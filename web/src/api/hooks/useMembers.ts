@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 
 import { apiRequest } from '@/api/client'
+import { i18n } from '@/i18n'
 import type { App, Member } from '@/api'
 import { _appsKeys } from '@/api/hooks/useApps'
 
@@ -103,7 +104,7 @@ export function useCreateMember(orgId: Ref<string | undefined>) {
   return useMutation({
     mutationFn: async (payload: MemberFormPayload) => {
       if (!orgId.value) {
-        throw new Error('缺少企业 ID')
+        throw new Error(i18n.global.t('common.errors.missingOrgId'))
       }
       const response = await apiRequest<{ member: Member }>(
         `/api/v1/organizations/${orgId.value}/members`,
@@ -154,7 +155,7 @@ export function useOnboardMember(orgId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (payload: OnboardMemberPayload) => {
-      if (!orgId.value) throw new Error('缺少企业 ID')
+      if (!orgId.value) throw new Error(i18n.global.t('common.errors.missingOrgId'))
       const response = await apiRequest<{ onboarding: { member: Member; app: OnboardMemberResult['app']; job_id: string } }>(
         `/api/v1/organizations/${orgId.value}/members/onboard`,
         { method: 'POST', body: payload },
@@ -173,7 +174,7 @@ export function useCreateMemberApp(orgId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async ({ userId, payload }: { userId: string; payload: CreateMemberAppPayload }) => {
-      if (!orgId.value) throw new Error('缺少企业 ID')
+      if (!orgId.value) throw new Error(i18n.global.t('common.errors.missingOrgId'))
       const response = await apiRequest<{ member_app: CreateMemberAppResult }>(
         `/api/v1/organizations/${orgId.value}/members/${userId}/apps`,
         { method: 'POST', body: payload },

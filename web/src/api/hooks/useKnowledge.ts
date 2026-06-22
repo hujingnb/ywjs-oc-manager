@@ -5,6 +5,7 @@ import { computed } from 'vue'
 import type { Ref } from 'vue'
 
 import { apiRequest, extractErrorMessage, getStoredAccessToken } from '@/api/client'
+import { i18n } from '@/i18n'
 import { xhrUpload } from '@/api/xhrUpload'
 
 // KnowledgeDocument 是 manager 从 RAGFlow document 元数据缓存归一化后的扁平文件视图。
@@ -71,9 +72,13 @@ const knowledgeDefaultPageSize = 50
 export const KNOWLEDGE_UPLOAD_MAX_BYTES = 1024 * 1024 * 1024
 // KNOWLEDGE_DEFAULT_QUOTA_BYTES 对齐后端迁移默认值；旧接口缺少配额字段时前端也不能回退为无限制。
 export const KNOWLEDGE_DEFAULT_QUOTA_BYTES = 1024 * 1024 * 1024
-// 提示文案的 MB 数值由上限字节数直接换算，修改上限后文案自动跟随，避免漂移。
+// KNOWLEDGE_UPLOAD_MAX_LABEL 是字节上限的人类可读表示，修改上限后自动同步。
 export const KNOWLEDGE_UPLOAD_MAX_LABEL = `${KNOWLEDGE_UPLOAD_MAX_BYTES / (1024 * 1024)}MB`
-export const KNOWLEDGE_UPLOAD_MAX_MESSAGE = `单文件最大支持 ${KNOWLEDGE_UPLOAD_MAX_LABEL}`
+// getKnowledgeUploadMaxMessage 返回单文件上限的用户可见提示文案（经 i18n 翻译）。
+// 改为函数以支持运行时语言切换；调用方无需感知 i18n 实例。
+export function getKnowledgeUploadMaxMessage(): string {
+  return i18n.global.t('knowledge.messages.uploadMaxMessage', { label: KNOWLEDGE_UPLOAD_MAX_LABEL })
+}
 
 // KnowledgeListQueryInput 是列表页传入分页、文件名搜索和状态过滤的原始参数。
 export interface KnowledgeListQueryInput {
@@ -301,7 +306,7 @@ export function useUpdateRAGFlowDatasetEmbeddingModel(
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (input: { name: string; provider?: string }) => {
-      if (!targetId.value) throw new Error('缺少知识库 ID')
+      if (!targetId.value) throw new Error(i18n.global.t('common.errors.missingKnowledgeId'))
       return apiRequest<KnowledgeRAGFlowDatasetInfo>(`${ragflowDatasetPath(scope.value, targetId.value)}/embedding-model`, {
         method: 'PATCH',
         body: input,
@@ -324,7 +329,7 @@ export function useUploadOrgKnowledge(orgId: Ref<string | undefined>) {
       onProgress?: (loaded: number, total: number) => void
       signal?: AbortSignal
     }) => {
-      if (!orgId.value) throw new Error('缺少企业 ID')
+      if (!orgId.value) throw new Error(i18n.global.t('common.errors.missingOrgId'))
       const params = new URLSearchParams({ filename: input.file.name })
       await xhrUpload(`/api/v1/organizations/${orgId.value}/knowledge?${params.toString()}`, {
         method: 'POST',
@@ -348,7 +353,7 @@ export function useUploadAppKnowledge(appId: Ref<string | undefined>) {
       onProgress?: (loaded: number, total: number) => void
       signal?: AbortSignal
     }) => {
-      if (!appId.value) throw new Error('缺少实例 ID')
+      if (!appId.value) throw new Error(i18n.global.t('common.errors.missingAppId'))
       const params = new URLSearchParams({ filename: input.file.name })
       await xhrUpload(`/api/v1/apps/${appId.value}/knowledge?${params.toString()}`, {
         method: 'POST',
@@ -368,7 +373,7 @@ export function useDeleteOrgKnowledge(orgId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (documentId: string) => {
-      if (!orgId.value) throw new Error('缺少企业 ID')
+      if (!orgId.value) throw new Error(i18n.global.t('common.errors.missingOrgId'))
       await apiRequest<void>(`/api/v1/organizations/${orgId.value}/knowledge/${documentId}`, { method: 'DELETE' })
     },
     onSuccess: () => {
@@ -381,7 +386,7 @@ export function useClearOrgKnowledge(orgId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async () => {
-      if (!orgId.value) throw new Error('缺少企业 ID')
+      if (!orgId.value) throw new Error(i18n.global.t('common.errors.missingOrgId'))
       await apiRequest<void>(`/api/v1/organizations/${orgId.value}/knowledge`, { method: 'DELETE' })
     },
     onSuccess: () => {
@@ -394,7 +399,7 @@ export function useDeleteAppKnowledge(appId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (documentId: string) => {
-      if (!appId.value) throw new Error('缺少实例 ID')
+      if (!appId.value) throw new Error(i18n.global.t('common.errors.missingAppId'))
       await apiRequest<void>(`/api/v1/apps/${appId.value}/knowledge/${documentId}`, { method: 'DELETE' })
     },
     onSuccess: () => {
@@ -407,7 +412,7 @@ export function useReparseOrgKnowledge(orgId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (documentId: string) => {
-      if (!orgId.value) throw new Error('缺少企业 ID')
+      if (!orgId.value) throw new Error(i18n.global.t('common.errors.missingOrgId'))
       await apiRequest<KnowledgeDocument>(`/api/v1/organizations/${orgId.value}/knowledge/${documentId}/reparse`, { method: 'POST' })
     },
     onSuccess: () => {
@@ -420,7 +425,7 @@ export function useReparseAppKnowledge(appId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (documentId: string) => {
-      if (!appId.value) throw new Error('缺少实例 ID')
+      if (!appId.value) throw new Error(i18n.global.t('common.errors.missingAppId'))
       await apiRequest<KnowledgeDocument>(`/api/v1/apps/${appId.value}/knowledge/${documentId}/reparse`, { method: 'POST' })
     },
     onSuccess: () => {

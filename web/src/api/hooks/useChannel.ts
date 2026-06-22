@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 
 import { apiRequest } from '@/api/client'
+import { i18n } from '@/i18n'
 
 // ChannelChallenge 表示后端返回给用户完成渠道认证的一次性挑战。
 export interface ChannelChallenge {
@@ -41,22 +42,27 @@ export interface ChannelProgress {
   metadata?: Record<string, string>
 }
 
-// channelStatusLabels 将后端渠道状态机原值映射为渠道 tab 的中文业务文案。
-// 未知状态由 formatChannelStatus 保留原值，方便后端新增状态时前端及时暴露差异。
-const channelStatusLabels: Record<string, string> = {
-  unbound: '未绑定',
-  pending_auth: '等待扫码授权',
-  bound: '已绑定',
-  failed: '绑定失败',
-  expired: '二维码已过期',
-  unbound_by_user: '已解绑',
-  deleted: '已删除',
+// CHANNEL_STATUS_KEYS 将后端渠道状态机原值映射为 apps.channels.status 命名空间下的 i18n key。
+// 未知状态由 formatChannelStatus 回退到 apps.channels.status.unknown（带 {status} 插值），
+// 方便后端新增状态时前端及时暴露差异。
+const CHANNEL_STATUS_KEYS: Record<string, string> = {
+  unbound: 'apps.channels.status.unbound',
+  pending_auth: 'apps.channels.status.pending_auth',
+  bound: 'apps.channels.status.bound',
+  failed: 'apps.channels.status.failed',
+  expired: 'apps.channels.status.expired',
+  unbound_by_user: 'apps.channels.status.unbound_by_user',
+  deleted: 'apps.channels.status.deleted',
 }
 
 // formatChannelStatus 将渠道绑定状态转成用户可读文案；空值表示轮询尚未返回或尚未发起登录。
+// 内部使用 i18n 单例翻译，使该纯函数无需额外参数即可在模板和 computed 中复用。
 export function formatChannelStatus(status?: string): string {
-  if (!status) return '未发起'
-  return channelStatusLabels[status] ?? `未知状态：${status}`
+  const t = i18n.global.t
+  if (!status) return t('apps.channels.status.not_started')
+  const key = CHANNEL_STATUS_KEYS[status]
+  if (key) return t(key)
+  return t('apps.channels.status.unknown', { status })
 }
 
 // channelChallengeFromProgress 从进度 metadata 中还原可展示挑战。
@@ -107,7 +113,7 @@ export function useBeginChannelAuth(appId: Ref<string | undefined>, channelType:
   const client = useQueryClient()
   return useMutation({
     mutationFn: async () => {
-      if (!appId.value || !channelType.value) throw new Error('缺少实例或渠道类型')
+      if (!appId.value || !channelType.value) throw new Error(i18n.global.t('common.errors.missingChannelParam'))
       const response = await apiRequest<{ challenge: ChannelChallenge }>(
         `/api/v1/apps/${appId.value}/channels/${channelType.value}/auth`,
         { method: 'POST' },
@@ -126,7 +132,7 @@ export function useUnbindChannel(appId: Ref<string | undefined>, channelType: Re
   const client = useQueryClient()
   return useMutation({
     mutationFn: async () => {
-      if (!appId.value || !channelType.value) throw new Error('缺少实例或渠道类型')
+      if (!appId.value || !channelType.value) throw new Error(i18n.global.t('common.errors.missingChannelParam'))
       await apiRequest<void>(`/api/v1/apps/${appId.value}/channels/${channelType.value}/unbind`, {
         method: 'POST',
       })

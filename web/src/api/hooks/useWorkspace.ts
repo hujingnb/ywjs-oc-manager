@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 
 import { apiRequest, getStoredAccessToken } from '@/api/client'
+import { i18n } from '@/i18n'
 
 // WorkspaceEntry 是应用工作目录中的文件或目录。
 export interface WorkspaceEntry {
@@ -56,7 +57,7 @@ async function downloadBlob(url: string, fileName: string) {
   const response = await fetch(url, { headers })
   if (!response.ok) {
     const text = await response.text().catch(() => '')
-    throw new Error(text || '下载失败')
+    throw new Error(text || i18n.global.t('common.errors.downloadFailed'))
   }
   const blob = await response.blob()
   const objectUrl = URL.createObjectURL(blob)

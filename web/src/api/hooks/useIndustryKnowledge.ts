@@ -4,6 +4,7 @@ import { computed } from 'vue'
 import type { Ref } from 'vue'
 
 import { apiDownload, apiRequest } from '@/api/client'
+import { i18n } from '@/i18n'
 import { xhrUpload } from '@/api/xhrUpload'
 import type { KnowledgeDocument } from '@/api/hooks/useKnowledge'
 
@@ -200,7 +201,7 @@ export function useUploadIndustryKnowledgeFile(industryId: Ref<string | undefine
       onProgress?: (loaded: number, total: number) => void
       signal?: AbortSignal
     }) => {
-      if (!industryId.value) throw new Error('缺少行业知识库 ID')
+      if (!industryId.value) throw new Error(i18n.global.t('common.errors.missingIndustryId'))
       const params = new URLSearchParams({ filename: input.file.name })
       await xhrUpload(`/api/v1/industry-knowledge-bases/${industryId.value}/knowledge?${params.toString()}`, {
         method: 'POST',
@@ -222,7 +223,7 @@ export function useDeleteIndustryKnowledgeFile(industryId: Ref<string | undefine
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (documentId: string) => {
-      if (!industryId.value) throw new Error('缺少行业知识库 ID')
+      if (!industryId.value) throw new Error(i18n.global.t('common.errors.missingIndustryId'))
       await apiRequest<void>(
         `/api/v1/industry-knowledge-bases/${industryId.value}/knowledge/${documentId}`,
         { method: 'DELETE' },
@@ -240,7 +241,7 @@ export function useClearIndustryKnowledgeFiles(industryId: Ref<string | undefine
   const client = useQueryClient()
   return useMutation({
     mutationFn: async () => {
-      if (!industryId.value) throw new Error('缺少行业知识库 ID')
+      if (!industryId.value) throw new Error(i18n.global.t('common.errors.missingIndustryId'))
       await apiRequest<void>(
         `/api/v1/industry-knowledge-bases/${industryId.value}/knowledge`,
         { method: 'DELETE' },
@@ -258,7 +259,7 @@ export function useReparseIndustryKnowledgeFile(industryId: Ref<string | undefin
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (documentId: string) => {
-      if (!industryId.value) throw new Error('缺少行业知识库 ID')
+      if (!industryId.value) throw new Error(i18n.global.t('common.errors.missingIndustryId'))
       await apiRequest<KnowledgeDocument>(
         `/api/v1/industry-knowledge-bases/${industryId.value}/knowledge/${documentId}/reparse`,
         { method: 'POST' },
