@@ -1,5 +1,6 @@
 -- name: CreateApp :exec
 -- k8s 模型下 app 对应 Deployment，pod 落点由调度器决定，不再写 runtime_node_id。
+-- locale 在创建时快照 owner 的用户语言偏好（NULL=平台回退默认）。
 INSERT INTO apps (
     id,
     org_id,
@@ -8,9 +9,10 @@ INSERT INTO apps (
     description,
     status,
     api_key_status,
-    version_id
+    version_id,
+    locale
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?
 );
 
 -- name: GetApp :one
@@ -214,5 +216,12 @@ SELECT COUNT(*) FROM apps WHERE org_id = ? AND deleted_at IS NULL;
 -- 更新单个实例知识库累计容量上限；允许低于当前已用，后续上传由 KnowledgeService 拒绝。
 UPDATE apps
 SET knowledge_quota_bytes = ?,
+    updated_at = now()
+WHERE id = ? AND deleted_at IS NULL;
+
+-- name: UpdateAppLocale :exec
+-- 更新实例语言偏好（hermes 对终端用户说话的语言）。locale 由 service 层校验合法取值后传入。
+UPDATE apps
+SET locale = ?,
     updated_at = now()
 WHERE id = ? AND deleted_at IS NULL;

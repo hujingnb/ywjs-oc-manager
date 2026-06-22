@@ -43,6 +43,8 @@ type App struct {
 	OwnerActiveKey         null.String     `db:"owner_active_key" json:"owner_active_key"`
 	RuntimeTokenActiveKey  null.String     `db:"runtime_token_active_key" json:"runtime_token_active_key"`
 	KnowledgeQuotaBytes    int64           `db:"knowledge_quota_bytes" json:"knowledge_quota_bytes"`
+	// 应用语言（hermes 对终端用户说话的语言, en/zh）；NULL=用平台默认
+	Locale null.String `db:"locale" json:"locale"`
 }
 
 // 实例级 skill 安装清单，自包含快照，运行时唯一来源

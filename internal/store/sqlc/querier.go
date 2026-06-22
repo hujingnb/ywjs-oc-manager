@@ -50,6 +50,7 @@ type Querier interface {
 	// 统计行业知识库文件总数，过滤条件必须与 ListRAGFlowIndustryDocuments 保持一致。
 	CountRAGFlowIndustryDocuments(ctx context.Context, arg CountRAGFlowIndustryDocumentsParams) (int64, error)
 	// k8s 模型下 app 对应 Deployment，pod 落点由调度器决定，不再写 runtime_node_id。
+	// locale 在创建时快照 owner 的用户语言偏好（NULL=平台回退默认）。
 	CreateApp(ctx context.Context, arg CreateAppParams) error
 	CreateAppSkill(ctx context.Context, arg CreateAppSkillParams) error
 	CreateAssistantVersion(ctx context.Context, arg CreateAssistantVersionParams) error
@@ -295,6 +296,8 @@ type Querier interface {
 	// 不改 status 或其它字段。
 	TouchApp(ctx context.Context, id string) error
 	TouchSkillTicket(ctx context.Context, id string) error
+	// 更新实例语言偏好（hermes 对终端用户说话的语言）。locale 由 service 层校验合法取值后传入。
+	UpdateAppLocale(ctx context.Context, arg UpdateAppLocaleParams) error
 	// phasePullRuntimeImage 成功后写入镜像引用与 sha256。
 	UpdateAppRuntimeImage(ctx context.Context, arg UpdateAppRuntimeImageParams) error
 	UpdateAppSkillLatest(ctx context.Context, arg UpdateAppSkillLatestParams) error
