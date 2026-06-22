@@ -6,34 +6,34 @@
         <div style="display: flex; align-items: center; justify-content: space-between">
           <div>
             <p class="eyebrow">Platform · Billing</p>
-            <h2 style="margin: 0">企业充值</h2>
-            <p v-if="orgId" class="state-text" style="margin: 4px 0 0">企业 {{ orgId }}</p>
+            <h2 style="margin: 0">{{ t('platform.recharge.heading') }}</h2>
+            <p v-if="orgId" class="state-text" style="margin: 4px 0 0">{{ t('platform.recharge.orgIdLabel', { id: orgId }) }}</p>
           </div>
-          <RouterLink class="secondary-button" to="/organizations">返回企业列表</RouterLink>
+          <RouterLink class="secondary-button" to="/organizations">{{ t('platform.recharge.backToOrgs') }}</RouterLink>
         </div>
       </template>
 
-      <div v-if="!orgId" class="state-text">URL 缺少企业 ID</div>
+      <div v-if="!orgId" class="state-text">{{ t('platform.recharge.missingOrgId') }}</div>
       <div v-else>
         <p class="state-text" style="margin-bottom: 12px">
-          当前余额：
-          <strong v-if="balanceQuery.isLoading.value">加载中…</strong>
+          {{ t('platform.recharge.currentBalance') }}
+          <strong v-if="balanceQuery.isLoading.value">{{ t('platform.recharge.balanceLoading') }}</strong>
           <strong v-else-if="balance">
-            剩余 {{ formatQuotaValue(balance.remain_quota, billingStatus) }} ｜ 已用 {{ formatQuotaValue(balance.used_quota, billingStatus) }}
+            {{ t('platform.recharge.remain', { remain: formatQuotaValue(balance.remain_quota, billingStatus) }) }} ｜ {{ t('platform.recharge.used', { used: formatQuotaValue(balance.used_quota, billingStatus) }) }}
           </strong>
-          <strong v-else class="danger">查询失败</strong>
+          <strong v-else class="danger">{{ t('platform.recharge.balanceFail') }}</strong>
         </p>
 
         <n-form label-placement="top" @submit.prevent="onSubmit">
           <n-grid :cols="3" :x-gap="14">
             <n-grid-item>
-              <n-form-item label="充值金额（正整数）">
-                <n-input-number v-model:value="amount" :min="1" :precision="0" style="width: 100%" placeholder="输入金额" />
+              <n-form-item :label="t('platform.recharge.labelAmount')">
+                <n-input-number v-model:value="amount" :min="1" :precision="0" style="width: 100%" :placeholder="t('platform.recharge.placeholderAmount')" />
               </n-form-item>
             </n-grid-item>
             <n-grid-item>
-              <n-form-item label="备注（可选）">
-                <n-input v-model:value="remark" placeholder="业务说明" />
+              <n-form-item :label="t('platform.recharge.labelRemark')">
+                <n-input v-model:value="remark" :placeholder="t('platform.recharge.placeholderRemark')" />
               </n-form-item>
             </n-grid-item>
             <n-grid-item style="display: flex; align-items: flex-end; padding-bottom: 24px">
@@ -43,7 +43,7 @@
                 :disabled="!canSubmit || mutation.isPending.value"
                 style="width: 100%"
               >
-                {{ mutation.isPending.value ? '充值中…' : '提交充值' }}
+                {{ mutation.isPending.value ? t('platform.recharge.submitPending') : t('platform.recharge.submitButton') }}
               </n-button>
             </n-grid-item>
           </n-grid>
@@ -55,9 +55,9 @@
 
     <ConfirmActionModal
       :visible="confirmRecharge"
-      title="确认企业充值"
-      :message="pendingPayload ? `将给当前企业充值 ${formatDisplayAmount(pendingPayload.credit_amount, billingStatus)}。该操作会调用 new-api 修改余额。` : ''"
-      confirm-label="确认充值"
+      :title="t('platform.recharge.confirmTitle')"
+      :message="pendingPayload ? t('platform.recharge.confirmMessage', { amount: formatDisplayAmount(pendingPayload.credit_amount, billingStatus) }) : ''"
+      :confirm-label="t('platform.recharge.confirmLabel')"
       :busy="mutation.isPending.value"
       :verify-value="orgName"
       :verify-hint="confirmHint"
@@ -68,11 +68,11 @@
     <!-- 充值历史 -->
     <n-card :bordered="true">
       <template #header>
-        <h2 style="margin: 0">充值历史</h2>
+        <h2 style="margin: 0">{{ t('platform.recharge.historyTitle') }}</h2>
       </template>
 
-      <div v-if="recordsQuery.isLoading.value" class="state-text">加载中…</div>
-      <div v-else-if="recordsQuery.error.value" class="state-text danger">查询失败：{{ recordsQuery.error.value?.message }}</div>
+      <div v-if="recordsQuery.isLoading.value" class="state-text">{{ t('platform.recharge.historyLoading') }}</div>
+      <div v-else-if="recordsQuery.error.value" class="state-text danger">{{ t('platform.recharge.historyError', { msg: recordsQuery.error.value?.message }) }}</div>
       <n-data-table
         v-else
         :columns="historyColumns"
@@ -87,6 +87,7 @@
 
 <script setup lang="ts">
 import { computed, h, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute } from 'vue-router'
 import { NButton, NCard, NDataTable, NForm, NFormItem, NGrid, NGridItem, NInput, NInputNumber, NTag, type DataTableColumns } from 'naive-ui'
 
@@ -96,6 +97,7 @@ import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import { formatDisplayAmount, formatQuotaValue } from '@/pages/usage/usageFormatting'
 
 // RechargePage 是独立组织充值页，保留余额查询、充值确认和历史记录展示。
+const { t } = useI18n()
 const route = useRoute()
 // orgId 来自路由参数，缺失时页面展示 URL 错误且相关查询不会具备有效目标。
 const orgId = computed<string | undefined>(() => route.params.orgId as string | undefined)
@@ -109,8 +111,8 @@ const mutation = useRechargeMutation(orgId)
 
 const orgQuery = useOrganizationQuery(orgId)
 // orgName 用于二次确认输入，组织尚未加载时降级为组织 ID。
-const orgName = computed(() => orgQuery.data.value?.name ?? (orgId.value ? `企业 ${orgId.value}` : ''))
-const confirmHint = computed(() => `输入企业名称 "${orgName.value}" 以确认充值`)
+const orgName = computed(() => orgQuery.data.value?.name ?? (orgId.value ? t('platform.recharge.orgNameFallback', { id: orgId.value }) : ''))
+const confirmHint = computed(() => t('platform.recharge.confirmHint', { name: orgName.value }))
 
 const amount = ref<number | null>(null)
 const remark = ref('')
@@ -142,12 +144,12 @@ async function onConfirmRecharge() {
   confirmRecharge.value = false
   try {
     const result = await mutation.mutateAsync(pendingPayload.value)
-    feedback.value = `已充值 ${formatDisplayAmount(result.credit_amount, billingStatus.value)}（${result.status}）`
+    feedback.value = t('platform.recharge.successMsg', { amount: formatDisplayAmount(result.credit_amount, billingStatus.value), status: result.status })
     amount.value = null
     remark.value = ''
   } catch (err: unknown) {
     feedbackError.value = true
-    feedback.value = err instanceof Error ? err.message : '充值失败'
+    feedback.value = err instanceof Error ? err.message : t('platform.recharge.failMsg')
   } finally {
     pendingPayload.value = null
   }
@@ -161,17 +163,17 @@ function onCancelRecharge() {
 
 // historyColumns 展示充值历史，状态列用标签色突出成功和失败记录。
 const historyColumns = computed<DataTableColumns<RechargeRecordDTO>>(() => [
-  { title: '时间', key: 'created_at' },
-  { title: '金额', key: 'credit_amount', render: (row) => formatDisplayAmount(row.credit_amount, billingStatus.value) },
-  { title: '备注', key: 'remark', render: (row) => row.remark || '—' },
+  { title: t('platform.recharge.columns.time'), key: 'created_at' },
+  { title: t('platform.recharge.columns.amount'), key: 'credit_amount', render: (row) => formatDisplayAmount(row.credit_amount, billingStatus.value) },
+  { title: t('platform.recharge.columns.remark'), key: 'remark', render: (row) => row.remark || '—' },
   {
-    title: '状态', key: 'status',
+    title: t('platform.recharge.columns.status'), key: 'status',
     render: (row) => h(NTag, {
       type: row.status === 'succeeded' ? 'success' : 'error',
       size: 'small',
       bordered: false,
     }, { default: () => row.status }),
   },
-  { title: '错误', key: 'error_message', render: (row) => row.error_message || '—' },
+  { title: t('platform.recharge.columns.error'), key: 'error_message', render: (row) => row.error_message || '—' },
 ])
 </script>

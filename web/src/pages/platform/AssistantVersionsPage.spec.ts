@@ -3,6 +3,7 @@ import { defineComponent, h, nextTick, ref, type PropType } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DataTableColumn } from 'naive-ui'
 
+import { i18n } from '@/i18n'
 import AssistantVersionsPage from './AssistantVersionsPage.vue'
 import type { AssistantVersionDTO } from '@/api/hooks/useAssistantVersions'
 
@@ -86,6 +87,8 @@ vi.mock('naive-ui', async () => {
 function mountPage() {
   return mount(AssistantVersionsPage, {
     global: {
+      // 注入 i18n 插件，AssistantVersionsPage 使用 useI18n() 需要。
+      plugins: [i18n],
       stubs: {
         NButton: defineComponent({
           props: ['loading', 'disabled'],
@@ -209,6 +212,8 @@ describe('AssistantVersionsPage', () => {
   // 各用例间清理 mock 调用历史，避免 toHaveBeenCalled 跨用例累积导致误判。
   beforeEach(() => {
     vi.clearAllMocks()
+    // 测试断言中文文案，设置 zh 语言以匹配 t() 返回值。
+    i18n.global.locale.value = 'zh'
   })
 
   // 列表展示已有版本的名称与修订号。

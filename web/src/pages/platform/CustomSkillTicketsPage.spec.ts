@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref, type VNodeChild } from 'vue'
 
+import { i18n } from '@/i18n'
 import CustomSkillTicketsPage from './CustomSkillTicketsPage.vue'
 
 const ticketsState = {
@@ -75,12 +76,14 @@ describe('CustomSkillTicketsPage', () => {
     organizationsState.data.value = []
     ticketsState.isLoading.value = false
     ticketsState.error.value = null
+    // 测试断言中文文案，设置 zh 语言以匹配 t() 返回值。
+    i18n.global.locale.value = 'zh'
   })
 
   // 队列渲染状态/报价；操作列去掉后，点击工单整行进入详情页。
   it('renders queue and navigates to detail', async () => {
     ticketsState.data.value = [{ id: 't-1', title: '需求', status: 'pending', requester_role: 'org_member', quote_amount_cents: 12000 }]
-    const wrapper = mount(CustomSkillTicketsPage)
+    const wrapper = mount(CustomSkillTicketsPage, { global: { plugins: [i18n] } })
     expect(wrapper.text()).toContain('需求')
     expect(wrapper.text()).toContain('待处理')
     expect(wrapper.text()).toContain('¥120.00')
@@ -103,7 +106,7 @@ describe('CustomSkillTicketsPage', () => {
       { id: 't-2', org_id: 'org-2', title: '乙公司需求', status: 'pending', requester_role: 'org_member' },
     ]
 
-    const wrapper = mount(CustomSkillTicketsPage)
+    const wrapper = mount(CustomSkillTicketsPage, { global: { plugins: [i18n] } })
     expect(wrapper.text()).toContain('甲公司需求')
     expect(wrapper.text()).toContain('乙公司需求')
     expect(wrapper.text()).toContain('甲公司（alpha）')

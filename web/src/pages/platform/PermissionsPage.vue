@@ -1,6 +1,9 @@
 <script setup lang="ts">
 // PermissionsPage 展示平台权限矩阵，仅平台管理员可访问。
 // 内容为静态数据，不调用任何 API；与 docs/superpowers/specs/2026-05-22-permission-refactor-design.md 保持一致。
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 interface PermRow {
   // op 是操作名称。
@@ -19,7 +22,7 @@ interface PermSection {
 // sections 包含全量权限矩阵，按功能模块分组。
 const sections: PermSection[] = [
   {
-    title: '企业管理',
+    title: t('platform.permissions.sections.orgMgmt'),
     rows: [
       { op: '创建企业', admin: '✅', orgAdmin: '❌', member: '❌' },
       { op: '企业列表', admin: '✅', orgAdmin: '❌', member: '❌' },
@@ -29,7 +32,7 @@ const sections: PermSection[] = [
     ],
   },
   {
-    title: '成员管理',
+    title: t('platform.permissions.sections.memberMgmt'),
     rows: [
       { op: '成员列表', admin: '✅', orgAdmin: '🟡 本企业', member: '❌' },
       { op: '查看成员详情', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
@@ -43,7 +46,7 @@ const sections: PermSection[] = [
     ],
   },
   {
-    title: '应用实例',
+    title: t('platform.permissions.sections.appInstance'),
     rows: [
       { op: '应用列表', admin: '✅', orgAdmin: '🟡 本企业全部', member: '🟡 仅自己' },
       { op: '查看应用详情', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
@@ -51,20 +54,20 @@ const sections: PermSection[] = [
     ],
   },
   {
-    title: '运行时操作',
+    title: t('platform.permissions.sections.runtime'),
     rows: [
       { op: '启动 / 停止 / 重启', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
     ],
   },
   {
-    title: '渠道（Channel）',
+    title: t('platform.permissions.sections.channel'),
     rows: [
       { op: '查看渠道信息', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
       { op: '绑定渠道', admin: '❌', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
     ],
   },
   {
-    title: '知识库',
+    title: t('platform.permissions.sections.knowledge'),
     rows: [
       { op: '读取企业知识库', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 本企业' },
       { op: '写入 / 重解析企业知识库', admin: '❌', orgAdmin: '🟡 本企业', member: '❌' },
@@ -73,7 +76,7 @@ const sections: PermSection[] = [
     ],
   },
   {
-    title: '助手版本',
+    title: t('platform.permissions.sections.version'),
     rows: [
       { op: '查看助手版本列表 / 详情', admin: '✅', orgAdmin: '✅', member: '✅' },
       { op: '创建 / 修改 / 删除助手版本', admin: '✅', orgAdmin: '❌', member: '❌' },
@@ -81,21 +84,21 @@ const sections: PermSection[] = [
     ],
   },
   {
-    title: '任务看板（Kanban）',
+    title: t('platform.permissions.sections.kanban'),
     rows: [
       { op: '查看任务看板', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
       { op: '写操作（评论 / 完成 / 阻塞）', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
     ],
   },
   {
-    title: 'Cron 任务',
+    title: t('platform.permissions.sections.cron'),
     rows: [
       { op: '查看 Cron 列表 / 详情', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
       { op: '创建 / 修改 / 启停 / 删除 Cron', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
     ],
   },
   {
-    title: '用量',
+    title: t('platform.permissions.sections.usage'),
     rows: [
       { op: '查看企业聚合用量', admin: '✅', orgAdmin: '🟡 本企业', member: '❌' },
       { op: '查看成员用量', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
@@ -103,7 +106,7 @@ const sections: PermSection[] = [
     ],
   },
   {
-    title: '审计日志',
+    title: t('platform.permissions.sections.audit'),
     rows: [
       { op: '查看企业审计', admin: '✅', orgAdmin: '🟡 本企业', member: '❌' },
       { op: '查看应用审计', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
@@ -111,45 +114,45 @@ const sections: PermSection[] = [
     ],
   },
   {
-    title: '充值记录',
+    title: t('platform.permissions.sections.recharge'),
     rows: [
       { op: '查看充值记录', admin: '✅', orgAdmin: '🟡 本企业', member: '❌' },
       { op: '查看余额', admin: '✅', orgAdmin: '🟡 本企业', member: '❌' },
     ],
   },
   {
-    title: '运行时节点',
+    title: t('platform.permissions.sections.node'),
     rows: [
       { op: '节点列表 / 详情', admin: '✅', orgAdmin: '❌', member: '❌' },
       { op: '启用 / 禁用节点', admin: '✅', orgAdmin: '❌', member: '❌' },
     ],
   },
   {
-    title: '平台总览',
+    title: t('platform.permissions.sections.overview'),
     rows: [
       { op: '平台总览统计', admin: '✅', orgAdmin: '❌', member: '❌' },
     ],
   },
   {
-    title: '模型列表',
+    title: t('platform.permissions.sections.models'),
     rows: [
       { op: '查看可用模型列表', admin: '✅', orgAdmin: '❌', member: '❌' },
     ],
   },
   {
-    title: '后台任务（Jobs）',
+    title: t('platform.permissions.sections.jobs'),
     rows: [
       { op: '查看后台任务列表', admin: '✅', orgAdmin: '❌', member: '❌' },
     ],
   },
   {
-    title: '工作区',
+    title: t('platform.permissions.sections.workspace'),
     rows: [
       { op: '查看 / 下载 / 打包工作区文件', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
     ],
   },
   {
-    title: '资源指标',
+    title: t('platform.permissions.sections.metrics'),
     rows: [
       { op: '查看应用资源指标', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
     ],
@@ -159,14 +162,14 @@ const sections: PermSection[] = [
 
 <template>
   <div style="padding: 24px; max-width: 900px;">
-    <n-h2 style="margin-bottom: 4px;">权限说明</n-h2>
-    <n-p depth="3" style="margin-bottom: 24px;">各角色可见 / 可操作范围一览</n-p>
+    <n-h2 style="margin-bottom: 4px;">{{ t('platform.permissions.title') }}</n-h2>
+    <n-p depth="3" style="margin-bottom: 24px;">{{ t('platform.permissions.subtitle') }}</n-p>
 
     <!-- 图例 -->
     <n-space style="margin-bottom: 24px;">
-      <n-tag type="success" :bordered="false">✅ 可操作（无条件）</n-tag>
-      <n-tag type="error" :bordered="false">❌ 无权限</n-tag>
-      <n-tag type="warning" :bordered="false">🟡 有条件（本企业 / 仅自己）</n-tag>
+      <n-tag type="success" :bordered="false">{{ t('platform.permissions.legendFull') }}</n-tag>
+      <n-tag type="error" :bordered="false">{{ t('platform.permissions.legendNone') }}</n-tag>
+      <n-tag type="warning" :bordered="false">{{ t('platform.permissions.legendCond') }}</n-tag>
     </n-space>
 
     <!-- 每个功能模块一个表格 -->
@@ -179,10 +182,10 @@ const sections: PermSection[] = [
       <n-table size="small" :bordered="true" :single-line="false">
         <thead>
           <tr>
-            <th style="width: 40%;">操作</th>
-            <th style="width: 20%; text-align: center;">平台管理员</th>
-            <th style="width: 20%; text-align: center;">企业管理员</th>
-            <th style="width: 20%; text-align: center;">企业成员</th>
+            <th style="width: 40%;">{{ t('platform.permissions.tableOp') }}</th>
+            <th style="width: 20%; text-align: center;">{{ t('platform.permissions.tableAdmin') }}</th>
+            <th style="width: 20%; text-align: center;">{{ t('platform.permissions.tableOrgAdmin') }}</th>
+            <th style="width: 20%; text-align: center;">{{ t('platform.permissions.tableMember') }}</th>
           </tr>
         </thead>
         <tbody>

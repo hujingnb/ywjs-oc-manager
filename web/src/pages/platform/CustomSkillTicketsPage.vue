@@ -3,17 +3,17 @@
     <div class="page-head">
       <div>
         <p class="eyebrow">Platform</p>
-        <h2>定制技能工单</h2>
+        <h2>{{ t('platform.tickets.heading') }}</h2>
       </div>
       <div class="ticket-filters">
         <n-select v-model:value="filterOrgID" :options="orgFilterOptions" size="small" class="org-filter" />
         <n-select v-model:value="filterStatus" :options="statusFilterOptions" size="small" class="status-filter" />
-        <n-input v-model:value="filterKeyword" size="small" clearable placeholder="按标题过滤" class="keyword-filter" />
+        <n-input v-model:value="filterKeyword" size="small" clearable :placeholder="t('platform.tickets.filterPlaceholder')" class="keyword-filter" />
       </div>
     </div>
 
-    <div v-if="ticketsQuery.isLoading.value" class="state-text">加载中…</div>
-    <p v-else-if="ticketsQuery.error.value" class="state-text danger">工单查询失败：{{ ticketsQuery.error.value?.message }}</p>
+    <div v-if="ticketsQuery.isLoading.value" class="state-text">{{ t('platform.tickets.loading') }}</div>
+    <p v-else-if="ticketsQuery.error.value" class="state-text danger">{{ t('platform.tickets.loadError', { msg: ticketsQuery.error.value?.message }) }}</p>
     <n-data-table
       v-else
       :columns="columns"
@@ -28,6 +28,7 @@
 
 <script setup lang="ts">
 import { computed, h, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { NDataTable, NInput, NSelect, NTag, type DataTableColumns } from 'naive-ui'
 
@@ -37,6 +38,7 @@ import { useAdminSkillTicketsQuery } from '@/api/hooks/useSkillTickets'
 
 defineOptions({ name: 'CustomSkillTicketsPage' })
 
+const { t } = useI18n()
 const router = useRouter()
 const ticketsQuery = useAdminSkillTicketsQuery()
 const organizationsQuery = useOrganizationsQuery()
@@ -44,17 +46,18 @@ const filterOrgID = ref<string>('all')
 const filterStatus = ref<string>('all')
 const filterKeyword = ref('')
 
-const statusFilterOptions = [
-  { label: '全部状态', value: 'all' },
-  { label: '待处理', value: 'pending' },
-  { label: '制作中', value: 'processing' },
-  { label: '已交付', value: 'delivered' },
-  { label: '已拒绝', value: 'rejected' },
-]
+// statusFilterOptions 随语言响应式切换，转为 computed。
+const statusFilterOptions = computed(() => [
+  { label: t('platform.tickets.filterAll'), value: 'all' },
+  { label: t('platform.tickets.statusPending'), value: 'pending' },
+  { label: t('platform.tickets.statusProcessing'), value: 'processing' },
+  { label: t('platform.tickets.statusDelivered'), value: 'delivered' },
+  { label: t('platform.tickets.statusRejected'), value: 'rejected' },
+])
 
 const organizations = computed<Organization[]>(() => organizationsQuery.data.value ?? [])
 const orgFilterOptions = computed(() => [
-  { label: '全部组织', value: 'all' },
+  { label: t('platform.tickets.filterOrgAll'), value: 'all' },
   ...organizations.value.map((org) => ({
     label: org.code ? `${org.name}（${org.code}）` : org.name,
     value: org.id,
@@ -72,31 +75,33 @@ const filteredTickets = computed(() => {
   })
 })
 
-const columns: DataTableColumns<SkillTicket> = [
-  { title: '标题', key: 'title' },
-  { title: '提交者', key: 'requester', render: (row) => roleLabel(row.requester_role) },
-  { title: '状态', key: 'status', render: (row) => h(NTag, { type: statusTag(row.status).type, bordered: false, size: 'small' }, () => statusTag(row.status).label) },
-  { title: '报价', key: 'quote', render: (row) => yuan(row.quote_amount_cents) },
-]
+// columns 随语言响应式切换，转为 computed。
+const columns = computed<DataTableColumns<SkillTicket>>(() => [
+  { title: t('platform.tickets.columns.title'), key: 'title' },
+  { title: t('platform.tickets.columns.requester'), key: 'requester', render: (row) => roleLabel(row.requester_role) },
+  { title: t('platform.tickets.columns.status'), key: 'status', render: (row) => h(NTag, { type: statusTag(row.status).type, bordered: false, size: 'small' }, () => statusTag(row.status).label) },
+  { title: t('platform.tickets.columns.quote'), key: 'quote', render: (row) => yuan(row.quote_amount_cents) },
+])
 
 interface StatusTag {
   type: 'default' | 'warning' | 'success' | 'error'
   label: string
 }
 
-const statusTags: Record<string, StatusTag> = {
-  pending: { type: 'default', label: '待处理' },
-  processing: { type: 'warning', label: '制作中' },
-  delivered: { type: 'success', label: '已交付' },
-  rejected: { type: 'error', label: '已拒绝' },
-}
+// statusTagsMap 随语言响应式切换，转为 computed。
+const statusTagsMap = computed<Record<string, StatusTag>>(() => ({
+  pending: { type: 'default', label: t('platform.tickets.statusPending') },
+  processing: { type: 'warning', label: t('platform.tickets.statusProcessing') },
+  delivered: { type: 'success', label: t('platform.tickets.statusDelivered') },
+  rejected: { type: 'error', label: t('platform.tickets.statusRejected') },
+}))
 
 function statusTag(status: string | undefined): StatusTag {
-  return statusTags[status ?? ''] ?? { type: 'default', label: status || '未知' }
+  return statusTagsMap.value[status ?? ''] ?? { type: 'default', label: status || t('common.status.unknown') }
 }
 
 function roleLabel(role: string | undefined) {
-  return role === 'org_admin' ? '管理员' : role === 'org_member' ? '成员' : role || '—'
+  return role === 'org_admin' ? t('platform.tickets.roleAdmin') : role === 'org_member' ? t('platform.tickets.roleMember') : role || '—'
 }
 
 function yuan(cents: number | null | undefined) {

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import type { DataTableColumn } from 'naive-ui'
 
+import { i18n } from '@/i18n'
 import OrganizationsPage from './OrganizationsPage.vue'
 import type { Organization } from '@/api'
 
@@ -82,12 +83,15 @@ describe('OrganizationsPage', () => {
     updateOrganization.mockReset()
     clipboardMock.mockReset()
     organizationsState.items = [{ ...organizationsState.defaultOrg }]
+    // 测试断言中文文案，设置 zh 语言以匹配 t() 返回值。
+    i18n.global.locale.value = 'zh'
   })
 
   const mountPage = () => mount(OrganizationsPage, {
     global: {
       // 注入 QueryClient，解决 useQueries 调用报 "No 'queryClient' found" 的问题。
-      plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]],
+      // 注入 i18n 插件，OrganizationsPage 使用 useI18n() 需要。
+      plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }], i18n],
       stubs: {
         NButton: defineComponent({
           props: ['loading', 'disabled'],

@@ -3,6 +3,7 @@ import { defineComponent, h, nextTick, ref, type PropType } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DataTableColumn } from 'naive-ui'
 
+import { i18n } from '@/i18n'
 import IndustryKnowledgePage from './IndustryKnowledgePage.vue'
 import type { IndustryKnowledgeBase } from '@/api/hooks/useIndustryKnowledge'
 import type { KnowledgeDocument } from '@/api/hooks/useKnowledge'
@@ -94,6 +95,8 @@ vi.mock('naive-ui', async () => {
 function mountPage() {
   return mount(IndustryKnowledgePage, {
     global: {
+      // 注入 i18n 插件，IndustryKnowledgePage 使用 useI18n() 需要。
+      plugins: [i18n],
       stubs: {
         NButton: defineComponent({
           props: ['loading', 'disabled'],
@@ -240,6 +243,8 @@ describe('IndustryKnowledgePage', () => {
       configurable: true,
       value: { writeText },
     })
+    // 测试断言中文文案，设置 zh 语言以匹配 t() 返回值。
+    i18n.global.locale.value = 'zh'
   })
 
   // 展示行业库列表、选中行业库文件和同名覆盖提示。

@@ -5,25 +5,25 @@
       <template #header>
         <div>
           <p class="eyebrow">Platform</p>
-          <h2 style="margin: 0">上传平台技能</h2>
+          <h2 style="margin: 0">{{ t('platform.skills.uploadTitle') }}</h2>
         </div>
       </template>
       <n-form label-placement="top" @submit.prevent="onUpload">
         <!-- 上传方式切换：粘贴 Markdown（仅一个 SKILL.md）/ 上传 skill 文件夹 -->
-        <n-form-item label="上传方式">
+        <n-form-item :label="t('platform.skills.uploadMode.label')">
           <n-radio-group v-model:value="mode">
-            <n-radio-button value="markdown">粘贴 Markdown</n-radio-button>
-            <n-radio-button value="folder">上传文件夹</n-radio-button>
+            <n-radio-button value="markdown">{{ t('platform.skills.uploadMode.markdown') }}</n-radio-button>
+            <n-radio-button value="folder">{{ t('platform.skills.uploadMode.folder') }}</n-radio-button>
           </n-radio-group>
         </n-form-item>
 
         <!-- 粘贴 Markdown：内容即单个 SKILL.md，需含 frontmatter -->
-        <n-form-item v-if="mode === 'markdown'" label="SKILL.md 内容 *">
+        <n-form-item v-if="mode === 'markdown'" :label="t('platform.skills.markdownMode.label')">
           <n-input
             v-model:value="mdText"
             type="textarea"
             :rows="10"
-            placeholder="粘贴 SKILL.md 全文，需含 --- 包裹的 frontmatter（至少含 name 字段）"
+            :placeholder="t('platform.skills.markdownMode.placeholder')"
           />
         </n-form-item>
 
@@ -33,13 +33,13 @@
             <span>
               格式：以 <code>---</code> 包裹的 frontmatter 开头（至少含 <code>name</code>，<code>description</code> 可选），其后是 Markdown 正文。示例：
             </span>
-            <n-button text type="primary" size="tiny" @click="fillMarkdownExample">填充示例</n-button>
+            <n-button text type="primary" size="tiny" @click="fillMarkdownExample">{{ t('platform.skills.markdownMode.hintFillExample') }}</n-button>
           </div>
           <pre class="upload-hint__code">{{ markdownExample }}</pre>
         </div>
 
         <!-- 上传文件夹：选择 skill 文件夹（其中直接包含 SKILL.md） -->
-        <n-form-item v-if="mode === 'folder'" label="Skill 文件夹 *">
+        <n-form-item v-if="mode === 'folder'" :label="t('platform.skills.folderMode.label')">
           <!-- 原生目录选择 input 隐藏，webkitdirectory 在点击前由 triggerFolderInput 动态设置 -->
           <input
             ref="folderInputRef"
@@ -49,9 +49,9 @@
             @change="onFolderChange"
           />
           <div style="display: flex; align-items: center; gap: 12px">
-            <n-button @click="triggerFolderInput">选择文件夹</n-button>
-            <span v-if="folderName" class="state-text" style="margin: 0">{{ folderName }}（{{ folderFiles.length }} 个文件）</span>
-            <span v-else class="state-text" style="margin: 0">未选择文件夹</span>
+            <n-button @click="triggerFolderInput">{{ t('platform.skills.folderMode.selectButton') }}</n-button>
+            <span v-if="folderName" class="state-text" style="margin: 0">{{ t('platform.skills.folderMode.selectedInfo', { name: folderName, count: folderFiles.length }) }}</span>
+            <span v-else class="state-text" style="margin: 0">{{ t('platform.skills.folderMode.noFolder') }}</span>
           </div>
           <!-- 选择前的关键提示：文件夹须含 SKILL.md，且其 frontmatter 为 YAML 含 name/description -->
           <p class="upload-hint" style="margin: 8px 0 0">
@@ -69,15 +69,15 @@
         <!-- 解析预览：成功展示识别到的技能 name/description，失败展示红色错误提示 -->
         <p v-if="parsed.error" class="state-text danger" style="margin: 4px 0">{{ parsed.error }}</p>
         <p v-else-if="parsed.meta" class="state-text" style="margin: 4px 0">
-          识别到技能：<strong>{{ parsed.meta.name }}</strong>
+          {{ t('platform.skills.parsedPreview') }}<strong>{{ parsed.meta.name }}</strong>
           <template v-if="parsed.meta.description"> — {{ parsed.meta.description }}</template>
         </p>
 
-        <n-form-item label="版本 *">
-          <n-input v-model:value="version" placeholder="如 1.0.0" style="max-width: 240px" />
+        <n-form-item :label="t('platform.skills.versionLabel')">
+          <n-input v-model:value="version" :placeholder="t('platform.skills.versionPlaceholder')" style="max-width: 240px" />
         </n-form-item>
-        <n-form-item label="描述">
-          <n-input v-model:value="description" type="textarea" :rows="2" placeholder="技能描述（默认取自 SKILL.md，可修改）" />
+        <n-form-item :label="t('platform.skills.descLabel')">
+          <n-input v-model:value="description" type="textarea" :rows="2" :placeholder="t('platform.skills.descPlaceholder')" />
         </n-form-item>
 
         <n-space justify="end">
@@ -87,7 +87,7 @@
             :loading="uploadMutation.isPending.value"
             :disabled="!canUpload"
           >
-            上传
+            {{ t('platform.skills.uploadButton') }}
           </n-button>
         </n-space>
         <p v-if="uploadFeedback" class="state-text" :class="{ danger: uploadFeedbackError }">{{ uploadFeedback }}</p>
@@ -99,14 +99,14 @@
       <template #header>
         <div>
           <p class="eyebrow">Platform</p>
-          <h2 style="margin: 0">平台技能列表</h2>
+          <h2 style="margin: 0">{{ t('platform.skills.listTitle') }}</h2>
         </div>
       </template>
 
       <!-- 加载态 -->
-      <div v-if="isLoading" class="state-text">加载中…</div>
+      <div v-if="isLoading" class="state-text">{{ t('platform.skills.loading') }}</div>
       <!-- 错误态 -->
-      <div v-else-if="error" class="state-text danger">查询失败：{{ error.message }}</div>
+      <div v-else-if="error" class="state-text danger">{{ t('platform.skills.queryFail', { msg: error.message }) }}</div>
       <!-- 正常态：使用 n-data-table 展示 skill 列表 -->
       <n-data-table
         v-else
@@ -122,6 +122,7 @@
 
 <script setup lang="ts">
 import { computed, h, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { NButton, NCard, NDataTable, NForm, NFormItem, NInput, NRadioButton, NRadioGroup, NSpace, useDialog, useMessage } from 'naive-ui'
 import { usePlatformSkillsQuery, useUploadPlatformSkill, useDeletePlatformSkill } from '@/api/hooks/useSkills'
 import {
@@ -136,6 +137,7 @@ import type { PlatformSkill } from '@/api'
 // PlatformSkillsPage 是平台管理员的平台库 skill 管理页：上传/列出/删除。
 // 上传支持两种方式：粘贴单个 SKILL.md，或上传整个 skill 文件夹；前端校验 frontmatter
 // 并打包成扁平 tar 后再走 multipart 上传（name/description 自动取自 frontmatter）。
+const { t } = useI18n()
 const { data: skills, isLoading, error } = usePlatformSkillsQuery()
 const uploadMutation = useUploadPlatformSkill()
 const deleteMutation = useDeletePlatformSkill()
@@ -258,7 +260,7 @@ async function onUpload() {
       description: description.value.trim() || result.description || undefined,
       file,
     })
-    message.success(`已上传 skill ${result.name} ${version.value.trim()}`)
+    message.success(t('platform.skills.uploadSuccess', { name: result.name, version: version.value.trim() }))
     // 上传成功后重置表单。
     mode.value = 'markdown'
     mdText.value = ''
@@ -268,23 +270,23 @@ async function onUpload() {
     description.value = ''
   } catch (err) {
     uploadFeedbackError.value = true
-    uploadFeedback.value = err instanceof Error ? err.message : '上传失败'
+    uploadFeedback.value = err instanceof Error ? err.message : t('platform.skills.uploadFail')
   }
 }
 
 // onDelete 弹出 useDialog().warning 二次确认后再执行删除，避免误操作。
 function onDelete(skill: PlatformSkill) {
   dialog.warning({
-    title: '删除 Skill',
-    content: `确定删除 skill「${skill.name} ${skill.version}」？删除后不可恢复。`,
-    positiveText: '删除',
-    negativeText: '取消',
+    title: t('platform.skills.deleteDialog.title'),
+    content: t('platform.skills.deleteDialog.content', { name: skill.name, version: skill.version }),
+    positiveText: t('platform.skills.deleteDialog.confirm'),
+    negativeText: t('platform.skills.deleteDialog.cancel'),
     onPositiveClick: async () => {
       try {
         await deleteMutation.mutateAsync(skill.id)
-        message.success(`已删除 skill ${skill.name} ${skill.version}`)
+        message.success(t('platform.skills.deleteSuccess', { name: skill.name, version: skill.version }))
       } catch (err) {
-        message.error(err instanceof Error ? err.message : '删除失败')
+        message.error(err instanceof Error ? err.message : t('platform.skills.deleteFail'))
       }
     },
   })
@@ -301,7 +303,7 @@ function formatBytes(n?: number): string {
 // columns 定义 n-data-table 列：name、version、file_size、操作（删除）。
 const columns = computed(() => [
   {
-    title: '名称',
+    title: t('platform.skills.columns.name'),
     key: 'name',
     render: (row: PlatformSkill) => [
       h('strong', row.name),
@@ -309,17 +311,17 @@ const columns = computed(() => [
     ],
   },
   {
-    title: '版本',
+    title: t('platform.skills.columns.version'),
     key: 'version',
     render: (row: PlatformSkill) => row.version,
   },
   {
-    title: '文件大小',
+    title: t('platform.skills.columns.fileSize'),
     key: 'file_size',
     render: (row: PlatformSkill) => formatBytes(row.file_size),
   },
   {
-    title: '操作',
+    title: t('common.table.actions'),
     key: 'actions',
     render: (row: PlatformSkill) =>
       h(
@@ -330,7 +332,7 @@ const columns = computed(() => [
           disabled: deleteMutation.isPending.value,
           onClick: () => onDelete(row),
         },
-        { default: () => '删除' },
+        { default: () => t('platform.skills.deleteDialog.confirm') },
       ),
   },
 ])
