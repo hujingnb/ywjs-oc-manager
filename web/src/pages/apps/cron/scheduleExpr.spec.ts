@@ -1,6 +1,9 @@
 // scheduleExpr.spec.ts —— schedule 点选器纯逻辑单测。
 // 覆盖：日历模式拼 cron、间隔模式拼 every、表达式回填、触发点枚举与笛卡尔积告警。
+// describeSchedule 测试使用真实 i18n 实例（zh 语言），断言中文输出。
 import { describe, expect, it } from 'vitest'
+
+import { i18n } from '@/i18n'
 
 import {
   buildScheduleExpr,
@@ -9,6 +12,10 @@ import {
   defaultScheduleState,
   type ScheduleState,
 } from './scheduleExpr'
+
+// 使用真实 i18n 实例的 t 函数，设为中文以断言中文输出。
+i18n.global.locale.value = 'zh'
+const t = i18n.global.t
 
 // 构造日历态的便捷函数，减少样板。
 function calendar(partial: Partial<ScheduleState['calendar']>): ScheduleState {
@@ -110,7 +117,7 @@ describe('describeSchedule', () => {
     const { text, warn } = describeSchedule(calendar({
       frequency: 'daily',
       times: [{ hour: 9, minute: 0 }, { hour: 18, minute: 0 }],
-    }))
+    }), t)
     expect(text).toBe('每天 09:00、18:00')
     expect(warn).toBe(false)
   })
@@ -120,20 +127,20 @@ describe('describeSchedule', () => {
     const { text, warn } = describeSchedule(calendar({
       frequency: 'daily',
       times: [{ hour: 9, minute: 0 }, { hour: 18, minute: 30 }],
-    }))
+    }), t)
     expect(text).toBe('每天 09:00、09:30、18:00、18:30')
     expect(warn).toBe(true)
   })
 
   // 每周预览带星期文案。
   it('每周预览', () => {
-    const { text } = describeSchedule(calendar({ frequency: 'weekly', weekdays: [1, 5], times: [{ hour: 8, minute: 0 }] }))
+    const { text } = describeSchedule(calendar({ frequency: 'weekly', weekdays: [1, 5], times: [{ hour: 8, minute: 0 }] }), t)
     expect(text).toBe('周一、周五 08:00')
   })
 
   // 间隔模式预览。
   it('间隔预览', () => {
     const state: ScheduleState = { ...defaultScheduleState(), mode: 'interval', interval: { value: 2, unit: 'h' } }
-    expect(describeSchedule(state).text).toBe('每 2 小时')
+    expect(describeSchedule(state, t).text).toBe('每 2 小时')
   })
 })

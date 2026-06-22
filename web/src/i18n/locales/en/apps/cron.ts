@@ -81,6 +81,66 @@ export default {
     scriptPlaceholder: 'Script file name in the workspace',
     selectFile: 'Pick file',
   },
+  // display.* — human-readable output of cronDisplay / scheduleExpr / deliverOptions helpers
+  display: {
+    // 状态标签
+    state: {
+      scheduled: 'Scheduled',
+      paused: 'Paused',
+      running: 'Running',
+      disabled: 'Disabled',
+      error: 'Error',
+      removed: 'Removed',
+      unknown: 'Unknown',
+    },
+    // 投递渠道标签
+    deliver: {
+      wechat: 'WeChat',
+      email: 'Email',
+      none: 'No delivery',
+      empty: '—',
+    },
+    // 周几标签（cron dow 顺序：0=Sun）
+    weekday: {
+      sun: 'Sun',
+      mon: 'Mon',
+      tue: 'Tue',
+      wed: 'Wed',
+      thu: 'Thu',
+      fri: 'Fri',
+      sat: 'Sat',
+    },
+    // 调度表达式模板
+    schedule: {
+      // every / interval 格式：每 N 单位
+      everyHour: 'Every {value} hour(s)',
+      everyMinute: 'Every {value} minute(s)',
+      everySecond: 'Every {value} second(s)',
+      // at 格式：一次性绝对时间
+      atTime: 'At {time}',
+      // cron 每小时
+      everyHourFixed: 'Every hour',
+      // cron 每天
+      everyDay: 'Daily at {time}',
+      // cron 每周某天
+      everyWeekday: 'Weekly on {day} at {time}',
+      // cron 每月某日
+      everyMonthDay: 'Monthly on the {day} at {time}',
+      // cron 每 N 分钟
+      everyNMinutes: 'Every {n} minute(s)',
+      // calendar 模式：每天（多时刻）
+      calendarDaily: 'Daily at {times}',
+      // calendar 模式：每周（星期列表 + 多时刻）
+      calendarWeekly: '{days} at {times}',
+      // calendar 模式：间隔
+      calendarInterval: 'Every {value} {unit}',
+      // 间隔单位
+      unitHour: 'hour(s)',
+      unitMinute: 'minute(s)',
+    },
+    // 不投递常驻选项标签
+    deliverNone: 'No delivery',
+  },
   // AppCronTab top-level tab copy (toolbar / status options / action feedback)
   tab: {
     searchPlaceholder: 'Search jobs',

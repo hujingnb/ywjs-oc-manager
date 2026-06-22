@@ -99,7 +99,8 @@ const state = reactive(defaultScheduleState())
 
 // generated 是当前状态拼出的表达式，作为「单一事实源」用于发出与回显。
 const generated = computed(() => buildScheduleExpr(state))
-const preview = computed(() => describeSchedule(state))
+// preview 在 computed 中传入 t 保证语言切换时预览文案响应式更新。
+const preview = computed(() => describeSchedule(state, t))
 
 // 外部 value 变化（如编辑态回填）且与当前生成结果不同才解析，避免与发出形成回环。
 watch(

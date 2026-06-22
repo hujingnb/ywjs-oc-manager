@@ -81,6 +81,66 @@ export default {
     scriptPlaceholder: '仓库内脚本文件名',
     selectFile: '选择文件',
   },
+  // display.* — cronDisplay / scheduleExpr / deliverOptions 辅助函数输出的人类可读文案
+  display: {
+    // 状态标签
+    state: {
+      scheduled: '已调度',
+      paused: '已暂停',
+      running: '运行中',
+      disabled: '已禁用',
+      error: '错误',
+      removed: '已移除',
+      unknown: 'unknown',
+    },
+    // 投递渠道标签
+    deliver: {
+      wechat: '微信',
+      email: '邮件',
+      none: '不投递',
+      empty: '—',
+    },
+    // 周几标签（cron dow 顺序：0=日）
+    weekday: {
+      sun: '周日',
+      mon: '周一',
+      tue: '周二',
+      wed: '周三',
+      thu: '周四',
+      fri: '周五',
+      sat: '周六',
+    },
+    // 调度表达式模板
+    schedule: {
+      // every / interval 格式：每 N 单位
+      everyHour: '每 {value} 小时',
+      everyMinute: '每 {value} 分钟',
+      everySecond: '每 {value} 秒',
+      // at 格式：一次性绝对时间
+      atTime: '指定时间 {time}',
+      // cron 每小时
+      everyHourFixed: '每小时',
+      // cron 每天
+      everyDay: '每天 {time}',
+      // cron 每周某天
+      everyWeekday: '每{day} {time}',
+      // cron 每月某日
+      everyMonthDay: '每月{day}日 {time}',
+      // cron 每 N 分钟
+      everyNMinutes: '每 {n} 分钟',
+      // calendar 模式：每天（多时刻）
+      calendarDaily: '每天 {times}',
+      // calendar 模式：每周（星期列表 + 多时刻）
+      calendarWeekly: '{days} {times}',
+      // calendar 模式：间隔
+      calendarInterval: '每 {value} {unit}',
+      // 间隔单位
+      unitHour: '小时',
+      unitMinute: '分钟',
+    },
+    // 不投递常驻选项标签
+    deliverNone: '不投递',
+  },
   // AppCronTab 顶层 tab 文案（工具栏 / 状态选项 / 操作反馈）
   tab: {
     searchPlaceholder: '搜索定时任务',

@@ -32,7 +32,8 @@ const boundTypes = computed(() => {
 
 // 强制转为 SelectOption[]：DeliverOption 结构与 SelectOption 兼容，但 naive-ui 类型联合
 // 导致 TS 无法自动收窄；显式断言避免 TS2322 误报。
-const options = computed(() => buildDeliverOptions(boundTypes.value, props.value) as SelectOption[])
+// 在 computed 中传入 t 保证语言切换时选项标签响应式更新。
+const options = computed(() => buildDeliverOptions(boundTypes.value, props.value, t) as SelectOption[])
 </script>
 
 <style scoped>

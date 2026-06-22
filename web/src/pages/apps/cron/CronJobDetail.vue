@@ -8,7 +8,7 @@
     <template v-else>
       <div class="detail-head">
         <div>
-          <p class="status-line">● {{ translateState(job.state) }}</p>
+          <p class="status-line">● {{ stateText }}</p>
           <h3>{{ job.name || t('apps.cron.detail.unnamed') }}</h3>
           <p class="detail-sub">job_id <code>{{ job.id || '—' }}</code></p>
         </div>
@@ -85,6 +85,9 @@ import { scheduleDisplay, translateState } from './cronDisplay'
 
 const { t } = useI18n()
 
+// stateText 将当前任务状态 i18n 化；在 computed 中传入 t 保证语言切换时响应式更新。
+const stateText = computed(() => translateState(props.job?.state, t))
+
 type CronActionVerb = 'run' | 'pause' | 'resume' | 'delete'
 
 // CronJobDetail 渲染右侧详情、写操作、运行历史和输出预览。
@@ -121,7 +124,8 @@ const pauseVerb = computed<CronActionVerb>(() =>
 )
 
 // scheduleText 走统一展示入口：上游 display 优先，缺失时前端兜底翻译，再退原文。
-const scheduleText = computed(() => scheduleDisplay(props.job?.schedule))
+// 在 computed 中传入 t 保证语言切换时响应式更新。
+const scheduleText = computed(() => scheduleDisplay(props.job?.schedule, t))
 
 // repeatText 同时展示重复上限和已完成次数，便于排查有限重复任务进度。
 const repeatText = computed(() => {
