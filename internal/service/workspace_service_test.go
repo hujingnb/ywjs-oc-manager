@@ -28,6 +28,7 @@ const (
 type fakeWorkspaceObjectStore struct {
 	// data 模拟 S3 bucket，key 为完整对象 key，value 为内容
 	data         map[string][]byte
+	modTimes     map[string]time.Time // 按完整 key 记录对象最后修改时间，模拟 S3 LastModified
 	presignError error // 模拟预签名失败
 	listError    error // 模拟 ListObjects 失败
 	lastPrefix   string // 最近一次 ListObjects 的 prefix
@@ -35,12 +36,18 @@ type fakeWorkspaceObjectStore struct {
 }
 
 func newFakeWorkspaceObjectStore() *fakeWorkspaceObjectStore {
-	return &fakeWorkspaceObjectStore{data: make(map[string][]byte)}
+	return &fakeWorkspaceObjectStore{data: make(map[string][]byte), modTimes: make(map[string]time.Time)}
 }
 
 // addObject 向 fake store 放入一个对象，content 为对象内容。
 func (f *fakeWorkspaceObjectStore) addObject(key string, content []byte) {
 	f.data[key] = content
+}
+
+// addObjectAt 放入对象并指定其最后修改时间，用于验证 ModTime 透传。
+func (f *fakeWorkspaceObjectStore) addObjectAt(key string, content []byte, modTime time.Time) {
+	f.data[key] = content
+	f.modTimes[key] = modTime
 }
 
 func (f *fakeWorkspaceObjectStore) PutObject(_ context.Context, key string, r io.Reader, _ int64) error {
@@ -76,7 +83,7 @@ func (f *fakeWorkspaceObjectStore) ListObjects(_ context.Context, prefix string)
 	for k, v := range f.data {
 		if strings.HasPrefix(k, prefix) {
 			relKey := k[len(prefix):]
-			items = append(items, storage.ObjectInfo{Key: relKey, Size: int64(len(v))})
+			items = append(items, storage.ObjectInfo{Key: relKey, Size: int64(len(v)), LastModified: f.modTimes[k]})
 		}
 	}
 	return items, nil
@@ -129,6 +136,29 @@ func TestWorkspaceServiceListReturnsEntries(t *testing.T) {
 	assert.Equal(t, int64(5), listing.Entries[0].Size)
 	// 确认 ListObjects 被调用时使用了正确的前缀
 	assert.Equal(t, prefix, obj.lastPrefix)
+}
+
+// TestWorkspaceServiceListPopulatesModTime 验证文件条目的创建时间（ModTime）从对象 LastModified 透传，
+// 而由对象层级推断出的目录无对应对象，应保持零值时间不参与展示。
+func TestWorkspaceServiceListPopulatesModTime(t *testing.T) {
+	store := newWorkspaceStub(t)
+	obj := newFakeWorkspaceObjectStore()
+	wsPrefix := "apps/" + testWorkAppID + "/workspace/"
+	fileTime := time.Date(2026, 6, 22, 10, 30, 0, 0, time.UTC) // 文件对象的最后修改时间
+	obj.addObjectAt(wsPrefix+"readme.txt", []byte("doc"), fileTime)
+	obj.addObjectAt(wsPrefix+"logs/app.log", []byte("log"), fileTime) // 子目录下对象，使 logs 成为推断目录
+
+	svc := NewWorkspaceService(store, obj, time.Minute)
+
+	// 场景：根目录列举时，文件条目带回真实创建时间，目录条目时间为零值。
+	listing, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "", "")
+	require.NoError(t, err)
+	byName := make(map[string]WorkspaceEntryResult)
+	for _, e := range listing.Entries {
+		byName[e.Name] = e
+	}
+	assert.Equal(t, fileTime, byName["readme.txt"].ModTime) // 文件透传 LastModified
+	assert.True(t, byName["logs"].ModTime.IsZero())         // 推断目录无创建时间
 }
 
 // TestWorkspaceServiceListRootReturnsAllTopLevel 验证根目录列举：返回直接子条目，目录与文件都正确识别。

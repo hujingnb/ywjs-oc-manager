@@ -15,6 +15,8 @@ export interface WorkspaceEntry {
   size: number
   // true 表示目录，false 表示普通文件。
   is_dir: boolean
+  // 文件创建时间（RFC3339）。源自 S3 对象最后修改时间；目录无对应对象，为零值时间。
+  mod_time: string
 }
 
 // WorkspaceListing 是某个工作目录路径下的列表响应。

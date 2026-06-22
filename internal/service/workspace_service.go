@@ -53,6 +53,10 @@ type WorkspaceEntryResult struct {
 	Name  string `json:"name"`
 	Size  int64  `json:"size"`
 	IsDir bool   `json:"is_dir"`
+	// ModTime 为文件创建时间。来源是 S3 对象的 LastModified——S3 无独立创建时间字段，
+	// 而工作目录产物写入后基本不再变更，故以最后修改时间等同创建时间对外展示。
+	// 目录由对象层级推断、无对应对象，保持零值，前端按 IsDir 不予展示。
+	ModTime time.Time `json:"mod_time"`
 }
 
 // List 列出指定应用工作目录下的文件。
@@ -129,10 +133,11 @@ func (s *WorkspaceService) List(ctx context.Context, principal auth.Principal, a
 			seen[fileName] = true
 			entryPath := joinSlash(relPath, fileName)
 			entries = append(entries, WorkspaceEntryResult{
-				Path:  entryPath,
-				Name:  fileName,
-				Size:  info.Size,
-				IsDir: false,
+				Path:    entryPath,
+				Name:    fileName,
+				Size:    info.Size,
+				IsDir:   false,
+				ModTime: info.LastModified,
 			})
 		}
 	}
@@ -172,10 +177,11 @@ func (s *WorkspaceService) searchWorkspace(ctx context.Context, wsPrefix, keywor
 			name = info.Key[idx+1:]
 		}
 		entries = append(entries, WorkspaceEntryResult{
-			Path:  info.Key,
-			Name:  name,
-			Size:  info.Size,
-			IsDir: false,
+			Path:    info.Key,
+			Name:    name,
+			Size:    info.Size,
+			IsDir:   false,
+			ModTime: info.LastModified,
 		})
 	}
 	return WorkspaceListing{Path: "/", Entries: entries}, nil

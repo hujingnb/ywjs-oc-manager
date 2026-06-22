@@ -118,7 +118,12 @@ func (s *S3ObjectStore) ListObjects(ctx context.Context, prefix string) ([]Objec
 			if obj.Size != nil {
 				size = *obj.Size
 			}
-			items = append(items, ObjectInfo{Key: relKey, Size: size})
+			// obj.LastModified 为 *time.Time，列表场景理应非空；为空时留零值，由上层按 is_dir 决定是否展示。
+			lastModified := time.Time{}
+			if obj.LastModified != nil {
+				lastModified = *obj.LastModified
+			}
+			items = append(items, ObjectInfo{Key: relKey, Size: size, LastModified: lastModified})
 		}
 		if aws.ToBool(out.IsTruncated) && out.NextContinuationToken != nil {
 			token = out.NextContinuationToken

@@ -12125,6 +12125,12 @@ export interface components {
         };
         "service.WorkspaceEntryResult": {
             is_dir?: boolean;
+            /**
+             * @description ModTime 为文件创建时间。来源是 S3 对象的 LastModified——S3 无独立创建时间字段，
+             *     而工作目录产物写入后基本不再变更，故以最后修改时间等同创建时间对外展示。
+             *     目录由对象层级推断、无对应对象，保持零值，前端按 IsDir 不予展示。
+             */
+            mod_time?: string;
             name?: string;
             path?: string;
             size?: number;

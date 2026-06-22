@@ -114,6 +114,21 @@ function formatSize(value: number): string {
   return `${(value / 1024 / 1024).toFixed(2)} MB`
 }
 
+// formatTime 把后端 RFC3339 时间转成本地可读格式；目录的零值时间由列渲染为占位符，不会进入此处。
+function formatTime(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+// isZeroTime 判断后端是否返回零值时间（目录或缺失），用于决定是否展示创建时间。
+function isZeroTime(value: string): boolean {
+  if (!value) return true
+  const t = new Date(value).getTime()
+  return Number.isNaN(t) || t <= 0
+}
+
 // entryRelativePath 将后端返回的绝对/带根路径条目转换成下载接口需要的相对路径。
 function entryRelativePath(entryPath: string): string {
   const root = listing.value?.path
@@ -133,6 +148,10 @@ const columns: DataTableColumns<WorkspaceEntry> = [
       : (searching.value ? row.path : row.name),
   },
   { title: '大小', key: 'size', render: (row) => row.is_dir ? '—' : formatSize(row.size) },
+  {
+    title: '创建时间', key: 'mod_time',
+    render: (row) => (row.is_dir || isZeroTime(row.mod_time)) ? '—' : formatTime(row.mod_time),
+  },
   {
     title: '操作', key: 'actions',
     render: (row) => !row.is_dir && appId.value

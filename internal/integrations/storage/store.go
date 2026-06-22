@@ -11,8 +11,9 @@ import (
 
 // ObjectInfo 是列举操作返回的单个对象元信息。
 type ObjectInfo struct {
-	Key  string // 相对调用方传入 prefix 的 key（已去掉 prefix 前缀）
-	Size int64  // 对象字节数
+	Key          string    // 相对调用方传入 prefix 的 key（已去掉 prefix 前缀）
+	Size         int64     // 对象字节数
+	LastModified time.Time // 对象最后修改时间；S3 无独立创建时间，工作目录产物写入后基本不变，可作创建时间展示
 }
 
 // ObjectStore 是标准 S3 对象读写抽象。实现见 s3.go（aws-sdk-go-v2）。
