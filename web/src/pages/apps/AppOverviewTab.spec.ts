@@ -1,7 +1,8 @@
 import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { computed, defineComponent, h, nextTick, ref } from 'vue'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { i18n } from '@/i18n'
 import AppOverviewTab from './AppOverviewTab.vue'
 
 // 每个用例结束后自动卸载已挂载组件，停止其内部 watch；否则残留组件的 watch 仍监听共享的
@@ -160,6 +161,7 @@ function mountOverview() {
     global: {
       provide: { app: appRef },
       stubs: makeStubs(),
+      plugins: [i18n],
     },
   })
 }
@@ -173,9 +175,15 @@ function mountWithApp(appOverride: Record<string, unknown>) {
     global: {
       provide: { app: customApp },
       stubs: makeStubs(),
+      plugins: [i18n],
     },
   })
 }
+
+// 每次用例前将 i18n 语言设为中文，确保断言中文文案的测试与翻译文件对齐。
+beforeEach(() => {
+  i18n.global.locale.value = 'zh'
+})
 
 describe('AppOverviewTab', () => {
   it('所属企业展示企业名称而不是企业 UUID', () => {

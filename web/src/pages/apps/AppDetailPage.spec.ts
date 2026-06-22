@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils'
 import { ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { i18n } from '@/i18n'
 import AppDetailPage from './AppDetailPage.vue'
 
 const authState = vi.hoisted(() => ({
@@ -46,12 +47,15 @@ function mountDetail() {
         AppStatusTag: { template: '<span />' },
         NCard: { template: '<section><slot name="header" /><slot /></section>' },
       },
+      plugins: [i18n],
     },
   })
 }
 
 describe('AppDetailPage', () => {
   beforeEach(() => {
+    // 每次用例前将 i18n 语言设为中文，确保断言中文文案的测试与翻译文件对齐。
+    i18n.global.locale.value = 'zh'
     authState.isPlatformAdmin = false
     authState.isOrgMember = false
   })

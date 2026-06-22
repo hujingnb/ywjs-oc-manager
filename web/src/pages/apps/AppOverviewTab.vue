@@ -3,7 +3,7 @@
     <template #header>
       <div>
         <p class="eyebrow">Instance · Overview</p>
-        <h2 style="margin: 0">概览</h2>
+        <h2 style="margin: 0">{{ t('apps.overview.heading') }}</h2>
       </div>
     </template>
     <template #header-extra>
@@ -12,13 +12,13 @@
         :disabled="!canRetryInit || initMutation.isPending.value"
         @click="onRetryInit"
       >
-        {{ initMutation.isPending.value ? '提交中…' : '重新初始化' }}
+        {{ initMutation.isPending.value ? t('apps.overview.retryInitPending') : t('apps.overview.retryInit') }}
       </n-button>
     </template>
 
-    <p v-if="!app" class="state-text">尚未加载实例信息</p>
+    <p v-if="!app" class="state-text">{{ t('apps.overview.noApp') }}</p>
     <n-descriptions v-else :column="2" bordered size="small">
-      <n-descriptions-item label="状态">
+      <n-descriptions-item :label="t('apps.overview.labelStatus')">
         <AppStatusTag :status="app.status" />
         <!-- 仅当处于初始化子状态且拿到了可量化进度(total>0)才显示进度条；拉镜像 / 起容器
              这类底层不暴露细粒度进度的阶段(total=0)不显示进度条，避免 0% / 不定进度条让用户
@@ -31,11 +31,11 @@
         </div>
         <!-- error 状态附加显示最近失败阶段的中文文案及具体错误原因 -->
         <div v-if="app.status === 'error' && app.last_error_status" class="init-failure">
-          <span>在「{{ formatAppStatus(app.last_error_status).label }}」阶段失败</span>
+          <span>{{ t('apps.overview.errorStageFmt', { stage: formatAppStatus(app.last_error_status).label }) }}</span>
           <span v-if="app.last_error_message" class="init-failure-reason">{{ app.last_error_message }}</span>
         </div>
       </n-descriptions-item>
-      <n-descriptions-item label="API key">
+      <n-descriptions-item :label="t('apps.overview.labelApiKey')">
         <n-space align="center" :size="8">
           <n-tag :type="keyTagType(app.api_key_status)" size="small" :bordered="false">
             {{ apiKeyLabel(app.api_key_status) }}
@@ -48,23 +48,23 @@
             :disabled="keyMutation.isPending.value"
             @click="onRestoreKey"
           >
-            恢复
+            {{ t('apps.overview.apiKeyRestore') }}
           </n-button>
         </n-space>
       </n-descriptions-item>
       <!-- 助手版本：展示绑定的版本名，version_synced=false 时附加需重启标签，组织管理员可切换 -->
-      <n-descriptions-item label="助手版本">
+      <n-descriptions-item :label="t('apps.overview.labelVersion')">
         <n-space align="center" :size="8">
           <span>{{ versionName }}</span>
           <!-- version_synced 为 false 时提示需重启，与实例列表的需重启提示视觉一致 -->
-          <n-tag v-if="app.version_synced === false" type="warning" size="small" :bordered="false">需重启</n-tag>
+          <n-tag v-if="app.version_synced === false" type="warning" size="small" :bordered="false">{{ t('apps.overview.restartNeeded') }}</n-tag>
           <!-- 切换按钮仅对有应用管理权限且可查看版本目录的用户展示 -->
           <n-button
             v-if="canSwitchAppVersion(auth.user, app) && canViewVersions"
             size="small"
             @click="openSwitchVersionModal"
           >
-            切换
+            {{ t('apps.overview.switchVersion') }}
           </n-button>
           <!-- 立即重启按钮：version_synced=false 且实例正在运行时，提供本页直接重启入口，
                避免用户为了同步镜像还要切换到运行时 tab。restart job 后端已实现镜像变更
@@ -77,21 +77,21 @@
             :disabled="restartMutation.isPending.value"
             @click="onRestartForVersionSync"
           >
-            {{ restartMutation.isPending.value ? '提交中…' : '立即重启' }}
+            {{ restartMutation.isPending.value ? t('apps.overview.restartNowPending') : t('apps.overview.restartNow') }}
           </n-button>
         </n-space>
       </n-descriptions-item>
-      <n-descriptions-item label="所属企业">
+      <n-descriptions-item :label="t('apps.overview.labelOrg')">
         {{ organizationName }}
       </n-descriptions-item>
-      <n-descriptions-item v-if="app.description" label="描述" :span="2">
+      <n-descriptions-item v-if="app.description" :label="t('apps.overview.labelDesc')" :span="2">
         {{ app.description }}
       </n-descriptions-item>
       <!-- runtime_image_ref / sha256 由后端仅对平台管理员填充，非管理员字段恒为空，此处不渲染 -->
-      <n-descriptions-item v-if="auth.isPlatformAdmin && app.runtime_image_ref" label="镜像引用" :span="2">
+      <n-descriptions-item v-if="auth.isPlatformAdmin && app.runtime_image_ref" :label="t('apps.overview.labelImageRef')" :span="2">
         <code>{{ app.runtime_image_ref }}</code>
       </n-descriptions-item>
-      <n-descriptions-item v-if="auth.isPlatformAdmin && app.runtime_image_sha256" label="镜像 Digest" :span="2">
+      <n-descriptions-item v-if="auth.isPlatformAdmin && app.runtime_image_sha256" :label="t('apps.overview.labelImageDigest')" :span="2">
         <code>{{ app.runtime_image_sha256 }}</code>
       </n-descriptions-item>
     </n-descriptions>
@@ -111,23 +111,23 @@
     />
 
     <!-- 切换助手版本弹窗：从组织 allowlist 与版本目录交集中选择目标版本 -->
-    <n-modal v-model:show="showSwitchVersionModal" preset="card" title="切换助手版本" style="width: 420px">
+    <n-modal v-model:show="showSwitchVersionModal" preset="card" :title="t('apps.overview.switchVersionTitle')" style="width: 420px">
       <n-select
         v-model:value="selectedVersionId"
         :options="versionOptions"
         :loading="versionsQuery.isLoading.value"
-        placeholder="请选择助手版本"
+        :placeholder="t('apps.overview.switchVersionPlaceholder')"
         style="margin-bottom: 16px"
       />
       <n-space justify="end">
-        <n-button @click="showSwitchVersionModal = false">取消</n-button>
+        <n-button @click="showSwitchVersionModal = false">{{ t('common.actions.cancel') }}</n-button>
         <n-button
           type="primary"
           :loading="switchVersionMutation.isPending.value"
           :disabled="!selectedVersionId || switchVersionMutation.isPending.value"
           @click="onConfirmSwitchVersion"
         >
-          确认切换
+          {{ t('apps.overview.switchVersionConfirm') }}
         </n-button>
       </n-space>
     </n-modal>
@@ -137,6 +137,7 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch, type Ref } from 'vue'
 import { NButton, NCard, NDescriptions, NDescriptionsItem, NModal, NProgress, NSelect, NSpace, NTag, type SelectOption } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 import {
   useInitializeAppMutation,
@@ -157,6 +158,7 @@ import { useAuthStore } from '@/stores/auth'
 
 // AppOverviewTab 展示应用基础信息，并提供初始化重试和 API key 启停入口。
 const props = defineProps<{ appId: string }>()
+const { t } = useI18n()
 const appId = computed<string | undefined>(() => props.appId)
 
 const app = inject<Ref<AppDTO | null>>('app')
@@ -164,7 +166,7 @@ const auth = useAuthStore()
 // orgId 只用于展示组织名称；权限和业务 API 仍继续使用 app.org_id。
 const orgId = computed<string | undefined>(() => app?.value?.org_id)
 const organizationQuery = useOrganizationQuery(orgId)
-const organizationName = computed(() => organizationQuery.data.value?.name || '未知企业')
+const organizationName = computed(() => organizationQuery.data.value?.name || t('apps.overview.unknownOrg'))
 
 // canViewVersions：三角色均可查看助手版本目录（CanViewAssistantVersion 已扩展至 org_member）。
 const canViewVersions = computed(() => !!auth.user)
@@ -213,10 +215,10 @@ async function onConfirmSwitchVersion() {
   try {
     await switchVersionMutation.mutateAsync(selectedVersionId.value)
     showSwitchVersionModal.value = false
-    versionFeedback.value = '已切换助手版本，重启实例后生效'
+    versionFeedback.value = t('apps.overview.switchVersionSuccess')
   } catch (err: unknown) {
     versionError.value = true
-    versionFeedback.value = err instanceof Error ? err.message : '切换版本失败'
+    versionFeedback.value = err instanceof Error ? err.message : t('apps.overview.switchVersionError')
   }
 }
 
@@ -249,18 +251,19 @@ async function onRestartForVersionSync() {
   try {
     const result = await restartMutation.mutateAsync('restart')
     trackingJobId.value = result.job_id
-    trackingJobTitle.value = '重启任务'
-    restartFeedback.value = `已提交重启任务：${result.job_id}`
+    trackingJobTitle.value = t('apps.overview.restartJobTitle')
+    restartFeedback.value = `${t('apps.overview.restartSubmitted')}${result.job_id}`
   } catch (err: unknown) {
     restartError.value = true
-    restartFeedback.value = err instanceof Error ? err.message : '重启失败'
+    restartFeedback.value = err instanceof Error ? err.message : t('apps.overview.restartError')
   }
 }
 
 const initMutation = useInitializeAppMutation(appId)
 // trackingJobId 记录最近一次后台任务，供 JobProgressPanel 轮询展示执行进度。
 const trackingJobId = ref<string | undefined>()
-const trackingJobTitle = ref('后台任务')
+// trackingJobTitle 初始为空串，提交任务时按操作类型动态赋值。
+const trackingJobTitle = ref('')
 const jobIdRef = computed<string | undefined>(() => trackingJobId.value)
 const jobQuery = useJobQuery(jobIdRef)
 const trackedJob = computed(() => jobQuery.data.value ?? null)
@@ -328,11 +331,11 @@ async function onRetryInit() {
   try {
     const result = await initMutation.mutateAsync()
     trackingJobId.value = result.job_id
-    trackingJobTitle.value = '初始化任务'
-    initFeedback.value = `已提交初始化任务：${result.job_id}`
+    trackingJobTitle.value = t('apps.overview.initJobTitle')
+    initFeedback.value = `${t('apps.overview.initSubmitted')}${result.job_id}`
   } catch (err: unknown) {
     initError.value = true
-    initFeedback.value = err instanceof Error ? err.message : '初始化失败'
+    initFeedback.value = err instanceof Error ? err.message : t('apps.overview.initError')
   }
 }
 
@@ -351,7 +354,7 @@ function keyTagType(s: string): 'success' | 'warning' | 'error' | 'default' {
 
 // apiKeyLabel 将后端 key 状态转换为用户可读文案，未知状态保留原值。
 function apiKeyLabel(s: string): string {
-  return s === 'active' ? '启用' : s === 'disabled' ? '已禁用' : s
+  return s === 'active' ? t('apps.overview.apiKeyActive') : s === 'disabled' ? t('apps.overview.apiKeyDisabled') : s
 }
 
 // onRestoreKey 提交 restore 后端任务；任务完成由 JobProgressPanel 继续轮询。
@@ -362,11 +365,11 @@ async function onRestoreKey() {
   try {
     const result = await keyMutation.mutateAsync('restore')
     trackingJobId.value = result.job_id
-    trackingJobTitle.value = '恢复 API key 任务'
+    trackingJobTitle.value = t('apps.overview.keyJobTitle')
     keyFeedback.value = `已提交 restore 任务：${result.job_id}`
   } catch (err: unknown) {
     keyError.value = true
-    keyFeedback.value = err instanceof Error ? err.message : 'restore 失败'
+    keyFeedback.value = err instanceof Error ? err.message : t('apps.overview.keyRestoreError')
   }
 }
 </script>
