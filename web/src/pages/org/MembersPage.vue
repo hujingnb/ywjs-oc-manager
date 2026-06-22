@@ -314,7 +314,8 @@ function openCreateAppForm(member: Member) {
   createAppResult.value = null
   createAppError.value = ''
   createAppForm.value = {
-    app_name: `${member.display_name} 的实例`,
+    // 根据成员显示名自动填充实例名，用户可覆盖修改
+    app_name: t('org.members.createApp.defaultAppName', { name: member.display_name }),
     version_id: '',
     channel_type: 'wechat',
   }

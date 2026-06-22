@@ -66,6 +66,8 @@ export default {
       selectVersionError: 'Please select an assistant version',
       createError: 'Failed to create instance',
       createdResult: 'Instance {name} created, Job ID: {jobId}',
+      // 补建实例时根据成员显示名自动填充的实例名默认值
+      defaultAppName: "{name}'s instance",
     },
     // table 成员列表列名。
     table: {

@@ -66,6 +66,8 @@ export default {
       selectVersionError: '请选择助手版本',
       createError: '创建实例失败',
       createdResult: '已创建实例 {name}，Job ID：{jobId}',
+      // 补建实例时根据成员显示名自动填充的实例名默认值
+      defaultAppName: '{name} 的实例',
     },
     // table 成员列表列名。
     table: {
