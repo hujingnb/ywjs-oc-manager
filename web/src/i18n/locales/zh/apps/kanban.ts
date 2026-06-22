@@ -76,5 +76,16 @@ export default {
     promptComplete: '完成结果（可选）',
     promptReassign: '重新分配给（profile）',
     confirmAction: '确定要执行「{verb}」吗？',
+    // 工具栏徽标与控件
+    taskCount: '{n} 个任务',
+    oldestReady: '最老就绪：{age}',
+    liveLabel: '● 实时',
+    reconnect: '重连实时流',
+    createTask: '+ 新建任务',
+    // formatAge 时长单位（秒/分/时/天）
+    ageSeconds: '{n} 秒',
+    ageMinutes: '{n} 分钟',
+    ageHours: '{n} 小时',
+    ageDays: '{n} 天',
   },
 } as const

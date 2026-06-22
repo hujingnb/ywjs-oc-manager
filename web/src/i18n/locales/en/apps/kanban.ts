@@ -76,5 +76,16 @@ export default {
     promptComplete: 'Completion result (optional)',
     promptReassign: 'Reassign to (profile)',
     confirmAction: 'Execute "{verb}"?',
+    // 工具栏徽标与控件
+    taskCount: '{n} tasks',
+    oldestReady: 'Oldest ready: {age}',
+    liveLabel: '● Live',
+    reconnect: 'Reconnect stream',
+    createTask: '+ New task',
+    // formatAge 时长单位（秒/分/时/天）
+    ageSeconds: '{n}s',
+    ageMinutes: '{n}min',
+    ageHours: '{n}h',
+    ageDays: '{n}d',
   },
 } as const

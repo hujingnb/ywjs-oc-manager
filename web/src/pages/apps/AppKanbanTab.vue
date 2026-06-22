@@ -14,14 +14,15 @@
         <!-- stats 徽标：任务总数 + 最老就绪任务等待时长（来自 kanban stats 端点）-->
         <!-- stats !== false：features 未知时默认显示，明确 false 才隐藏 -->
         <span v-if="statsSummary && kanbanFeatures?.stats !== false" class="stat-badge">
-          <span><strong>{{ statsSummary.total }}</strong> 个任务</span>
-          <span v-if="statsSummary.oldestReady">最老就绪 <strong class="warn">{{ statsSummary.oldestReady }}</strong></span>
+          <!-- t('apps.kanban.tab.taskCount') 含插值 {n}，用 v-html 内联渲染 bold 数字 -->
+          <span>{{ t('apps.kanban.tab.taskCount', { n: statsSummary.total }) }}</span>
+          <span v-if="statsSummary.oldestReady">{{ t('apps.kanban.tab.oldestReady', { age: statsSummary.oldestReady }) }}</span>
         </span>
         <!-- streamConnected 为 true 时显示绿点「实时」，否则显示「重连实时流」按钮 -->
-        <span v-if="streamConnected" class="live-tag">● 实时</span>
-        <n-button v-else size="small" tertiary @click="reconnectStream">重连实时流</n-button>
+        <span v-if="streamConnected" class="live-tag">{{ t('apps.kanban.tab.liveLabel') }}</span>
+        <n-button v-else size="small" tertiary @click="reconnectStream">{{ t('apps.kanban.tab.reconnect') }}</n-button>
         <!-- write !== false：features 未知时默认显示，明确 false 才隐藏 -->
-        <n-button v-if="kanbanFeatures?.write !== false" class="create-task-btn" size="small" type="primary" @click="showCreate = true">+ 新建任务</n-button>
+        <n-button v-if="kanbanFeatures?.write !== false" class="create-task-btn" size="small" type="primary" @click="showCreate = true">{{ t('apps.kanban.tab.createTask') }}</n-button>
       </n-space>
     </n-card>
 
@@ -136,11 +137,12 @@ const capabilitiesQuery = useKanbanCapabilitiesQuery(appId)
 const kanbanFeatures = computed(() => capabilitiesQuery.data.value?.features)
 
 // formatAge 把秒数格式化为人类可读的时长（用于「最老就绪等待时长」）。
+// 使用 i18n key 确保英文/中文单位随语言切换。
 function formatAge(seconds: number): string {
-  if (seconds < 60) return `${Math.floor(seconds)} 秒`
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟`
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)} 小时`
-  return `${Math.floor(seconds / 86400)} 天`
+  if (seconds < 60) return t('apps.kanban.tab.ageSeconds', { n: Math.floor(seconds) })
+  if (seconds < 3600) return t('apps.kanban.tab.ageMinutes', { n: Math.floor(seconds / 60) })
+  if (seconds < 86400) return t('apps.kanban.tab.ageHours', { n: Math.floor(seconds / 3600) })
+  return t('apps.kanban.tab.ageDays', { n: Math.floor(seconds / 86400) })
 }
 
 // statsSummary：把 stats 端点数据归纳为工具栏徽标用的两项 —— 任务总数、最老就绪等待时长。
