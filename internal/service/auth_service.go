@@ -29,6 +29,8 @@ type AuthStore interface {
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (sqlc.RefreshToken, error)
 	RevokeRefreshToken(ctx context.Context, id string) error
 	RevokeRefreshTokensByUser(ctx context.Context, userID string) error
+	// UpdateUserLocale 持久化用户界面语言偏好到 users.locale 字段。
+	UpdateUserLocale(ctx context.Context, arg sqlc.UpdateUserLocaleParams) error
 }
 
 // AuthService 处理登录、刷新和注销等认证业务。
@@ -326,6 +328,33 @@ func (s *AuthService) ensureUserEnabled(ctx context.Context, user sqlc.User) err
 		if org.Status != domain.StatusActive {
 			return ErrOrgDisabled
 		}
+	}
+	return nil
+}
+
+// SupportedLocales 是平台受支持的界面语言集合；新增语言时在此扩展并同步前端 locale 目录与迁移 CHECK 约束。
+var SupportedLocales = []string{"en", "zh"}
+
+// isSupportedLocale 判断 locale 是否属于受支持集合。
+func isSupportedLocale(locale string) bool {
+	for _, l := range SupportedLocales {
+		if l == locale {
+			return true
+		}
+	}
+	return false
+}
+
+// UpdateLocale 持久化用户界面语言偏好。locale 必须属于 SupportedLocales，否则返回 ErrInvalidLocale。
+func (s *AuthService) UpdateLocale(ctx context.Context, userID, locale string) error {
+	if !isSupportedLocale(locale) {
+		return ErrInvalidLocale
+	}
+	if err := s.store.UpdateUserLocale(ctx, sqlc.UpdateUserLocaleParams{
+		ID:     userID,
+		Locale: null.StringFrom(locale),
+	}); err != nil {
+		return fmt.Errorf("更新用户语言失败: %w", err)
 	}
 	return nil
 }

@@ -35,6 +35,12 @@ type RefreshRequest struct {
 	RefreshToken string `json:"refresh_token" binding:"required"`
 }
 
+// UpdateLocaleRequest 是 PATCH /auth/me/locale 的请求体；locale 取值由 service 校验。
+type UpdateLocaleRequest struct {
+	// Locale 是目标界面语言，例如 en / zh。
+	Locale string `json:"locale" binding:"required"`
+}
+
 // ChangePasswordRequest 是已登录用户修改自己密码的请求体。
 type ChangePasswordRequest struct {
 	// OldPassword 是当前登录密码，只用于本次校验，不写日志。

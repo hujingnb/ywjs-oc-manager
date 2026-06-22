@@ -629,6 +629,11 @@ func (s *authStoreStub) RevokeRefreshTokensByUser(_ context.Context, userID stri
 	return nil
 }
 
+// UpdateUserLocale 是 AuthStore 接口新增方法的测试桩实现；既有测试不调用此方法，故为空操作。
+func (s *authStoreStub) UpdateUserLocale(_ context.Context, _ sqlc.UpdateUserLocaleParams) error {
+	return nil
+}
+
 // loginFakeCaptcha 是 CaptchaVerifier 的测试桩，按预置 err 返回。
 type loginFakeCaptcha struct{ err error }
 
@@ -664,6 +669,36 @@ func TestAuthServiceLoginPassesWithGoodCaptcha(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, "admin", result.User.Username)
+}
+
+// fakeLocaleStore 仅实现 UpdateLocale 测试所需的存储方法，记录最后一次写入参数。
+// 嵌入 AuthStore 接口（nil 实现），以满足 AuthStore 的完整方法集；
+// 只覆盖 UpdateUserLocale，其余方法若被调用会 panic，测试中不会触发。
+type fakeLocaleStore struct {
+	AuthStore
+	gotID, gotLocale string
+	err              error
+}
+
+func (f *fakeLocaleStore) UpdateUserLocale(_ context.Context, arg sqlc.UpdateUserLocaleParams) error {
+	f.gotID, f.gotLocale = arg.ID, arg.Locale.String
+	return f.err
+}
+
+// TestAuthService_UpdateLocale 覆盖语言持久化：合法 locale 写库、非法 locale 被拒。
+func TestAuthService_UpdateLocale(t *testing.T) {
+	// 合法 zh：应写入对应用户行
+	store := &fakeLocaleStore{}
+	svc := &AuthService{store: store}
+	require.NoError(t, svc.UpdateLocale(context.Background(), "u1", "zh"))
+	assert.Equal(t, "u1", store.gotID)
+	assert.Equal(t, "zh", store.gotLocale)
+
+	// 非法 fr：应返回 ErrInvalidLocale，不写库
+	store2 := &fakeLocaleStore{}
+	svc2 := &AuthService{store: store2}
+	require.ErrorIs(t, svc2.UpdateLocale(context.Background(), "u1", "fr"), ErrInvalidLocale)
+	assert.Equal(t, "", store2.gotID)
 }
 
 // mustUUID 返回字符串 UUID（MySQL 侧 CHAR(36)，无需解析）。
