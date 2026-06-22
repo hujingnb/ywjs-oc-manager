@@ -148,7 +148,11 @@
         <div class="api-doc-section">
           <h3>{{ t('platform.industry.apiDoc.sectionRequest') }}</h3>
           <p><strong>POST</strong> <code>/api/v1/external/industry-knowledge/files</code></p>
-          <p>鉴权 Header：<code>X-OC-Industry-Knowledge-Token</code>，当前值：<code>{{ industryUploadTokenText }}</code>。</p>
+          <p>
+            {{ t('platform.industry.apiDoc.authHeader') }}
+            <code>X-OC-Industry-Knowledge-Token</code>，{{ t('platform.industry.apiDoc.authHeaderCurrentValue') }}
+            <code>{{ industryUploadTokenText }}</code>。
+          </p>
         </div>
 
         <div class="api-doc-section">
@@ -167,10 +171,10 @@
         <div class="api-doc-section">
           <h3>{{ t('platform.industry.apiDoc.sectionStatusCodes') }}</h3>
           <ul>
-            <li><code>202</code>：上传成功，文件进入 RAGFlow 解析队列。</li>
-            <li><code>400</code>：参数缺失、行业名称为空或请求体格式错误。</li>
-            <li><code>401</code>：缺少或错误的 <code>X-OC-Industry-Knowledge-Token</code>。</li>
-            <li><code>413</code>：文件大小超过平台上传限制。</li>
+            <li><code>202</code>：{{ t('platform.industry.apiDoc.status202') }}</li>
+            <li><code>400</code>：{{ t('platform.industry.apiDoc.status400') }}</li>
+            <li><code>401</code>：{{ t('platform.industry.apiDoc.status401') }} <code>X-OC-Industry-Knowledge-Token</code>。</li>
+            <li><code>413</code>：{{ t('platform.industry.apiDoc.status413') }}</li>
           </ul>
         </div>
 
@@ -232,6 +236,7 @@ import {
   useUploadIndustryKnowledgeFile,
   type IndustryKnowledgeBase,
 } from '@/api/hooks/useIndustryKnowledge'
+import zhPlatform from '@/i18n/locales/zh/platform'
 import { canManageRAGFlowDatasetInfo } from '@/domain/permissions'
 import { PARSE_STATUS_FILTER_OPTIONS, parseStatusLabel, parseStatusTagType } from '@/domain/parseStatus'
 import { useAuthStore } from '@/stores/auth'
@@ -328,60 +333,21 @@ function shellSingleQuote(value: string): string {
 }
 
 // industryExternalUploadCurl 是页面展示和 Markdown 文档共用的 curl 调用模板，直接内联当前配置 token。
+// industry_name 示例值取自 zh 语言包，与正文一致（此处直接读对象绕过 vue-i18n 编译器限制）。
 const industryExternalUploadCurl = computed(() => `curl -i \\
   -H ${shellSingleQuote(`X-OC-Industry-Knowledge-Token: ${industryUploadTokenText.value}`)} \\
-  -F "industry_name=保险" \\
+  -F "industry_name=${zhPlatform.industry.apiDoc.curlExampleIndustryName}" \\
   -F "file=@./policy.pdf;type=application/pdf" \\
   https://<manager-domain>/api/v1/external/industry-knowledge/files`)
 
 // industryExternalUploadMarkdown 是复制给外部商业知识库服务方的 Markdown 接口文档。
-const industryExternalUploadMarkdown = computed(() => `# 行业知识库外部上传接口
-
-外部商业知识库服务通过固定鉴权字符串把文件上传到平台级行业知识库。manager 会按行业名称自动创建或复用行业库，同一行业库内同名文件会覆盖旧文件。
-
-## 接口
-
-- Method: \`POST\`
-- URL: \`https://<manager-domain>/api/v1/external/industry-knowledge/files\`
-- Content-Type: \`multipart/form-data\`
-
-## 鉴权
-
-请求必须携带 Header：
-
-\`\`\`text
-X-OC-Industry-Knowledge-Token: ${industryUploadTokenText.value}
-\`\`\`
-
-token 来自 manager 配置项 \`industry_knowledge.upload_token\`。该配置为空时外部上传入口禁用；只包含空白字符时 manager 会启动失败。
-
-## 表单字段
-
-| 字段 | 必填 | 说明 |
-|---|---|---|
-| \`industry_name\` | 是 | 行业名称。不存在时自动创建行业库；未删除行业库中名称唯一。 |
-| \`file\` | 是 | 上传文件。同一行业库内同名文件会覆盖旧文件。 |
-
-## curl 示例
-
-\`\`\`bash
-${industryExternalUploadCurl.value}
-\`\`\`
-
-## 返回码
-
-| 状态码 | 说明 |
-|---|---|
-| \`202\` | 上传成功，文件已进入 RAGFlow 解析队列。 |
-| \`400\` | 参数缺失、行业名称为空或请求体格式错误。 |
-| \`401\` | 缺少或错误的 \`X-OC-Industry-Knowledge-Token\`。 |
-| \`413\` | 文件大小超过平台上传限制。 |
-
-## 注意事项
-
-- 上传成功后通常先返回 \`parse_status=queued\`，解析完成后才能稳定参与检索。
-- 外部上传只负责写入行业库；实例是否检索该行业库，由助手版本的行业知识库关联决定。
-- 每个关联行业库都会在检索时单独召回最多 \`top_k\` 条结果，关联过多会增加上下文长度和响应成本。`)
+// Markdown 内含 Pipe 表格语法，会被 vue-i18n 消息编译器误判为复数分隔符；因此直接从 zh 语言包
+// 读取原始模板字符串，用 replace() 注入当前 token 与 curl 示例，绕过 vue-i18n 编译器。
+const industryExternalUploadMarkdown = computed(() =>
+  zhPlatform.industry.apiDoc.apiDocMarkdown
+    .replace('{uploadToken}', industryUploadTokenText.value)
+    .replace('{curlExample}', industryExternalUploadCurl.value)
+)
 
 watch(
   () => bases.value?.items ?? [],
@@ -497,7 +463,7 @@ async function onUpload(event: Event) {
       })
     })
   } catch (err) {
-    message.warning(err instanceof Error ? err.message : '已有上传任务正在进行')
+    message.warning(err instanceof Error ? err.message : t('platform.industry.uploadConflict'))
   }
 }
 
