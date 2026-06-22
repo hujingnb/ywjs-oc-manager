@@ -86,6 +86,7 @@
           </n-button>
         </div>
         <div class="topbar-actions">
+          <LocaleSwitcher :persist="true" />
           <n-tag type="success" size="small" :bordered="false">API 正常</n-tag>
           <!-- 使用手册入口：右上角文字按钮，点开右侧抽屉按当前角色展示对应手册 -->
           <n-button quaternary title="使用手册" @click="helpOpen = true">
@@ -174,6 +175,7 @@ import {
 } from 'lucide-vue-next'
 
 import HelpDrawer from '@/components/HelpDrawer.vue'
+import LocaleSwitcher from '@/components/LocaleSwitcher.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useOwnApp } from '@/composables/useOwnApp'
 import { useAdminPerspective, type AdminPerspective } from '@/composables/useAdminPerspective'

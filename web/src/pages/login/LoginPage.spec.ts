@@ -16,6 +16,11 @@ vi.mock('@/stores/auth', () => ({
 vi.mock('vue-router', () => ({
   useRouter: () => ({ currentRoute: { value: { query: {} } }, replace: replaceMock }),
 }))
+// LocaleSwitcher 依赖 i18n 与 Pinia 插件，登录页测试环境无这两个插件；
+// 用占位桩替代，避免引入无关的插件配置影响既有验证码测试用例。
+vi.mock('@/components/LocaleSwitcher.vue', () => ({
+  default: { template: '<div />' },
+}))
 
 // 把出题探测 fetch 固定为指定状态码。
 function stubChallenge(status: number) {

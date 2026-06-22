@@ -60,6 +60,12 @@ const HelpDrawerStub = {
   template: '<aside data-test="help-drawer" :data-show="String(show)" :data-role="role" />',
 }
 
+// LocaleSwitcherStub：语言选择器占位桩，避免挂载真实组件时因缺少 i18n/Pinia 插件而抛错。
+const LocaleSwitcherStub = {
+  props: ['persist'],
+  template: '<div data-test="locale-switcher" />',
+}
+
 const MenuStub = {
   props: ['options', 'value'],
   emits: ['update:value'],
@@ -150,6 +156,7 @@ function mountLayout() {
       stubs: {
         RouterView: { template: '<section class="route-page">页面内容</section>' },
         HelpDrawer: HelpDrawerStub,
+        LocaleSwitcher: LocaleSwitcherStub,
         NAlert: AlertStub,
         NButton: ButtonStub,
         NForm: FormStub,

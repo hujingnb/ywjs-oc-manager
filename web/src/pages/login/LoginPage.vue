@@ -1,6 +1,9 @@
 <template>
   <!-- 登录卡片：嵌入 AuthLayout 的右侧登录控制台外框中，承载本地账号登录表单。 -->
   <form class="login-card" @submit.prevent="onSubmit">
+    <div class="login-locale-row">
+      <LocaleSwitcher :persist="false" />
+    </div>
     <p class="login-brand">AGENT RUNTIME MANAGER</p>
     <h2 class="login-heading">登录控制台</h2>
 
@@ -108,6 +111,7 @@ import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
+import LocaleSwitcher from '@/components/LocaleSwitcher.vue'
 
 // LoginPage 负责本地账号登录，并在登录成功后回跳原始受保护路径。
 const auth = useAuthStore()
@@ -359,5 +363,12 @@ async function onSubmit() {
   .login-security {
     flex-direction: column;
   }
+}
+
+/* 语言选择器行：右对齐，为登录品牌文字提供视觉缓冲。 */
+.login-locale-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
 }
 </style>
