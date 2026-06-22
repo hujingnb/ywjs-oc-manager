@@ -31,7 +31,7 @@
         <div v-if="mode === 'markdown'" class="upload-hint">
           <div class="upload-hint__head">
             <span>
-              格式：以 <code>---</code> 包裹的 frontmatter 开头（至少含 <code>name</code>，<code>description</code> 可选），其后是 Markdown 正文。示例：
+              {{ t('platform.skills.markdownMode.hintPrefix') }} <code>---</code> {{ t('platform.skills.markdownMode.hintSuffix') }} <code>name</code>，<code>description</code> {{ t('platform.skills.markdownMode.hintDescOpt') }}
             </span>
             <n-button text type="primary" size="tiny" @click="fillMarkdownExample">{{ t('platform.skills.markdownMode.hintFillExample') }}</n-button>
           </div>
@@ -55,15 +55,15 @@
           </div>
           <!-- 选择前的关键提示：文件夹须含 SKILL.md，且其 frontmatter 为 YAML 含 name/description -->
           <p class="upload-hint" style="margin: 8px 0 0">
-            文件夹需包含 <code>SKILL.md</code> 文件；该 <code>.md</code> 文件需包含 YAML 格式的技能名称（<code>name</code>）和描述（<code>description</code>）。
+            {{ t('platform.skills.folderMode.hintSkillMd') }} <code>SKILL.md</code> {{ t('platform.skills.folderMode.hintMdFrontmatter') }}<code>name</code>{{ t('platform.skills.folderMode.hintAndDesc') }}<code>description</code>{{ t('platform.skills.folderMode.hintClose') }}
           </p>
         </n-form-item>
 
         <!-- 上传文件夹使用说明 -->
         <ul v-if="mode === 'folder'" class="upload-hint upload-hint__list">
-          <li>选择 <strong>skill 自身的文件夹</strong>，其中需<strong>直接包含 SKILL.md</strong>（即 <code>所选文件夹/SKILL.md</code>，不要选它的上层目录）。</li>
-          <li>文件夹内的子目录与附属文件会原样保留（如 <code>scripts/</code>、<code>assets/</code>、<code>reference.md</code>）。</li>
-          <li>技能名取自 SKILL.md 的 <code>name</code> 字段，与文件夹名无关；上传时会自动剥掉最外层目录、按扁平结构打包。</li>
+          <li>{{ t('platform.skills.folderMode.tipSelectSkillFolder') }}</li>
+          <li>{{ t('platform.skills.folderMode.tipSubdir') }}</li>
+          <li>{{ t('platform.skills.folderMode.tipName') }}</li>
         </ul>
 
         <!-- 解析预览：成功展示识别到的技能 name/description，失败展示红色错误提示 -->
@@ -156,18 +156,12 @@ const version = ref('')
 const description = ref('')
 
 // markdownExample 是粘贴 Markdown 模式的格式示例，既用于页面展示，也用于「填充示例」按钮。
-const markdownExample = `---
-name: my-skill
-description: 一句话描述这个技能的用途
----
-
-# My Skill
-
-用 Markdown 说明这个技能：什么时候触发、做什么、怎么用。`
+// 使用 computed 包裹 t() 以响应语言切换。
+const markdownExample = computed(() => t('platform.skills.markdownExample'))
 
 // fillMarkdownExample 把示例模板填入文本域，方便用户在其基础上修改。
 function fillMarkdownExample() {
-  mdText.value = markdownExample
+  mdText.value = markdownExample.value
 }
 
 // 上传操作的反馈文案与错误标记（成功显绿色，失败显红色）。
