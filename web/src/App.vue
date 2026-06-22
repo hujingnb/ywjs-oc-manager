@@ -1,5 +1,5 @@
 <template>
-  <NConfigProvider :theme-overrides="themeOverrides">
+  <NConfigProvider :theme-overrides="themeOverrides" :locale="naiveLocale" :date-locale="naiveDateLocale">
     <!-- NMessageProvider 提供全局 message API，供页面通过 useMessage() 弹出操作反馈 -->
     <!-- NDialogProvider 提供全局 dialog API，供页面通过 useDialog() 弹出确认对话框 -->
     <NMessageProvider>
@@ -14,16 +14,24 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { GlobalThemeOverrides } from 'naive-ui'
-import { NConfigProvider, NDialogProvider, NMessageProvider } from 'naive-ui'
+import { NConfigProvider, NDialogProvider, NMessageProvider, enUS, zhCN, dateEnUS, dateZhCN } from 'naive-ui'
+import { storeToRefs } from 'pinia'
 
 import UploadProgressModal from '@/components/UploadProgressModal.vue'
 import { useBeforeUnloadGuard } from '@/composables/useBeforeUnloadGuard'
+import { useLocaleStore } from '@/stores/locale'
 
 // App 是前端根组件，统一挂载全局 Naive UI 主题并把页面渲染交给路由出口。
 // 这里不承载业务状态，避免根组件和页面权限、请求生命周期耦合。
 // 上传相关的全局副作用（进度对话框、刷新拦截）统一在此装配，业务页面无需自行挂载。
 useBeforeUnloadGuard()
+
+// naive-ui 内置组件文案与日期组件随当前 locale 切换。
+const { locale } = storeToRefs(useLocaleStore())
+const naiveLocale = computed(() => (locale.value === 'zh' ? zhCN : enUS))
+const naiveDateLocale = computed(() => (locale.value === 'zh' ? dateZhCN : dateEnUS))
 
 const themeOverrides: GlobalThemeOverrides = {
   common: {

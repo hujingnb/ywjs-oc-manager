@@ -11,6 +11,7 @@ import {
   setStoredTokens,
 } from '@/api/client'
 import type { AuthUser, LoginResult } from '@/api'
+import { useLocaleStore } from '@/stores/locale'
 
 // 登录与会话状态由 Pinia 集中管理。
 // access_token 和 refresh_token 的持久化在 client 层处理，store 只负责内存中的当前用户视图。
@@ -47,6 +48,8 @@ export const useAuthStore = defineStore('auth', () => {
         refreshToken: result.tokens.refresh_token,
       })
       user.value = result.user
+      // 登录后用 DB 中的用户语言覆盖界面（user.locale 为空表示未选择，保持登录页所选）。
+      useLocaleStore().applyFromUser(result.user.locale)
       return result
     } catch (err) {
       error.value = err instanceof Error ? err.message : '登录失败'
@@ -66,6 +69,8 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const response = await apiRequest<{ user: AuthUser }>('/api/v1/auth/me')
       user.value = response.user
+      // 恢复会话后用 DB 中的用户语言同步界面（user.locale 为空则保持当前选择）。
+      useLocaleStore().applyFromUser(response.user.locale)
       return response.user
     } catch (err) {
       // access token 过期时清空状态；此处不主动刷新 token，刷新逻辑由路由守卫触发。
