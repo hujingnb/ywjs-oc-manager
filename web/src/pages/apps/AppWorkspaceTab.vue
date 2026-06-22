@@ -129,14 +129,13 @@ function isZeroTime(value: string): boolean {
   return Number.isNaN(t) || t <= 0
 }
 
-// entryRelativePath 将后端返回的绝对/带根路径条目转换成下载接口需要的相对路径。
+// entryRelativePath 返回条目相对工作目录根的完整路径，供下载 / 归档接口与目录导航共用。
+// 后端这些接口一律以工作目录根为基准；普通列举（joinSlash(relPath, name)）与递归搜索
+// （S3 相对 key）返回的 path 本就是 root 相对完整路径，因此只需去掉可能的前导斜杠。
+// 不能再剥掉当前目录前缀：否则子目录文件下载会丢失层级（如把 logs/app.log 砍成 app.log
+// 导致 404），多级目录导航也会因 relativePath 丢级而查不到目录。
 function entryRelativePath(entryPath: string): string {
-  const root = listing.value?.path
-  if (!root || root === '/') return entryPath.replace(/^\/+/, '')
-  const normalizedRoot = root.replace(/^\/+|\/+$/g, '')
-  const normalizedEntry = entryPath.replace(/^\/+/, '')
-  const prefix = `${normalizedRoot}/`
-  return normalizedEntry.startsWith(prefix) ? normalizedEntry.slice(prefix.length) : normalizedEntry
+  return entryPath.replace(/^\/+/, '')
 }
 
 // columns 提供目录进入和文件下载操作，目录不展示下载按钮。
