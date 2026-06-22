@@ -25,19 +25,21 @@ interface InitUploadResponse {
   part_size: number
 }
 
-// uploadKnowledgeFile 按文件大小选择直传或分片上传；onProgress 上报聚合字节进度，signal 支持取消。
+// uploadKnowledgeFile 按文件大小选择直传或分片上传；onProgress 上报聚合字节进度，signal 支持取消，
+// onFinalizing 在分片全部传完、进入服务端合并阶段时触发（直传不调，直传的 100% 仍是上传中）。
 export async function uploadKnowledgeFile(
   target: KnowledgeUploadTarget,
   file: File,
   onProgress?: (loaded: number, total: number) => void,
   signal?: AbortSignal,
+  onFinalizing?: () => void,
 ): Promise<void> {
   if (file.size < CHUNK_THRESHOLD) {
     await directUpload(target.directPath, file, onProgress, signal)
     return
   }
   try {
-    await chunkedUpload(target.uploadsPath, file, onProgress, signal)
+    await chunkedUpload(target.uploadsPath, file, onProgress, signal, onFinalizing)
   } catch (err) {
     // 后端未启用对象存储（分片不可用）时回退直传，保证功能可用。
     if (isMultipartUnavailable(err)) {
@@ -71,6 +73,7 @@ async function chunkedUpload(
   file: File,
   onProgress?: (loaded: number, total: number) => void,
   signal?: AbortSignal,
+  onFinalizing?: () => void,
 ): Promise<void> {
   // 1) 发起会话：拿 uploadId 与分片大小（init 失败若为 503 多半是分片不可用，交由上层回退直传）。
   const init = await apiRequest<InitUploadResponse>(uploadsPath, {
@@ -102,7 +105,9 @@ async function chunkedUpload(
       })
       onProgress?.(end, total)
     }
-    // 3) 合并并触发解析。
+    // 3) 合并并触发解析。complete 期间服务端要把整文件从对象存储推给 RAGFlow，可能耗时若干秒，
+    //    先通知前端进入「合并中」状态，避免进度卡在 100% 看起来像卡死。
+    onFinalizing?.()
     await apiRequest(`${uploadsPath}/${uploadId}/complete`, { method: 'POST' })
   } catch (err) {
     // 失败或取消：尽力中止会话，让后端 Abort multipart 回收已上传分片，不阻塞错误抛出。

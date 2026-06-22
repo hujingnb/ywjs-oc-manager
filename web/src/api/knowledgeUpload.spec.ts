@@ -44,8 +44,11 @@ describe('知识库文件上传', () => {
     })
     vi.mocked(xhrUpload).mockResolvedValue({ status: 204, body: '' })
 
-    await uploadKnowledgeFile(target, makeFile(17 * 1024 * 1024))
+    const onFinalizing = vi.fn()
+    await uploadKnowledgeFile(target, makeFile(17 * 1024 * 1024), undefined, undefined, onFinalizing)
 
+    // 进入合并阶段的回调被触发一次（用于前端显示「合并中…」）
+    expect(onFinalizing).toHaveBeenCalledTimes(1)
     // init + complete 各一次
     expect(apiRequest).toHaveBeenCalledWith('/api/v1/organizations/o1/knowledge-uploads', {
       method: 'POST',

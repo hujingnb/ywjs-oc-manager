@@ -323,6 +323,7 @@ export function useUploadOrgKnowledge(orgId: Ref<string | undefined>) {
       file: File
       onProgress?: (loaded: number, total: number) => void
       signal?: AbortSignal
+      onFinalizing?: () => void
     }) => {
       if (!orgId.value) throw new Error('缺少企业 ID')
       await uploadKnowledgeFile(
@@ -333,6 +334,7 @@ export function useUploadOrgKnowledge(orgId: Ref<string | undefined>) {
         input.file,
         input.onProgress,
         input.signal,
+        input.onFinalizing,
       )
     },
     onSettled: () => {
@@ -348,6 +350,7 @@ export function useUploadAppKnowledge(appId: Ref<string | undefined>) {
       file: File
       onProgress?: (loaded: number, total: number) => void
       signal?: AbortSignal
+      onFinalizing?: () => void
     }) => {
       if (!appId.value) throw new Error('缺少实例 ID')
       await uploadKnowledgeFile(
@@ -358,6 +361,7 @@ export function useUploadAppKnowledge(appId: Ref<string | undefined>) {
         input.file,
         input.onProgress,
         input.signal,
+        input.onFinalizing,
       )
     },
     onSettled: () => {
