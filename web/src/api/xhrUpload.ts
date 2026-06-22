@@ -8,6 +8,7 @@ import {
   triggerUnauthorized,
   type ApiError,
 } from '@/api/client'
+import { i18n } from '@/i18n'
 
 // XhrUploadOptions 描述一次上传请求的全部入参；onProgress 与 signal 为可选。
 export interface XhrUploadOptions {
@@ -80,7 +81,7 @@ export function xhrUpload(url: string, opts: XhrUploadOptions): Promise<XhrUploa
     xhr.onabort = () => reject(makeAbortError())
 
     xhr.onerror = () => {
-      const err = makeApiError('网络错误，请检查连接', 0, undefined)
+      const err = makeApiError(i18n.global.t('common.errors.networkError'), 0, undefined)
       reject(err)
     }
 

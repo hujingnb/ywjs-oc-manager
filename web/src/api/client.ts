@@ -1,5 +1,6 @@
 // HTTP 客户端封装。
 // 统一处理 base URL、Authorization 头部、JSON 解析和错误抛出，避免每个 hook 重复实现。
+import { i18n } from '@/i18n'
 
 const TOKEN_STORAGE_KEY = 'ocm.access_token'
 const REFRESH_STORAGE_KEY = 'ocm.refresh_token'
@@ -256,7 +257,7 @@ export function extractErrorMessage(body: unknown, status: number): string {
   if (body && typeof body === 'object' && 'message' in body && typeof (body as { message: unknown }).message === 'string') {
     return (body as { message: string }).message
   }
-  return `请求失败 (${status})`
+  return i18n.global.t('common.errors.requestFailed', { status })
 }
 
 function extractErrorCode(body: unknown): string | null {
