@@ -55,6 +55,11 @@ export default {
       successMsg: '已复制 {name} 的企业信息',
       failMsg: '复制失败，请检查浏览器剪贴板权限',
       adminPasswordHint: '<创建时设置，系统不保存明文；如忘记请重置密码>',
+      // formatCode/Name/AdminUsername/AdminPassword：复制企业登录信息时的标签前缀行。
+      formatCode: '标识： {code}',
+      formatName: '名称： {name}',
+      formatAdminUsername: '管理员用户名： {username}',
+      formatAdminPassword: '管理员密码： {hint}',
     },
     editError: '编辑失败',
     rechargeModal: {
@@ -122,6 +127,77 @@ export default {
       workspace: '工作区',
       metrics: '资源指标',
     },
+    // ops：权限矩阵中每条操作名称，key 与 en/platform.ts 和 PermissionsPage.vue 完全对齐。
+    ops: {
+      // 企业管理
+      createOrg: '创建企业',
+      listOrgs: '企业列表',
+      viewOrgDetail: '查看企业详情',
+      editOrgInfo: '修改企业信息',
+      toggleOrg: '启用 / 禁用企业',
+      // 成员管理
+      listMembers: '成员列表',
+      viewMemberDetail: '查看成员详情',
+      createMember: '创建成员',
+      editMember: '修改成员资料',
+      toggleMember: '启用 / 禁用成员',
+      deleteMember: '删除成员',
+      resetPassword: '重置成员密码',
+      onboard: 'Onboard（初始建实例）',
+      rebuildInstance: '为成员复建实例',
+      // 应用实例
+      listApps: '应用列表',
+      viewAppDetail: '查看应用详情',
+      switchVersion: '切换助手版本',
+      // 运行时操作
+      startStopRestart: '启动 / 停止 / 重启',
+      // 渠道
+      viewChannel: '查看渠道信息',
+      bindChannel: '绑定渠道',
+      // 知识库
+      readOrgKnowledge: '读取企业知识库',
+      writeOrgKnowledge: '写入 / 重解析企业知识库',
+      readAppKnowledge: '读取应用知识库',
+      writeAppKnowledge: '写入 / 重解析应用知识库',
+      // 助手版本
+      viewVersions: '查看助手版本列表 / 详情',
+      manageVersions: '创建 / 修改 / 删除助手版本',
+      uploadSkill: '上传技能包',
+      // 任务看板
+      viewKanban: '查看任务看板',
+      writeKanban: '写操作（评论 / 完成 / 阻塞）',
+      // Cron 任务
+      viewCron: '查看 Cron 列表 / 详情',
+      manageCron: '创建 / 修改 / 启停 / 删除 Cron',
+      // 用量
+      viewOrgUsage: '查看企业聚合用量',
+      viewMemberUsage: '查看成员用量',
+      viewAppUsage: '查看应用用量',
+      // 审计日志
+      viewOrgAudit: '查看企业审计',
+      viewAppAudit: '查看应用审计',
+      viewMyAudit: '查看"我的审计"',
+      // 充值记录
+      viewRecharge: '查看充值记录',
+      viewBalance: '查看余额',
+      // 运行时节点
+      viewNodes: '节点列表 / 详情',
+      toggleNode: '启用 / 禁用节点',
+      // 平台总览
+      viewOverview: '平台总览统计',
+      // 模型列表
+      viewModels: '查看可用模型列表',
+      // 后台任务
+      viewJobs: '查看后台任务列表',
+      // 工作区
+      workspaceAccess: '查看 / 下载 / 打包工作区文件',
+      // 资源指标
+      viewMetrics: '查看应用资源指标',
+    },
+    // condOrg/condOrgAll/condSelf：条件权限描述，与 en/platform.ts 和 PermissionsPage.vue 对齐（平铺，非嵌套）。
+    condOrg: '🟡 本企业',
+    condOrgAll: '🟡 本企业全部',
+    condSelf: '🟡 仅自己',
   },
   // console：控制台首页
   console: {
@@ -227,7 +303,67 @@ export default {
       tokenMissing: '未配置，外部上传入口禁用',
       copySuccess: '已复制 Markdown 文档',
       copyFail: '复制失败，请手动复制文档内容',
+      // authHeader/authHeaderCurrentValue：API 文档中鉴权 Header 说明行。
+      authHeader: '鉴权 Header：',
+      authHeaderCurrentValue: '当前值：',
+      // 返回码描述。
+      status202: '上传成功，文件进入 RAGFlow 解析队列。',
+      status400: '参数缺失、行业名称为空或请求体格式错误。',
+      status401: '缺少或错误的',
+      status413: '文件大小超过平台上传限制。',
+      // curlExampleIndustryName：curl 示例中的行业名称占位值，仅作为演示用途。
+      curlExampleIndustryName: '保险',
+      // apiDocMarkdown：复制给外部服务方的完整 Markdown 接口文档；{uploadToken} 与 {curlExample} 由计算属性注入。
+      apiDocMarkdown: `# 行业知识库外部上传接口
+
+外部商业知识库服务通过固定鉴权字符串把文件上传到平台级行业知识库。manager 会按行业名称自动创建或复用行业库，同一行业库内同名文件会覆盖旧文件。
+
+## 接口
+
+- Method: \`POST\`
+- URL: \`https://<manager-domain>/api/v1/external/industry-knowledge/files\`
+- Content-Type: \`multipart/form-data\`
+
+## 鉴权
+
+请求必须携带 Header：
+
+\`\`\`text
+X-OC-Industry-Knowledge-Token: {uploadToken}
+\`\`\`
+
+token 来自 manager 配置项 \`industry_knowledge.upload_token\`。该配置为空时外部上传入口禁用；只包含空白字符时 manager 会启动失败。
+
+## 表单字段
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| \`industry_name\` | 是 | 行业名称。不存在时自动创建行业库；未删除行业库中名称唯一。 |
+| \`file\` | 是 | 上传文件。同一行业库内同名文件会覆盖旧文件。 |
+
+## curl 示例
+
+\`\`\`bash
+{curlExample}
+\`\`\`
+
+## 返回码
+
+| 状态码 | 说明 |
+|---|---|
+| \`202\` | 上传成功，文件已进入 RAGFlow 解析队列。 |
+| \`400\` | 参数缺失、行业名称为空或请求体格式错误。 |
+| \`401\` | 缺少或错误的 \`X-OC-Industry-Knowledge-Token\`。 |
+| \`413\` | 文件大小超过平台上传限制。 |
+
+## 注意事项
+
+- 上传成功后通常先返回 \`parse_status=queued\`，解析完成后才能稳定参与检索。
+- 外部上传只负责写入行业库；实例是否检索该行业库，由助手版本的行业知识库关联决定。
+- 每个关联行业库都会在检索时单独召回最多 \`top_k\` 条结果，关联过多会增加上下文长度和响应成本。`,
     },
+    // uploadConflict：上传文件时已有任务在进行的提示
+    uploadConflict: '已有上传任务正在进行',
     baseColumns: {
       name: '行业名称',
       docCount: '文件数',
@@ -326,6 +462,8 @@ export default {
       tipName: '技能名取自 SKILL.md 的 name 字段，与文件夹名无关；上传时会自动剥掉最外层目录、按扁平结构打包。',
     },
     parsedPreview: '识别到技能：',
+    // markdownExample：粘贴 Markdown 模式的格式示例，既用于展示也用于填充示例按钮
+    markdownExample: '---\nname: my-skill\ndescription: 一句话描述这个技能的用途\n---\n\n# My Skill\n\n用 Markdown 说明这个技能：什么时候触发、做什么、怎么用。',
     versionLabel: '版本 *',
     versionPlaceholder: '如 1.0.0',
     descLabel: '描述',
