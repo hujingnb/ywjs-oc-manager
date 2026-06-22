@@ -40,22 +40,12 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ select: [taskId: string] }>()
 
-// 状态分组顺序与看板状态流转保持一致；label 统一由状态格式化函数生成。
-const GROUP_DEFS: ReadonlyArray<{ status: KanbanStatus; label: string }> = ([
-  'running',
-  'ready',
-  'todo',
-  'blocked',
-  'triage',
-  'done',
-  'archived',
-] as const).map((status) => ({
-  status,
-  label: formatKanbanStatus(status).label,
-}))
+// KANBAN_STATUSES 固定看板状态排列顺序，与状态流转保持一致。
+// label 键由 formatKanbanStatus 在 groups computed 内通过 t() 动态解析，确保语言切换时响应式更新。
+const KANBAN_STATUSES = ['running', 'ready', 'todo', 'blocked', 'triage', 'done', 'archived'] as const satisfies ReadonlyArray<KanbanStatus>
 
 // KNOWN_STATUS_SET 用于识别 Hermes 约定状态；未知状态会追加为降级分组，避免任务被隐藏。
-const KNOWN_STATUS_SET = new Set<string>(GROUP_DEFS.map((def) => def.status))
+const KNOWN_STATUS_SET = new Set<string>(KANBAN_STATUSES)
 
 // taskStatusKey 统一处理任务状态缺失的边界，确保列表里没有任务因为 status 为空而丢失。
 function taskStatusKey(task: KanbanTask): string {
@@ -63,11 +53,16 @@ function taskStatusKey(task: KanbanTask): string {
 }
 
 // groups 把 tasks 按状态分桶；已知状态保持固定顺序，未知状态按接口返回的首次出现顺序追加。
+// label 通过 t(view.label, view.params) 解析为当前语言文案，确保语言切换时分组标题响应式更新。
 const groups = computed(() => {
-  const knownGroups = GROUP_DEFS.map((def) => ({
-    ...def,
-    tasks: props.tasks.filter((task) => taskStatusKey(task) === def.status),
-  }))
+  const knownGroups = KANBAN_STATUSES.map((status) => {
+    const view = formatKanbanStatus(status)
+    return {
+      status,
+      label: t(view.label, view.params ?? {}),
+      tasks: props.tasks.filter((task) => taskStatusKey(task) === status),
+    }
+  })
   const unknownGroups = new Map<string, KanbanTask[]>()
   for (const task of props.tasks) {
     const status = taskStatusKey(task)
@@ -78,11 +73,14 @@ const groups = computed(() => {
   }
   return [
     ...knownGroups,
-    ...Array.from(unknownGroups, ([status, tasks]) => ({
-      status,
-      label: formatKanbanStatus(status).label,
-      tasks,
-    })),
+    ...Array.from(unknownGroups, ([status, tasks]) => {
+      const view = formatKanbanStatus(status)
+      return {
+        status,
+        label: t(view.label, view.params ?? {}),
+        tasks,
+      }
+    }),
   ]
 })
 

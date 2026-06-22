@@ -31,7 +31,8 @@
         </div>
         <!-- error 状态附加显示最近失败阶段的中文文案及具体错误原因 -->
         <div v-if="app.status === 'error' && app.last_error_status" class="init-failure">
-          <span>{{ t('apps.overview.errorStageFmt', { stage: formatAppStatus(app.last_error_status).label }) }}</span>
+          <!-- formatAppStatus 返回 i18n 键；先用 t() 解析为当前语言文案再传入 errorStageFmt 插值。 -->
+          <span>{{ t('apps.overview.errorStageFmt', { stage: t(formatAppStatus(app.last_error_status).label, formatAppStatus(app.last_error_status).params ?? {}) }) }}</span>
           <span v-if="app.last_error_message" class="init-failure-reason">{{ app.last_error_message }}</span>
         </div>
       </n-descriptions-item>

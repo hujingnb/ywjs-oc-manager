@@ -6,7 +6,7 @@
     </template>
     <template v-else>
       <div class="detail-head">
-        <!-- 状态条：status 缺失时显示 unknown 的降级文案（由 formatKanbanStatus 处理，来自 domain map，不迁移） -->
+        <!-- 状态条：status 缺失时 formatKanbanStatus('unknown') 返回降级键，t() 解析为当前语言降级文案。 -->
         <div class="status-bar">● {{ taskStatusLabel }}</div>
         <h3 class="detail-title">{{ detail.task?.title ?? t('apps.kanban.taskDetail.noTitle') }}</h3>
         <p class="detail-sub">task_id <code>{{ detail.task?.id ?? '—' }}</code> · board <code>{{ board }}</code></p>
@@ -62,8 +62,8 @@
           <thead><tr><th>{{ t('apps.kanban.taskDetail.runsColStatus') }}</th><th>{{ t('apps.kanban.taskDetail.runsColProfile') }}</th><th>{{ t('apps.kanban.taskDetail.runsColResult') }}</th></tr></thead>
           <tbody>
             <tr v-for="(run, i) in runs" :key="i">
-              <!-- run.status 来自 formatKanbanStatus（domain map），保留不迁移 -->
-              <td>{{ run.status ? formatKanbanStatus(run.status).label : '—' }}</td>
+              <!-- run.status 经 formatKanbanStatus 映射为 i18n 键，再通过 t() 展示当前语言文案。 -->
+              <td>{{ run.status ? t(formatKanbanStatus(run.status).label, formatKanbanStatus(run.status).params ?? {}) : '—' }}</td>
               <td>{{ run.profile ?? '—' }}</td>
               <!-- error / summary 均可选，优先显示 error，再 summary，均无则显示 — -->
               <td>{{ run.error || run.summary || '—' }}</td>
@@ -116,8 +116,11 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-// taskStatusLabel 汇集任务状态展示文案；状态来自 domain map（formatKanbanStatus），不迁移到 i18n。
-const taskStatusLabel = computed(() => formatKanbanStatus(props.detail?.task?.status ?? 'unknown').label)
+// taskStatusLabel 汇集任务状态展示文案；formatKanbanStatus 返回 i18n 键，通过 t() 解析为当前语言文案。
+const taskStatusLabel = computed(() => {
+  const view = formatKanbanStatus(props.detail?.task?.status ?? 'unknown')
+  return t(view.label, view.params ?? {})
+})
 
 // KNOWN_STATUSES 是 KanbanStatus 的所有合法值集合，用于类型守卫。
 // 当 hermes 新增状态时，此处不会自动扩展，但操作按钮不会渲染（降级策略）。

@@ -263,7 +263,9 @@ const columns = computed(() => [
   { title: t('org.members.table.username'), key: 'username' },
   { title: t('org.members.table.displayName'), key: 'display_name' },
   // 角色列页面内 render，不抽 factory
-  { title: t('org.members.table.role'), key: 'role', render: (row: Member) => formatMemberRole(row.role) },
+  // formatMemberRole 返回 i18n 键（已知角色）或原始值（未知角色）；t() 对非键字符串原样返回。
+  { title: t('org.members.table.role'), key: 'role', render: (row: Member) => t(formatMemberRole(row.role)) },
+  // formatMemberStatus 返回含 i18n 键的 StatusView；StatusBadge 内部已通过 t() 解析展示文案。
   statusColumn<Member>(t('org.members.table.status'), r => formatMemberStatus(r.status)),
   {
     title: t('org.members.table.instance'),

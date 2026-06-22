@@ -37,9 +37,10 @@
         clearable
         style="width: 220px"
       />
+      <!-- parseStatusOptions 是 computed，语言切换时选项文案响应式更新。 -->
       <n-select
         v-model:value="status"
-        :options="PARSE_STATUS_FILTER_OPTIONS"
+        :options="parseStatusOptions"
         clearable
         :placeholder="t('apps.knowledge.statusAll')"
         style="width: 160px"
@@ -111,6 +112,8 @@ import {
   toKnowledgeUploadItems,
 } from '@/pages/knowledge/knowledgeUploadBatch'
 import { parseStatusLabel, parseStatusTagType, PARSE_STATUS_FILTER_OPTIONS } from '@/domain/parseStatus'
+// parseStatusOptions 在 computed 中翻译选项标签，确保语言切换时下拉选项文案响应式更新。
+const parseStatusOptions = computed(() => PARSE_STATUS_FILTER_OPTIONS.map(opt => ({ ...opt, label: t(opt.label) })))
 import RAGFlowDatasetInfoDialog from '@/components/RAGFlowDatasetInfoDialog.vue'
 
 // AppKnowledgeTab 管理单个应用的 RAGFlow 知识库文件，权限来自应用详情注入。
@@ -337,7 +340,8 @@ const columns = computed<DataTableColumns<KnowledgeDocument>>(() => [
   {
     title: t('apps.knowledge.colParseStatus'), key: 'parse_status',
     render: (row) => h('div', { style: 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap' }, [
-      h(NTag, { type: parseStatusTagType(row.parse_status), size: 'small', bordered: false }, { default: () => parseStatusLabel(row.parse_status) }),
+      // parseStatusLabel 返回 i18n 键（已知状态）或原始值（未知状态）；t() 对非键字符串原样返回。
+      h(NTag, { type: parseStatusTagType(row.parse_status), size: 'small', bordered: false }, { default: () => t(parseStatusLabel(row.parse_status)) }),
       row.parse_status === 'running' ? h('span', { class: 'state-text', style: 'margin: 0; font-size: 12px' }, `${row.progress}%`) : null,
       row.last_error ? h('span', { style: 'color: var(--color-danger); font-size: 12px' }, row.last_error) : null,
     ]),

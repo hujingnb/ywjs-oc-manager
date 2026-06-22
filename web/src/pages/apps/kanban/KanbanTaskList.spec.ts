@@ -41,8 +41,8 @@ describe('KanbanTaskList', () => {
     localStorage.clear()
   })
 
-  // 覆盖已知状态：列表分组标题使用中文文案，不直接展示 Hermes 英文状态。
-  // 分组标签由 formatKanbanStatus（domain map）产生，与 i18n 无关，仍为中文。
+  // 覆盖已知状态：列表分组标题使用中文文案（zh locale 下），不直接展示 Hermes 英文状态。
+  // 分组标签由 formatKanbanStatus 返回 i18n 键，再经 t() 解析为当前语言文案。
   it('renders known status group labels in Chinese', () => {
     const wrapper = mountList([
       { id: 'task-running', title: '运行中任务', status: 'running' },
