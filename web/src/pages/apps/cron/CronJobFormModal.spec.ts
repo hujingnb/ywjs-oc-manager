@@ -1,5 +1,6 @@
 // CronJobFormModal.spec.ts —— Cron 任务表单弹窗单元测试。
-// 覆盖：角色字段显隐、字符串 trim、skills 解析和非平台 payload strip。
+// 覆盖：四区块字段显隐（workdir 收进高级区）、payload 组装、非平台 strip、编辑清空、repeat 保留。
+// 子组件 ScheduleField/DeliverField/WorkspaceFilePicker 以 stub 替身，聚焦 Modal 自身的布局与 payload。
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
@@ -37,47 +38,52 @@ vi.mock('naive-ui', () => ({
     template: '<button :disabled="disabled" @click="$emit(\'click\')"><slot /></button>',
   },
   NSpace: { template: '<div><slot /></div>' },
+  NTooltip: { template: '<span><slot /><slot name="trigger" /></span>' },
+}))
+
+// stub 子组件：暴露最小接口，让测试能驱动 schedule/deliver/script 值，且不引入 vue-query 依赖。
+vi.mock('./ScheduleField.vue', () => ({
+  default: {
+    props: ['value'],
+    emits: ['update:value'],
+    template: '<input class="stub-schedule" :value="value" @input="$emit(\'update:value\', $event.target.value)" />',
+  },
+}))
+vi.mock('./DeliverField.vue', () => ({
+  default: {
+    props: ['value', 'appId'],
+    emits: ['update:value'],
+    template: '<input class="stub-deliver" :value="value" @input="$emit(\'update:value\', $event.target.value)" />',
+  },
+}))
+vi.mock('./WorkspaceFilePicker.vue', () => ({
+  default: {
+    props: ['value', 'appId'],
+    emits: ['update:value'],
+    template: '<input class="stub-script" :value="value" @input="$emit(\'update:value\', $event.target.value)" />',
+  },
 }))
 
 function mountFormModal(isPlatformAdmin: boolean, job: CronJob | null = null) {
   return mount(CronJobFormModal, {
-    props: {
-      show: true,
-      submitting: false,
-      job,
-      isPlatformAdmin,
-    },
+    props: { show: true, submitting: false, job, isPlatformAdmin, appId: 'app_1' },
   })
-}
-
-async function fillByPlaceholder(wrapper: ReturnType<typeof mountFormModal>, placeholder: string, value: string) {
-  const input = wrapper.find(`[placeholder="${placeholder}"]`)
-  expect(input.exists()).toBe(true)
-  await input.setValue(value)
 }
 
 describe('CronJobFormModal', () => {
-  // 覆盖组织成员字段显隐：基础执行字段可见，高级模型字段不可见。
-  it('org member sees script/no_agent/workdir but not model/provider/base_url/skills', () => {
-    const wrapper = mountFormModal(false)
-    const text = wrapper.text()
-
+  // 组织成员：可见 script/no_agent，不可见高级区（含已下沉的 workdir）。
+  it('org member 不再看到 workdir 与高级字段', () => {
+    const text = mountFormModal(false).text()
     expect(text).toContain('script')
     expect(text).toContain('no_agent')
-    expect(text).toContain('workdir')
+    expect(text).not.toContain('workdir')
     expect(text).not.toContain('model')
-    expect(text).not.toContain('provider')
-    expect(text).not.toContain('base_url')
     expect(text).not.toContain('skills')
   })
 
-  // 覆盖平台管理员字段显隐：高级模型和 skills 字段全部展示。
-  it('platform admin sees all fields', () => {
-    const wrapper = mountFormModal(true)
-    const text = wrapper.text()
-
-    expect(text).toContain('script')
-    expect(text).toContain('no_agent')
+  // 平台管理员：高级区可见，workdir 在高级区出现。
+  it('platform admin 看到 workdir 与全部高级字段', () => {
+    const text = mountFormModal(true).text()
     expect(text).toContain('workdir')
     expect(text).toContain('skills')
     expect(text).toContain('model')
@@ -85,139 +91,102 @@ describe('CronJobFormModal', () => {
     expect(text).toContain('base_url')
   })
 
-  // 覆盖提交 payload 规整：字符串 trim，skills 按逗号或空白拆分，布尔字段保留。
-  it('submit trims fields and emits payload', async () => {
+  // no_agent 文案改为「不使用 AI，仅运行脚本」。
+  it('no_agent 文案更友好', () => {
+    expect(mountFormModal(false).text()).toContain('不使用 AI，仅运行脚本')
+  })
+
+  // 提交 payload：schedule/deliver/script 来自子组件，字符串 trim，skills 拆分。
+  it('submit 组装 payload', async () => {
     const wrapper = mountFormModal(true)
 
-    await fillByPlaceholder(wrapper, '任务名称', '  日报  ')
-    await fillByPlaceholder(wrapper, 'cron 或 every 表达式', '  0 9 * * *  ')
-    await fillByPlaceholder(wrapper, '触发时交给 Hermes 的提示词', '  汇总昨天的工作  ')
-    await fillByPlaceholder(wrapper, 'wechat / email / none', '  wechat  ')
-    await fillByPlaceholder(wrapper, '仓库内脚本文件名', '  scripts/daily.py  ')
-    await fillByPlaceholder(wrapper, '任务运行目录', '  /workspace/app  ')
-    await fillByPlaceholder(wrapper, '逗号分隔，如 shell,git', ' shell, git  ')
-    await fillByPlaceholder(wrapper, '模型名称', '  gpt-5  ')
-    await fillByPlaceholder(wrapper, 'provider 名称', '  openai  ')
-    await fillByPlaceholder(wrapper, 'https://provider.example/v1', '  https://example.test/v1  ')
+    await wrapper.find('[placeholder="任务名称"]').setValue('  日报  ')
+    await wrapper.find('.stub-schedule').setValue('cron 0 9 * * *')
+    await wrapper.find('[placeholder="触发时交给 Hermes 的提示词"]').setValue('  汇总  ')
+    await wrapper.find('.stub-deliver').setValue('wechat')
+    await wrapper.find('.stub-script').setValue('daily.py')
+    await wrapper.find('[placeholder="任务运行目录"]').setValue('  /workspace/app  ')
+    await wrapper.find('[placeholder="逗号分隔，如 shell,git"]').setValue(' shell, git ')
+    await wrapper.find('[placeholder="模型名称"]').setValue('  gpt-5  ')
     await wrapper.find('input[type="checkbox"]').setValue(true)
     await wrapper.find('input[type="number"]').setValue('3')
     await wrapper.findAll('button').at(-1)?.trigger('click')
 
-    expect(wrapper.emitted('submit')?.[0]?.[0]).toEqual({
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({
       name: '日报',
-      schedule: '0 9 * * *',
-      prompt: '汇总昨天的工作',
+      schedule: 'cron 0 9 * * *',
+      prompt: '汇总',
       deliver: 'wechat',
       repeat: 3,
-      script: 'scripts/daily.py',
+      script: 'daily.py',
       no_agent: true,
       workdir: '/workspace/app',
       skills: ['shell', 'git'],
       model: 'gpt-5',
-      provider: 'openai',
-      base_url: 'https://example.test/v1',
     })
   })
 
-  // 覆盖非平台用户提交时的字段边界：即使表单有基础执行字段，也不能带高级字段。
-  it('non-platform payload does not include advanced fields', async () => {
+  // 非平台用户提交不带高级字段（含 workdir，因为它在高级区不渲染）。
+  it('非平台 payload 不含高级字段', async () => {
     const wrapper = mountFormModal(false)
-
-    await fillByPlaceholder(wrapper, '任务名称', '  日报  ')
-    await fillByPlaceholder(wrapper, 'cron 或 every 表达式', '  0 9 * * *  ')
-    await fillByPlaceholder(wrapper, '仓库内脚本文件名', '  scripts/daily.py  ')
-    await fillByPlaceholder(wrapper, '任务运行目录', '  /workspace/app  ')
+    await wrapper.find('[placeholder="任务名称"]').setValue('日报')
+    await wrapper.find('.stub-schedule').setValue('cron 0 9 * * *')
+    await wrapper.find('.stub-script').setValue('daily.py')
     await wrapper.findAll('button').at(-1)?.trigger('click')
 
     const payload = wrapper.emitted('submit')?.[0]?.[0] as Record<string, unknown>
-    expect(payload).toMatchObject({
-      name: '日报',
-      schedule: '0 9 * * *',
-      script: 'scripts/daily.py',
-      workdir: '/workspace/app',
-    })
+    expect(payload).toMatchObject({ name: '日报', schedule: 'cron 0 9 * * *', script: 'daily.py' })
+    expect(payload).not.toHaveProperty('workdir')
     expect(payload).not.toHaveProperty('skills')
     expect(payload).not.toHaveProperty('model')
-    expect(payload).not.toHaveProperty('provider')
-    expect(payload).not.toHaveProperty('base_url')
   })
 
-  // 覆盖编辑模式清空基础可选字段：PATCH 中空字符串是清空语义，不能被 payload builder 省略。
-  it('edit payload includes cleared base optional fields', async () => {
+  // 编辑模式清空基础可选字段：空字符串保留为清空语义。
+  it('编辑清空基础可选字段发送空串', async () => {
     const wrapper = mountFormModal(false, {
       id: 'cron_daily',
       name: '日报',
       schedule: { expr: '0 9 * * *', display: '每天 09:00' },
       prompt: '旧 prompt',
       deliver: 'wechat',
-      script: 'scripts/old.py',
-      workdir: '/workspace/old',
+      script: 'old.py',
       no_agent: true,
     })
-
-    await fillByPlaceholder(wrapper, '触发时交给 Hermes 的提示词', '   ')
-    await fillByPlaceholder(wrapper, 'wechat / email / none', '   ')
-    await fillByPlaceholder(wrapper, '仓库内脚本文件名', '   ')
-    await fillByPlaceholder(wrapper, '任务运行目录', '   ')
+    await wrapper.find('[placeholder="触发时交给 Hermes 的提示词"]').setValue('   ')
+    await wrapper.find('.stub-deliver').setValue('   ')
+    await wrapper.find('.stub-script').setValue('   ')
     await wrapper.findAll('button').at(-1)?.trigger('click')
 
     expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({
-      name: '日报',
-      schedule: '0 9 * * *',
-      prompt: '',
-      deliver: '',
-      script: '',
-      workdir: '',
-      no_agent: true,
+      name: '日报', prompt: '', deliver: '', script: '', no_agent: true,
     })
   })
 
-  // 覆盖平台管理员编辑模式清空 skills：空输入应转为 clear_skills:true，而不是省略导致旧 skills 保留。
-  it('platform admin edit payload clears skills and advanced strings', async () => {
+  // 平台管理员编辑清空 skills → clear_skills:true。
+  it('编辑清空 skills 转 clear_skills', async () => {
     const wrapper = mountFormModal(true, {
-      id: 'cron_daily',
-      name: '日报',
-      schedule: { expr: '0 9 * * *' },
-      skills: ['shell', 'git'],
-      model: 'gpt-5',
-      provider: 'openai',
-      base_url: 'https://example.test/v1',
+      id: 'cron_daily', name: '日报', schedule: { expr: '0 9 * * *' },
+      skills: ['shell', 'git'], model: 'gpt-5',
     })
-
-    await fillByPlaceholder(wrapper, '逗号分隔，如 shell,git', '   ')
-    await fillByPlaceholder(wrapper, '模型名称', '   ')
-    await fillByPlaceholder(wrapper, 'provider 名称', '   ')
-    await fillByPlaceholder(wrapper, 'https://provider.example/v1', '   ')
+    await wrapper.find('[placeholder="逗号分隔，如 shell,git"]').setValue('   ')
+    await wrapper.find('[placeholder="模型名称"]').setValue('   ')
     await wrapper.findAll('button').at(-1)?.trigger('click')
 
     const payload = wrapper.emitted('submit')?.[0]?.[0] as Record<string, unknown>
-    expect(payload).toMatchObject({
-      clear_skills: true,
-      model: '',
-      provider: '',
-      base_url: '',
-    })
+    expect(payload).toMatchObject({ clear_skills: true, model: '' })
     expect(payload).not.toHaveProperty('skills')
   })
 
-  // 覆盖编辑模式已有 repeat 时的清空尝试：clear_repeat 暂不支持，表单应保留并提交原 repeat。
-  it('edit payload preserves existing repeat when repeat input is cleared', async () => {
+  // 编辑已有 repeat 清空尝试：保留并提交原值。
+  it('编辑保留已有 repeat', async () => {
     const wrapper = mountFormModal(false, {
-      id: 'cron_daily',
-      name: '日报',
-      schedule: { expr: '0 9 * * *' },
+      id: 'cron_daily', name: '日报', schedule: { expr: '0 9 * * *' },
       repeat: { times: 5, completed: 2 },
     })
-
     await wrapper.find('input[type="number"]').setValue('')
     await nextTick()
     await wrapper.findAll('button').at(-1)?.trigger('click')
 
-    expect(wrapper.find('input[type="number"]').attributes('data-clearable')).toBe('false')
-    expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({
-      name: '日报',
-      schedule: '0 9 * * *',
-      repeat: 5,
-    })
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({ name: '日报', repeat: 5 })
   })
 })

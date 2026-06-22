@@ -7,39 +7,54 @@
     @update:show="emit('update:show', $event)"
   >
     <n-form>
-      <!-- name / schedule 是创建任务所需的最小字段。 -->
+      <!-- ① 基础：name 必填 + prompt。 -->
       <n-form-item label="name" required>
         <n-input v-model:value="form.name" placeholder="任务名称" />
-      </n-form-item>
-      <n-form-item label="schedule" required>
-        <n-input v-model:value="form.schedule" placeholder="cron 或 every 表达式" />
       </n-form-item>
       <n-form-item label="prompt">
         <n-input v-model:value="form.prompt" type="textarea" placeholder="触发时交给 Hermes 的提示词" />
       </n-form-item>
-      <n-form-item label="deliver">
-        <n-input v-model:value="form.deliver" placeholder="wechat / email / none" />
+
+      <!-- ② 调度：可视化点选器 + 运行次数上限（原 repeat）。 -->
+      <n-form-item label="schedule" required>
+        <ScheduleField v-model:value="form.schedule" />
       </n-form-item>
-      <n-form-item label="repeat">
-        <n-input-number
-          :value="form.repeat"
-          :min="1"
-          :clearable="!hasExistingRepeat"
-          @update:value="onRepeatUpdate"
-        />
-      </n-form-item>
-      <n-form-item label="script">
-        <n-input v-model:value="form.script" placeholder="仓库内脚本文件名" />
-      </n-form-item>
-      <n-form-item label="no_agent">
-        <n-checkbox v-model:checked="form.no_agent">跳过 agent 执行路径</n-checkbox>
-      </n-form-item>
-      <n-form-item label="workdir">
-        <n-input v-model:value="form.workdir" placeholder="任务运行目录" />
+      <n-form-item label="运行次数上限">
+        <n-space vertical :size="2" style="width: 100%">
+          <n-input-number
+            :value="form.repeat"
+            :min="1"
+            :clearable="!hasExistingRepeat"
+            @update:value="onRepeatUpdate"
+          />
+          <span class="field-hint">留空 = 一直按计划运行；填 N = 运行 N 次后停止</span>
+        </n-space>
       </n-form-item>
 
-      <!-- 平台高级字段仅平台管理员可见；后端仍会做最终权限裁剪。 -->
+      <!-- ③ 投递：从已绑定渠道点选。 -->
+      <n-form-item label="deliver">
+        <DeliverField v-model:value="form.deliver" :app-id="appId" />
+      </n-form-item>
+
+      <!-- ④ 执行：脚本点选 + 是否仅跑脚本。 -->
+      <n-form-item label="script">
+        <WorkspaceFilePicker v-model:value="form.script" :app-id="appId" />
+      </n-form-item>
+      <n-form-item label="no_agent">
+        <n-space align="center" :size="6">
+          <n-checkbox v-model:checked="form.no_agent">不使用 AI，仅运行脚本</n-checkbox>
+          <n-tooltip>
+            <template #trigger><span class="field-help">?</span></template>
+            勾选后跳过 AI agent，直接执行 script 指定脚本（更快、不消耗 token），适合纯脚本任务；不勾选则由 AI 按 prompt 执行。
+          </n-tooltip>
+        </n-space>
+      </n-form-item>
+
+      <!-- 平台管理员·高级：workdir 与模型相关字段仅平台管理员可见，后端仍会做最终权限裁剪。 -->
       <template v-if="isPlatformAdmin">
+        <n-form-item label="workdir">
+          <n-input v-model:value="form.workdir" placeholder="任务运行目录" />
+        </n-form-item>
         <n-form-item label="skills">
           <n-input v-model:value="form.skills" placeholder="逗号分隔，如 shell,git" />
         </n-form-item>
@@ -71,7 +86,11 @@
 
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
-import { NButton, NCheckbox, NForm, NFormItem, NInput, NInputNumber, NModal, NSpace } from 'naive-ui'
+import { NButton, NCheckbox, NForm, NFormItem, NInput, NInputNumber, NModal, NSpace, NTooltip } from 'naive-ui'
+
+import ScheduleField from './ScheduleField.vue'
+import DeliverField from './DeliverField.vue'
+import WorkspaceFilePicker from './WorkspaceFilePicker.vue'
 
 import type { CronJob, CreateCronJobRequest, UpdateCronJobRequest } from '@/api/hooks/useCron'
 
@@ -99,6 +118,8 @@ const props = withDefaults(defineProps<{
   show: boolean
   // submitting 来自父组件 mutation pending 状态。
   submitting: boolean
+  // appId 透传给 deliver / script 子组件用于查询渠道与工作目录。
+  appId: string
   // job 有值时进入编辑模式，无值时进入新建模式。
   job?: CronJob | null
   // isPlatformAdmin 控制高级字段显隐和 payload strip。
@@ -107,6 +128,9 @@ const props = withDefaults(defineProps<{
   job: null,
   isPlatformAdmin: false,
 })
+
+// appId 给模板内子组件直接引用。
+const appId = computed(() => props.appId)
 
 const emit = defineEmits<{
   // update:show 支持父组件 v-model:show。
@@ -239,3 +263,12 @@ function onSubmit() {
   emit('submit', buildPayload())
 }
 </script>
+
+<style scoped>
+.field-hint { font-size: 12px; color: #999; }
+.field-help {
+  display: inline-flex; width: 16px; height: 16px; border-radius: 50%;
+  align-items: center; justify-content: center; font-size: 12px;
+  background: #eee; color: #666; cursor: help;
+}
+</style>
