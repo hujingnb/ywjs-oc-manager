@@ -88,6 +88,7 @@ export default {
     // key 任务
     keyJobTitle: '恢复 API key 任务',
     keyRestoreError: 'restore 失败',
+    keyRestoreSubmitted: '已提交 restore 任务：{jobId}',
   },
   // channels：渠道绑定 tab（AppChannelsTab）
   channels: {
@@ -154,6 +155,9 @@ export default {
     stopMessage: '停止后 Hermes 容器对话立即中断；可在恢复时重新启动。',
     stopConfirm: '确认停止',
     stopVerifyHint: '输入实例名 "{name}" 以确认停止运行',
+    // 运行时操作反馈（异步任务提交成功 / 操作失败）
+    opSubmitted: '已提交 {op}：{jobId}',
+    opFailed: '{op} 操作失败',
   },
   // workspace：工作目录 tab（AppWorkspaceTab）
   workspace: {

@@ -88,6 +88,7 @@ export default {
     // Key job
     keyJobTitle: 'Restore API key job',
     keyRestoreError: 'Restore failed',
+    keyRestoreSubmitted: 'Restore job submitted: {jobId}',
   },
   // channels: Channels tab (AppChannelsTab)
   channels: {
@@ -154,6 +155,9 @@ export default {
     stopMessage: 'Stopping will immediately interrupt Hermes container conversations; you can restart later.',
     stopConfirm: 'Confirm stop',
     stopVerifyHint: 'Type the instance name "{name}" to confirm stopping',
+    // 运行时操作反馈（异步任务提交成功 / 操作失败）
+    opSubmitted: '{op} submitted: {jobId}',
+    opFailed: '{op} failed',
   },
   // workspace: Workspace tab (AppWorkspaceTab)
   workspace: {

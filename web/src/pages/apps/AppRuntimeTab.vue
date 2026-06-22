@@ -151,10 +151,10 @@ async function runMutation(op: 'start' | 'stop' | 'restart' | 'delete') {
   try {
     const result = await mutation.mutateAsync(op)
     trackingJobId.value = result.job_id
-    actionFeedback.value = `已提交 ${op}：${result.job_id}`
+    actionFeedback.value = t('apps.runtime.opSubmitted', { op, jobId: result.job_id })
   } catch (err: unknown) {
     actionError.value = true
-    actionFeedback.value = err instanceof Error ? err.message : `${op} 操作失败`
+    actionFeedback.value = err instanceof Error ? err.message : t('apps.runtime.opFailed', { op })
   }
 }
 </script>

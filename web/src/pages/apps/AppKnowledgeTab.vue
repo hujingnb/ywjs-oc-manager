@@ -155,7 +155,8 @@ const canEditQuota = computed(() => canUpdateAppKnowledgeQuota(auth.user, app?.v
 // canManageRAGFlowInfo 控制远端 dataset 运维入口，仅平台管理员可见。
 const canManageRAGFlowInfo = computed(() => canManageRAGFlowDatasetInfo(auth.user))
 // ragflowTargetName 给运维弹框展示实例名；注入值缺失时保留稳定兜底文案。
-const ragflowTargetName = computed(() => app?.value?.name || '实例知识库')
+// app 未加载时用「实例知识库」文案作为兜底，确保运维弹框标题始终有值。
+const ragflowTargetName = computed(() => app?.value?.name || t('apps.knowledge.heading'))
 const uploading = computed(() => uploadMutation.isPending.value)
 const deleting = computed(() => deleteMutation.isPending.value)
 const quotaSummary = computed(() => listing.data.value

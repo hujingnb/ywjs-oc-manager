@@ -366,7 +366,7 @@ async function onRestoreKey() {
     const result = await keyMutation.mutateAsync('restore')
     trackingJobId.value = result.job_id
     trackingJobTitle.value = t('apps.overview.keyJobTitle')
-    keyFeedback.value = `已提交 restore 任务：${result.job_id}`
+    keyFeedback.value = t('apps.overview.keyRestoreSubmitted', { jobId: result.job_id })
   } catch (err: unknown) {
     keyError.value = true
     keyFeedback.value = err instanceof Error ? err.message : t('apps.overview.keyRestoreError')
