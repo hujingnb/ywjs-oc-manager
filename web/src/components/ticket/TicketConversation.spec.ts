@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { ref } from 'vue'
 
 import TicketConversation from './TicketConversation.vue'
+import { i18n } from '@/i18n'
 
 const mocks = vi.hoisted(() => ({
   send: vi.fn(),
@@ -39,6 +40,8 @@ describe('TicketConversation', () => {
     vi.clearAllMocks()
     mocks.fetchUrl.mockResolvedValue('blob:image')
     globalThis.URL.revokeObjectURL = vi.fn()
+    // locale 设为 zh，使文案断言沿用中文词条。
+    i18n.global.locale.value = 'zh'
   })
 
   // text 消息按作者区分左右气泡,并显示发送时间。
@@ -52,6 +55,7 @@ describe('TicketConversation', () => {
           { id: 'm2', kind: 'text', text: '对方消息', author_user_id: 'other', created_at: '2026-06-11T01:01:00Z' },
         ],
       },
+      global: { plugins: [i18n] },
     })
     expect(wrapper.text()).toContain('我的消息')
     expect(wrapper.text()).toContain('对方消息')
@@ -70,6 +74,7 @@ describe('TicketConversation', () => {
           { id: 'file', kind: 'file', file_name: '需求.pdf', file_size: 2048, author_user_id: 'other' },
         ],
       },
+      global: { plugins: [i18n] },
     })
     await vi.waitFor(() => expect(mocks.fetchUrl).toHaveBeenCalled())
     expect(wrapper.find('img').attributes('src')).toBe('blob:image')
@@ -88,6 +93,7 @@ describe('TicketConversation', () => {
           { id: 'img', kind: 'image', file_name: '图.png', author_user_id: 'other' },
         ],
       },
+      global: { plugins: [i18n] },
     })
     await vi.waitFor(() => expect(wrapper.find('.image-message img').exists()).toBe(true))
 
@@ -104,6 +110,7 @@ describe('TicketConversation', () => {
   it('sends text and uploads file via composer', async () => {
     const wrapper = mount(TicketConversation, {
       props: { ticketId: 't-1', currentUserId: 'me', messages: [] },
+      global: { plugins: [i18n] },
     })
     await wrapper.find('textarea').setValue('新消息')
     await wrapper.findAll('button').find((button) => button.text() === '发送')!.trigger('click')

@@ -37,11 +37,13 @@ vi.mock('naive-ui', () => ({
 
 import UploadProgressModal from '../UploadProgressModal.vue'
 import { useUploadProgressStore } from '@/stores/uploadProgress'
+import { i18n } from '@/i18n'
 
 // mountModal 统一创建组件实例；vi.mock 已经在模块层面替换好 naive-ui，
-// 这里不需要再传 stubs，wrapper 直接拿到 stub 渲染出的 DOM。
+// i18n 插件注入确保 useI18n() 在组件内可用；locale 设为 zh 使断言沿用中文词条。
 function mountModal() {
-  return mount(UploadProgressModal)
+  i18n.global.locale.value = 'zh'
+  return mount(UploadProgressModal, { global: { plugins: [i18n] } })
 }
 
 describe('UploadProgressModal', () => {

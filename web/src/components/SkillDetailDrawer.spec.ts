@@ -48,15 +48,20 @@ vi.mock('naive-ui', async () => {
   }
 })
 
+import { i18n } from '@/i18n'
+
 // ======================== 挂载辅助 ========================
 // mountDrawer：打开抽屉并传入指定 skill 数据。
+// i18n 插件注入确保 useI18n() 在组件内可用；locale 设为 zh 使文案断言沿用中文词条。
 function mountDrawer(skill: InstanceType<typeof SkillDetailDrawer>['$props']['skill'], extra: Record<string, unknown> = {}) {
+  i18n.global.locale.value = 'zh'
   return mount(SkillDetailDrawer, {
     props: {
       show: true,
       skill,
       ...extra,
     },
+    global: { plugins: [i18n] },
   })
 }
 

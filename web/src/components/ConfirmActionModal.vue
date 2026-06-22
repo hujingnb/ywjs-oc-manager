@@ -38,6 +38,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { NButton, NCard, NFormItem, NInput, NModal, NSpace } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 // ConfirmActionModal 为删除、禁用、充值等高风险操作提供二次确认。
 // verifyValue 可要求用户输入业务对象名称，避免误点直接提交破坏性请求。
@@ -58,10 +59,14 @@ const emit = defineEmits<{
   (event: 'cancel'): void
 }>()
 
-const confirmLabel = computed(() => props.confirmLabel ?? '确认')
-const cancelLabel = computed(() => props.cancelLabel ?? '取消')
+const { t } = useI18n()
+
+const confirmLabel = computed(() => props.confirmLabel ?? t('components.confirmActionModal.defaultConfirm'))
+const cancelLabel = computed(() => props.cancelLabel ?? t('components.confirmActionModal.defaultCancel'))
 // verifyLabel 优先使用调用方给出的业务提示，默认提示展示需要输入的确认值。
-const verifyLabel = computed(() => props.verifyHint || `输入 "${props.verifyValue}" 以确认`)
+const verifyLabel = computed(() =>
+  props.verifyHint || t('components.confirmActionModal.defaultVerifyLabel', { value: props.verifyValue }),
+)
 // verifyInput 每次打开弹框都会重置，避免上一次确认值复用到新的业务对象。
 const verifyInput = ref('')
 

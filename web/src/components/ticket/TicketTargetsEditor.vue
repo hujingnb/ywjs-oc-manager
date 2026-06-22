@@ -1,6 +1,6 @@
 <template>
   <div class="ticket-targets-editor">
-    <div v-if="!modelValue.length" class="target-empty">暂无可见范围</div>
+    <div v-if="!modelValue.length" class="target-empty">{{ t('components.ticketTargetsEditor.emptyHint') }}</div>
     <div v-for="target in modelValue" :key="target.org_id" class="target-row">
       <span class="target-org">{{ orgLabel(target.org_id) }}</span>
       <n-select
@@ -10,17 +10,17 @@
         class="target-audience"
         @update:value="(value) => updateAudience(target.org_id, String(value))"
       />
-      <n-button quaternary size="small" @click="removeTarget(target.org_id)">移除</n-button>
+      <n-button quaternary size="small" @click="removeTarget(target.org_id)">{{ t('components.ticketTargetsEditor.removeBtn') }}</n-button>
     </div>
     <div class="target-add">
       <n-select
         v-model:value="pendingOrgID"
         :options="addableOrgOptions"
         size="small"
-        placeholder="选择组织"
+        :placeholder="t('components.ticketTargetsEditor.orgSelectPlaceholder')"
         class="target-add-select"
       />
-      <n-button size="small" :disabled="!pendingOrgID" @click="addTarget">加组织</n-button>
+      <n-button size="small" :disabled="!pendingOrgID" @click="addTarget">{{ t('components.ticketTargetsEditor.addBtn') }}</n-button>
     </div>
   </div>
 </template>
@@ -28,6 +28,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { NButton, NSelect } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 import type { DeliverTarget } from '@/api/hooks/useSkillTickets'
 
@@ -44,13 +45,15 @@ const props = defineProps<{
 
 const emit = defineEmits<{ 'update:modelValue': [DeliverTarget[]] }>()
 
+const { t } = useI18n()
 const pendingOrgID = ref<string | null>(null)
 
-const audienceOptions = [
-  { label: '整企业', value: 'all_org' },
-  { label: '仅企业管理员', value: 'org_admins' },
-  { label: '仅申请人', value: 'requester_only' },
-]
+// audienceOptions 用 computed 包装，确保语言切换时选项标签随之更新。
+const audienceOptions = computed(() => [
+  { label: t('components.ticketTargetsEditor.audienceAllOrg'), value: 'all_org' },
+  { label: t('components.ticketTargetsEditor.audienceOrgAdmins'), value: 'org_admins' },
+  { label: t('components.ticketTargetsEditor.audienceRequesterOnly'), value: 'requester_only' },
+])
 
 const selectedOrgIDs = computed(() => new Set(props.modelValue.map((target) => target.org_id)))
 

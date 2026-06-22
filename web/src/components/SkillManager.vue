@@ -3,15 +3,15 @@
   <div class="skill-manager">
     <!-- 运行时版本过旧：实例运行的 hermes 镜像无 oc-ops /oc/skills 路由，技能管理整体不可用，
          直接提示更新版本，不再展示 tab（安装/卸载等操作都无法生效）。 -->
-    <n-alert v-if="runtimeUnsupported" type="warning" title="技能管理不可用">
+    <n-alert v-if="runtimeUnsupported" type="warning" :title="t('components.skillManager.runtimeUnsupportedTitle')">
       {{ runtimeUnsupportedMessage }}
     </n-alert>
     <n-tabs v-else v-model:value="activeTab" type="line" animated>
       <!-- 已安装视图：实时对账当前实例的 skill 列表，含状态徽章和操作按钮。 -->
-      <n-tab-pane name="installed" tab="已安装">
-        <div v-if="appSkillsQuery.isLoading.value" class="state-text">加载中…</div>
+      <n-tab-pane name="installed" :tab="t('components.skillManager.tabInstalled')">
+        <div v-if="appSkillsQuery.isLoading.value" class="state-text">{{ t('common.status.loading') }}</div>
         <p v-else-if="appSkillsQuery.error.value" class="state-text danger">
-          查询失败：{{ appSkillsQuery.error.value?.message }}
+          {{ t('components.skillManager.queryFailed', { message: appSkillsQuery.error.value?.message }) }}
         </p>
         <template v-else>
           <!-- 来源筛选工具栏：仅当列表存在 2 种及以上来源时展示（只有一种来源筛选无意义）。
@@ -32,7 +32,7 @@
             </n-tag>
           </div>
           <!-- 仅一种来源（筛选工具栏隐藏）时，单独展示一行总数统计，保证数量始终可见。 -->
-          <div v-else class="installed-count state-text">共 {{ filteredAppSkills.length }} 个技能</div>
+          <div v-else class="installed-count state-text">{{ t('components.skillManager.installedCount', { count: filteredAppSkills.length }) }}</div>
           <n-data-table
             :columns="installedColumns"
             :data="filteredAppSkills"
@@ -46,11 +46,11 @@
       <!-- 技能市场视图：委托给 SkillMarketBrowser 子组件实现。
            :source="pendingMarketSource" 把「去安装」期望的来源筛选（如 'custom'）传入，
            SkillMarketBrowser 通过 prop watch 同步到内部 selectedSource，实现跨 tab 来源联动。 -->
-      <n-tab-pane name="market" tab="技能市场">
+      <n-tab-pane name="market" :tab="t('components.skillManager.tabMarket')">
         <skill-market-browser
           :existing-names="installedNames"
-          action-label="安装"
-          existing-label="已安装"
+          :action-label="t('components.skillManager.marketActionLabel')"
+          :existing-label="t('components.skillManager.marketExistingLabel')"
           :action-pending="installMutation.isPending.value"
           :can-action="canManage"
           :source="pendingMarketSource"
@@ -60,7 +60,7 @@
 
       <!-- 定制技能视图：成员工单面板（提交需求 / 查看进度 / 去安装）。
            仅 showTickets=true 时挂载（成员技能页开启，管理员 per-app 视图不显示）。 -->
-      <n-tab-pane v-if="showTickets" name="tickets" tab="定制技能">
+      <n-tab-pane v-if="showTickets" name="tickets" :tab="t('components.skillManager.tabTickets')">
         <skill-ticket-panel @go-install="onGoInstall" />
       </n-tab-pane>
     </n-tabs>
@@ -83,6 +83,7 @@ import {
   useMessage,
   type DataTableColumns,
 } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 import type { AppSkill } from '@/api'
 import type { AppDTO } from '@/api/hooks/useApps'
@@ -113,6 +114,7 @@ const props = withDefaults(
 const auth = useAuthStore()
 const message = useMessage()
 const dialog = useDialog()
+const { t } = useI18n()
 
 // app 由管理员页面（AppSkillsTab / OrgSkillsPage）通过 provide 注入；
 // 成员页面场景下 app 从 useMemberApp() 传入，两条路径都走 inject。
@@ -137,7 +139,7 @@ const runtimeUnsupported = computed(() => {
 // runtimeUnsupportedMessage 优先用后端返回的提示文案，缺失时兜底固定文案。
 const runtimeUnsupportedMessage = computed(() => {
   const body = (appSkillsQuery.error.value as { body?: { message?: string } } | null)?.body
-  return body?.message ?? '当前实例运行的 hermes 版本过旧，不支持技能管理，请更新实例的运行时版本后重试。'
+  return body?.message ?? t('components.skillManager.runtimeUnsupportedFallback')
 })
 
 // 安装/卸载/更新/重装 mutations。
@@ -184,9 +186,9 @@ const visibleAppSkills = computed<AppSkill[]>(() => {
 // sourceLabel 将来源字符串转换为用户可读标签。
 // 空来源（内置/自创 skill 无 source）显示「内置」，避免详情页「来源」一栏为空。
 function sourceLabel(source?: string): string {
-  if (source === 'platform') return '平台技能'
+  if (source === 'platform') return t('components.skillManager.sourcePlatform')
   if (source === 'clawhub') return 'ClawHub'
-  return source || '内置'
+  return source || t('components.skillManager.sourceBuiltin')
 }
 
 // categoryTagType 按 category 或 source 渲染已安装列表的来源徽章。
@@ -201,8 +203,8 @@ function installedSourceTagType(row: AppSkill): 'info' | 'warning' | 'default' |
 
 // installedSourceLabel 渲染已安装列表的来源文案。
 function installedSourceLabel(row: AppSkill): string {
-  if (row.status === 'builtin') return '内置'
-  if (row.status === 'self_created') return '自创'
+  if (row.status === 'builtin') return t('components.skillManager.sourceBuiltin')
+  if (row.status === 'self_created') return t('components.skillManager.sourceSelfCreated')
   return sourceLabel(row.source)
 }
 
@@ -210,11 +212,12 @@ function installedSourceLabel(row: AppSkill): string {
 // INSTALLED_SOURCE_DEFS 是已安装列表可能出现的来源类别（顺序即筛选项展示顺序）。
 // 比市场多「内置/自创」两类——builtin/self_created skill 无 source 标识、按 status 归类。
 // 归类口径与 installedSourceLabel / installedSourceKey 保持一致。
+// 注：label 由 computed 中实时翻译，此处保留 value 供筛选逻辑使用。
 const INSTALLED_SOURCE_DEFS = [
-  { label: '平台技能', value: 'platform' },
-  { label: 'ClawHub', value: 'clawhub' },
-  { label: '内置', value: 'builtin' },
-  { label: '自创', value: 'self_created' },
+  { labelKey: 'components.skillManager.sourcePlatform', value: 'platform' },
+  { labelKey: 'clawhub', value: 'clawhub' },
+  { labelKey: 'components.skillManager.sourceBuiltin', value: 'builtin' },
+  { labelKey: 'components.skillManager.sourceSelfCreated', value: 'self_created' },
 ] as const
 
 // selectedInstalledSource 当前选中的已安装来源筛选值，空字符串表示「全部」。
@@ -233,6 +236,7 @@ function installedSourceKey(row: AppSkill): string {
 // installedSourceFilters 动态来源筛选项——「全部」+ 当前列表实际出现的来源类别，
 // 每项带 count 数量统计（「全部」为总数）。避免展示没有数据的空筛选项
 // （如实例无 clawhub skill 时不显示「ClawHub」）。
+// 使用 computed 确保语言切换时标签随之更新。
 const installedSourceFilters = computed(() => {
   const all = visibleAppSkills.value
   // 统计每个来源类别的 skill 数量。
@@ -242,9 +246,9 @@ const installedSourceFilters = computed(() => {
     counts.set(k, (counts.get(k) ?? 0) + 1)
   }
   return [
-    { label: '全部', value: '', count: all.length },
+    { label: t('components.skillManager.filterAll'), value: '', count: all.length },
     ...INSTALLED_SOURCE_DEFS.filter((f) => counts.has(f.value)).map((f) => ({
-      label: f.label,
+      label: f.value === 'clawhub' ? 'ClawHub' : t(f.labelKey),
       value: f.value,
       count: counts.get(f.value) ?? 0,
     })),
@@ -279,13 +283,13 @@ function statusTagType(status: string): 'success' | 'warning' | 'default' {
 
 // statusLabel 将对账状态转换为用户可读文案。
 function statusLabel(status: string): string {
-  const labels: Record<string, string> = {
-    active: '已生效',
-    pending: '待生效',
-    builtin: '内置',
-    self_created: '自创',
+  const keys: Record<string, string> = {
+    active: 'components.skillManager.statusActive',
+    pending: 'components.skillManager.statusPending',
+    builtin: 'components.skillManager.statusBuiltin',
+    self_created: 'components.skillManager.statusSelfCreated',
   }
-  return labels[status] ?? status
+  return keys[status] ? t(keys[status]) : status
 }
 
 // ===== 技能详情抽屉 =====
@@ -309,25 +313,25 @@ function openInstalledDetail(row: AppSkill) {
 async function onMarketAction(p: { source: string; source_ref: string; name: string; version: string }) {
   try {
     await installMutation.mutateAsync({ source: p.source, source_ref: p.source_ref, name: p.name, version: p.version })
-    message.success(`已安装 ${p.name}`)
+    message.success(t('components.skillManager.installSuccess', { name: p.name }))
   } catch (err) {
-    message.error(err instanceof Error ? err.message : '安装失败')
+    message.error(err instanceof Error ? err.message : t('components.skillManager.installFailed'))
   }
 }
 
 // onUninstall 经 useDialog 二次确认后卸载指定 skill。
 function onUninstall(row: AppSkill) {
   dialog.warning({
-    title: '确认卸载',
-    content: `确认卸载技能「${row.name}」？`,
-    positiveText: '卸载',
-    negativeText: '取消',
+    title: t('components.skillManager.confirmUninstallTitle'),
+    content: t('components.skillManager.confirmUninstallContent', { name: row.name }),
+    positiveText: t('components.skillManager.confirmUninstallOk'),
+    negativeText: t('common.actions.cancel'),
     onPositiveClick: async () => {
       try {
         await uninstallMutation.mutateAsync(row.name)
-        message.success(`已卸载 ${row.name}`)
+        message.success(t('components.skillManager.uninstallSuccess', { name: row.name }))
       } catch (err) {
-        message.error(err instanceof Error ? err.message : '卸载失败')
+        message.error(err instanceof Error ? err.message : t('components.skillManager.uninstallFailed'))
       }
     },
   })
@@ -338,9 +342,9 @@ async function onUpdate(row: AppSkill) {
   if (!row.latest_version) return
   try {
     await updateMutation.mutateAsync({ name: row.name, version: row.latest_version })
-    message.success(`${row.name} 已更新到 ${row.latest_version}`)
+    message.success(t('components.skillManager.updateSuccess', { name: row.name, version: row.latest_version }))
   } catch (err) {
-    message.error(err instanceof Error ? err.message : '更新失败')
+    message.error(err instanceof Error ? err.message : t('components.skillManager.updateFailed'))
   }
 }
 
@@ -349,20 +353,21 @@ async function onReinstall(row: AppSkill) {
   try {
     const r = await reinstallMutation.mutateAsync(row.name)
     if (r?.status === 'active') {
-      message.success(`已重新安装 ${row.name}`)
+      message.success(t('components.skillManager.reinstallSuccess', { name: row.name }))
     } else {
-      message.warning(`${row.name} 仍未生效，可稍后再试`)
+      message.warning(t('components.skillManager.reinstallStillPending', { name: row.name }))
     }
   } catch (err) {
-    message.error(err instanceof Error ? err.message : '重新安装失败')
+    message.error(err instanceof Error ? err.message : t('components.skillManager.reinstallFailed'))
   }
 }
 
 // installedColumns 定义已安装列表表格列。
-const installedColumns: DataTableColumns<AppSkill> = [
+// 使用 computed 确保语言切换时列头文案随之更新。
+const installedColumns = computed<DataTableColumns<AppSkill>>(() => [
   // 技能名称列：渲染为可点击链接，点击打开详情抽屉（含版本列表）。
   {
-    title: '名称',
+    title: t('components.skillManager.colName'),
     key: 'name',
     render: (row) =>
       h(
@@ -373,7 +378,7 @@ const installedColumns: DataTableColumns<AppSkill> = [
   },
   // 来源徽章列：根据 status/source 渲染颜色区分。
   {
-    title: '来源',
+    title: t('components.skillManager.colSource'),
     key: 'source',
     render: (row) =>
       h(
@@ -383,13 +388,13 @@ const installedColumns: DataTableColumns<AppSkill> = [
       ),
   },
   // 版本号列。
-  { title: '版本', key: 'version', render: (row) => row.version ?? '—' },
+  { title: t('components.skillManager.colVersion'), key: 'version', render: (row) => row.version ?? '—' },
   // 对账状态徽章列：active 绿/pending 黄「待生效·重新安装」/builtin 灰/self_created 灰。
   {
-    title: '状态',
+    title: t('components.skillManager.colStatus'),
     key: 'status',
     render: (row) => {
-      const tagLabel = row.status === 'pending' ? '待生效·重新安装' : statusLabel(row.status)
+      const tagLabel = row.status === 'pending' ? t('components.skillManager.statusPendingWithRetry') : statusLabel(row.status)
       return h(
         NTag,
         { type: statusTagType(row.status), size: 'small', bordered: false },
@@ -399,7 +404,7 @@ const installedColumns: DataTableColumns<AppSkill> = [
   },
   // 更新列：latest_version 大于 version 时显示更新按钮。
   {
-    title: '更新',
+    title: t('components.skillManager.colUpdate'),
     key: 'update',
     render: (row) => {
       // builtin/self_created skill 无来源版本，不显示更新按钮。
@@ -412,22 +417,22 @@ const installedColumns: DataTableColumns<AppSkill> = [
           loading: updateMutation.isPending.value,
           onClick: () => onUpdate(row),
         },
-        { default: () => `更新至 ${row.latest_version}` },
+        { default: () => t('components.skillManager.updateTo', { version: row.latest_version }) },
       )
     },
   },
   // 操作列：protected 隐藏卸载并显示锁标记；builtin 只读；pending 额外给「重新安装」重试；其余显示卸载按钮。
   {
-    title: '操作',
+    title: t('components.skillManager.colActions'),
     key: 'actions',
     render: (row) => {
       // builtin 镜像内置 skill（含 oc-kb 等运行时强制系统 skill）只读展示，不允许任何操作。
       if (row.status === 'builtin') {
-        return h('span', { class: 'state-text', style: 'font-size: 12px; margin: 0' }, '内置只读')
+        return h('span', { class: 'state-text', style: 'font-size: 12px; margin: 0' }, t('components.skillManager.builtinReadonly'))
       }
       // protected skill（当前版本必需）隐藏卸载入口，显示锁标记提示用户。
       if (row.protected) {
-        return h('span', { class: 'protected-lock', title: '当前版本必需，不可卸载' }, '🔒')
+        return h('span', { class: 'protected-lock', title: t('components.skillManager.protectedTitle') }, '🔒')
       }
       // 无写权限时不显示任何操作按钮。
       if (!canManage.value) return null
@@ -443,7 +448,7 @@ const installedColumns: DataTableColumns<AppSkill> = [
                   loading: reinstallMutation.isPending.value,
                   onClick: () => onReinstall(row),
                 },
-                { default: () => '重新安装' },
+                { default: () => t('components.skillManager.reinstall') },
               ),
             ]
           : []
@@ -455,12 +460,12 @@ const installedColumns: DataTableColumns<AppSkill> = [
           loading: uninstallMutation.isPending.value,
           onClick: () => onUninstall(row),
         },
-        { default: () => '卸载' },
+        { default: () => t('components.skillManager.uninstall') },
       )
       return h('div', { style: 'display: flex; gap: 8px' }, [...reinstallBtn, uninstallBtn])
     },
   },
-]
+])
 </script>
 
 <style scoped>

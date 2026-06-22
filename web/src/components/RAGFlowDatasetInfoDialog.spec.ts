@@ -4,6 +4,7 @@ import { defineComponent, h, nextTick, ref } from 'vue'
 
 import RAGFlowDatasetInfoDialog from './RAGFlowDatasetInfoDialog.vue'
 import type { KnowledgeEmbeddingModelList, KnowledgeRAGFlowDatasetInfo } from '@/api/hooks/useKnowledge'
+import { i18n } from '@/i18n'
 
 const info = ref<KnowledgeRAGFlowDatasetInfo>({
   scope: 'org',
@@ -106,10 +107,13 @@ const confirmStub = defineComponent({
 })
 
 function mountDialog() {
+  // i18n 插件注入确保 useI18n() 在组件内可用；locale 设为 zh 使文案断言沿用中文词条。
+  i18n.global.locale.value = 'zh'
   return mount(RAGFlowDatasetInfoDialog, {
     attachTo: document.body,
     props: { visible: true, scope: 'org', targetId: 'org-1', targetName: '测试企业' },
     global: {
+      plugins: [i18n],
       stubs: {
         'n-modal': passthroughStub('NModal'),
         'n-spin': passthroughStub('NSpin'),

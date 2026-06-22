@@ -2,39 +2,39 @@
   <n-modal
     :show="show"
     preset="card"
-    title="交付定制技能"
+    :title="t('components.deliverCustomSkillModal.modalTitle')"
     class="deliver-custom-skill-modal"
     :style="{ width: '640px', maxWidth: 'calc(100vw - 32px)' }"
     @update:show="(value) => emit('update:show', value)"
   >
     <n-form label-placement="top">
-      <n-form-item label="上传方式">
+      <n-form-item :label="t('components.deliverCustomSkillModal.fieldUploadMode')">
         <n-radio-group v-model:value="mode">
-          <n-radio-button value="markdown">粘贴 Markdown</n-radio-button>
-          <n-radio-button value="folder">上传文件夹</n-radio-button>
+          <n-radio-button value="markdown">{{ t('components.deliverCustomSkillModal.modeMarkdown') }}</n-radio-button>
+          <n-radio-button value="folder">{{ t('components.deliverCustomSkillModal.modeFolder') }}</n-radio-button>
         </n-radio-group>
       </n-form-item>
-      <n-form-item v-if="mode === 'markdown'" label="SKILL.md 内容">
+      <n-form-item v-if="mode === 'markdown'" :label="t('components.deliverCustomSkillModal.fieldSkillMd')">
         <n-input
           v-model:value="mdText"
           type="textarea"
           :rows="10"
-          placeholder="粘贴带 frontmatter 的 SKILL.md"
+          :placeholder="t('components.deliverCustomSkillModal.skillMdPlaceholder')"
         />
       </n-form-item>
-      <n-form-item v-else label="Skill 文件夹">
+      <n-form-item v-else :label="t('components.deliverCustomSkillModal.fieldSkillFolder')">
         <input ref="folderInput" type="file" multiple class="folder-input" @change="onFolderChange" />
-        <n-button @click="folderInput?.click()">选择文件夹</n-button>
-        <span v-if="folderFiles.length" class="folder-count">{{ folderFiles.length }} 个文件</span>
+        <n-button @click="folderInput?.click()">{{ t('components.deliverCustomSkillModal.selectFolderBtn') }}</n-button>
+        <span v-if="folderFiles.length" class="folder-count">{{ t('components.deliverCustomSkillModal.folderFileCount', { count: folderFiles.length }) }}</span>
       </n-form-item>
-      <n-form-item label="可见范围">
+      <n-form-item :label="t('components.deliverCustomSkillModal.fieldVisibility')">
         <ticket-targets-editor v-model="targets" :orgs="orgs" />
       </n-form-item>
     </n-form>
     <template #footer>
       <div class="modal-footer">
-        <n-button @click="emit('update:show', false)">取消</n-button>
-        <n-button type="primary" :loading="deliverMut.isPending.value" @click="onDeliver">交付</n-button>
+        <n-button @click="emit('update:show', false)">{{ t('components.deliverCustomSkillModal.cancelBtn') }}</n-button>
+        <n-button type="primary" :loading="deliverMut.isPending.value" @click="onDeliver">{{ t('components.deliverCustomSkillModal.deliverBtn') }}</n-button>
       </div>
     </template>
   </n-modal>
@@ -52,6 +52,7 @@ import {
   NRadioGroup,
   useMessage,
 } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 import type { SkillTicketDetail } from '@/api'
 import { packFromFolder, packFromMarkdown, type UploadedFile } from '@/domain/skillPackaging'
@@ -76,6 +77,7 @@ const emit = defineEmits<{
 }>()
 
 const message = useMessage()
+const { t } = useI18n()
 const deliverMut = useDeliverCustomSkill()
 const mode = ref<'markdown' | 'folder'>('markdown')
 const mdText = ref('')
@@ -125,11 +127,11 @@ async function onDeliver() {
       targets: targets.value,
       file,
     })
-    message.success('已交付')
+    message.success(t('components.deliverCustomSkillModal.deliverSuccess'))
     emit('delivered')
     emit('update:show', false)
   } catch (error) {
-    message.error(error instanceof Error ? error.message : '交付失败')
+    message.error(error instanceof Error ? error.message : t('components.deliverCustomSkillModal.deliverFailed'))
   }
 }
 

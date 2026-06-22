@@ -6,11 +6,11 @@
     placement="right"
     @update:show="(value: boolean) => emit('update:show', value)"
   >
-    <n-drawer-content :title="`使用手册 · ${manual.roleLabel}`" closable :native-scrollbar="false">
+    <n-drawer-content :title="t('components.helpDrawer.drawerTitle', { roleLabel: manual.roleLabel })" closable :native-scrollbar="false">
       <p class="help-summary">{{ manual.summary }}</p>
 
       <!-- 功能介绍：逐个菜单分区说明用途、范围与边界 -->
-      <h2 class="help-group-title">功能介绍</h2>
+      <h2 class="help-group-title">{{ t('components.helpDrawer.featuresTitle') }}</h2>
       <section
         v-for="section in manual.sections"
         :key="section.title"
@@ -23,7 +23,7 @@
       </section>
 
       <!-- 操作指引：面向常见任务的分步教程，回答「怎么用」 -->
-      <h2 class="help-group-title">操作指引</h2>
+      <h2 class="help-group-title">{{ t('components.helpDrawer.guidesTitle') }}</h2>
       <section
         v-for="guide in manual.guides"
         :key="guide.title"
@@ -41,6 +41,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NDrawer, NDrawerContent } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 import { getHelpManual } from '@/domain/helpContent'
 
@@ -57,6 +58,8 @@ const emit = defineEmits<{
   // update:show 透传抽屉的显隐变化，支持父级 v-model:show 双向绑定。
   (event: 'update:show', value: boolean): void
 }>()
+
+const { t } = useI18n()
 
 // manual 根据角色解析对应手册，role 变化时自动切换内容。
 const manual = computed(() => getHelpManual(props.role))

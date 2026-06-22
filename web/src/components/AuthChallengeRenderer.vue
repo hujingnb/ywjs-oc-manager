@@ -7,12 +7,12 @@
         不是图片二进制，所以不能直接 <img :src=...>。这里用 qrcode 库把 URL
         重新编码为 PNG dataURL 渲染出来，用户用微信扫描即可登录。
       -->
-      <img v-if="qrDataUrl" :src="qrDataUrl" alt="登录二维码" class="challenge-qr" />
-      <p v-else class="state-text">正在生成二维码…</p>
+      <img v-if="qrDataUrl" :src="qrDataUrl" :alt="t('components.authChallengeRenderer.qrcodeAlt')" class="challenge-qr" />
+      <p v-else class="state-text">{{ t('components.authChallengeRenderer.generatingQrcode') }}</p>
       <p v-if="errorMessage" class="state-text danger">{{ errorMessage }}</p>
       <p class="state-text">{{ expiresLabel }}</p>
       <p class="state-text fallback-hint">
-        若扫码失败，可手动打开此链接以继续：
+        {{ t('components.authChallengeRenderer.fallbackHint') }}
         <a :href="challenge.qrcode" target="_blank" rel="noopener">{{ challenge.qrcode }}</a>
       </p>
     </template>
@@ -20,13 +20,14 @@
       <p class="challenge-code">{{ challenge.code }}</p>
       <p class="state-text">{{ expiresLabel }}</p>
     </template>
-    <p v-else-if="challenge" class="state-text danger">未知挑战类型：{{ challenge.challenge_type ?? challenge.status }}</p>
+    <p v-else-if="challenge" class="state-text danger">{{ t('components.authChallengeRenderer.unknownChallenge', { type: challenge.challenge_type ?? challenge.status }) }}</p>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import QRCode from 'qrcode'
+import { useI18n } from 'vue-i18n'
 
 import type { ChannelChallenge } from '@/api/hooks/useChannel'
 
@@ -38,6 +39,8 @@ const props = defineProps<{ challenge?: ChannelChallenge | null }>()
 // 父组件用这个事件作为"刷新二维码 loading 结束"的判据，避免在新图实际可见前误判结束。
 const emit = defineEmits<{ (e: 'rendered', qrcode: string): void }>()
 
+const { t } = useI18n()
+
 // qrDataUrl 保存本地编码后的二维码图片；上游给纯 URL 时必须先转成 dataURL 才能渲染。
 const qrDataUrl = ref<string>('')
 // errorMessage 只表示前端二维码编码失败，不覆盖渠道认证本身的后端错误。
@@ -48,7 +51,9 @@ const expiresLabel = computed(() => {
   if (!props.challenge?.expires_at) return ''
   const date = new Date(props.challenge.expires_at)
   if (Number.isNaN(date.getTime())) return ''
-  return `挑战将于 ${date.toLocaleString('zh-CN', { hour12: false })} 过期`
+  return t('components.authChallengeRenderer.expiresAt', {
+    datetime: date.toLocaleString('zh-CN', { hour12: false }),
+  })
 })
 
 watch(
@@ -73,7 +78,9 @@ watch(
       })
       emit('rendered', raw)
     } catch (err) {
-      errorMessage.value = `二维码生成失败：${err instanceof Error ? err.message : String(err)}`
+      errorMessage.value = t('components.authChallengeRenderer.qrcodeGenFailed', {
+        message: err instanceof Error ? err.message : String(err),
+      })
     }
   },
   { immediate: true },
