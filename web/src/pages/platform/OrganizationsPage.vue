@@ -632,10 +632,10 @@ function optionalAdminUsername(org: Organization) {
 // formatOrganizationCopyInfo 固定对外复制格式，便于平台管理员直接发送给组织管理员。
 function formatOrganizationCopyInfo(org: Organization) {
   return [
-    `标识： ${org.code || ''}`,
-    `名称： ${org.name}`,
-    `管理员用户名： ${optionalAdminUsername(org)}`,
-    `管理员密码： ${adminPasswordCopyHint}`,
+    t('platform.orgs.copy.formatCode', { code: org.code || '' }),
+    t('platform.orgs.copy.formatName', { name: org.name }),
+    t('platform.orgs.copy.formatAdminUsername', { username: optionalAdminUsername(org) }),
+    t('platform.orgs.copy.formatAdminPassword', { hint: adminPasswordCopyHint }),
   ].join('\n')
 }
 
