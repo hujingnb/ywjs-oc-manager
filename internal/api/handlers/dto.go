@@ -340,6 +340,12 @@ type UpdateAppKnowledgeQuotaRequest struct {
 	QuotaBytes int64 `json:"quota_bytes" binding:"required"`
 }
 
+// UpdateAppLocaleRequest 是 PATCH /api/v1/apps/:appId/locale 的请求体。
+type UpdateAppLocaleRequest struct {
+	// Locale 是 hermes bot 对终端用户说话的语言（en/zh）；取值集合由 service 层校验。
+	Locale string `json:"locale" binding:"required"`
+}
+
 // ===== 助手版本 assistant-versions =====
 
 // AssistantVersionRoutingDTO 是智能路由 8 槽位的请求结构；空字符串表示走主模型。

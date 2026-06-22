@@ -3383,6 +3383,100 @@ export interface paths {
         };
         trace?: never;
     };
+    "/apps/{appId}/locale": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 更新实例语言
+         * @description 更新实例 hermes bot 对终端用户说话的语言（en/zh），持久化后触发容器重启使配置生效
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                };
+                cookie?: never;
+            };
+            /** @description 目标语言 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.UpdateAppLocaleRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.AppResult"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
     "/apps/{appId}/runtime": {
         parameters: {
             query?: never;
@@ -11361,6 +11455,10 @@ export interface components {
             /** @description QuotaBytes 是实例知识库累计容量上限，单位字节，必须大于 0。 */
             quota_bytes: number;
         };
+        "handlers.UpdateAppLocaleRequest": {
+            /** @description Locale 是 hermes bot 对终端用户说话的语言（en/zh）；取值集合由 service 层校验。 */
+            locale: string;
+        };
         "handlers.UpdateAppSkillRequest": {
             /** @description Version 是目标版本号，必须与 source 端已发布的版本对应。 */
             version: string;
@@ -11731,6 +11829,11 @@ export interface components {
             last_error_message?: string;
             /** @description LastErrorStatus 上次进入 error 时所在的状态值;前端用 formatAppStatus 转中文文案。 */
             last_error_status?: string;
+            /**
+             * @description Locale 是 hermes bot 对终端用户说话的语言（en/zh）；
+             *     空表示使用平台默认语言（历史数据或未设置）。
+             */
+            locale?: string;
             name?: string;
             /**
              * @description NewapiKeyID 是 new-api 中 token 的数值 id；schema 上是 text 列存的字符串，

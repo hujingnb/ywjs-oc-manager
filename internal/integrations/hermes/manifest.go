@@ -21,10 +21,12 @@ type Manifest struct {
 }
 
 // ManifestApp 业务元数据。id/name 仅审计日志使用；model 直接进 hermes config.yaml model.default。
+// Language 是 hermes bot 对终端用户说话的语言（en/zh）；空时 renderer 回退平台默认，omitempty 省略。
 type ManifestApp struct {
-	ID    string `yaml:"id"`
-	Name  string `yaml:"name"`
-	Model string `yaml:"model"`
+	ID       string `yaml:"id"`
+	Name     string `yaml:"name"`
+	Model    string `yaml:"model"`
+	Language string `yaml:"language,omitempty"`
 }
 
 // ManifestCredentials 凭证集合；当前仅 openai；微信凭证由 hermes 自管。

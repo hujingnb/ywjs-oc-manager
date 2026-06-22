@@ -41,6 +41,11 @@ type AppInputData struct {
 
 	OrgName   string
 	OwnerName string
+
+	// Language 是 hermes bot 对终端用户说话的语言（en/zh）。
+	// 空字符串表示「未设置」，由 renderer/hermes 回退平台默认。
+	// 对应 manifest.yaml 中 app.language 字段。
+	Language string
 }
 
 // WriteAppInput 一次性写入 manifest.yaml + resources/persona.md + resources/platform-rules.md。
