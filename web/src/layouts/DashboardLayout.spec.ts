@@ -3,6 +3,7 @@ import { defineComponent, h } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NLayoutContent } from 'naive-ui'
 
+import { i18n } from '@/i18n'
 import DashboardLayout from './DashboardLayout.vue'
 
 const routerPush = vi.hoisted(() => vi.fn())
@@ -150,9 +151,13 @@ const AlertStub = defineComponent({
   },
 })
 
+// mountLayout：挂载 DashboardLayout，注入 i18n 插件（布局使用 useI18n() 渲染导航、顶栏与弹窗文案）。
+// i18n locale 设置为 zh，保持各测试用例中的中文文案断言不变。
 function mountLayout() {
+  i18n.global.locale.value = 'zh'
   return mount(DashboardLayout, {
     global: {
+      plugins: [i18n],
       stubs: {
         RouterView: { template: '<section class="route-page">页面内容</section>' },
         HelpDrawer: HelpDrawerStub,

@@ -41,7 +41,7 @@
           @click="openPasswordModal"
         >
           <template #icon><KeyRound :size="15" /></template>
-          修改密码
+          {{ t('layout.password.changePassword') }}
         </n-button>
         <n-button
           v-if="auth.user"
@@ -52,7 +52,7 @@
           @click="onLogout"
         >
           <template #icon><LogOut :size="15" /></template>
-          退出
+          {{ t('layout.sidebar.logout') }}
         </n-button>
       </div>
     </n-layout-sider>
@@ -64,7 +64,7 @@
       >
         <div>
           <p class="eyebrow">{{ environmentLabel }}</p>
-          <h1 style="margin: 0; font-size: 20px">控制台</h1>
+          <h1 style="margin: 0; font-size: 20px">{{ t('layout.header.console') }}</h1>
         </div>
         <!-- 视角切换器:仅 org_admin 可见,在「企业管理」与「我的实例」两视角间切换并导航。 -->
         <div v-if="isOrgAdmin" class="perspective-switch">
@@ -74,7 +74,7 @@
             :aria-pressed="perspective === 'manage'"
             @click="onSwitchPerspective('manage')"
           >
-            企业管理
+            {{ t('layout.perspective.manage') }}
           </n-button>
           <n-button
             size="small"
@@ -82,15 +82,15 @@
             :aria-pressed="perspective === 'instance'"
             @click="onSwitchPerspective('instance')"
           >
-            我的实例
+            {{ t('layout.perspective.instance') }}
           </n-button>
         </div>
         <div class="topbar-actions">
           <LocaleSwitcher :persist="true" />
-          <n-tag type="success" size="small" :bordered="false">API 正常</n-tag>
+          <n-tag type="success" size="small" :bordered="false">{{ t('layout.header.apiStatus') }}</n-tag>
           <!-- 使用手册入口：右上角文字按钮，点开右侧抽屉按当前角色展示对应手册 -->
-          <n-button quaternary title="使用手册" @click="helpOpen = true">
-            使用手册
+          <n-button quaternary :title="t('layout.header.helpManual')" @click="helpOpen = true">
+            {{ t('layout.header.helpManual') }}
           </n-button>
           <n-button quaternary circle @click="reload">
             <template #icon><RefreshCw :size="17" /></template>
@@ -112,7 +112,7 @@
     <n-modal
       :show="passwordModalOpen"
       preset="card"
-      title="修改密码"
+      :title="t('layout.password.changePassword')"
       class="password-modal"
       data-test="password-modal"
       :style="{ width: '420px', maxWidth: 'calc(100vw - 32px)' }"
@@ -121,36 +121,36 @@
       @update:show="onPasswordModalShowUpdate"
     >
       <n-form data-test="password-form" :model="passwordForm" @submit.prevent="onChangePassword">
-        <n-form-item label="当前密码">
+        <n-form-item :label="t('layout.password.currentPassword')">
           <n-input
             v-model:value="passwordForm.oldPassword"
             type="password"
             autocomplete="current-password"
-            placeholder="请输入当前密码"
+            :placeholder="t('layout.password.currentPasswordPlaceholder')"
           />
         </n-form-item>
-        <n-form-item label="新密码">
+        <n-form-item :label="t('layout.password.newPassword')">
           <n-input
             v-model:value="passwordForm.newPassword"
             type="password"
             autocomplete="new-password"
-            placeholder="至少 8 位"
+            :placeholder="t('layout.password.newPasswordPlaceholder')"
           />
         </n-form-item>
-        <n-form-item label="确认新密码">
+        <n-form-item :label="t('layout.password.confirmPassword')">
           <n-input
             v-model:value="passwordForm.confirmPassword"
             type="password"
             autocomplete="new-password"
-            placeholder="再次输入新密码"
+            :placeholder="t('layout.password.confirmPasswordPlaceholder')"
           />
         </n-form-item>
         <n-alert v-if="passwordError" type="error" :bordered="false" style="margin-bottom: 12px">
           {{ passwordError }}
         </n-alert>
         <n-space justify="end">
-          <n-button attr-type="button" :disabled="passwordChanging" @click="closePasswordModal">取消</n-button>
-          <n-button type="primary" attr-type="submit" :loading="passwordChanging" :disabled="passwordChanging">确认修改</n-button>
+          <n-button attr-type="button" :disabled="passwordChanging" @click="closePasswordModal">{{ t('common.actions.cancel') }}</n-button>
+          <n-button type="primary" attr-type="submit" :loading="passwordChanging" :disabled="passwordChanging">{{ t('layout.password.submitButton') }}</n-button>
         </n-space>
       </n-form>
     </n-modal>
@@ -163,6 +163,7 @@
 <script setup lang="ts">
 import { computed, h, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import {
   NAlert, NBadge, NButton, NForm, NFormItem, NInput, NLayout, NLayoutContent, NLayoutHeader, NLayoutSider, NMenu, NModal,
   NSpace, NTag,
@@ -183,6 +184,7 @@ import { useSkillTicketBadgeQuery } from '@/api/hooks/useSkillTickets'
 
 // DashboardLayout 负责已登录后台的导航外壳、环境标识和退出入口。
 // 具体页面权限仍由路由和页面级查询控制，这里只隐藏不适合当前角色的导航项。
+const { t } = useI18n()
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
@@ -195,9 +197,10 @@ const passwordChanging = ref(false)
 const passwordError = ref('')
 const passwordForm = ref({ oldPassword: '', newPassword: '', confirmPassword: '' })
 
+// environmentLabel 根据是否登录以及当前语言返回环境标识文案，响应语言切换。
 const environmentLabel = computed(() => {
-  if (!auth.user) return '本地调试环境'
-  return `本地调试环境 · ${auth.user.role}`
+  if (!auth.user) return t('layout.header.envLabel')
+  return t('layout.header.envLabelWithRole', { role: auth.user.role })
 })
 
 // 根据当前路由计算激活的菜单项 key（前缀匹配）
@@ -273,38 +276,39 @@ function memberAppTabKey(tab: MemberAppTab) {
 // org_member 的总览目标：有实例指向唯一实例 overview，无实例指向空状态。
 const memberAppPath = computed(() => memberAppTabPath('overview'))
 
-// menuOptions 根据角色裁剪入口：普通成员不显示组织管理和审计，平台管理员仅显示控制台单一入口。
+// menuOptions 根据角色裁剪入口，并随语言切换自动更新 label。
+// 使用 computed 保证切换语言后菜单文案立即响应。
 const menuOptions = computed<MenuOption[]>(() => {
   if (inOwnInstanceView.value) {
     return [
-      { key: memberAppTabKey('overview'), label: '总览', icon: () => h(LayoutDashboard, { size: 18 }) },
-      { key: memberAppTabKey('channels'), label: '渠道', icon: () => h(Radio, { size: 18 }) },
-      { key: memberAppTabKey('workspace'), label: '工作目录', icon: () => h(FolderOpen, { size: 18 }) },
-      { key: memberAppTabKey('knowledge'), label: '个人知识库', icon: () => h(BookOpen, { size: 18 }) },
-      { key: '/knowledge', label: '企业知识库', icon: () => h(BookOpen, { size: 18 }) },
+      { key: memberAppTabKey('overview'), label: t('layout.nav.overview'), icon: () => h(LayoutDashboard, { size: 18 }) },
+      { key: memberAppTabKey('channels'), label: t('layout.nav.channels'), icon: () => h(Radio, { size: 18 }) },
+      { key: memberAppTabKey('workspace'), label: t('layout.nav.workspace'), icon: () => h(FolderOpen, { size: 18 }) },
+      { key: memberAppTabKey('knowledge'), label: t('layout.nav.personalKnowledge'), icon: () => h(BookOpen, { size: 18 }) },
+      { key: '/knowledge', label: t('layout.nav.orgKnowledge'), icon: () => h(BookOpen, { size: 18 }) },
       // 技能：成员顶级技能页，key 为 /skills，与路由保持一致。
-      { key: '/skills', label: '技能', icon: () => h(Puzzle, { size: 18 }) },
-      { key: memberAppTabKey('kanban'), label: '任务', icon: () => h(ListChecks, { size: 18 }) },
-      { key: memberAppTabKey('cron'), label: '定时任务', icon: () => h(CalendarClock, { size: 18 }) },
-      { key: '/usage', label: '用量', icon: () => h(BarChart3, { size: 18 }) },
+      { key: '/skills', label: t('layout.nav.skills'), icon: () => h(Puzzle, { size: 18 }) },
+      { key: memberAppTabKey('kanban'), label: t('layout.nav.tasks'), icon: () => h(ListChecks, { size: 18 }) },
+      { key: memberAppTabKey('cron'), label: t('layout.nav.cron'), icon: () => h(CalendarClock, { size: 18 }) },
+      { key: '/usage', label: t('layout.nav.usage'), icon: () => h(BarChart3, { size: 18 }) },
     ]
   }
   // platform_admin 使用单一「控制台」入口，替代原来「总览+平台」两个菜单项。
   const items: MenuOption[] = isPlatformAdmin.value
-    ? [{ key: '/console', label: '控制台', icon: () => h(Gauge, { size: 18 }) }]
-    : [{ key: '/', label: '总览', icon: () => h(LayoutDashboard, { size: 18 }) }]
+    ? [{ key: '/console', label: t('layout.nav.console'), icon: () => h(Gauge, { size: 18 }) }]
+    : [{ key: '/', label: t('layout.nav.overview'), icon: () => h(LayoutDashboard, { size: 18 }) }]
   if (isPlatformAdmin.value) {
-    items.push({ key: '/organizations', label: '企业', icon: () => h(Building2, { size: 18 }) })
-    items.push({ key: '/assistant-versions', label: '助手版本', icon: () => h(Boxes, { size: 18 }) })
-    items.push({ key: '/platform/industry-knowledge', label: '行业知识库', icon: () => h(BookOpen, { size: 18 }) })
+    items.push({ key: '/organizations', label: t('layout.nav.organizations'), icon: () => h(Building2, { size: 18 }) })
+    items.push({ key: '/assistant-versions', label: t('layout.nav.assistantVersions'), icon: () => h(Boxes, { size: 18 }) })
+    items.push({ key: '/platform/industry-knowledge', label: t('layout.nav.industryKnowledge'), icon: () => h(BookOpen, { size: 18 }) })
     // 平台库管理入口：仅平台管理员可见，用于上传/删除 skill tar 包。
-    items.push({ key: '/platform/skills', label: '平台技能', icon: () => h(Package, { size: 18 }) })
+    items.push({ key: '/platform/skills', label: t('layout.nav.platformSkills'), icon: () => h(Package, { size: 18 }) })
     // 定制技能工单入口：label 用 render 函数，在文案后挂 n-badge 显示待处理工单数（>0 时才显示）。
     items.push({
       key: '/platform/custom-skills',
       label: () =>
         h('span', { style: 'display: inline-flex; align-items: center; gap: 8px' }, [
-          '定制技能',
+          t('layout.nav.customSkills'),
           pendingTicketCount.value > 0
             ? h(NBadge, { value: pendingTicketCount.value, type: 'error' })
             : null,
@@ -314,24 +318,24 @@ const menuOptions = computed<MenuOption[]>(() => {
   }
   // 成员/审计 是组织管理视角，普通成员不展示。
   if (!isOrgMember.value) {
-    items.push({ key: '/members', label: '成员', icon: () => h(Users, { size: 18 }) })
+    items.push({ key: '/members', label: t('layout.nav.members'), icon: () => h(Users, { size: 18 }) })
   }
   items.push(
-    { key: memberAppPath.value, label: '实例', icon: () => h(Bot, { size: 18 }) },
-    { key: '/knowledge', label: '企业知识库', icon: () => h(BookOpen, { size: 18 }) },
+    { key: memberAppPath.value, label: t('layout.nav.instance'), icon: () => h(Bot, { size: 18 }) },
+    { key: '/knowledge', label: t('layout.nav.orgKnowledge'), icon: () => h(BookOpen, { size: 18 }) },
   )
   // 账户余额仅对 org_admin 显示；org_member 和 platform_admin 无此入口。
   if (isOrgAdmin.value) {
-    items.push({ key: '/balance', label: '账户余额', icon: () => h(Wallet, { size: 18 }) })
+    items.push({ key: '/balance', label: t('layout.nav.balance'), icon: () => h(Wallet, { size: 18 }) })
   }
   if (!isOrgMember.value) {
-    items.push({ key: '/audit-logs', label: '审计', icon: () => h(FileSearch, { size: 18 }) })
+    items.push({ key: '/audit-logs', label: t('layout.nav.audit'), icon: () => h(FileSearch, { size: 18 }) })
   }
   if (isPlatformAdmin.value) {
-    items.push({ key: '/platform/permissions', label: '权限说明', icon: () => h(ShieldCheck, { size: 18 }) })
+    items.push({ key: '/platform/permissions', label: t('layout.nav.permissions'), icon: () => h(ShieldCheck, { size: 18 }) })
   }
   // 用量统一落到所有管理员菜单末尾，与成员视角保持一致的收尾位置。
-  items.push({ key: '/usage', label: '用量', icon: () => h(BarChart3, { size: 18 }) })
+  items.push({ key: '/usage', label: t('layout.nav.usage'), icon: () => h(BarChart3, { size: 18 }) })
   return items
 })
 
@@ -390,13 +394,13 @@ function onPasswordModalShowUpdate(show: boolean) {
   closePasswordModal()
 }
 
-// validatePasswordForm 做提交前的本地校验，减少无效请求并给用户明确的中文错误原因。
+// validatePasswordForm 做提交前的本地校验，减少无效请求并给用户明确的错误原因。
 function validatePasswordForm() {
   const { oldPassword, newPassword, confirmPassword } = passwordForm.value
-  if (!oldPassword || !newPassword || !confirmPassword) return '请填写当前密码、新密码和确认新密码'
-  if (newPassword.length < 8) return '新密码至少 8 位'
-  if (newPassword === oldPassword) return '新密码不能与当前密码相同'
-  if (newPassword !== confirmPassword) return '两次输入的新密码不一致'
+  if (!oldPassword || !newPassword || !confirmPassword) return t('layout.password.errAllRequired')
+  if (newPassword.length < 8) return t('layout.password.errMinLength')
+  if (newPassword === oldPassword) return t('layout.password.errSameAsOld')
+  if (newPassword !== confirmPassword) return t('layout.password.errMismatch')
   return null
 }
 
@@ -417,7 +421,7 @@ async function onChangePassword() {
     resetPasswordForm()
     await router.replace('/login')
   } catch (err) {
-    passwordError.value = err instanceof Error && err.message ? err.message : '修改密码失败'
+    passwordError.value = err instanceof Error && err.message ? err.message : t('layout.password.errChangeFailed')
   } finally {
     passwordChanging.value = false
   }

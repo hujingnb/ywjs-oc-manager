@@ -9,31 +9,31 @@
 
     <!-- 内容层：把平台介绍和登录卡片作为一个整体居中，避免大屏下左右分散。 -->
     <div class="auth-content">
-      <section class="auth-hero" aria-label="平台介绍">
+      <section class="auth-hero" :aria-label="t('layout.auth.heroLabel')">
         <div class="auth-hero-copy">
           <div class="auth-eyebrow">ENTERPRISE AI AGENT PLATFORM</div>
-          <h1 class="auth-title">让<span class="auth-title-hot">智能体</span>融入企业工作流</h1>
+          <h1 class="auth-title">{{ t('layout.auth.titlePrefix') }}<span class="auth-title-hot">{{ t('layout.auth.titleHot') }}</span>{{ t('layout.auth.titleSuffix') }}</h1>
           <p class="auth-lead">
-            企业 AI 数智员工运行管理平台，用 Agent 连通云资源、企业知识库和多模型能力，深度接管员工日常工作任务。
+            {{ t('layout.auth.lead') }}
           </p>
         </div>
-        <div class="auth-metrics" aria-label="平台能力">
+        <div class="auth-metrics" :aria-label="t('layout.auth.metricsLabel')">
           <div class="auth-metric">
-            <strong>一人一 Agent</strong>
-            <span>配置独立运行环境、专属任务管理及独享个人知识库</span>
+            <strong>{{ t('layout.auth.metrics.agent.title') }}</strong>
+            <span>{{ t('layout.auth.metrics.agent.desc') }}</span>
           </div>
           <div class="auth-metric">
-            <strong>统一管控</strong>
-            <span>实现账号权限、知识库、大模型与 Token 消耗的统一管控</span>
+            <strong>{{ t('layout.auth.metrics.unified.title') }}</strong>
+            <span>{{ t('layout.auth.metrics.unified.desc') }}</span>
           </div>
           <div class="auth-metric">
-            <strong>可定制化</strong>
-            <span>支持定制需求，可私有化部署，完全适配企业安全规范</span>
+            <strong>{{ t('layout.auth.metrics.custom.title') }}</strong>
+            <span>{{ t('layout.auth.metrics.custom.desc') }}</span>
           </div>
         </div>
       </section>
 
-      <section class="auth-login-shell" aria-label="登录控制台">
+      <section class="auth-login-shell" :aria-label="t('layout.auth.loginLabel')">
         <RouterView />
       </section>
     </div>
@@ -42,6 +42,9 @@
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 // neural 指向背景画布元素，登录页挂载后在其上绘制连线粒子动效。
 const neural = ref<HTMLCanvasElement | null>(null)

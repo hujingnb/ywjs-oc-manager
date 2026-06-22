@@ -1,11 +1,14 @@
 import { mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { i18n } from '@/i18n'
 import AuthLayout from './AuthLayout.vue'
 
+// mountLayout：挂载 AuthLayout，注入 i18n 插件（AuthLayout 使用 useI18n() 渲染平台介绍文案）。
 function mountLayout() {
   return mount(AuthLayout, {
     global: {
+      plugins: [i18n],
       stubs: {
         RouterView: { template: '<form class="login-card">登录表单</form>' },
       },
