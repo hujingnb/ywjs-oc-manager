@@ -39,6 +39,15 @@ type knowledgeService interface {
 	OpenAppFile(ctx context.Context, principal auth.Principal, appID, documentID string) (io.ReadCloser, int64, string, error)
 	DeleteAppFile(ctx context.Context, principal auth.Principal, appID, documentID string) error
 	ReparseAppFile(ctx context.Context, principal auth.Principal, appID, documentID string) (service.KnowledgeDocumentResult, error)
+	// 分片上传（大文件走 multipart，规避公网入口超时）：org 与 app 两套。
+	InitOrgUpload(ctx context.Context, principal auth.Principal, orgID, filename string, size int64) (service.KnowledgeUploadInitResult, error)
+	UploadOrgPart(ctx context.Context, principal auth.Principal, orgID, uploadID string, partNumber int32, body io.Reader, size int64) error
+	CompleteOrgUpload(ctx context.Context, principal auth.Principal, orgID, uploadID string) (service.KnowledgeDocumentResult, error)
+	AbortOrgUpload(ctx context.Context, principal auth.Principal, orgID, uploadID string) error
+	InitAppUpload(ctx context.Context, principal auth.Principal, appID, filename string, size int64) (service.KnowledgeUploadInitResult, error)
+	UploadAppPart(ctx context.Context, principal auth.Principal, appID, uploadID string, partNumber int32, body io.Reader, size int64) error
+	CompleteAppUpload(ctx context.Context, principal auth.Principal, appID, uploadID string) (service.KnowledgeDocumentResult, error)
+	AbortAppUpload(ctx context.Context, principal auth.Principal, appID, uploadID string) error
 	ListKnowledgeEmbeddingModels(ctx context.Context, principal auth.Principal) (service.KnowledgeEmbeddingModelListResult, error)
 	GetKnowledgeRAGFlowDatasetInfo(ctx context.Context, principal auth.Principal, scope, targetID string) (service.KnowledgeRAGFlowDatasetInfoResult, error)
 	UpdateKnowledgeEmbeddingModel(ctx context.Context, principal auth.Principal, scope, targetID string, input service.KnowledgeEmbeddingModelInput) (service.KnowledgeRAGFlowDatasetInfoResult, error)
@@ -54,6 +63,9 @@ const (
 	// maxKnowledgeUploadBytes 是 manager 知识库上传的服务端硬上限，前端 / 后端提示文案均由此推导。
 	maxKnowledgeUploadBytes            int64 = 1024 * 1024 * 1024
 	maxKnowledgeMultipartOverheadBytes int64 = 1 * 1024 * 1024
+	// maxKnowledgePartBytes 是单个分片请求体的硬上限：前端按 8MB 切片，留足余量到 64MB，
+	// 既防御异常超大分片，又不至于卡正常分片。
+	maxKnowledgePartBytes int64 = 64 * 1024 * 1024
 )
 
 // maxKnowledgeUploadMessage 是超出上限时返回给客户端的统一提示，以 MB 为单位由
@@ -83,6 +95,14 @@ func RegisterKnowledgeRoutes(router gin.IRouter, handler *KnowledgeHandler) {
 	orgGroup.DELETE("/:documentId", handler.DeleteOrg)
 	orgGroup.POST("/:documentId/reparse", handler.ReparseOrg)
 
+	// 分片上传走独立路径前缀 knowledge-uploads，避免与 /knowledge/:documentId 的通配段在
+	// gin 路由树里冲突（静态段 uploads 与 :documentId 不能同级）。
+	orgUploads := router.Group("/api/v1/organizations/:orgId/knowledge-uploads")
+	orgUploads.POST("", handler.InitOrgUpload)
+	orgUploads.PUT("/:uploadId/parts/:partNumber", handler.UploadOrgPart)
+	orgUploads.POST("/:uploadId/complete", handler.CompleteOrgUpload)
+	orgUploads.DELETE("/:uploadId", handler.AbortOrgUpload)
+
 	appGroup := router.Group("/api/v1/apps/:appId/knowledge")
 	appGroup.GET("/ragflow-dataset", handler.GetAppRAGFlowDataset)
 	appGroup.PATCH("/ragflow-dataset/embedding-model", handler.UpdateAppEmbeddingModel)
@@ -91,6 +111,12 @@ func RegisterKnowledgeRoutes(router gin.IRouter, handler *KnowledgeHandler) {
 	appGroup.GET("/:documentId/file", handler.DownloadApp)
 	appGroup.DELETE("/:documentId", handler.DeleteApp)
 	appGroup.POST("/:documentId/reparse", handler.ReparseApp)
+
+	appUploads := router.Group("/api/v1/apps/:appId/knowledge-uploads")
+	appUploads.POST("", handler.InitAppUpload)
+	appUploads.PUT("/:uploadId/parts/:partNumber", handler.UploadAppPart)
+	appUploads.POST("/:uploadId/complete", handler.CompleteAppUpload)
+	appUploads.DELETE("/:uploadId", handler.AbortAppUpload)
 }
 
 // ListEmbeddingModels 列出平台可切换的 RAGFlow embedding 模型。
@@ -585,6 +611,12 @@ func writeKnowledgeError(c *gin.Context, err error) {
 		c.JSON(http.StatusServiceUnavailable, apierror.New("KNOWLEDGE_NOT_CONFIGURED", "知识库未配置"))
 	case errors.Is(err, service.ErrKnowledgeQuotaExceeded):
 		c.JSON(http.StatusConflict, apierror.New("KNOWLEDGE_QUOTA_EXCEEDED", validationServiceMessage(err, service.ErrKnowledgeQuotaExceeded)))
+	case errors.Is(err, service.ErrKnowledgeMultipartUnavailable):
+		// 未启用对象存储，分片上传不可用；前端据此回退到直传。
+		c.JSON(http.StatusServiceUnavailable, apierror.New("KNOWLEDGE_MULTIPART_UNAVAILABLE", "分片上传不可用"))
+	case errors.Is(err, service.ErrKnowledgeUploadSessionNotFound):
+		// 会话不存在 / 已过期 / 归属不符，统一按 404 处理。
+		c.JSON(http.StatusNotFound, apierror.New("KNOWLEDGE_UPLOAD_SESSION_NOT_FOUND", "上传会话不存在或已过期"))
 	default:
 		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", redactlog.SafeErrorMessage(err)))
 	}

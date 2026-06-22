@@ -271,6 +271,18 @@ components:
           example: 应用不存在
           type: string
       type: object
+    handlers.InitKnowledgeUploadRequest:
+      properties:
+        filename:
+          description: Filename 是原始文件名，服务端会取 base 后用于暂存 key 与最终文档名。
+          type: string
+        size:
+          description: Size 是文件总字节数，用于上传前的配额预校验，必须为正。
+          type: integer
+      required:
+      - filename
+      - size
+      type: object
     handlers.InstallAppSkillRequest:
       properties:
         name:
@@ -1543,6 +1555,13 @@ components:
             $ref: '#/components/schemas/service.KnowledgeSearchHit'
           type: array
           uniqueItems: false
+      type: object
+    service.KnowledgeUploadInitResult:
+      properties:
+        part_size:
+          type: integer
+        upload_id:
+          type: string
       type: object
     service.LoginResult:
       properties:
@@ -4003,6 +4022,193 @@ paths:
       security:
       - BearerAuth: []
       summary: 上传应用级知识库文件
+      tags:
+      - knowledge
+  /apps/{appId}/knowledge-uploads:
+    post:
+      description: 大文件分片上传第一步：校验配额后返回 uploadId 与建议分片大小
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.InitKnowledgeUploadRequest'
+                description: 文件名与大小
+                summary: request
+        description: 文件名与大小
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.KnowledgeUploadInitResult'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Conflict
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 发起实例知识库分片上传
+      tags:
+      - knowledge
+  /apps/{appId}/knowledge-uploads/{uploadId}:
+    delete:
+      description: 分片上传可选步：取消会话并清理已上传分片
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 上传会话 ID
+        in: path
+        name: uploadId
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+      security:
+      - BearerAuth: []
+      summary: 中止实例知识库分片上传
+      tags:
+      - knowledge
+  /apps/{appId}/knowledge-uploads/{uploadId}/complete:
+    post:
+      description: 分片上传第三步：合并全部分片，推送 RAGFlow 并触发解析
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 上传会话 ID
+        in: path
+        name: uploadId
+        required: true
+        schema:
+          type: string
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.KnowledgeDocumentResult'
+          description: Accepted
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+      security:
+      - BearerAuth: []
+      summary: 完成实例知识库分片上传
+      tags:
+      - knowledge
+  /apps/{appId}/knowledge-uploads/{uploadId}/parts/{partNumber}:
+    put:
+      description: 分片上传第二步：以 application/octet-stream 上传单个分片字节
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 上传会话 ID
+        in: path
+        name: uploadId
+        required: true
+        schema:
+          type: string
+      - description: 分片序号（从 1 起）
+        in: path
+        name: partNumber
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              format: binary
+              type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+      security:
+      - BearerAuth: []
+      summary: 上传实例知识库分片
       tags:
       - knowledge
   /apps/{appId}/knowledge/{documentId}:
@@ -7732,6 +7938,193 @@ paths:
       security:
       - BearerAuth: []
       summary: 上传企业级知识库文件
+      tags:
+      - knowledge
+  /organizations/{orgId}/knowledge-uploads:
+    post:
+      description: 大文件分片上传第一步：校验配额后返回 uploadId 与建议分片大小
+      parameters:
+      - description: 企业 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.InitKnowledgeUploadRequest'
+                description: 文件名与大小
+                summary: request
+        description: 文件名与大小
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.KnowledgeUploadInitResult'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Conflict
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 发起企业知识库分片上传
+      tags:
+      - knowledge
+  /organizations/{orgId}/knowledge-uploads/{uploadId}:
+    delete:
+      description: 分片上传可选步：取消会话并清理已上传分片
+      parameters:
+      - description: 企业 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - description: 上传会话 ID
+        in: path
+        name: uploadId
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+      security:
+      - BearerAuth: []
+      summary: 中止企业知识库分片上传
+      tags:
+      - knowledge
+  /organizations/{orgId}/knowledge-uploads/{uploadId}/complete:
+    post:
+      description: 分片上传第三步：合并全部分片，推送 RAGFlow 并触发解析
+      parameters:
+      - description: 企业 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - description: 上传会话 ID
+        in: path
+        name: uploadId
+        required: true
+        schema:
+          type: string
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.KnowledgeDocumentResult'
+          description: Accepted
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+      security:
+      - BearerAuth: []
+      summary: 完成企业知识库分片上传
+      tags:
+      - knowledge
+  /organizations/{orgId}/knowledge-uploads/{uploadId}/parts/{partNumber}:
+    put:
+      description: 分片上传第二步：以 application/octet-stream 上传单个分片字节
+      parameters:
+      - description: 企业 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      - description: 上传会话 ID
+        in: path
+        name: uploadId
+        required: true
+        schema:
+          type: string
+      - description: 分片序号（从 1 起）
+        in: path
+        name: partNumber
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              format: binary
+              type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+      security:
+      - BearerAuth: []
+      summary: 上传企业知识库分片
       tags:
       - knowledge
   /organizations/{orgId}/knowledge/{documentId}:

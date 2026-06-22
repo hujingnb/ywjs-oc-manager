@@ -351,6 +351,21 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	} else {
 		libraryBlobs = service.NewFSLibraryBlobStore(cfg.App.DataRoot)
 	}
+	// 知识库分片上传依赖：S3 启用时注入对象存储 multipart 能力 + Redis 会话存储（复用 imagecoordRedis），
+	// 让大文件走分片上传规避公网入口超时；未启用 S3 时不注入，分片上传不可用、前端回退直传。
+	if cfg.Storage.S3.Enabled {
+		s3cfg := storage.S3Config{
+			Endpoint:        cfg.Storage.S3.Endpoint,
+			Region:          cfg.Storage.S3.Region,
+			Bucket:          cfg.Storage.S3.Bucket,
+			AccessKeyID:     cfg.Storage.S3.AccessKeyID,
+			SecretAccessKey: cfg.Storage.S3.SecretAccessKey,
+			UsePathStyle:    cfg.Storage.S3.UsePathStyle,
+		}
+		uploadSessions := service.NewRedisKnowledgeUploadSessions(imagecoordRedis, cfg.Redis.KeyPrefix, 24*time.Hour)
+		// partSize 传 0 用 service 默认 8MB。
+		knowledgeService.SetMultipartUploader(storage.NewS3ObjectStore(s3cfg), uploadSessions, 0)
+	}
 	// archiveCache 是第三方市场归档读穿缓存，市场下载与（间接）安装/版本共用：复用 libraryBlobs 同一对象存储。
 	archiveCache := service.NewSkillArchiveCache(libraryBlobs)
 	platformSkillService := service.NewPlatformSkillService(dbStore.Queries, libraryBlobs)

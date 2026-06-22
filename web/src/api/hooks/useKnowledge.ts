@@ -1,11 +1,11 @@
 // 知识库 API hooks 负责组织级与实例级 RAGFlow 文件列表、上传、下载、删除和重解析。
-// 上传走 xhrUpload 支持进度反馈与取消；其余 JSON 接口统一走 apiRequest。
+// 上传走 uploadKnowledgeFile：小文件直传、大文件分片，内部用 xhrUpload 上报进度与取消；其余 JSON 接口走 apiRequest。
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed } from 'vue'
 import type { Ref } from 'vue'
 
 import { apiRequest, extractErrorMessage, getStoredAccessToken } from '@/api/client'
-import { xhrUpload } from '@/api/xhrUpload'
+import { uploadKnowledgeFile } from '@/api/knowledgeUpload'
 
 // KnowledgeDocument 是 manager 从 RAGFlow document 元数据缓存归一化后的扁平文件视图。
 export interface KnowledgeDocument {
@@ -325,14 +325,15 @@ export function useUploadOrgKnowledge(orgId: Ref<string | undefined>) {
       signal?: AbortSignal
     }) => {
       if (!orgId.value) throw new Error('缺少企业 ID')
-      const params = new URLSearchParams({ filename: input.file.name })
-      await xhrUpload(`/api/v1/organizations/${orgId.value}/knowledge?${params.toString()}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/octet-stream' },
-        body: input.file,
-        onProgress: input.onProgress,
-        signal: input.signal,
-      })
+      await uploadKnowledgeFile(
+        {
+          directPath: `/api/v1/organizations/${orgId.value}/knowledge`,
+          uploadsPath: `/api/v1/organizations/${orgId.value}/knowledge-uploads`,
+        },
+        input.file,
+        input.onProgress,
+        input.signal,
+      )
     },
     onSettled: () => {
       void client.invalidateQueries({ queryKey: orgKey(orgId.value) })
@@ -349,14 +350,15 @@ export function useUploadAppKnowledge(appId: Ref<string | undefined>) {
       signal?: AbortSignal
     }) => {
       if (!appId.value) throw new Error('缺少实例 ID')
-      const params = new URLSearchParams({ filename: input.file.name })
-      await xhrUpload(`/api/v1/apps/${appId.value}/knowledge?${params.toString()}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/octet-stream' },
-        body: input.file,
-        onProgress: input.onProgress,
-        signal: input.signal,
-      })
+      await uploadKnowledgeFile(
+        {
+          directPath: `/api/v1/apps/${appId.value}/knowledge`,
+          uploadsPath: `/api/v1/apps/${appId.value}/knowledge-uploads`,
+        },
+        input.file,
+        input.onProgress,
+        input.signal,
+      )
     },
     onSettled: () => {
       void client.invalidateQueries({ queryKey: appKey(appId.value) })

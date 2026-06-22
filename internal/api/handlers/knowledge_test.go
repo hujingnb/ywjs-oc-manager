@@ -103,6 +103,39 @@ func (s *knowledgeServiceStub) ReparseAppFile(context.Context, auth.Principal, s
 	return service.KnowledgeDocumentResult{}, nil
 }
 
+// 分片上传方法：当前路由测试不覆盖具体行为，stub 返回零值满足接口即可。
+func (s *knowledgeServiceStub) InitOrgUpload(context.Context, auth.Principal, string, string, int64) (service.KnowledgeUploadInitResult, error) {
+	return service.KnowledgeUploadInitResult{}, nil
+}
+
+func (s *knowledgeServiceStub) UploadOrgPart(context.Context, auth.Principal, string, string, int32, io.Reader, int64) error {
+	return nil
+}
+
+func (s *knowledgeServiceStub) CompleteOrgUpload(context.Context, auth.Principal, string, string) (service.KnowledgeDocumentResult, error) {
+	return service.KnowledgeDocumentResult{}, nil
+}
+
+func (s *knowledgeServiceStub) AbortOrgUpload(context.Context, auth.Principal, string, string) error {
+	return nil
+}
+
+func (s *knowledgeServiceStub) InitAppUpload(context.Context, auth.Principal, string, string, int64) (service.KnowledgeUploadInitResult, error) {
+	return service.KnowledgeUploadInitResult{}, nil
+}
+
+func (s *knowledgeServiceStub) UploadAppPart(context.Context, auth.Principal, string, string, int32, io.Reader, int64) error {
+	return nil
+}
+
+func (s *knowledgeServiceStub) CompleteAppUpload(context.Context, auth.Principal, string, string) (service.KnowledgeDocumentResult, error) {
+	return service.KnowledgeDocumentResult{}, nil
+}
+
+func (s *knowledgeServiceStub) AbortAppUpload(context.Context, auth.Principal, string, string) error {
+	return nil
+}
+
 func (s *knowledgeServiceStub) ListKnowledgeEmbeddingModels(context.Context, auth.Principal) (service.KnowledgeEmbeddingModelListResult, error) {
 	return s.listEmbeddingModelsResult, s.listEmbeddingModelsErr
 }

@@ -169,6 +169,14 @@ type UpdateKnowledgeEmbeddingModelRequest struct {
 	Provider string `json:"provider"`
 }
 
+// InitKnowledgeUploadRequest 是发起知识库分片上传的请求体。
+type InitKnowledgeUploadRequest struct {
+	// Filename 是原始文件名，服务端会取 base 后用于暂存 key 与最终文档名。
+	Filename string `json:"filename" binding:"required"`
+	// Size 是文件总字节数，用于上传前的配额预校验，必须为正。
+	Size int64 `json:"size" binding:"required"`
+}
+
 // CreateIndustryKnowledgeBaseRequest 是创建行业知识库请求体。
 type CreateIndustryKnowledgeBaseRequest struct {
 	// Name 是行业知识库展示名，在未删除行业库中必须唯一。
