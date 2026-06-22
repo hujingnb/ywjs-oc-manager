@@ -1,6 +1,6 @@
 <template>
   <div class="history">
-    <p v-if="runs.length === 0" class="state-text">暂无执行历史。</p>
+    <p v-if="runs.length === 0" class="state-text">{{ t('apps.cron.history.empty') }}</p>
     <button
       v-for="(run, index) in runs"
       v-else
@@ -11,7 +11,7 @@
       @click="onSelect(run)"
     >
       <span>
-        <strong>{{ run.run_time || '未知时间' }}</strong>
+        <strong>{{ run.run_time || t('apps.cron.history.unknownTime') }}</strong>
         <small>{{ run.status || 'unknown' }}</small>
       </span>
       <span class="run-output">{{ outputText(run) }}</span>
@@ -20,7 +20,10 @@
 </template>
 
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import type { CronRunEntry } from '@/api/hooks/useCron'
+
+const { t } = useI18n()
 
 // CronRunHistory 展示单个 Cron 任务的执行历史，并只允许选择真实存在的输出文件。
 const props = defineProps<{
@@ -42,7 +45,7 @@ function canSelectOutput(run: CronRunEntry): run is CronRunEntry & { file_name: 
 
 // outputText 为无输出文件的 synthetic 行提供明确文案，避免用户误以为是加载失败。
 function outputText(run: CronRunEntry): string {
-  if (!canSelectOutput(run)) return '无输出文件'
+  if (!canSelectOutput(run)) return t('apps.cron.history.noOutput')
   const size = typeof run.size === 'number' && run.size > 0 ? ` · ${run.size} B` : ''
   return `${run.file_name}${size}`
 }

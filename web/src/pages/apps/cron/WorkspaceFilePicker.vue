@@ -1,11 +1,11 @@
 <template>
   <n-space align="center" :size="6">
-    <n-input :value="value" placeholder="仓库内脚本文件名" @update:value="emit('update:value', $event)" />
+    <n-input :value="value" :placeholder="t('apps.cron.picker.scriptPlaceholder')" @update:value="emit('update:value', $event)" />
     <n-select
       :value="(null as never)"
       :options="fileOptions"
       :loading="query.isLoading.value"
-      placeholder="选择文件"
+      :placeholder="t('apps.cron.picker.selectFile')"
       style="width: 180px"
       @update:value="onPick"
     />
@@ -14,8 +14,11 @@
 
 <script setup lang="ts">
 import { computed, ref, toRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { NInput, NSelect, NSpace } from 'naive-ui'
 import type { SelectOption } from 'naive-ui'
+
+const { t } = useI18n()
 
 import { useWorkspaceQuery } from '@/api/hooks/useWorkspace'
 import { workspaceFileNames } from './workspaceFiles'

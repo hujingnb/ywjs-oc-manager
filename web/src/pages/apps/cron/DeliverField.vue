@@ -1,12 +1,15 @@
 <template>
   <n-select :value="value" :options="options" @update:value="emit('update:value', $event)" />
-  <p v-if="boundTypes.length === 0" class="deliver-hint">暂无已绑定渠道，去「渠道」页绑定后可在此选择。</p>
+  <p v-if="boundTypes.length === 0" class="deliver-hint">{{ t('apps.cron.deliver.noChannelHint') }}</p>
 </template>
 
 <script setup lang="ts">
 import { computed, toRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { NSelect } from 'naive-ui'
 import type { SelectOption } from 'naive-ui'
+
+const { t } = useI18n()
 
 import { useChannelProgressQuery } from '@/api/hooks/useChannel'
 import { buildDeliverOptions } from './deliverOptions'

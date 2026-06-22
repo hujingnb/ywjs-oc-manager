@@ -3,8 +3,9 @@
 // 子组件 ScheduleField/DeliverField/WorkspaceFilePicker 以 stub 替身，聚焦 Modal 自身的布局与 payload。
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { i18n } from '@/i18n'
 import type { CronJob } from '@/api/hooks/useCron'
 import CronJobFormModal from './CronJobFormModal.vue'
 
@@ -64,9 +65,16 @@ vi.mock('./WorkspaceFilePicker.vue', () => ({
   },
 }))
 
+// 每次用例前将 i18n 语言设为中文，确保断言中文文案的测试与翻译文件对齐。
+beforeEach(() => {
+  i18n.global.locale.value = 'zh'
+})
+
 function mountFormModal(isPlatformAdmin: boolean, job: CronJob | null = null) {
+  // 注入 i18n 插件，使组件内 t() 调用能够解析翻译文案。
   return mount(CronJobFormModal, {
     props: { show: true, submitting: false, job, isPlatformAdmin, appId: 'app_1' },
+    global: { plugins: [i18n] },
   })
 }
 
