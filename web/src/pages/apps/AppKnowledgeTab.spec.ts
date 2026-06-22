@@ -3,7 +3,7 @@ import { defineComponent, h, ref, type PropType, type VNodeChild } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { i18n } from '@/i18n'
-import { KNOWLEDGE_UPLOAD_MAX_BYTES, KNOWLEDGE_UPLOAD_MAX_MESSAGE } from '@/api/hooks/useKnowledge'
+import { KNOWLEDGE_UPLOAD_MAX_BYTES, getKnowledgeUploadMaxMessage } from '@/api/hooks/useKnowledge'
 import AppKnowledgeTab from './AppKnowledgeTab.vue'
 
 const mocks = vi.hoisted(() => ({
@@ -299,7 +299,8 @@ describe('AppKnowledgeTab', () => {
     Object.defineProperty(input.element, 'files', { value: [oversizedFile()], configurable: true })
     await input.trigger('change')
 
-    expect(mocks.warning).toHaveBeenCalledWith(KNOWLEDGE_UPLOAD_MAX_MESSAGE)
+    // 超限提示应与 getKnowledgeUploadMaxMessage() 在当前语言下的翻译一致。
+    expect(mocks.warning).toHaveBeenCalledWith(getKnowledgeUploadMaxMessage())
     expect(mocks.run).not.toHaveBeenCalled()
     expect(mocks.mutateAsync).not.toHaveBeenCalled()
   })
