@@ -47,11 +47,19 @@ type MemberOnboardingService struct {
 	tx                TxRunner
 	hashPassword      PasswordHasher
 	knowledgeDatasets KnowledgeDatasetProvisioner
+	// defaultLocale 是平台默认语言（en/zh），在创建实例时作为 locale 的回退值。
+	// owner 未显式设置语言时，实例 locale 落此值；否则快照 owner 的 locale。
+	defaultLocale string
 }
 
 // NewMemberOnboardingService 创建 onboarding 服务。
-func NewMemberOnboardingService(tx TxRunner, hash PasswordHasher) *MemberOnboardingService {
-	return &MemberOnboardingService{tx: tx, hashPassword: hash}
+// defaultLocale 是平台默认语言（en/zh），用于在 owner locale 未设置时回退；空时按 "en" 处理。
+func NewMemberOnboardingService(tx TxRunner, hash PasswordHasher, defaultLocale ...string) *MemberOnboardingService {
+	dl := "en"
+	if len(defaultLocale) > 0 && defaultLocale[0] != "" {
+		dl = defaultLocale[0]
+	}
+	return &MemberOnboardingService{tx: tx, hashPassword: hash, defaultLocale: dl}
 }
 
 // SetKnowledgeDatasetProvisioner 注入实例创建后的知识库 dataset 预创建能力。
@@ -156,6 +164,7 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 			return fmt.Errorf("创建成员失败: %w", err)
 		}
 		// CreateApp 为 :exec；k8s 模型下不写 runtime_node_id，由调度器决定落点。
+		// locale 快照：新成员尚无语言偏好，直接使用平台默认语言作为初始 locale。
 		if err := store.CreateApp(ctx, sqlc.CreateAppParams{
 			ID:           appID,
 			OrgID:        org.ID,
@@ -165,6 +174,7 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 			Status:       domain.AppStatusDraft,
 			ApiKeyStatus: domain.APIKeyStatusPending,
 			VersionID:    null.StringFrom(input.VersionID),
+			Locale:       null.StringFrom(s.defaultLocale),
 		}); err != nil {
 			return fmt.Errorf("创建应用失败: %w", err)
 		}
@@ -336,6 +346,11 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 			return fmt.Errorf("查询成员应用失败: %w", err)
 		}
 		// k8s 模型下不写 runtime_node_id，由调度器决定落点。
+		// locale 快照：优先使用 owner 已设置的语言偏好；未设置时回退平台默认语言，确保 hermes 容器有确定语言。
+		appLocale := s.defaultLocale
+		if user.Locale.Valid && user.Locale.String != "" {
+			appLocale = user.Locale.String
+		}
 		if err := store.CreateApp(ctx, sqlc.CreateAppParams{
 			ID:           appID,
 			OrgID:        org.ID,
@@ -345,6 +360,7 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 			Status:       domain.AppStatusDraft,
 			ApiKeyStatus: domain.APIKeyStatusPending,
 			VersionID:    null.StringFrom(input.VersionID),
+			Locale:       null.StringFrom(appLocale),
 		}); err != nil {
 			if isAppsOwnerActiveUniqueViolation(err) {
 				return fmt.Errorf("%w: 成员已有未删除实例", ErrMemberCreateInvalid)

@@ -176,6 +176,22 @@ func CanManageKnowledgeRAGFlowDataset(p Principal) bool {
 	return p.Role == domain.UserRolePlatformAdmin
 }
 
+// CanUpdateAppLocale 判断主体是否可修改实例语言（hermes 对终端用户说话的语言）。
+// 语言变更会触发容器重启（配置写入 manifest 后生效），属于有运行时影响的写操作；
+// 平台管理员可运维兜底，本组织管理员可管本组织实例，实例 owner 可管自己的实例。
+func CanUpdateAppLocale(p Principal, appOrgID, appOwnerUserID string) bool {
+	switch p.Role {
+	case domain.UserRolePlatformAdmin:
+		return true
+	case domain.UserRoleOrgAdmin:
+		return p.OrgID == appOrgID
+	case domain.UserRoleOrgMember:
+		return p.UserID == appOwnerUserID
+	default:
+		return false
+	}
+}
+
 // CanUpdateAppKnowledgeQuota 判断主体是否可编辑实例知识库容量。
 // 平台管理员可运维兜底；企业管理员仅能调整本企业实例；普通成员不可修改容量。
 func CanUpdateAppKnowledgeQuota(p Principal, appOrgID string) bool {

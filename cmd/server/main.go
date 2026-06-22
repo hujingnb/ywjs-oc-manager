@@ -139,7 +139,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 
 	memberService := service.NewMemberService(dbStore.Queries, hashPasswordWithDefault)
 	// k8s 模型下不再需要选节点，pod 落点由调度器决定；直接构造 onboarding 服务。
-	onboardingService := service.NewMemberOnboardingService(store.NewOnboardingRunner(dbStore), hashPasswordWithDefault)
+	// 传入平台默认语言，创建实例时快照 owner 语言偏好，未设置时回退此默认值。
+	onboardingService := service.NewMemberOnboardingService(store.NewOnboardingRunner(dbStore), hashPasswordWithDefault, cfg.I18n.DefaultLocale)
 	auditService := service.NewAuditService(dbStore.Queries)
 
 	var ragflowClient service.RAGFlowKnowledgeClient
