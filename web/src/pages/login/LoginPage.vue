@@ -5,52 +5,52 @@
       <LocaleSwitcher :persist="false" />
     </div>
     <p class="login-brand">AGENT RUNTIME MANAGER</p>
-    <h2 class="login-heading">登录控制台</h2>
+    <h2 class="login-heading">{{ t('login.heading') }}</h2>
 
     <div class="login-field">
-      <label for="org-code">企业标识</label>
+      <label for="org-code">{{ t('login.orgCode.label') }}</label>
       <div class="login-input-wrap">
         <input
           id="org-code"
           v-model="orgCode"
           type="text"
           autocomplete="organization"
-          aria-label="企业标识"
-          placeholder="企业用户填写，平台管理员留空"
+          :aria-label="t('login.orgCode.label')"
+          :placeholder="t('login.orgCode.placeholder')"
         />
       </div>
     </div>
 
     <div class="login-field">
-      <label for="username">账号</label>
+      <label for="username">{{ t('login.username.label') }}</label>
       <div class="login-input-wrap">
         <input
           id="username"
           v-model="username"
           type="text"
           autocomplete="username"
-          aria-label="账号"
+          :aria-label="t('login.username.label')"
           placeholder="platform-admin"
         />
       </div>
     </div>
 
     <div class="login-field">
-      <label for="password">密码</label>
+      <label for="password">{{ t('login.password.label') }}</label>
       <div class="login-input-wrap">
         <input
           id="password"
           v-model="password"
           :type="showPassword ? 'text' : 'password'"
           autocomplete="current-password"
-          aria-label="密码"
-          placeholder="请输入密码"
+          :aria-label="t('login.password.label')"
+          :placeholder="t('login.password.placeholder')"
         />
         <!-- eye 图标点击切换密码显隐；末段斜线在显示明文时隐藏。 -->
         <button
           type="button"
           class="login-eye"
-          :aria-label="showPassword ? '隐藏密码' : '显示密码'"
+          :aria-label="showPassword ? t('login.password.hide') : t('login.password.show')"
           @click="showPassword = !showPassword"
         >
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -88,7 +88,7 @@
         configuration='{"hideFooter":true,"hideLogo":true}'
         @statechange="onCaptchaState"
       />
-      <p v-if="!captchaVerified" class="login-captcha-hint">🔄 人机校验中…</p>
+      <p v-if="!captchaVerified" class="login-captcha-hint">{{ t('login.captchaHint') }}</p>
     </div>
 
     <button
@@ -96,7 +96,7 @@
       class="login-submit"
       :disabled="auth.loading || (captchaActive && !captchaVerified)"
     >
-      {{ auth.loading ? '登录中…' : '登录' }}
+      {{ auth.loading ? t('login.submitting') : t('login.submit') }}
     </button>
 
     <div class="login-security">
@@ -109,6 +109,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 
 import { useAuthStore } from '@/stores/auth'
 import LocaleSwitcher from '@/components/LocaleSwitcher.vue'
@@ -116,6 +117,7 @@ import LocaleSwitcher from '@/components/LocaleSwitcher.vue'
 // LoginPage 负责本地账号登录，并在登录成功后回跳原始受保护路径。
 const auth = useAuthStore()
 const router = useRouter()
+const { t } = useI18n()
 
 const orgCode = ref('')
 const username = ref('')
@@ -172,7 +174,8 @@ async function onSubmit() {
     const target = (router.currentRoute.value.query.redirect as string | undefined) ?? '/'
     await router.replace(target)
   } catch (err) {
-    errorMessage.value = err instanceof Error ? err.message : '登录失败'
+    // 后端错误信息优先展示；无具体信息时使用本地化兜底文案。
+    errorMessage.value = err instanceof Error ? err.message : t('login.loginFailed')
     // payload 一次性：无论密码错(401)还是验证码错(400)，本次 payload 已消费，
     // 重置 widget 触发重新出题+重算，让用户可再试。
     if (captchaActive.value) {
