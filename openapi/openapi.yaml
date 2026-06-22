@@ -442,6 +442,18 @@ components:
       required:
       - name
       type: object
+    handlers.PublicConfigResponse:
+      properties:
+        default_locale:
+          description: DefaultLocale 是平台默认界面语言（en/zh），登录页 localStorage 为空时采用。
+          type: string
+        supported_locales:
+          description: SupportedLocales 是平台受支持的界面语言集合，供前端渲染语言选择器。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
+      type: object
     handlers.RechargeRequest:
       properties:
         credit_amount:
@@ -627,6 +639,14 @@ components:
           type: string
       required:
       - name
+      type: object
+    handlers.UpdateLocaleRequest:
+      properties:
+        locale:
+          description: Locale 是目标界面语言，例如 en / zh。
+          type: string
+      required:
+      - locale
       type: object
     handlers.UpdateMemberRequest:
       properties:
@@ -1293,6 +1313,9 @@ components:
         display_name:
           type: string
         id:
+          type: string
+        locale:
+          description: Locale 是用户界面语言偏好（en/zh）；空字符串表示未显式选择，前端回退平台默认。
           type: string
         org_id:
           type: string
@@ -5649,6 +5672,38 @@ paths:
       summary: 当前用户信息
       tags:
       - auth
+  /auth/me/locale:
+    patch:
+      description: 保存当前用户的界面语言偏好（en/zh），登录后跟随用户
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.UpdateLocaleRequest'
+                description: 语言请求
+                summary: body
+        description: 语言请求
+        required: true
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+      summary: 更新界面语言
+      tags:
+      - auth
   /auth/password:
     post:
       description: 已登录用户输入当前密码后修改自己的 manager 登录密码
@@ -5766,6 +5821,19 @@ paths:
       summary: 查询计费展示配置
       tags:
       - recharge
+  /config:
+    get:
+      description: 登录前可读的平台级配置：默认界面语言与受支持语言集合
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.PublicConfigResponse'
+          description: OK
+      summary: 公开前端配置
+      tags:
+      - config
   /custom-skills/deliver:
     post:
       requestBody:

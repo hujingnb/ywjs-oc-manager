@@ -5389,6 +5389,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/me/locale": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 更新界面语言
+         * @description 保存当前用户的界面语言偏好（en/zh），登录后跟随用户
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description 语言请求 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.UpdateLocaleRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
     "/auth/password": {
         parameters: {
             query?: never;
@@ -5585,6 +5645,45 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 公开前端配置
+         * @description 登录前可读的平台级配置：默认界面语言与受支持语言集合
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.PublicConfigResponse"];
                     };
                 };
             };
@@ -11215,6 +11314,12 @@ export interface components {
             /** @description Remark 是平台管理员维护的内部备注，可置空。 */
             remark?: string;
         };
+        "handlers.PublicConfigResponse": {
+            /** @description DefaultLocale 是平台默认界面语言（en/zh），登录页 localStorage 为空时采用。 */
+            default_locale?: string;
+            /** @description SupportedLocales 是平台受支持的界面语言集合，供前端渲染语言选择器。 */
+            supported_locales?: string[];
+        };
         "handlers.RechargeRequest": {
             /** @description CreditAmount 是充值额度，必须为正数，service 层会同步写入 new-api。 */
             credit_amount: number;
@@ -11312,6 +11417,10 @@ export interface components {
             name: string;
             /** @description Provider 是模型来源；为空时后端按 name 做唯一匹配。 */
             provider?: string;
+        };
+        "handlers.UpdateLocaleRequest": {
+            /** @description Locale 是目标界面语言，例如 en / zh。 */
+            locale: string;
         };
         "handlers.UpdateMemberRequest": {
             /** @description DisplayName 是成员展示名，更新接口要求显式传入非空值。 */
@@ -11746,6 +11855,8 @@ export interface components {
         "service.AuthUser": {
             display_name?: string;
             id?: string;
+            /** @description Locale 是用户界面语言偏好（en/zh）；空字符串表示未显式选择，前端回退平台默认。 */
+            locale?: string;
             org_id?: string;
             role?: string;
             status?: string;
