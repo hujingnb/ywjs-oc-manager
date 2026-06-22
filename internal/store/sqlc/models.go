@@ -364,4 +364,6 @@ type User struct {
 	// 下线时间
 	DeletedAt           null.Time   `db:"deleted_at" json:"deleted_at"`
 	PlatformUsernameKey null.String `db:"platform_username_key" json:"platform_username_key"`
+	// 用户界面语言偏好（en/zh）；NULL=未选择，回退平台默认
+	Locale null.String `db:"locale" json:"locale"`
 }

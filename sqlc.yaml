@@ -14,6 +14,7 @@ sql:
       - internal/migrations/000010_custom_skill.up.sql
       - internal/migrations/000011_skill_ticket_messages.up.sql
       - internal/migrations/000012_skill_ticket_title_only.up.sql
+      - internal/migrations/000013_users_locale.up.sql
     queries: internal/store/queries
     gen:
       go:

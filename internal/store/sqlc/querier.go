@@ -309,6 +309,8 @@ type Querier interface {
 	// 回写解析状态、进度和错误；状态值由 service 层从 RAGFlow run 值归一化。
 	UpdateRAGFlowDocumentParseStatus(ctx context.Context, arg UpdateRAGFlowDocumentParseStatusParams) error
 	UpdateSkillTicketStatus(ctx context.Context, arg UpdateSkillTicketStatusParams) error
+	// 更新用户界面语言偏好。locale 由 handler 校验取值集合后传入；NULL 表示重置为「未选择」。
+	UpdateUserLocale(ctx context.Context, arg UpdateUserLocaleParams) error
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) error
 }
