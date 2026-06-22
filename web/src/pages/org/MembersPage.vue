@@ -2,7 +2,7 @@
   <div style="display: grid; gap: 18px">
     <!-- 成员列表 -->
     <DataTableList
-      title="成员列表"
+      :title="t('org.members.list.title')"
       :eyebrow="orgEyebrow"
       :columns="columns"
       :data="members ?? []"
@@ -16,13 +16,13 @@
           v-model:value="selectedOrgId"
           :options="orgOptions"
           style="width: 220px"
-          placeholder="选择企业"
+          :placeholder="t('org.members.list.selectOrg')"
         />
         <n-button v-if="canOnboardMember" @click="router.push('/members/new')">
-          创建并初始化
+          {{ t('org.members.list.createAndInit') }}
         </n-button>
         <n-button v-if="canManageMembers" type="primary" @click="openForm">
-          新增成员
+          {{ t('org.members.list.addMember') }}
         </n-button>
       </template>
     </DataTableList>
@@ -33,36 +33,36 @@
     <n-card v-if="formVisible" :bordered="true">
       <template #header>
         <div style="display: flex; align-items: center; justify-content: space-between">
-          <h2 style="margin: 0">创建成员</h2>
+          <h2 style="margin: 0">{{ t('org.members.form.createTitle') }}</h2>
           <n-button quaternary circle @click="formVisible = false">✕</n-button>
         </div>
       </template>
       <n-form :model="form" label-placement="top" @submit.prevent="submit">
         <n-grid :cols="2" :x-gap="14">
           <n-grid-item>
-            <n-form-item label="用户名 *">
-              <n-input v-model:value="form.username" placeholder="username" />
+            <n-form-item :label="t('org.members.form.username')">
+              <n-input v-model:value="form.username" :placeholder="t('org.members.form.usernamePlaceholder')" />
             </n-form-item>
           </n-grid-item>
           <n-grid-item>
-            <n-form-item label="显示名 *">
-              <n-input v-model:value="form.display_name" placeholder="显示名称" />
+            <n-form-item :label="t('org.members.form.displayName')">
+              <n-input v-model:value="form.display_name" :placeholder="t('org.members.form.displayNamePlaceholder')" />
             </n-form-item>
           </n-grid-item>
           <n-grid-item>
-            <n-form-item label="初始密码 *">
-              <n-input v-model:value="form.password" type="password" placeholder="至少 8 位" />
+            <n-form-item :label="t('org.members.form.password')">
+              <n-input v-model:value="form.password" type="password" :placeholder="t('org.members.form.passwordPlaceholder')" />
             </n-form-item>
           </n-grid-item>
           <n-grid-item>
-            <n-form-item label="角色">
+            <n-form-item :label="t('org.members.form.role')">
               <n-select v-model:value="form.role" :options="roleOptions" />
             </n-form-item>
           </n-grid-item>
           <n-grid-item :span="2">
             <n-space justify="end">
-              <n-button @click="formVisible = false">取消</n-button>
-              <n-button type="primary" attr-type="submit" :loading="creating">保存</n-button>
+              <n-button @click="formVisible = false">{{ t('common.actions.cancel') }}</n-button>
+              <n-button type="primary" attr-type="submit" :loading="creating">{{ t('common.actions.save') }}</n-button>
             </n-space>
             <p v-if="submitError" class="state-text danger">{{ submitError }}</p>
           </n-grid-item>
@@ -74,31 +74,31 @@
     <n-card v-if="createAppTarget" :bordered="true">
       <template #header>
         <div style="display: flex; align-items: center; justify-content: space-between">
-          <h2 style="margin: 0">为该成员创建实例</h2>
+          <h2 style="margin: 0">{{ t('org.members.createApp.title') }}</h2>
           <n-button quaternary circle @click="createAppTarget = null">✕</n-button>
         </div>
       </template>
       <n-form label-placement="top" @submit.prevent="onSubmitCreateApp">
         <n-grid :cols="2" :x-gap="14">
           <n-grid-item>
-            <n-form-item label="实例名 *">
-              <n-input v-model:value="createAppForm.app_name" placeholder="实例名称" />
+            <n-form-item :label="t('org.members.createApp.appName')">
+              <n-input v-model:value="createAppForm.app_name" :placeholder="t('org.members.form.displayNamePlaceholder')" />
             </n-form-item>
           </n-grid-item>
           <n-grid-item>
             <!-- 助手版本从组织 allowlist 过滤，必选；与 CreateMemberPage 保持一致 -->
-            <n-form-item label="助手版本 *">
+            <n-form-item :label="t('org.members.createApp.assistantVersion')">
               <n-select
                 v-model:value="createAppForm.version_id"
                 :options="versionOptions"
                 :loading="versionsLoading || organizationQuery.isLoading.value"
-                placeholder="请选择助手版本"
+                :placeholder="t('org.members.createApp.assistantVersionPlaceholder')"
               />
             </n-form-item>
           </n-grid-item>
           <n-grid-item :span="2">
             <n-space justify="end">
-              <n-button @click="createAppTarget = null">取消</n-button>
+              <n-button @click="createAppTarget = null">{{ t('common.actions.cancel') }}</n-button>
               <n-button
                 type="primary"
                 attr-type="submit"
@@ -106,7 +106,7 @@
                 :disabled="!createAppForm.app_name || !createAppForm.version_id || createAppMutation.isPending.value"
                 @click.prevent="onSubmitCreateApp"
               >
-                提交创建
+                {{ t('org.members.createApp.submitCreate') }}
               </n-button>
             </n-space>
             <p v-if="createAppError" class="state-text danger">{{ createAppError }}</p>
@@ -116,27 +116,27 @@
     </n-card>
 
     <p v-if="createAppResult" class="state-text">
-      已创建实例 {{ createAppResult.app.name }}，Job ID：{{ createAppResult.job_id }}
+      {{ t('org.members.createApp.createdResult', { name: createAppResult.app.name, jobId: createAppResult.job_id }) }}
     </p>
 
     <!-- Modals -->
     <ConfirmActionModal
       :visible="!!memberToDelete"
-      title="确认删除成员"
-      :message="memberToDelete ? `将禁用账号 ${memberToDelete.username} 并提交其名下实例的删除任务，操作不可撤销。` : ''"
-      confirm-label="确认删除"
+      :title="t('org.members.modal.deleteTitle')"
+      :message="memberToDelete ? t('org.members.modal.deleteMessage', { username: memberToDelete.username }) : ''"
+      :confirm-label="t('org.members.modal.deleteConfirm')"
       :busy="deleteMutation.isPending.value"
       @confirm="onConfirmDelete"
       @cancel="memberToDelete = null"
     />
     <ConfirmActionModal
       :visible="!!resetTarget"
-      title="确认重置成员密码"
-      :message="resetTarget ? `将强制重置成员 ${resetTarget.username} 的登录密码，原密码立即失效。` : ''"
-      confirm-label="确认重置"
+      :title="t('org.members.modal.resetTitle')"
+      :message="resetTarget ? t('org.members.modal.resetMessage', { username: resetTarget.username }) : ''"
+      :confirm-label="t('org.members.modal.resetConfirm')"
       :busy="resetMutation.isPending.value"
       :verify-value="resetTarget?.username"
-      :verify-hint='resetTarget ? `输入成员登录名 "${resetTarget.username}" 以确认重置` : ""'
+      :verify-hint='resetTarget ? t("org.members.modal.resetPasswordPrompt", { username: resetTarget.username }) : ""'
       @confirm="onConfirmReset"
       @cancel="resetTarget = null"
     />
@@ -146,6 +146,7 @@
 <script setup lang="ts">
 import { computed, h, ref, watch } from 'vue'
 import { useRouter, RouterLink } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import {
   NButton, NCard, NForm, NFormItem, NGrid, NGridItem,
   NInput, NSelect, NSpace, NTag, type SelectOption,
@@ -170,6 +171,7 @@ import { useOrganizationQuery } from '@/api/hooks/useOrganizations'
 const props = defineProps<{ orgId?: string }>()
 const auth = useAuthStore()
 const router = useRouter()
+const { t } = useI18n()
 // 平台管理员通过组织选择器查看成员，组织管理员默认管理自身组织。
 const {
   isPlatformAdmin,
@@ -179,7 +181,8 @@ const {
   organizationsLoading,
   organizationsError,
 } = usePlatformOrgSelection(computed(() => auth.user), computed(() => props.orgId))
-const orgEyebrow = computed(() => auth.user?.role === 'platform_admin' ? 'Platform · 企业成员' : '我的企业')
+// orgEyebrow 随角色与语言切换响应式更新副标题。
+const orgEyebrow = computed(() => auth.user?.role === 'platform_admin' ? t('org.members.page.eyebrowPlatform') : t('org.members.page.eyebrowOrg'))
 // 一键开户会同步创建应用，按后端 CanCreateAppForOrg 规则仅开放给本组织管理员。
 const canOnboardMember = computed(() => auth.user?.role === 'org_admin' && Boolean(effectiveOrgId.value))
 // 成员写操作只允许本组织管理员；平台管理员在本页仅查看成员信息。
@@ -238,7 +241,7 @@ watch(effectiveOrgId, () => {
 // errorMessage 区分平台管理员无可选组织和组织用户无归属。
 const errorMessage = computed(() => {
   if (organizationsError.value) return String(organizationsError.value)
-  if (!effectiveOrgId.value) return isPlatformAdmin.value ? '暂无可查看企业' : '当前账号未关联企业'
+  if (!effectiveOrgId.value) return isPlatformAdmin.value ? t('org.members.state.noOrg') : t('org.members.state.noOrgLinked')
   return undefined
 })
 
@@ -248,38 +251,40 @@ const { form, formVisible, creating, submitError, openForm, submit } = useFormMo
   mutation: createMutation,
 })
 
-const roleOptions: SelectOption[] = [
-  { label: '企业成员', value: 'org_member' },
-  { label: '企业管理员', value: 'org_admin' },
-]
+// roleOptions 随语言切换响应式更新角色选项文案。
+const roleOptions = computed<SelectOption[]>(() => [
+  { label: t('org.members.role.orgMember'), value: 'org_member' },
+  { label: t('org.members.role.orgAdmin'), value: 'org_admin' },
+])
 
 // columns 展示成员身份和状态，启用/禁用按钮按当前成员状态互斥显示。
-const columns = [
-  { title: '用户名', key: 'username' },
-  { title: '姓名', key: 'display_name' },
+// 使用 computed 确保语言切换时列头文案和操作按钮文案响应式更新。
+const columns = computed(() => [
+  { title: t('org.members.table.username'), key: 'username' },
+  { title: t('org.members.table.displayName'), key: 'display_name' },
   // 角色列页面内 render，不抽 factory
-  { title: '角色', key: 'role', render: (row: Member) => formatMemberRole(row.role) },
-  statusColumn<Member>('状态', r => formatMemberStatus(r.status)),
+  { title: t('org.members.table.role'), key: 'role', render: (row: Member) => formatMemberRole(row.role) },
+  statusColumn<Member>(t('org.members.table.status'), r => formatMemberStatus(r.status)),
   {
-    title: '实例',
+    title: t('org.members.table.instance'),
     key: 'active_app_name',
     render: (row: Member) =>
       row.active_app_id
         ? h(RouterLink, { to: `/apps/${row.active_app_id}/overview` }, () => row.active_app_name ?? '')
-        : h(NTag, { type: 'warning', size: 'small' }, () => '无实例'),
+        : h(NTag, { type: 'warning', size: 'small' }, () => t('org.members.table.noInstance')),
   },
   // 启用/禁用互斥：用两条 RowAction + hidden 分别渲染
   actionColumn<Member>([
-    { label: '禁用', onClick: r => onToggle(r, 'disable'), hidden: r => !canManageMembers.value || r.status !== 'active' },
-    { label: '启用', type: 'primary', onClick: r => onToggle(r, 'enable'), hidden: r => !canManageMembers.value || r.status === 'active' },
-    { label: '重置密码', hidden: () => !canManageMembers.value, onClick: r => openResetForm(r) },
-    { label: '删除', type: 'error', hidden: r => !canManageMembers.value || r.id === currentUserId.value, onClick: r => { memberToDelete.value = r } },
+    { label: t('org.members.actions.disable'), onClick: r => onToggle(r, 'disable'), hidden: r => !canManageMembers.value || r.status !== 'active' },
+    { label: t('org.members.actions.enable'), type: 'primary', onClick: r => onToggle(r, 'enable'), hidden: r => !canManageMembers.value || r.status === 'active' },
+    { label: t('org.members.actions.resetPassword'), hidden: () => !canManageMembers.value, onClick: r => openResetForm(r) },
+    { label: t('common.actions.delete'), type: 'error', hidden: r => !canManageMembers.value || r.id === currentUserId.value, onClick: r => { memberToDelete.value = r } },
     // 仅在「当前账号有补建权限」且「该行没有活跃实例」时显示，避免点击后被后端 ErrMemberCreateInvalid 兜底。
-    { label: '为该成员创建实例', type: 'primary',
+    { label: t('org.members.actions.createInstance'), type: 'primary',
       hidden: r => !canCreateAppForMember.value || Boolean(r.active_app_id),
       onClick: r => openCreateAppForm(r) },
   ]),
-]
+])
 
 // onToggle 调用成员状态 mutation，列表刷新由 hook 的失效策略处理。
 function onToggle(member: Member, action: 'enable' | 'disable') {
@@ -296,7 +301,7 @@ async function onConfirmDelete() {
 
 // openResetForm 通过 prompt 获取新密码，长度不满足时不进入确认流程。
 function openResetForm(member: Member) {
-  const pwd = window.prompt(`输入成员 ${member.username} 的新密码（至少 8 位）`)
+  const pwd = window.prompt(t('org.members.modal.resetPasswordPrompt', { username: member.username }))
   if (!pwd || pwd.length < 8) return
   resetTarget.value = member; resetNewPassword.value = pwd
   resetFeedback.value = ''; resetError.value = false
@@ -320,7 +325,7 @@ function openCreateAppForm(member: Member) {
 async function onSubmitCreateApp() {
   if (!createAppTarget.value) return
   if (!createAppForm.value.version_id) {
-    createAppError.value = '请选择助手版本'
+    createAppError.value = t('org.members.createApp.selectVersionError')
     return
   }
   createAppError.value = ''
@@ -331,7 +336,7 @@ async function onSubmitCreateApp() {
     })
     createAppTarget.value = null
   } catch (err) {
-    createAppError.value = err instanceof Error ? err.message : '创建实例失败'
+    createAppError.value = err instanceof Error ? err.message : t('org.members.createApp.createError')
   }
 }
 
@@ -341,10 +346,10 @@ async function onConfirmReset() {
   resetFeedback.value = ''; resetError.value = false
   try {
     await resetMutation.mutateAsync({ userId: resetTarget.value.id, password: resetNewPassword.value })
-    resetFeedback.value = '已重置密码'; resetTarget.value = null
+    resetFeedback.value = t('org.members.modal.resetSuccess'); resetTarget.value = null
   } catch (err) {
     resetError.value = true
-    resetFeedback.value = err instanceof Error ? err.message : '重置失败'
+    resetFeedback.value = err instanceof Error ? err.message : t('org.members.modal.resetFailed')
   }
 }
 </script>

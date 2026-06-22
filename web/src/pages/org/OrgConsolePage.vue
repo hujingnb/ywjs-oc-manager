@@ -20,17 +20,17 @@
     <n-card :bordered="true">
       <n-tabs v-model:value="activeTab" type="line" animated @update:value="onTabChange">
         <!-- Tab 1：用量趋势 -->
-        <n-tab-pane name="usage" tab="用量趋势">
-          <div v-if="usageLoading" class="chart-state">加载中…</div>
-          <div v-else-if="usageError" class="chart-state danger">用量服务不可用</div>
-          <div v-else-if="!usageItems?.length" class="chart-state">暂无数据</div>
+        <n-tab-pane name="usage" :tab="t('org.console.tabs.usageTrend')">
+          <div v-if="usageLoading" class="chart-state">{{ t('common.status.loading') }}</div>
+          <div v-else-if="usageError" class="chart-state danger">{{ t('org.console.state.usageUnavailable') }}</div>
+          <div v-else-if="!usageItems?.length" class="chart-state">{{ t('common.status.empty') }}</div>
           <div v-else ref="usageChartEl" class="chart-container" />
         </n-tab-pane>
 
         <!-- Tab 2：实例状态 -->
-        <n-tab-pane name="status" tab="实例状态">
-          <div v-if="appsLoading" class="chart-state">加载中…</div>
-          <div v-else-if="appsError" class="chart-state danger">实例数据不可用</div>
+        <n-tab-pane name="status" :tab="t('org.console.tabs.instanceStatus')">
+          <div v-if="appsLoading" class="chart-state">{{ t('common.status.loading') }}</div>
+          <div v-else-if="appsError" class="chart-state danger">{{ t('org.console.state.instanceUnavailable') }}</div>
           <div v-else ref="statusChartEl" class="chart-container" />
         </n-tab-pane>
       </n-tabs>
@@ -40,6 +40,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { NCard, NGrid, NGridItem, NStatistic, NTabPane, NTabs } from 'naive-ui'
 import { init, use } from 'echarts/core'
 import { LineChart, PieChart } from 'echarts/charts'
@@ -70,6 +71,7 @@ const CHART_DANGER_COLOR = '#d93026'
 const CHART_PIE_BORDER = '#ffffff'
 
 const auth = useAuthStore()
+const { t } = useI18n()
 const isOrgAdmin = computed(() => auth.isOrgAdmin)
 const orgId = computed(() => auth.user?.org_id)
 
@@ -109,49 +111,50 @@ const todayTokenTotal = computed(() => {
 })
 
 // stats 将 members/apps/balance/usage 汇总为统计卡片数组，顺序：成员、实例、运行中、异常、余额、今日 Token。
+// 使用 computed 确保语言切换时标签文案响应式更新。
 const stats = computed(() => {
   const runningCount = apps.value?.filter(a => a.status === 'running').length ?? 0
   const errorCount = apps.value?.filter(a => a.status === 'error').length ?? 0
   const remainQuota = balance.value?.remain_quota ?? null
   return [
     {
-      label: '成员数',
+      label: t('org.console.stats.memberCount'),
       value: membersLoading.value ? '—' : String(members.value?.length ?? 0),
       note: '',
       noteColor: undefined,
     },
     {
-      label: '实例数',
+      label: t('org.console.stats.instanceCount'),
       value: appsLoading.value ? '—' : String(apps.value?.length ?? 0),
       note: '',
       noteColor: undefined,
     },
     {
-      label: '运行中',
+      label: t('org.console.stats.running'),
       value: appsLoading.value ? '—' : String(runningCount),
       note: '',
       noteColor: 'var(--color-success)',
     },
     {
-      label: '异常',
+      label: t('org.console.stats.error'),
       value: appsLoading.value ? '—' : String(errorCount),
       note: '',
       noteColor: 'var(--color-danger)',
     },
     {
-      label: '当前余额',
+      label: t('org.console.stats.currentBalance'),
       value: remainQuota !== null ? formatQuotaValue(remainQuota, billingStatus.value) : '—',
-      note: 'new-api 实时',
+      note: t('org.console.stats.realtimeNote'),
       noteColor: undefined,
     },
     {
-      label: '今日 Token',
+      label: t('org.console.stats.todayTokens'),
       value: todayTokenTotal.value !== null
         ? todayTokenTotal.value.toLocaleString('en-US')
         : '—',
       note: todayTokenTotal.value !== null
-        ? 'new-api 实时'
-        : usageLoading.value ? '加载中…' : '不可用',
+        ? t('org.console.stats.realtimeNote')
+        : usageLoading.value ? t('common.status.loading') : t('org.console.stats.unavailable'),
       noteColor: undefined,
     },
   ]
@@ -217,6 +220,8 @@ function buildUsageChart() {
 }
 
 // ── 实例状态图（饼图） ──
+// buildStatusChart 使用当前 t() 值；语言切换时图表标签不会自动重绘（ECharts 无响应式），
+// 需切 Tab 或 resize 时重建才生效，此为已知限制，可接受。
 function buildStatusChart() {
   if (!statusChartEl.value || !apps.value) return
   if (!statusChart) statusChart = init(statusChartEl.value)
@@ -237,9 +242,9 @@ function buildStatusChart() {
       itemStyle: { borderWidth: 2, borderColor: CHART_PIE_BORDER },
       label: { show: false },
       data: [
-        { name: '运行中', value: running, itemStyle: { color: CHART_SUCCESS_COLOR } },
-        { name: '停止', value: stopped < 0 ? 0 : stopped, itemStyle: { color: CHART_MUTED_COLOR } },
-        { name: '异常', value: error, itemStyle: { color: CHART_DANGER_COLOR } },
+        { name: t('org.console.chart.running'), value: running, itemStyle: { color: CHART_SUCCESS_COLOR } },
+        { name: t('org.console.chart.stopped'), value: stopped < 0 ? 0 : stopped, itemStyle: { color: CHART_MUTED_COLOR } },
+        { name: t('org.console.chart.error'), value: error, itemStyle: { color: CHART_DANGER_COLOR } },
       ],
     }],
   })

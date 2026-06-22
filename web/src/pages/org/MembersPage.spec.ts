@@ -1,9 +1,10 @@
 import { mount } from '@vue/test-utils'
 import { computed, defineComponent, h, nextTick, ref, type PropType } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DataTableColumn } from 'naive-ui'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 
+import { i18n } from '@/i18n'
 import MembersPage from './MembersPage.vue'
 import type { Member } from '@/api'
 
@@ -106,10 +107,15 @@ vi.mock('@/api/hooks/useMembers', () => ({
 }))
 
 describe('MembersPage', () => {
+  // 每次用例前将 i18n 语言设为中文，确保断言中文文案的测试与翻译文件对齐。
+  beforeEach(() => {
+    i18n.global.locale.value = 'zh'
+  })
+
   const mountPage = () => mount(MembersPage, {
     global: {
-      // 注入 QueryClient，解决 useQuery 调用报 "No 'queryClient' found" 的问题。
-      plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]],
+      // 注入 i18n 插件，使组件内 t() 调用能够解析翻译文案。
+      plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }], i18n],
       stubs: {
         ConfirmActionModal: true,
         DataTableList: defineComponent({

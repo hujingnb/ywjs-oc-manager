@@ -5,68 +5,68 @@
         <div style="display: flex; align-items: center; justify-content: space-between">
           <div>
             <p class="eyebrow">{{ orgEyebrow }}</p>
-            <h2 style="margin: 0">创建成员并初始化实例</h2>
+            <h2 style="margin: 0">{{ t('org.createMember.page.title') }}</h2>
           </div>
-          <RouterLink class="secondary-button" to="/members">返回列表</RouterLink>
+          <RouterLink class="secondary-button" to="/members">{{ t('common.actions.back') }}</RouterLink>
         </div>
       </template>
 
-      <div v-if="!effectiveOrgId" class="state-text">当前账号未关联企业，无法创建成员。</div>
+      <div v-if="!effectiveOrgId" class="state-text">{{ t('org.createMember.state.noOrgLinked') }}</div>
       <n-form v-else label-placement="top" @submit.prevent="onSubmit">
         <!-- 账号信息 -->
-        <p class="form-section-label">账号信息</p>
+        <p class="form-section-label">{{ t('org.createMember.section.account') }}</p>
         <n-grid :cols="2" :x-gap="14">
           <n-grid-item>
-            <n-form-item label="用户名 *">
-              <n-input v-model:value="form.username" placeholder="username" />
+            <n-form-item :label="t('org.createMember.form.username')">
+              <n-input v-model:value="form.username" :placeholder="t('org.createMember.form.usernamePlaceholder')" />
             </n-form-item>
           </n-grid-item>
           <n-grid-item>
-            <n-form-item label="显示名 *">
-              <n-input v-model:value="form.display_name" placeholder="显示名称" />
+            <n-form-item :label="t('org.createMember.form.displayName')">
+              <n-input v-model:value="form.display_name" :placeholder="t('org.createMember.form.displayNamePlaceholder')" />
             </n-form-item>
           </n-grid-item>
           <n-grid-item>
-            <n-form-item label="初始密码 *">
-              <n-input v-model:value="form.password" type="password" placeholder="至少 8 位" />
+            <n-form-item :label="t('org.createMember.form.password')">
+              <n-input v-model:value="form.password" type="password" :placeholder="t('org.createMember.form.passwordPlaceholder')" />
             </n-form-item>
           </n-grid-item>
           <n-grid-item>
-            <n-form-item label="角色">
+            <n-form-item :label="t('org.createMember.form.role')">
               <n-select v-model:value="form.role" :options="roleOptions" />
             </n-form-item>
           </n-grid-item>
         </n-grid>
 
         <!-- 实例信息 -->
-        <p class="form-section-label">实例信息</p>
+        <p class="form-section-label">{{ t('org.createMember.section.instance') }}</p>
         <n-grid :cols="2" :x-gap="14">
           <n-grid-item>
-            <n-form-item label="实例名 *">
-              <n-input v-model:value="form.app_name" placeholder="实例名称" />
+            <n-form-item :label="t('org.createMember.form.appName')">
+              <n-input v-model:value="form.app_name" :placeholder="t('org.createMember.form.appNamePlaceholder')" />
             </n-form-item>
           </n-grid-item>
           <n-grid-item>
             <!-- 助手版本从组织 allowlist 过滤，必选 -->
-            <n-form-item label="助手版本 *">
+            <n-form-item :label="t('org.createMember.form.assistantVersion')">
               <n-select
                 v-model:value="form.version_id"
                 :options="versionOptions"
                 :loading="versionsLoading || orgLoading"
-                placeholder="请选择助手版本"
+                :placeholder="t('org.createMember.form.assistantVersionPlaceholder')"
               />
             </n-form-item>
           </n-grid-item>
           <n-grid-item :span="2">
             <n-space justify="end">
-              <RouterLink class="secondary-button" to="/members">取消</RouterLink>
+              <RouterLink class="secondary-button" to="/members">{{ t('org.createMember.actions.cancel') }}</RouterLink>
               <n-button
                 type="primary"
                 attr-type="submit"
                 :loading="creating"
                 :disabled="!form.version_id"
               >
-                {{ creating ? '提交中…' : '创建并初始化' }}
+                {{ creating ? t('org.createMember.actions.submitting') : t('org.createMember.actions.createAndInit') }}
               </n-button>
             </n-space>
             <p v-if="versionValidationError" class="state-text danger">{{ versionValidationError }}</p>
@@ -81,6 +81,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import {
   NButton, NCard, NForm, NFormItem, NGrid, NGridItem,
   NInput, NSelect, NSpace, useMessage, type SelectOption,
@@ -99,10 +100,12 @@ import { useAuthStore } from '@/stores/auth'
 const props = defineProps<{ orgId?: string }>()
 const auth = useAuthStore()
 const router = useRouter()
+const { t } = useI18n()
 const message = useMessage()
 // effectiveOrgId 支持平台管理员指定组织，组织管理员则默认使用自身组织。
 const effectiveOrgId = computed(() => props.orgId ?? auth.user?.org_id)
-const orgEyebrow = computed(() => (auth.user?.role === 'platform_admin' ? 'Platform · 创建成员' : '企业 · 创建成员'))
+// orgEyebrow 随角色与语言切换响应式更新副标题。
+const orgEyebrow = computed(() => (auth.user?.role === 'platform_admin' ? t('org.createMember.page.eyebrowPlatform') : t('org.createMember.page.eyebrowOrg')))
 
 // orgIdRef 转为 Ref<string | undefined> 供 vue-query hook 订阅。
 const orgIdRef = computed(() => effectiveOrgId.value)
@@ -123,6 +126,12 @@ const versionOptions = computed<SelectOption[]>(() => {
     .map(v => ({ label: v.name, value: v.id }))
 })
 
+// roleOptions 随语言切换响应式更新角色选项文案。
+const roleOptions = computed<SelectOption[]>(() => [
+  { label: t('org.createMember.role.orgMember'), value: 'org_member' },
+  { label: t('org.createMember.role.orgAdmin'), value: 'org_admin' },
+])
+
 const onboardMutation = useOnboardMember(effectiveOrgId)
 // creating 是页面本地提交态，用于覆盖 mutation 返回前的按钮禁用和文案。
 const creating = ref(false)
@@ -139,11 +148,6 @@ const form = reactive<OnboardMemberPayload>({
   channel_type: 'wechat',
 })
 
-const roleOptions: SelectOption[] = [
-  { label: '企业成员', value: 'org_member' },
-  { label: '企业管理员', value: 'org_admin' },
-]
-
 // versionValidationError 在用户尝试提交但未选择版本时给出明确提示。
 const versionValidationError = ref<string | null>(null)
 
@@ -151,7 +155,7 @@ const versionValidationError = ref<string | null>(null)
 async function onSubmit() {
   // version_id 必填校验：未选择时阻断提交并给出提示。
   if (!form.version_id) {
-    versionValidationError.value = '请选择助手版本'
+    versionValidationError.value = t('org.createMember.state.selectVersionError')
     return
   }
   versionValidationError.value = null
@@ -161,10 +165,10 @@ async function onSubmit() {
     const result = await onboardMutation.mutateAsync({ ...form })
     // 开通成功后给出明确反馈，并跳转到成员列表查看新成员；
     // 实例初始化由 worker 后台异步推进，列表页可继续观察进度。
-    message.success(`已创建成员 ${result.member.display_name} 并提交实例初始化`)
+    message.success(t('org.createMember.success.created', { name: result.member.display_name }))
     router.push('/members')
   } catch (err) {
-    errorMessage.value = err instanceof Error ? err.message : '创建失败'
+    errorMessage.value = err instanceof Error ? err.message : t('org.createMember.state.createError')
   } finally {
     creating.value = false
   }
