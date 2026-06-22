@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils'
 import { nextTick, ref, type Ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { i18n } from '@/i18n'
 import AppRuntimeTab from './AppRuntimeTab.vue'
 
 const appRef = ref({
@@ -48,6 +49,7 @@ function mountRuntimeTab() {
     props: { appId: '00000000-0000-0000-0000-000000000001' },
     global: {
       provide: { app: appRef },
+      plugins: [i18n],
       stubs: {
         ConfirmActionModal: true,
         JobProgressPanel: true,
@@ -61,6 +63,8 @@ function mountRuntimeTab() {
 
 describe('AppRuntimeTab', () => {
   beforeEach(() => {
+    // 每次用例前将 i18n 语言设为中文，确保断言中文文案的测试与翻译文件对齐。
+    i18n.global.locale.value = 'zh'
     appRef.value = {
       id: '00000000-0000-0000-0000-000000000001',
       org_id: '00000000-0000-0000-0000-000000000101',

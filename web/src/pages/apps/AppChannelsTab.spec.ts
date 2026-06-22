@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils'
 import { defineComponent, h, provide, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { i18n } from '@/i18n'
 import AppChannelsTab from './AppChannelsTab.vue'
 import type { ChannelProgress } from '@/api/hooks/useChannel'
 import type { AppDTO } from '@/api/hooks/useApps'
@@ -83,11 +84,13 @@ function mountChannelsTab(channelType?: string) {
       provide('app', app)
       return () => h(AppChannelsTab, { appId: 'app-1', channelType })
     },
-  }))
+  }), { global: { plugins: [i18n] } })
 }
 
 describe('AppChannelsTab', () => {
   beforeEach(() => {
+    // 每次用例前将 i18n 语言设为中文，确保断言中文文案的测试与翻译文件对齐。
+    i18n.global.locale.value = 'zh'
     progress.value = null
     beginAuth.mockReset()
     unbindChannel.mockReset()

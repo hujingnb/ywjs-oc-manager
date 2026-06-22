@@ -3,13 +3,13 @@
     <template #header>
       <div>
         <p class="eyebrow">Instance · Channels</p>
-        <h2 style="margin: 0">渠道绑定</h2>
+        <h2 style="margin: 0">{{ t('apps.channels.heading') }}</h2>
       </div>
     </template>
 
-    <div v-if="!appId" class="state-text">请选择目标实例</div>
+    <div v-if="!appId" class="state-text">{{ t('apps.channels.noApp') }}</div>
     <div v-else class="channels-layout">
-      <aside class="channel-list" aria-label="渠道列表">
+      <aside class="channel-list" :aria-label="t('apps.channels.ariaList')">
         <button
           v-for="channel in channels"
           :key="channel.type"
@@ -34,7 +34,7 @@
         </button>
       </aside>
 
-      <section class="channel-detail" aria-label="微信渠道详情">
+      <section class="channel-detail" :aria-label="t('apps.channels.ariaDetail')">
         <div class="channel-detail-head">
           <div class="channel-title">
             <ChannelLogo :type="activeChannel.type" large />
@@ -59,17 +59,17 @@
               :loading="beginning"
               @click="beginAuth"
             >
-              {{ beginning ? '生成中…' : '刷新二维码' }}
+              {{ beginning ? t('apps.channels.refreshQrPending') : t('apps.channels.refreshQr') }}
             </n-button>
-            <n-button v-if="canUnbind" @click="unbind">解绑</n-button>
+            <n-button v-if="canUnbind" @click="unbind">{{ t('apps.channels.unbind') }}</n-button>
           </n-space>
         </div>
 
-        <p v-if="progress?.bound_identity" class="state-text">已绑定：{{ progress.bound_identity }}</p>
-        <p v-if="progress?.error_message" class="state-text danger">最近错误：{{ progress.error_message }}</p>
-        <p v-if="isWaitingForChallenge" class="state-text">正在生成登录二维码…</p>
+        <p v-if="progress?.bound_identity" class="state-text">{{ t('apps.channels.boundIdentity') }}{{ progress.bound_identity }}</p>
+        <p v-if="progress?.error_message" class="state-text danger">{{ t('apps.channels.errorMsg') }}{{ progress.error_message }}</p>
+        <p v-if="isWaitingForChallenge" class="state-text">{{ t('apps.channels.waitingQr') }}</p>
         <p v-if="challengeExpired" class="state-text danger">
-          当前二维码已过期，请点击"刷新二维码"重新生成。
+          {{ t('apps.channels.qrExpired') }}
         </p>
 
         <AuthChallengeRenderer v-if="visibleChallenge" :challenge="visibleChallenge" @rendered="onQrRendered" />
@@ -81,6 +81,7 @@
 <script setup lang="ts">
 import { computed, inject, ref, toRef, watch, type Ref } from 'vue'
 import { NButton, NCard, NSpace } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 import type { AppDTO } from '@/api/hooks/useApps'
 import AuthChallengeRenderer from '@/components/AuthChallengeRenderer.vue'
@@ -100,6 +101,7 @@ import { useAuthStore } from '@/stores/auth'
 // AppChannelsTab 负责应用渠道登录绑定流程，当前默认处理 wechat 渠道。
 // appId 和 channelType 来自路由，父级注入的 app 用于判断当前用户是否可管理。
 const props = defineProps<{ appId?: string; channelType?: string }>()
+const { t } = useI18n()
 
 // ChannelDisplay 是渠道 tab 的纯前端展示模型；当前仅 wechat 接入真实绑定能力。
 // 其他渠道作为能力边界展示，不参与 API 参数或后端状态机。type 直接复用 ChannelLogo 的
@@ -113,17 +115,18 @@ interface ChannelDisplay {
 }
 
 // channels 固定列出当前产品规划中需要展示的渠道；supported=false 的渠道只做灰色预告。
-const channels: ReadonlyArray<ChannelDisplay> = [
-  { type: 'wechat', name: '微信', description: '扫码绑定后接收助手消息', supported: true, statusLabel: '已支持' },
-  { type: 'work_wechat', name: '企业微信', description: '企业内部协作场景', supported: false, statusLabel: '暂不支持' },
-  { type: 'feishu', name: '飞书', description: '团队消息与工作台场景', supported: false, statusLabel: '暂不支持' },
-  { type: 'dingtalk', name: '钉钉', description: '企业通讯与审批场景', supported: false, statusLabel: '暂不支持' },
-  { type: 'telegram', name: 'Telegram', description: '海外即时通讯与 Bot 接入场景', supported: false, statusLabel: '暂不支持' },
-  { type: 'whatsapp', name: 'WhatsApp', description: '海外用户触达与客服场景', supported: false, statusLabel: '暂不支持' },
-  { type: 'discord', name: 'Discord', description: '社区与游戏玩家场景', supported: false, statusLabel: '暂不支持' },
-  { type: 'slack', name: 'Slack', description: '团队协作与工作流场景', supported: false, statusLabel: '暂不支持' },
-  { type: 'line', name: 'Line', description: '日本与东南亚用户场景', supported: false, statusLabel: '暂不支持' },
-]
+// 使用 computed 包裹确保语言切换时渠道名称和描述响应式更新。
+const channels = computed<ReadonlyArray<ChannelDisplay>>(() => [
+  { type: 'wechat', name: t('apps.channels.channelWechat'), description: t('apps.channels.channelWechatDesc'), supported: true, statusLabel: t('apps.channels.supported') },
+  { type: 'work_wechat', name: t('apps.channels.channelWorkWechat'), description: t('apps.channels.channelWorkWechatDesc'), supported: false, statusLabel: t('apps.channels.unsupported') },
+  { type: 'feishu', name: t('apps.channels.channelFeishu'), description: t('apps.channels.channelFeishuDesc'), supported: false, statusLabel: t('apps.channels.unsupported') },
+  { type: 'dingtalk', name: t('apps.channels.channelDingtalk'), description: t('apps.channels.channelDingtalkDesc'), supported: false, statusLabel: t('apps.channels.unsupported') },
+  { type: 'telegram', name: t('apps.channels.channelTelegram'), description: t('apps.channels.channelTelegramDesc'), supported: false, statusLabel: t('apps.channels.unsupported') },
+  { type: 'whatsapp', name: t('apps.channels.channelWhatsapp'), description: t('apps.channels.channelWhatsappDesc'), supported: false, statusLabel: t('apps.channels.unsupported') },
+  { type: 'discord', name: t('apps.channels.channelDiscord'), description: t('apps.channels.channelDiscordDesc'), supported: false, statusLabel: t('apps.channels.unsupported') },
+  { type: 'slack', name: t('apps.channels.channelSlack'), description: t('apps.channels.channelSlackDesc'), supported: false, statusLabel: t('apps.channels.unsupported') },
+  { type: 'line', name: t('apps.channels.channelLine'), description: t('apps.channels.channelLineDesc'), supported: false, statusLabel: t('apps.channels.unsupported') },
+])
 
 const auth = useAuthStore()
 const app = inject<Ref<AppDTO | null>>('app')
@@ -134,9 +137,10 @@ const supportedChannelType = 'wechat'
 const channelType = computed(() => supportedChannelType)
 const channelTypeRef = computed(() => channelType.value)
 // activeChannel 当前始终落在微信；保留 computed 是为了让模板只依赖展示模型。
-const activeChannel = computed(() => channels.find(channel => channel.type === channelType.value) ?? channels[0])
+const activeChannel = computed(() => channels.value.find(channel => channel.type === channelType.value) ?? channels.value[0])
 
 // selectChannel 只接受当前已支持的微信渠道；暂不支持渠道保持禁用且不改变详情或请求参数。
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function selectChannel(channel: ChannelDisplay) {
   if (!channel.supported) return
 }
@@ -191,10 +195,10 @@ const showRefreshChallenge = computed(() => {
 
 // primaryButtonLabel 聚合提交态、绑定态和过期态，避免模板中散落渠道状态判断。
 const primaryButtonLabel = computed(() => {
-  if (beginning.value) return '触发中…'
-  if (challengeExpired.value) return '重新生成二维码'
-  if (progress.value?.status === 'bound') return '重新登录'
-  return '发起登录'
+  if (beginning.value) return t('apps.channels.triggering')
+  if (challengeExpired.value) return t('apps.channels.regenQr')
+  if (progress.value?.status === 'bound') return t('apps.channels.relogin')
+  return t('apps.channels.beginLogin')
 })
 
 watch(
