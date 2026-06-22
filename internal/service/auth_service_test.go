@@ -679,3 +679,15 @@ func uuidToString(id string) string { return id }
 func fakeAuthHash(password string) (string, error) {
 	return "hashed:" + password, nil
 }
+
+// TestToAuthUser_LocaleMapping 覆盖 toAuthUser 把 users.locale(null.String) 正确映射到 AuthUser.Locale：
+// 已选语言透传，NULL（未选择）映射为空字符串，交由前端回退平台默认。
+func TestToAuthUser_LocaleMapping(t *testing.T) {
+	// 已显式选择 zh：应原样透传
+	got := toAuthUser(sqlc.User{ID: "u1", Username: "a", DisplayName: "A", Role: "org_member", Status: "active", Locale: null.StringFrom("zh")})
+	assert.Equal(t, "zh", got.Locale)
+
+	// locale 为 NULL（未选择）：应映射为空字符串
+	got = toAuthUser(sqlc.User{ID: "u2", Username: "b", DisplayName: "B", Role: "org_member", Status: "active"})
+	assert.Equal(t, "", got.Locale)
+}

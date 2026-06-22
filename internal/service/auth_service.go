@@ -95,6 +95,8 @@ type AuthUser struct {
 	DisplayName string `json:"display_name"`
 	Role        string `json:"role"`
 	Status      string `json:"status"`
+	// Locale 是用户界面语言偏好（en/zh）；空字符串表示未显式选择，前端回退平台默认。
+	Locale string `json:"locale,omitempty"`
 }
 
 // LoginResult 聚合当前用户快照和新签发的 token pair。
@@ -336,5 +338,6 @@ func toAuthUser(user sqlc.User) AuthUser {
 		DisplayName: user.DisplayName,
 		Role:        user.Role,
 		Status:      user.Status,
+		Locale:      user.Locale.String, // null.String：未选择时 .String 为 ""
 	}
 }
