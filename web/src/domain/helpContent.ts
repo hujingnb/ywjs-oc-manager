@@ -2,13 +2,15 @@
 // 三种角色看到的能力边界完全不同，这里按角色各维护一套独立手册，
 // 内容与 DashboardLayout 的菜单裁剪、PermissionsPage 的权限矩阵保持一致。
 // 纯静态数据、不调用任何 API；改文案即改此文件，无需后端配合。
+// 国际化：每种语言维护独立的 HELP_MANUALS_ZH / HELP_MANUALS_EN；
+// getHelpManual 根据 locale 参数选择对应语言版本，未知 locale 降级为中文。
 import type { Role } from '@/domain/permissions'
 
 // HelpSection 是「功能介绍」中的一个菜单分区：一个标题 + 若干条详细说明。
 export interface HelpSection {
   // 分区标题，通常对应一个菜单入口或一类操作。
   title: string
-  // items 为该分区的要点说明，每条是一句可直接展示的中文，覆盖用途、范围与边界。
+  // items 为该分区的要点说明，每条是一句可直接展示的文本，覆盖用途、范围与边界。
   items: string[]
 }
 
@@ -22,7 +24,7 @@ export interface HelpGuide {
 
 // HelpManual 是单个角色的完整手册视图。
 export interface HelpManual {
-  // roleLabel 为角色中文名，用于抽屉标题。
+  // roleLabel 为角色名，用于抽屉标题。
   roleLabel: string
   // summary 是角色定位的一句话概述，置于手册顶部。
   summary: string
@@ -32,9 +34,9 @@ export interface HelpManual {
   guides: HelpGuide[]
 }
 
-// HELP_MANUALS 按角色给出三套独立手册。
+// HELP_MANUALS_ZH 是中文版三角色手册。
 // 仅覆盖该角色在左侧菜单中实际可达的入口与可执行的操作，避免误导用户去点没有权限的功能。
-const HELP_MANUALS: Record<Role, HelpManual> = {
+const HELP_MANUALS_ZH: Record<Role, HelpManual> = {
   // 平台管理员：全平台治理视角，可跨企业观察与运维，但不直接代企业建成员、也无企业余额入口。
   platform_admin: {
     roleLabel: '平台管理员',
@@ -352,12 +354,337 @@ const HELP_MANUALS: Record<Role, HelpManual> = {
   },
 }
 
-// getHelpManual 按角色取对应手册。
+// HELP_MANUALS_EN 是英文版三角色手册，内容与中文版保持语义一致。
+// 仅覆盖该角色在左侧菜单中实际可达的入口与可执行的操作，避免误导用户。
+const HELP_MANUALS_EN: Record<Role, HelpManual> = {
+  // Platform Admin: platform-wide governance perspective; can observe and operate across organizations,
+  // but does not directly create members on behalf of organizations.
+  platform_admin: {
+    roleLabel: 'Platform Admin',
+    summary: 'Platform Admins govern organizations, assistant versions, and runtime resources across the entire platform. They can observe and operate across organizations, but do not directly create members for them. Day-to-day work includes onboarding organizations, maintaining assistant versions, monitoring platform-wide usage, and troubleshooting abnormal instances.',
+    sections: [
+      {
+        title: 'Console',
+        items: [
+          'The default home page after login, displaying key platform-level metrics at a glance.',
+          'Shows total organizations, total members (excluding platform admins), instance count, and running/abnormal distribution.',
+          'Also includes today\'s token consumption trend, per-organization usage comparison, and available model list — all data sourced in real time from new-api.',
+        ],
+      },
+      {
+        title: 'Organizations',
+        items: [
+          'The platform\'s organization registry: create organizations, edit organization info, enable/disable organizations, and top up balances.',
+          'Creating an organization simultaneously generates the first Org Admin account for it; subsequent members are added by the Org Admin.',
+          'Disabling an organization freezes access for all its members and instances; re-enabling restores access.',
+        ],
+      },
+      {
+        title: 'Assistant Versions',
+        items: [
+          'Manage the platform-wide shared assistant version library: create versions, upload skill packages, and maintain version metadata.',
+          'Each version corresponds to a specific set of agent capabilities and skills; instances are bound to a version via "Switch Version".',
+          'After upgrading a version, the affected instances typically need to be restarted for the change to take effect.',
+        ],
+      },
+      {
+        title: 'Members',
+        items: [
+          'View member lists and member details across organizations — useful for verifying account ownership and status.',
+          'Platform Admins do not add org members here; that is the Org Admin\'s responsibility.',
+        ],
+      },
+      {
+        title: 'Instances (Cross-Org)',
+        items: [
+          'View instances from all organizations across the platform and open instance details for operations.',
+          'Supported actions: start / stop / restart and switch assistant version.',
+          'The "Runtime" tab in instance details is exclusive to Platform Admins, used to inspect node and container status and pinpoint failure stages and causes.',
+        ],
+      },
+      {
+        title: 'Organization Knowledge Base',
+        items: [
+          'Upload, re-parse, and search knowledge base documents across organizations.',
+          'Suitable for distributing common policies, supplementary operational materials, or any content that requires centralized platform-side maintenance.',
+        ],
+      },
+      {
+        title: 'Usage',
+        items: [
+          'View token consumption and call statistics across the platform; drill down by organization, member, or application dimension.',
+          'Data is sourced in real time from new-api; the platform does not cache it locally.',
+        ],
+      },
+      {
+        title: 'Audit',
+        items: [
+          'Review platform-wide records of high-risk operations for security accountability and incident post-mortems.',
+        ],
+      },
+      {
+        title: 'Permissions',
+        items: [
+          'Provides a complete three-role permission matrix listing, for each operation, what is visible and actionable by Platform Admin / Org Admin / Org Member.',
+          'When unsure who can perform a certain action, check here first.',
+        ],
+      },
+    ],
+    guides: [
+      {
+        title: 'Create a New Organization',
+        steps: [
+          'Go to "Organizations" from the left-side menu.',
+          'Click the "New Organization" button in the top-right corner.',
+          'Fill in the organization name, organization code, and the first Org Admin\'s account, display name, and initial password.',
+          'On submission, the system creates the Org Admin account together with the organization.',
+          'Hand over the organization code, admin account, and initial password to the organization\'s contact person — they will onboard subsequent members themselves.',
+        ],
+      },
+      {
+        title: 'Top Up an Organization\'s Balance',
+        steps: [
+          'Go to "Organizations" and locate the target organization in the list.',
+          'Open the top-up entry for that organization, enter the amount, and confirm.',
+          'The updated balance and top-up history can be viewed by the Org Admin in their "Account Balance" section.',
+        ],
+      },
+      {
+        title: 'Maintain Assistant Versions and Upgrade Instances',
+        steps: [
+          'Go to "Assistant Versions", create a new version, and upload the corresponding skill package.',
+          'Go to "Instances" and open the detail page of the instance to upgrade.',
+          'Click "Switch" in the version section and select the target version.',
+          'After switching, restart the instance as prompted so the new version takes effect.',
+        ],
+      },
+      {
+        title: 'Troubleshoot an Abnormal Instance',
+        steps: [
+          'Go to "Instances" and open the detail page of an instance with "Abnormal" status.',
+          'Check the failure stage and error cause in the "Overview" tab.',
+          'Switch to the "Runtime" tab to inspect node and container status.',
+          'Restart the instance based on the cause, or resolve underlying dependencies (e.g., missing new-api credentials for the organization) before restarting.',
+        ],
+      },
+    ],
+  },
+  // Org Admin: full authority within their own organization; all operations are strictly scoped to it.
+  org_admin: {
+    roleLabel: 'Org Admin',
+    summary: 'Org Admins manage members, instances, knowledge bases, account balance, and audit logs within their own organization. All operations are scoped to that organization. Day-to-day work includes onboarding employee accounts and dedicated instances, maintaining the organization knowledge base, and monitoring balance and usage.',
+    sections: [
+      {
+        title: 'Overview',
+        items: [
+          'The default home page for Org Admins, showing the overall operational status of the organization.',
+          'Includes member count, instance count, running/abnormal instance distribution, current balance, and today\'s token consumption.',
+          'Also shows the organization\'s usage trend and instance status distribution charts.',
+        ],
+      },
+      {
+        title: 'Members',
+        items: [
+          'Manage all members in the organization: add, edit profiles, enable/disable, delete, and reset passwords.',
+          'When adding a member, you can simultaneously initialize a dedicated instance for them (Onboard), so the employee has a ready-to-use instance upon first login.',
+          'Management scope is limited to this organization\'s members; members of other organizations are not visible.',
+        ],
+      },
+      {
+        title: 'Instances',
+        items: [
+          'Manage all instances in the organization; open an instance detail to access the Overview, Tasks, Scheduled Jobs, Channels, Knowledge Base, Workspace, and Audit tabs.',
+          'Supported actions: start / stop / restart, switch assistant version, and bind third-party channels.',
+          'When a member\'s instance is abnormal, you can assist in troubleshooting and restarting it here.',
+        ],
+      },
+      {
+        title: 'Organization Knowledge Base',
+        items: [
+          'Maintain shared documents for the organization: upload, re-parse, and search.',
+          'All members in the organization can read these documents, but only Org Admins can write or re-parse them.',
+          'After uploading, wait for parsing to complete before the agent can retrieve the content; re-parse if parsing fails.',
+        ],
+      },
+      {
+        title: 'Usage',
+        items: [
+          'View aggregated usage for the organization, with the ability to drill down to per-member and per-instance detail.',
+          'Use this to verify each member\'s or instance\'s token consumption; data is sourced in real time from new-api.',
+        ],
+      },
+      {
+        title: 'Account Balance',
+        items: [
+          'View the organization\'s current balance and historical top-up records.',
+          'Balance is real-time data sourced directly from new-api; no local caching.',
+          'Top-ups are performed by Platform Admins — contact the platform side when the balance is insufficient.',
+        ],
+      },
+      {
+        title: 'Audit',
+        items: [
+          'Review records of high-risk operations within the organization for accountability and investigation.',
+          'Includes the executor and outcome of key actions such as member management, instance operations, and knowledge base writes.',
+        ],
+      },
+    ],
+    guides: [
+      {
+        title: 'Add a Member and Provision a Dedicated Instance',
+        steps: [
+          'Go to "Members" from the left-side menu.',
+          'Click "Add Member".',
+          'Fill in the member\'s account, display name, initial password, and select a role (typically Org Member).',
+          'Confirm instance initialization (Onboard); the system will create a dedicated instance for the member.',
+          'After submission, hand the account and initial password to the employee — they can log in and use their instance immediately.',
+        ],
+      },
+      {
+        title: 'Manage an Instance',
+        steps: [
+          'Go to "Instances" and select the target instance to open its detail page.',
+          'In "Overview", check the running status and assistant version; you can start / stop / restart from here.',
+          'In "Channels", bind external conversation entry points; in "Scheduled Jobs", configure scheduling; in "Knowledge Base", maintain instance-specific materials.',
+          'To upgrade capabilities, click "Switch" to change the assistant version and restart as prompted.',
+        ],
+      },
+      {
+        title: 'Maintain the Organization Knowledge Base',
+        steps: [
+          'Go to "Organization Knowledge Base".',
+          'Upload documents and wait for the parsing status to become "Complete".',
+          'If parsing fails, click "Re-parse".',
+          'Once parsing is complete, members and instances within the organization can retrieve these materials.',
+        ],
+      },
+      {
+        title: 'Reset a Member\'s Password or Deactivate a Member',
+        steps: [
+          'Go to "Members" and locate the target member.',
+          'Select "Reset Password" from the member\'s action menu and hand the new password to the employee.',
+          'When an employee leaves or needs to be frozen, select "Deactivate" to suspend their access; delete the account if necessary.',
+        ],
+      },
+    ],
+  },
+  // Org Member: manages only their own assigned instance and personal knowledge base;
+  // the left menu flattens instance sections directly.
+  org_member: {
+    roleLabel: 'Org Member',
+    summary: 'Org Members manage only the instance assigned to them and their personal knowledge base. They can view the organization\'s shared knowledge base and their own usage. Day-to-day work includes configuring their instance, uploading personal materials, and using the task board and scheduled jobs to drive the agent.',
+    sections: [
+      {
+        title: 'My Instance',
+        items: [
+          'The left-side menu directly exposes all sections of your instance — no need to navigate through an instance list first.',
+          'You can only see the single instance assigned to you.',
+          'If no instance has been assigned yet, the relevant entries will display an empty state page.',
+        ],
+      },
+      {
+        title: 'Overview',
+        items: [
+          'View your instance\'s basic information, running status, API Key status, and current assistant version.',
+          'When the instance is abnormal, this page shows the failure stage and cause, and provides a "Re-initialize" entry.',
+        ],
+      },
+      {
+        title: 'Tasks',
+        items: [
+          'A task board for organizing work items you want the agent to handle into cards.',
+          'You can create tasks, add comments, mark tasks as complete, or flag them as blocked.',
+        ],
+      },
+      {
+        title: 'Scheduled Jobs',
+        items: [
+          'Configure periodic or scheduled tasks for your instance.',
+          'You can create, modify, enable/disable, and delete schedules.',
+        ],
+      },
+      {
+        title: 'Channels',
+        items: [
+          'View and bind third-party channels to connect your instance to external conversation entry points.',
+          'Once bound, you can interact with your agent through those external channels.',
+        ],
+      },
+      {
+        title: 'Personal Knowledge Base',
+        items: [
+          'Upload, re-parse, and search knowledge base files belonging to your own instance.',
+          'Uploaded materials will be retrieved and referenced by the agent during conversations; they take effect only after parsing is complete.',
+        ],
+      },
+      {
+        title: 'Workspace',
+        items: [
+          'View and download files in the instance\'s workspace directory to see what the agent has produced.',
+        ],
+      },
+      {
+        title: 'Organization Knowledge Base',
+        items: [
+          'Read-only access to shared documents distributed by the organization; uploading or modifying is not available here.',
+          'If you need to add organization-level materials, contact your Org Admin.',
+        ],
+      },
+      {
+        title: 'Usage',
+        items: [
+          'View your personal token consumption and call statistics; data is sourced in real time from new-api.',
+        ],
+      },
+    ],
+    guides: [
+      {
+        title: 'Get Started with My Instance',
+        steps: [
+          'After logging in, you land on "Overview" by default — confirm the instance status is normal.',
+          'Go to "Channels" and bind an external conversation entry point.',
+          'Go to "Personal Knowledge Base" and upload materials you want the agent to reference.',
+          'Once the materials finish parsing, you can start conversing with the agent through your channel.',
+        ],
+      },
+      {
+        title: 'Create a Scheduled Job',
+        steps: [
+          'Go to "Scheduled Jobs".',
+          'Create a new job, set the schedule rule and the content to execute.',
+          'After saving, you can enable, disable, or delete the job at any time.',
+        ],
+      },
+      {
+        title: 'Collaborate on the Task Board',
+        steps: [
+          'Go to "Tasks".',
+          'Create a new task card describing what you want the agent to handle.',
+          'Add comments on the card to provide additional context.',
+          'Mark the task as complete when done, or flag it as blocked when you hit a blocker.',
+        ],
+      },
+      {
+        title: 'What to Do When the Instance Shows as Abnormal',
+        steps: [
+          'Check the failure stage and error cause in "Overview".',
+          'Try clicking "Re-initialize" to rebuild the instance\'s runtime environment.',
+          'If it remains abnormal, share the error message shown in Overview with your Org Admin for assistance.',
+        ],
+      },
+    ],
+  },
+}
+
+// getHelpManual 按角色与语言取对应手册。
 // role 允许任意字符串：后端未来新增角色或取值异常时，统一降级到企业成员手册（权限最小的视图），
 // 避免抽屉因未知角色而空白。
-export function getHelpManual(role: string | undefined | null): HelpManual {
-  if (role && role in HELP_MANUALS) {
-    return HELP_MANUALS[role as Role]
+// locale 参数决定语言版本：'en' 返回英文，其他值（含未传）均返回中文。
+export function getHelpManual(role: string | undefined | null, locale?: string): HelpManual {
+  // 根据 locale 选择对应语言的手册数据集；未传或非 'en' 均使用中文。
+  const manuals = locale === 'en' ? HELP_MANUALS_EN : HELP_MANUALS_ZH
+  if (role && role in manuals) {
+    return manuals[role as Role]
   }
-  return HELP_MANUALS.org_member
+  return manuals.org_member
 }

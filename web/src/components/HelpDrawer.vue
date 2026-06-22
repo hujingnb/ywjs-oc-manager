@@ -59,10 +59,10 @@ const emit = defineEmits<{
   (event: 'update:show', value: boolean): void
 }>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
-// manual 根据角色解析对应手册，role 变化时自动切换内容。
-const manual = computed(() => getHelpManual(props.role))
+// manual 根据角色与当前语言解析对应手册；role 或 locale 变化时均自动切换内容。
+const manual = computed(() => getHelpManual(props.role, locale.value))
 
 // drawerWidth 取较宽的固定值以容纳详细文案与操作步骤；窄屏按视口宽度的 92% 自适应收窄，避免溢出。
 // 后台为桌面端使用，这里取一次即可，不监听 resize。
