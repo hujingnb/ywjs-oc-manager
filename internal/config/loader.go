@@ -104,6 +104,10 @@ func (c *Config) applyDefaults() {
 	if c.Logging.SlowQueryMS <= 0 {
 		c.Logging.SlowQueryMS = 200
 	}
+	// i18n 默认语言：未配置时回退 en（平台默认英文）。
+	if strings.TrimSpace(c.I18n.DefaultLocale) == "" {
+		c.I18n.DefaultLocale = "en"
+	}
 	// 验证码启用时填难度与有效期默认（关闭时不使用这两个值）。
 	if c.Captcha.Enabled {
 		if c.Captcha.Difficulty == 0 {

@@ -77,6 +77,8 @@ type Dependencies struct {
 	JobNotifier service.JobNotifier
 	// AllowedOrigins 是 CORS 白名单。空切片代表同源部署不开 CORS。
 	AllowedOrigins []string
+	// DefaultLocale 是平台默认界面语言（来自 config i18n.default_locale），经公开配置端点下发给前端。
+	DefaultLocale string
 }
 
 // NewRouter 创建 Manager API 的 HTTP 路由。
@@ -129,6 +131,13 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	if dep.BootstrapService != nil {
 		handlers.RegisterBootstrapRoutes(router, handlers.NewBootstrapHandler(dep.BootstrapService))
 	}
+
+	// 公开前端配置：无需鉴权，登录页据此初始化界面语言。
+	defaultLocale := dep.DefaultLocale
+	if defaultLocale == "" {
+		defaultLocale = "en"
+	}
+	handlers.RegisterPublicConfigRoutes(router, handlers.NewConfigHandler(defaultLocale, service.SupportedLocales))
 
 	// ── user：RequireUserAuth 注入 principal，所有业务路由挂载在此组 ──
 	user := router.Group("")

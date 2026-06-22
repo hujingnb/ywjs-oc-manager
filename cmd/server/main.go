@@ -587,6 +587,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			TokenManager:                 tokenManager,
 			JobNotifier:                  redisQueue,
 			AllowedOrigins:               allowedOriginsFromConfig(cfg),
+			DefaultLocale:                cfg.I18n.DefaultLocale,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
