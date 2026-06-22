@@ -1,7 +1,7 @@
 // useFormModal.ts 封装常见表单弹窗的打开、提交、错误和 loading 状态。
 // 调用方负责传入可 JSON clone 的初始值，以及与表单类型匹配的 mutation。
 import { reactive, ref, type Ref } from 'vue'
-import { useI18n } from 'vue-i18n'
+import { i18n } from '@/i18n'
 import type { UseMutationReturnType } from '@tanstack/vue-query'
 
 // UseFormModalOptions 定义表单弹窗组合式函数的输入契约。
@@ -42,7 +42,6 @@ export interface UseFormModalReturn<TPayload> {
 export function useFormModal<TPayload extends object, TResult = unknown>(
   opts: UseFormModalOptions<TPayload, TResult>,
 ): UseFormModalReturn<TPayload> {
-  const { t } = useI18n()
   const formVisible = ref(false)
   const creating = ref(false)
   const submitError = ref<string | null>(null)
@@ -67,7 +66,9 @@ export function useFormModal<TPayload extends object, TResult = unknown>(
       formVisible.value = false
       opts.onSuccess?.(result)
     } catch (err) {
-      const fallback = err instanceof Error ? err.message : t('common.errors.actionFailed')
+      // 兜底错误文案用全局 i18n 实例 t（useFormModal 可能在 setup 外被调用/测试，
+      // 不能用 useI18n()）；mutation 失败时即时取当前语言。
+      const fallback = err instanceof Error ? err.message : i18n.global.t('common.errors.actionFailed')
       submitError.value = opts.errorMessage?.(err) ?? fallback
     } finally {
       creating.value = false
