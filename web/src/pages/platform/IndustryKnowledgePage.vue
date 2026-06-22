@@ -34,7 +34,7 @@
       </template>
       <template #header-extra>
         <div class="upload-actions">
-          <span class="upload-limit">{{ KNOWLEDGE_UPLOAD_MAX_MESSAGE }}</span>
+          <span class="upload-limit">{{ t('knowledge.messages.uploadMaxMessage', { label: KNOWLEDGE_UPLOAD_MAX_LABEL }) }}</span>
           <n-button
             size="small"
             type="error"
@@ -219,7 +219,7 @@ import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import DataTableList from '@/components/DataTableList.vue'
 import RAGFlowDatasetInfoDialog from '@/components/RAGFlowDatasetInfoDialog.vue'
 import {
-  KNOWLEDGE_UPLOAD_MAX_MESSAGE,
+  KNOWLEDGE_UPLOAD_MAX_LABEL,
   formatKnowledgeBytes,
   type KnowledgeDocument,
 } from '@/api/hooks/useKnowledge'

@@ -21,7 +21,7 @@
         </n-button>
         <n-button v-if="canEditQuota" size="small" @click="openQuotaModal">{{ t('apps.knowledge.editQuota') }}</n-button>
         <template v-if="canManage">
-          <span class="upload-limit">{{ KNOWLEDGE_UPLOAD_MAX_MESSAGE }}</span>
+          <span class="upload-limit">{{ t('knowledge.messages.uploadMaxMessage', { label: KNOWLEDGE_UPLOAD_MAX_LABEL }) }}</span>
           <label class="secondary-button file-picker" :class="{ disabled: uploading }">
             {{ t('apps.knowledge.upload') }}
             <input type="file" multiple :disabled="uploading" @change="onUploadFile" />
@@ -92,7 +92,7 @@ import { useI18n } from 'vue-i18n'
 
 import { useUpdateAppKnowledgeQuota, type AppDTO } from '@/api/hooks/useApps'
 import {
-  KNOWLEDGE_UPLOAD_MAX_MESSAGE,
+  KNOWLEDGE_UPLOAD_MAX_LABEL,
   downloadAppKnowledgeFile,
   formatKnowledgeBytes,
   useAppKnowledgeQuery,

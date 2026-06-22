@@ -85,7 +85,7 @@
             <p class="eyebrow" style="margin: 4px 0">{{ t('platform.versions.form.labelRouting') }}</p>
           </n-grid-item>
           <n-grid-item v-for="slot in AUXILIARY_SLOTS" :key="slot.key">
-            <n-form-item :label="slot.label">
+            <n-form-item :label="t(slot.labelKey)">
               <n-select
                 v-model:value="form.routing[slot.key]"
                 filterable

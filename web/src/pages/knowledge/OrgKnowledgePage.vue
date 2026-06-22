@@ -25,7 +25,7 @@
           >
             {{ t('knowledge.actions.ragflowInfo') }}
           </n-button>
-          <span class="upload-limit">{{ KNOWLEDGE_UPLOAD_MAX_MESSAGE }}</span>
+          <span class="upload-limit">{{ t('knowledge.messages.uploadMaxMessage', { label: KNOWLEDGE_UPLOAD_MAX_LABEL }) }}</span>
           <n-button
             size="small"
             type="error"
@@ -110,7 +110,7 @@ import { NButton, NCard, NDataTable, NInput, NSelect, NSpace, NTag, useMessage, 
 import { useI18n } from 'vue-i18n'
 
 import {
-  KNOWLEDGE_UPLOAD_MAX_MESSAGE,
+  KNOWLEDGE_UPLOAD_MAX_LABEL,
   downloadOrgKnowledgeFile,
   formatKnowledgeBytes,
   useClearOrgKnowledge,
