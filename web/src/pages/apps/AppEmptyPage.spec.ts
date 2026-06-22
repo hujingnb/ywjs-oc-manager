@@ -54,7 +54,13 @@ vi.mock('naive-ui', () => {
   return { NEmpty: EmptyStub, NButton: ButtonStub }
 })
 
+import { i18n } from '@/i18n'
 import AppEmptyPage from './AppEmptyPage.vue'
+
+// 每次用例前将 i18n 语言设为中文，确保断言中文文案的测试与翻译文件对齐。
+beforeEach(() => {
+  i18n.global.locale.value = 'zh'
+})
 
 function mountPage() {
   return mount(AppEmptyPage, {
@@ -62,6 +68,7 @@ function mountPage() {
       stubs: {
         Bot: { template: '<i />' },
       },
+      plugins: [i18n],
     },
   })
 }
