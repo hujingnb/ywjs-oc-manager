@@ -2,12 +2,12 @@
   <!-- OrgSkillsPage：企业用户左侧「技能」入口页，通过 useOwnApp 取当前用户自己的实例后复用 SkillManager。 -->
   <div>
     <!-- 加载态：等待用户实例信息返回时展示加载提示。 -->
-    <div v-if="isLoading" class="state-text">加载中…</div>
+    <div v-if="isLoading" class="state-text">{{ t('common.status.loading') }}</div>
     <!-- 无实例态：不再整页空态，而是仍渲染定制技能工单提交/跟踪（SkillTicketPanel 自包含、per-user、不需要 appId），
          顶部加提示 banner 说明无实例可提交需求、但需有实例才能安装。 -->
     <template v-else-if="!hasApp">
       <n-alert type="info" :bordered="false" class="no-app-banner">
-        你还没有实例，可提交定制技能需求；交付后需有实例才能安装。
+        {{ t('skills.state.noApp') }}
       </n-alert>
       <!-- 无实例场景下「去安装」无可用实例，提示用户先创建实例再安装。 -->
       <SkillTicketPanel @go-install="onGoInstallWithoutApp" />
@@ -21,6 +21,7 @@
 <script setup lang="ts">
 import { provide } from 'vue'
 import { NAlert, useMessage } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 import SkillManager from '@/components/SkillManager.vue'
 import SkillTicketPanel from '@/components/SkillTicketPanel.vue'
@@ -34,6 +35,7 @@ defineOptions({ name: 'OrgSkillsPage' })
 const { appId, hasApp, isLoading, app } = useOwnApp()
 
 const message = useMessage()
+const { t } = useI18n()
 
 // provide('app')：把用户实例对象注入给 SkillManager，使其 canManageAppSkill 能判定本人归属，
 // 从而在市场展示「安装」按钮（用户可安装包括定制技能在内的 skill 到自己实例）。
@@ -42,7 +44,7 @@ provide('app', app)
 
 // onGoInstallWithoutApp：无实例时 delivered 工单的「去安装」无可落地实例，提示用户先创建实例再安装。
 function onGoInstallWithoutApp() {
-  message.info('请先创建实例后再安装')
+  message.info(t('skills.messages.createAppFirst'))
 }
 </script>
 

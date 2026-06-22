@@ -1,71 +1,71 @@
 <template>
   <div class="ticket-detail-page">
-    <div v-if="detailQuery.isLoading.value" class="state-text">加载中…</div>
-    <p v-else-if="detailQuery.error.value" class="state-text danger">工单详情加载失败</p>
+    <div v-if="detailQuery.isLoading.value" class="state-text">{{ t('common.status.loading') }}</div>
+    <p v-else-if="detailQuery.error.value" class="state-text danger">{{ t('tickets.state.loadFailed') }}</p>
     <template v-else-if="ticket">
       <header class="ticket-header">
         <div class="title-block">
-          <n-button quaternary size="small" @click="router.back()">返回</n-button>
+          <n-button quaternary size="small" @click="router.back()">{{ t('tickets.actions.back') }}</n-button>
           <h1>{{ ticket.title }}</h1>
           <ticket-status-stepper :status="ticket.status" />
         </div>
         <div class="action-bar">
           <template v-if="isAdmin">
-            <n-button v-if="ticket.status === 'pending'" type="primary" @click="onStart">开始制作</n-button>
-            <n-button v-if="ticket.status === 'processing'" type="primary" @click="deliverOpen = true">交付</n-button>
-            <n-button v-if="ticket.status === 'delivered'" type="primary" @click="deliverOpen = true">迭代交付</n-button>
-            <n-button v-if="ticket.status === 'delivered'" @click="openTargets">编辑可见范围</n-button>
-            <n-button v-if="ticket.status === 'rejected'" type="primary" @click="onReopen">重新受理</n-button>
-            <n-button v-if="ticket.status === 'pending' || ticket.status === 'processing'" type="error" @click="rejectOpen = true">拒绝</n-button>
+            <n-button v-if="ticket.status === 'pending'" type="primary" @click="onStart">{{ t('tickets.actions.start') }}</n-button>
+            <n-button v-if="ticket.status === 'processing'" type="primary" @click="deliverOpen = true">{{ t('tickets.actions.deliver') }}</n-button>
+            <n-button v-if="ticket.status === 'delivered'" type="primary" @click="deliverOpen = true">{{ t('tickets.actions.redeliver') }}</n-button>
+            <n-button v-if="ticket.status === 'delivered'" @click="openTargets">{{ t('tickets.actions.editTargets') }}</n-button>
+            <n-button v-if="ticket.status === 'rejected'" type="primary" @click="onReopen">{{ t('tickets.actions.reopen') }}</n-button>
+            <n-button v-if="ticket.status === 'pending' || ticket.status === 'processing'" type="error" @click="rejectOpen = true">{{ t('tickets.actions.reject') }}</n-button>
           </template>
-          <n-button v-else-if="ticket.status === 'delivered'" type="primary" @click="router.push('/skills')">去安装</n-button>
+          <n-button v-else-if="ticket.status === 'delivered'" type="primary" @click="router.push('/skills')">{{ t('tickets.actions.install') }}</n-button>
         </div>
       </header>
 
       <section v-if="isAdmin" class="detail-section submitter-section">
-        <h2>提交信息</h2>
+        <h2>{{ t('tickets.section.submitter') }}</h2>
         <dl class="submitter-grid">
           <div>
-            <dt>提交者</dt>
+            <dt>{{ t('tickets.fields.submitter') }}</dt>
             <dd>
               {{ requesterDisplay }}
               <span v-if="ticket.requester_role" class="role-chip">{{ requesterRoleLabel(ticket.requester_role) }}</span>
             </dd>
           </div>
           <div>
-            <dt>所属企业</dt>
+            <dt>{{ t('tickets.fields.organization') }}</dt>
             <dd>{{ organizationDisplay }}</dd>
           </div>
         </dl>
       </section>
 
       <section v-if="ticket.reject_reason" class="detail-section">
-        <h2>拒绝原因</h2>
+        <h2>{{ t('tickets.section.rejectReason') }}</h2>
         <p class="reject-reason">{{ ticket.reject_reason }}</p>
       </section>
 
       <section class="detail-section split-section">
         <div>
-          <h2>报价</h2>
+          <h2>{{ t('tickets.section.quote') }}</h2>
           <div v-if="isAdmin && canEditQuote" class="quote-editor">
-            <n-input-number v-model:value="quoteYuan" :min="0" :precision="2" placeholder="报价（元）" />
-            <n-button size="small" :loading="quoteMut.isPending.value" @click="onSaveQuote">保存报价</n-button>
+            <n-input-number v-model:value="quoteYuan" :min="0" :precision="2" :placeholder="t('tickets.fields.quotePlaceholder')" />
+            <n-button size="small" :loading="quoteMut.isPending.value" @click="onSaveQuote">{{ t('tickets.actions.saveQuote') }}</n-button>
           </div>
           <p v-else class="readonly-value">{{ yuan(ticket.quote_amount_cents) }}</p>
         </div>
         <div>
-          <h2>可见范围</h2>
+          <h2>{{ t('tickets.section.targets') }}</h2>
           <div v-if="targets.length" class="target-list">
             <span v-for="target in targets" :key="`${target.org_id}-${target.audience}`">
               {{ orgLabel(target.org_id) }} · {{ audienceLabel(target.audience) }}
             </span>
           </div>
-          <p v-else class="state-text">未交付</p>
+          <p v-else class="state-text">{{ t('tickets.state.noDelivery') }}</p>
         </div>
       </section>
 
       <section class="detail-section">
-        <h2>对话</h2>
+        <h2>{{ t('tickets.section.conversation') }}</h2>
         <ticket-conversation
           :ticket-id="ticket.id"
           :messages="messages"
@@ -79,27 +79,27 @@
         :orgs="orgs"
       />
 
-      <n-modal v-model:show="rejectOpen" preset="card" title="拒绝工单" :style="{ width: '460px' }">
+      <n-modal v-model:show="rejectOpen" preset="card" :title="t('tickets.modal.rejectTitle')" :style="{ width: '460px' }">
         <n-input
           v-model:value="rejectReason"
           type="textarea"
           :autosize="{ minRows: 3, maxRows: 6 }"
-          placeholder="填写拒绝原因"
+          :placeholder="t('tickets.modal.rejectPlaceholder')"
         />
         <template #footer>
           <div class="modal-footer">
-            <n-button @click="rejectOpen = false">取消</n-button>
-            <n-button type="error" :loading="rejectMut.isPending.value" @click="onReject">确认拒绝</n-button>
+            <n-button @click="rejectOpen = false">{{ t('tickets.actions.cancel') }}</n-button>
+            <n-button type="error" :loading="rejectMut.isPending.value" @click="onReject">{{ t('tickets.actions.confirmReject') }}</n-button>
           </div>
         </template>
       </n-modal>
 
-      <n-modal v-model:show="targetsOpen" preset="card" title="编辑可见范围" :style="{ width: '560px' }">
+      <n-modal v-model:show="targetsOpen" preset="card" :title="t('tickets.modal.targetsTitle')" :style="{ width: '560px' }">
         <ticket-targets-editor v-model="editableTargets" :orgs="orgs" />
         <template #footer>
           <div class="modal-footer">
-            <n-button @click="targetsOpen = false">取消</n-button>
-            <n-button type="primary" :loading="targetsMut.isPending.value" @click="onSaveTargets">保存</n-button>
+            <n-button @click="targetsOpen = false">{{ t('tickets.actions.cancel') }}</n-button>
+            <n-button type="primary" :loading="targetsMut.isPending.value" @click="onSaveTargets">{{ t('tickets.actions.save') }}</n-button>
           </div>
         </template>
       </n-modal>
@@ -111,6 +111,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NInput, NInputNumber, NModal, useMessage } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 import type { SkillTicketDetail, SkillTicketMessage } from '@/api'
 import { useOrganizationsQuery } from '@/api/hooks/useOrganizations'
@@ -135,6 +136,7 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const message = useMessage()
+const { t } = useI18n()
 
 const id = computed(() => String(route.params.id || ''))
 const detailQuery = useSkillTicketDetailQuery(id)
@@ -197,18 +199,24 @@ function orgLabel(orgID: string) {
   return orgID
 }
 
+// audienceLabel 将可见范围枚举值映射为本地化标签，走 i18n 随语言切换；未知值原样展示。
 function audienceLabel(audience: string) {
-  return (
-    {
-      all_org: '整企业',
-      org_admins: '仅企业管理员',
-      requester_only: '仅申请人',
-    }[audience] ?? audience
-  )
+  const map: Record<string, string> = {
+    all_org: t('tickets.audience.all_org'),
+    org_admins: t('tickets.audience.org_admins'),
+    requester_only: t('tickets.audience.requester_only'),
+  }
+  return map[audience] ?? audience
 }
 
+// requesterRoleLabel 将申请人角色枚举映射为本地化标签，未知角色直接展示原值。
 function requesterRoleLabel(role: string | undefined) {
-  return role === 'org_admin' ? '管理员' : role === 'org_member' ? '成员' : role || '未知'
+  if (!role) return t('common.status.unknown')
+  const map: Record<string, string> = {
+    org_admin: t('tickets.requesterRole.org_admin'),
+    org_member: t('tickets.requesterRole.org_member'),
+  }
+  return map[role] ?? role
 }
 
 function yuan(cents: number | null | undefined) {
@@ -253,7 +261,7 @@ async function onReopen() {
 async function onSaveQuote() {
   if (!ticket.value || quoteYuan.value == null) return
   await quoteMut.mutateAsync({ id: ticket.value.id, quote_amount_cents: Math.round(quoteYuan.value * 100) })
-  message.success('报价已保存')
+  message.success(t('tickets.messages.quoteSaved'))
 }
 
 async function onReject() {

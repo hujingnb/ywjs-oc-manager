@@ -1,7 +1,8 @@
 import { mount } from '@vue/test-utils'
 import { ref } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { i18n } from '@/i18n'
 import AuditLogsPage from './AuditLogsPage.vue'
 
 // AuditLogsPage 通过 useOrgAuditLogsQuery 拉取审计行；这里 mock 后端返回的四种典型场景，
@@ -82,9 +83,14 @@ vi.mock('@/domain/permissions', () => ({
 }))
 
 describe('AuditLogsPage', () => {
+  // 每次用例前将 i18n 语言设为中文，确保断言中文文案的测试与翻译文件对齐。
+  beforeEach(() => {
+    i18n.global.locale.value = 'zh'
+  })
+
   // 普通行应展示操作者中文名 + 角色副文 + 资源名 + 「已删除」徽章。
   it('renders actor name, role subtitle, target name and deleted badge', () => {
-    const wrapper = mount(AuditLogsPage)
+    const wrapper = mount(AuditLogsPage, { global: { plugins: [i18n] } })
     const text = wrapper.text()
     expect(text).toContain('张三')
     expect(text).toContain('企业管理员')
@@ -94,19 +100,19 @@ describe('AuditLogsPage', () => {
 
   // 详情列应展示后端冻结的字符串。
   it('renders action detail from action_detail field', () => {
-    const wrapper = mount(AuditLogsPage)
+    const wrapper = mount(AuditLogsPage, { global: { plugins: [i18n] } })
     expect(wrapper.text()).toContain('gpt-4o → claude-opus-4-7')
   })
 
   // 详情为空时应渲染「—」灰字占位。
   it('falls back to dash when action_detail is empty', () => {
-    const wrapper = mount(AuditLogsPage)
+    const wrapper = mount(AuditLogsPage, { global: { plugins: [i18n] } })
     expect(wrapper.text()).toContain('—')
   })
 
   // 系统行：actor_role=system 且无 actor_id 应展示「系统」主文。
   it('renders system actor with role label only', () => {
-    const wrapper = mount(AuditLogsPage)
+    const wrapper = mount(AuditLogsPage, { global: { plugins: [i18n] } })
     expect(wrapper.text()).toContain('系统')
   })
 })

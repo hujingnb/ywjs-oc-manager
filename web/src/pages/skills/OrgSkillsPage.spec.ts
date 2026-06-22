@@ -6,8 +6,9 @@
  */
 import { mount } from '@vue/test-utils'
 import { ref } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { i18n } from '@/i18n'
 import OrgSkillsPage from './OrgSkillsPage.vue'
 
 // mock useOwnApp composable，由各用例按需覆盖返回值。
@@ -34,6 +35,11 @@ vi.mock('naive-ui', async () => {
 })
 
 describe('OrgSkillsPage', () => {
+  // 每次用例前将 i18n 语言设为中文，确保断言中文文案的测试与翻译文件对齐。
+  beforeEach(() => {
+    i18n.global.locale.value = 'zh'
+  })
+
   // 覆盖加载态：useOwnApp 返回 isLoading=true 时应渲染加载提示，不渲染 SkillManager / 工单面板。
   it('isLoading 为 true 时展示加载提示', () => {
     mockUseOwnApp.mockReturnValue({
@@ -43,7 +49,7 @@ describe('OrgSkillsPage', () => {
       app: ref(null),
     })
 
-    const wrapper = mount(OrgSkillsPage)
+    const wrapper = mount(OrgSkillsPage, { global: { plugins: [i18n] } })
 
     expect(wrapper.text()).toContain('加载中')
     expect(wrapper.find('.skill-manager-stub').exists()).toBe(false)
@@ -59,7 +65,7 @@ describe('OrgSkillsPage', () => {
       app: ref(null),
     })
 
-    const wrapper = mount(OrgSkillsPage)
+    const wrapper = mount(OrgSkillsPage, { global: { plugins: [i18n] } })
 
     // banner 文案提示可提交需求、交付后需有实例才能安装。
     expect(wrapper.text()).toContain('你还没有实例')
@@ -79,7 +85,7 @@ describe('OrgSkillsPage', () => {
       app: ref({ id: testAppId }),
     })
 
-    const wrapper = mount(OrgSkillsPage)
+    const wrapper = mount(OrgSkillsPage, { global: { plugins: [i18n] } })
 
     // SkillManager stub 渲染了说明条件渲染命中有实例态分支。
     const skillManagerEl = wrapper.find('.skill-manager-stub')

@@ -1,6 +1,6 @@
 <template>
   <DataTableList
-    :title="'审计日志'"
+    :title="t('audit.page.title')"
     :eyebrow="orgEyebrow"
     :columns="columns"
     :data="logs ?? []"
@@ -14,7 +14,7 @@
         v-model:value="selectedOrgId"
         :options="orgOptions"
         style="width: 220px"
-        placeholder="选择企业"
+        :placeholder="t('audit.filters.selectOrg')"
       />
     </template>
   </DataTableList>
@@ -23,6 +23,7 @@
 <script setup lang="ts">
 import { computed, h, type VNode } from 'vue'
 import { NSelect, NTag, NTooltip, type DataTableColumns } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 import { useOrgAuditLogsQuery } from '@/api/hooks/useAuditLogs'
 import { usePlatformOrgSelection } from '@/composables/usePlatformOrgSelection'
@@ -34,6 +35,8 @@ import { timeColumn } from '@/components/columns'
 // AuditLogsPage 展示组织级审计日志，平台和组织管理员可看，普通成员需去应用详情查看自己的应用审计。
 const props = defineProps<{ orgId?: string }>()
 const auth = useAuthStore()
+const { t } = useI18n()
+
 // 平台管理员通过组织选择器查看不同组织审计，组织用户默认使用自身组织。
 const {
   isPlatformAdmin,
@@ -43,7 +46,13 @@ const {
   organizationsLoading,
   organizationsError,
 } = usePlatformOrgSelection(computed(() => auth.user), computed(() => props.orgId))
-const orgEyebrow = computed(() => auth.user?.role === 'platform_admin' ? 'Platform · 审计' : '企业 · 审计')
+
+// orgEyebrow 随角色与语言切换响应式更新副标题。
+const orgEyebrow = computed(() =>
+  auth.user?.role === 'platform_admin'
+    ? t('audit.page.eyebrowPlatform')
+    : t('audit.page.eyebrowOrg'),
+)
 const canView = computed(() => canViewOrgAudit(auth.user, effectiveOrgId.value))
 
 // queryOrgId 为 undefined 时不发起查询，前端先拦截无权限场景减少 403。
@@ -53,8 +62,8 @@ const { data: logs, isLoading, error } = useOrgAuditLogsQuery(queryOrgId)
 // 无关联组织时展示提示；有 API 错误时展示错误信息
 const errorMessage = computed(() => {
   if (organizationsError.value) return String(organizationsError.value)
-  if (!effectiveOrgId.value) return isPlatformAdmin.value ? '暂无可查看企业' : '当前账号未关联企业，无法查看审计日志。'
-  if (!canView.value) return '当前账号无权查看企业级审计，请在自己的实例详情中查看实例审计。'
+  if (!effectiveOrgId.value) return isPlatformAdmin.value ? t('audit.state.noOrg') : t('audit.state.noOrgLinked')
+  if (!canView.value) return t('audit.state.noPermission')
   if (error.value) return String(error.value)
   return undefined
 })
@@ -80,7 +89,7 @@ function shortenId(value: string | undefined | null): string {
 // renderPrincipal 渲染操作者 / 资源单元格的统一结构：
 // - system actor 行直接展 actor_role_label（系统），无副文与 hover；
 // - 否则主文 name fallback shortenId(uuid) fallback role_label，副文为 sub，UUID 进 hover。
-// deleted 为 true 时主文后追加「已删除」徽章。
+// deleted 为 true 时主文后追加「已删除」徽章（文案走 i18n）。
 function renderPrincipal(opts: {
   primary: string
   fallback: string
@@ -94,7 +103,7 @@ function renderPrincipal(opts: {
   }
   const main: VNode[] = [h('strong', opts.primary || opts.fallback)]
   if (opts.deleted) {
-    main.push(h(NTag, { type: 'warning', size: 'tiny', bordered: false, style: 'margin-left:6px' }, { default: () => '已删除' }))
+    main.push(h(NTag, { type: 'warning', size: 'tiny', bordered: false, style: 'margin-left:6px' }, { default: () => t('audit.table.deleted') }))
   }
   const sub = opts.sub ? h('small', { style: 'display:block;color:var(--color-text-secondary);font-size:12px' }, opts.sub) : null
   const children: VNode[] = sub ? [...main, sub] : main
@@ -107,10 +116,11 @@ function renderPrincipal(opts: {
 }
 
 // columns 展示审计主体、资源、动作、详情和结果；错误信息作为结果列的辅助诊断文本。
-const columns: DataTableColumns<AuditLog> = [
-  timeColumn('时间', r => r.created_at),
+// 使用 computed 确保语言切换时列头文案响应式更新。
+const columns = computed<DataTableColumns<AuditLog>>(() => [
+  timeColumn(t('audit.table.time'), r => r.created_at),
   {
-    title: '操作者', key: 'actor_name',
+    title: t('audit.table.actor'), key: 'actor_name',
     render: (row) => renderPrincipal({
       primary: row.actor_name ?? '',
       fallback: shortenId(row.actor_id ?? '') || row.actor_role_label,
@@ -121,7 +131,7 @@ const columns: DataTableColumns<AuditLog> = [
     }),
   },
   {
-    title: '资源', key: 'target_name',
+    title: t('audit.table.target'), key: 'target_name',
     render: (row) => renderPrincipal({
       primary: row.target_name ?? '',
       // 没 name 的目标（newapi_call 等）直接展示 target_id 字符串本身。
@@ -132,20 +142,20 @@ const columns: DataTableColumns<AuditLog> = [
       deleted: row.target_deleted ?? false,
     }),
   },
-  { title: '操作', key: 'action', render: (row) => row.action_label },
+  { title: t('audit.table.action'), key: 'action', render: (row) => row.action_label },
   {
-    title: '详情', key: 'action_detail',
+    title: t('audit.table.detail'), key: 'action_detail',
     minWidth: 240,
     render: (row) => row.action_detail
       ? h('span', { style: 'white-space:pre-wrap' }, row.action_detail)
       : h('span', { style: 'color:var(--color-text-secondary)' }, '—'),
   },
   {
-    title: '结果', key: 'result',
+    title: t('audit.table.result'), key: 'result',
     render: (row) => [
       h(NTag, { type: auditTagType(row.result), size: 'small', bordered: false }, { default: () => row.result_label }),
       row.error_message ? h('small', { style: 'display:block;color:var(--color-danger);font-size:12px' }, row.error_message) : null,
     ],
   },
-]
+])
 </script>
