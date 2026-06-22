@@ -46,10 +46,24 @@ describe('useLocaleStore', () => {
     expect(apiRequest).toHaveBeenCalledWith('/api/v1/auth/me/locale', expect.objectContaining({ method: 'PATCH', body: { locale: 'zh' } }))
   })
 
-  // 非法 locale 被规范化为兜底 en，不写入非法值
-  it('applyFromUser 非法值回退兜底', () => {
+  // 非法 locale 被规范化为兜底 en：先切到 zh，再用非法值 'fr' 调 applyFromUser，
+  // 应归一化为 'en'（证明 normalize 真的执行了，而非「什么都没做、恰好仍是默认 en」）。
+  it('applyFromUser 非法值归一化为兜底 en', () => {
     const store = useLocaleStore()
-    store.applyFromUser('fr')
+    store.applyFromUser('zh') // 先置为 zh，制造非默认初态
+    expect(store.locale).toBe('zh')
+    store.applyFromUser('fr') // 非法值
     expect(store.locale).toBe('en')
+    expect(i18n.global.locale.value).toBe('en')
+  })
+
+  // 空 / undefined 的 user.locale 表示未选择，applyFromUser 应保持当前语言不变
+  it('applyFromUser 空值时保持当前语言', () => {
+    const store = useLocaleStore()
+    store.applyFromUser('zh')
+    store.applyFromUser('') // 未选择
+    expect(store.locale).toBe('zh')
+    store.applyFromUser(undefined)
+    expect(store.locale).toBe('zh')
   })
 })
