@@ -59,6 +59,7 @@
 
     <CronJobFormModal
       v-model:show="showForm"
+      :app-id="appId"
       :submitting="formSubmitting"
       :job="editingJob"
       :is-platform-admin="canShowAdvancedFields"
