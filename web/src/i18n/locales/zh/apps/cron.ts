@@ -52,6 +52,7 @@ export default {
     modeCalendar: '按天/周',
     modeInterval: '按间隔',
     modeExpr: '高级表达式',
+    exprPlaceholder: 'cron 0 9 * * 1-5 或 every 10m',
     freqDaily: '每天',
     freqWeekly: '每周',
     removeTime: '删除',

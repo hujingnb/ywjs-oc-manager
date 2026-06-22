@@ -288,6 +288,8 @@ export default {
       // authHeader/authHeaderCurrentValue：API 文档中鉴权 Header 说明行；key 与 zh/platform.ts 和 IndustryKnowledgePage.vue 对齐。
       authHeader: 'Auth Header:',
       authHeaderCurrentValue: ', current value:',
+      // authHeaderSuffix：鉴权说明句末标点，随语言切换。
+      authHeaderSuffix: '.',
       // Status code descriptions
       status202: 'Uploaded successfully; file queued for RAGFlow parsing.',
       status400: 'Missing parameter, empty industry name, or malformed request body.',

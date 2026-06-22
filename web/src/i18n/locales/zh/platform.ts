@@ -305,7 +305,9 @@ export default {
       copyFail: '复制失败，请手动复制文档内容',
       // authHeader/authHeaderCurrentValue：API 文档中鉴权 Header 说明行。
       authHeader: '鉴权 Header：',
-      authHeaderCurrentValue: '当前值：',
+      authHeaderCurrentValue: '，当前值：',
+      // authHeaderSuffix：鉴权说明句末标点，随语言切换。
+      authHeaderSuffix: '。',
       // 返回码描述。
       status202: '上传成功，文件进入 RAGFlow 解析队列。',
       status400: '参数缺失、行业名称为空或请求体格式错误。',

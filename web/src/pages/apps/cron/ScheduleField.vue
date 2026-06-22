@@ -47,7 +47,7 @@
 
     <!-- 模式 C：原始表达式兜底。 -->
     <div v-else class="mode-block">
-      <n-input :value="state.expr" placeholder="cron 0 9 * * 1-5 或 every 10m" @update:value="onExprChange" />
+      <n-input :value="state.expr" :placeholder="t('apps.cron.schedule.exprPlaceholder')" @update:value="onExprChange" />
     </div>
 
     <!-- 实际运行预览：calendar 模式枚举真实触发点，分钟不一致时给告警。 -->

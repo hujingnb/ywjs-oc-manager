@@ -151,8 +151,8 @@
           <p><strong>POST</strong> <code>/api/v1/external/industry-knowledge/files</code></p>
           <p>
             {{ t('platform.industry.apiDoc.authHeader') }}
-            <code>X-OC-Industry-Knowledge-Token</code>，{{ t('platform.industry.apiDoc.authHeaderCurrentValue') }}
-            <code>{{ industryUploadTokenText }}</code>。
+            <code>X-OC-Industry-Knowledge-Token</code>{{ t('platform.industry.apiDoc.authHeaderCurrentValue') }}
+            <code>{{ industryUploadTokenText }}</code>{{ t('platform.industry.apiDoc.authHeaderSuffix') }}
           </p>
         </div>
 

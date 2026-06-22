@@ -52,6 +52,7 @@ export default {
     modeCalendar: 'Daily / Weekly',
     modeInterval: 'Interval',
     modeExpr: 'Advanced expression',
+    exprPlaceholder: 'cron 0 9 * * 1-5 or every 10m',
     freqDaily: 'Every day',
     freqWeekly: 'Every week',
     removeTime: 'Remove',
