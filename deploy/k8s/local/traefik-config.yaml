@@ -1,0 +1,31 @@
+# 本地 k3d Traefik 入口超时补丁 —— 仅本地联调用。
+#
+# 背景：k3d 内置 Traefik v2.11（helm chart traefik-27.x）web entrypoint 的
+# `respondingTimeouts.readTimeout` 默认 60s——这是「读取整个请求（含 body）」的上限。
+# 知识库上传走原始 application/octet-stream 直传，且 manager 侧对上传 body 限速
+# 512KB/s（secret 里 transfer_limit.upload_bytes_per_sec=524288）。两者叠加后，
+# 任何 >~30MB 的文件读 body 都超过 60s，被 Traefik 在第 60s 掐断连接：manager 读
+# body 报错返回 400，Traefik 又把响应替换成自己的 21 字节 "Internal Server Error"，
+# 浏览器记为 499，前端显示「上传失败」。实测 77MB 的 PDF 每次稳定 ~62s 失败。
+#
+# 修法：用 k3s 原生 HelmChartConfig 扩展点覆盖 Traefik chart 的 values，把 web
+# entrypoint 的 readTimeout 调到 600s（10min）。512KB/s 限速下可容纳 ~300MB 文件，
+# 覆盖知识库 PDF 常见体量。只改 web entrypoint 的读取超时，不动其它 entrypoint、
+# 不动写超时/空闲超时，影响面最小。
+#
+# 注意：限速若不变，接近前端宣称的 1024MB 上限仍需更长 readTimeout；本补丁优先
+# 解决「数十~数百 MB 文件传不上去」的实际问题。生产 Traefik 为多租户共享入口，
+# 不在本仓库管理范围内，此补丁仅作用于本地 k3d。
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  # valuesContent 会被 helm-controller 合并覆盖到 HelmChart traefik 的既有 values 之上。
+  # 直接用 additionalArguments 追加 Traefik 原生静态参数，绕开 chart 的 ports.transport
+  # 子 schema（实测 chart 27.0.x 不会把 ports.web.transport.respondingTimeouts 渲染成
+  # CLI arg）。additionalArguments 由 chart 原样拼到 traefik 容器 args 末尾，最稳。
+  valuesContent: |-
+    additionalArguments:
+      - "--entrypoints.web.transport.respondingtimeouts.readtimeout=600"
