@@ -19,7 +19,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
-from ocops import channel, cron, doctor, info, kanban, skills
+from ocops import channel, conversation, cron, doctor, info, kanban, skills
 from ocops.auth import token_matches
 from ocops.errors import OpsError, code_to_http
 from ocops.kanban import KanbanError
@@ -543,6 +543,66 @@ async def channel_login(request):
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
+# ---------------------------------------------------------------------------
+# 会话（conversation）端点：转发到同 pod hermes api_server /api/sessions/*。
+# manager 仅做带 per-app token 的透传，会话数据不在 oc-ops 落地。
+# ---------------------------------------------------------------------------
+
+async def conversation_list(request):
+    """GET /oc/conversations?source=&limit=&offset= —— 列实例下会话。"""
+    try:
+        q = request.query_params
+        data = conversation.list_sessions(
+            source=q.get("source", ""),
+            limit=int(q.get("limit", "50") or "50"),
+            offset=int(q.get("offset", "0") or "0"),
+        )
+        return _ok(data)
+    except OpsError as e:
+        return _err(e)
+
+
+async def conversation_messages(request):
+    """GET /oc/conversations/{sid}/messages —— 读会话历史。"""
+    try:
+        return _ok(conversation.session_messages(request.path_params["sid"]))
+    except OpsError as e:
+        return _err(e)
+
+
+async def conversation_create(request):
+    """POST /oc/conversations —— 新建会话，body 透传（source/title）。"""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        return _ok(conversation.create_session(body), status=201)
+    except OpsError as e:
+        return _err(e)
+
+
+async def conversation_delete(request):
+    """DELETE /oc/conversations/{sid} —— 删除会话。"""
+    try:
+        conversation.delete_session(request.path_params["sid"])
+        return Response(status_code=204)
+    except OpsError as e:
+        return _err(e)
+
+
+async def conversation_chat(request):
+    """POST /oc/conversations/{sid}/chat —— 单轮续聊，body 含 message。"""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        return _ok(conversation.chat(request.path_params["sid"], body))
+    except OpsError as e:
+        return _err(e)
+
+
 # 路由表：按 REST 语义定义 HTTP 方法，无方法限制的路由接受所有方法。
 # kanban / login 路由在 Task 10/11 追加。
 routes = [
@@ -588,6 +648,12 @@ routes = [
     Route("/oc/skills",        skills_install, methods=["POST"]),
     Route("/oc/skills/reload", skills_reload,  methods=["POST"]),
     Route("/oc/skills/{name}", skills_delete,  methods=["DELETE"]),
+    # 会话端点（Task 12）：非流式 REST；/chat/stream SSE 在后续任务追加。
+    Route("/oc/conversations", conversation_list, methods=["GET"]),
+    Route("/oc/conversations", conversation_create, methods=["POST"]),
+    Route("/oc/conversations/{sid}/messages", conversation_messages, methods=["GET"]),
+    Route("/oc/conversations/{sid}/chat", conversation_chat, methods=["POST"]),
+    Route("/oc/conversations/{sid}", conversation_delete, methods=["DELETE"]),
 ]
 
 # Starlette app：路由 + AuthMiddleware 中间件栈。

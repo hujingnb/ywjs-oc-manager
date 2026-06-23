@@ -106,6 +106,19 @@ accepts any.
 | `POST` | `/oc/skills/reload` | - | `schema/skills/reload.schema.json` |
 | `DELETE` | `/oc/skills/{name}` | - | `schema/skills/action.schema.json` |
 
+### Conversations
+
+会话端点：oc-ops 做带 per-app token 的透传，将请求转发到同 pod 内的 hermes
+api_server（`/api/sessions/*`）。会话数据不在 oc-ops 落地。
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| `GET` | `/oc/conversations` | query `source`, `limit`, `offset` | 会话列表数组 |
+| `POST` | `/oc/conversations` | JSON body（`source`/`title`） | 新建会话对象，`201 Created` |
+| `GET` | `/oc/conversations/{sid}/messages` | - | 历史消息数组 |
+| `POST` | `/oc/conversations/{sid}/chat` | JSON body（`message`） | 单轮续聊 assistant 回复对象 |
+| `DELETE` | `/oc/conversations/{sid}` | - | `204 No Content` |
+
 ## Schema Layout
 
 - `schema/common/*.schema.json` defines shared payloads such as errors.
