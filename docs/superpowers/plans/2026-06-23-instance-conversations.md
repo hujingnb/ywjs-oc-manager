@@ -559,21 +559,28 @@ Expected: FAIL（未定义 ListSessions 等）。
 package ocops
 
 // ConversationSession 是一条会话（跨渠道；source 标识来源渠道）。
+// 字段名对齐 api_server `_session_response` safe_keys（已读源码确认）。
 type ConversationSession struct {
-	ID         string `json:"id"`
-	Source     string `json:"source"`               // 渠道来源：weixin / web / api_server 等
-	Title      string `json:"title,omitempty"`      // 会话标题（可空）
-	Model      string `json:"model,omitempty"`      // 绑定模型（可空）
-	LastActive string `json:"last_active,omitempty"`// 最近活跃时间（ISO8601，可空）
-	CreatedAt  string `json:"created_at,omitempty"`
+	ID           string `json:"id"`
+	Source       string `json:"source"`                  // 渠道来源：weixin / web / api_server 等
+	UserID       string `json:"user_id,omitempty"`       // 会话归属用户标识（渠道侧）
+	Title        string `json:"title,omitempty"`         // 会话标题（可空）
+	Model        string `json:"model,omitempty"`         // 绑定模型（可空）
+	StartedAt    string `json:"started_at,omitempty"`    // 会话开始时间
+	LastActive   string `json:"last_active,omitempty"`   // 最近活跃时间（列表按此排序）
+	MessageCount int    `json:"message_count,omitempty"` // 消息数（列表展示）
+	Preview      string `json:"preview,omitempty"`       // 末条消息预览（列表展示）
 }
 
 // ConversationMessage 是一条历史消息。content 可能是字符串或多模态 parts，
-// 用 json.RawMessage 容纳文字/图片两种形态，由前端按 type 渲染。
+// 用 any 容纳文字/图片两种形态，由前端按 type 渲染。
+// 字段名对齐 api_server `_message_response` safe_keys（已读源码确认）。
 type ConversationMessage struct {
-	Role      string `json:"role"`              // user / assistant
-	Content   any    `json:"content"`           // 字符串或 [{type,text|image_url}]
-	CreatedAt string `json:"created_at,omitempty"`
+	Role          string `json:"role"`                      // user / assistant
+	Content       any    `json:"content"`                   // 字符串或 [{type,text|image_url}]
+	Timestamp     string `json:"timestamp,omitempty"`       // 消息时间戳
+	ToolCalls     any    `json:"tool_calls,omitempty"`      // 工具调用（透传，前端可忽略）
+	FinishReason  string `json:"finish_reason,omitempty"`
 }
 
 // ConversationChatReq 是续聊请求体。Message 为文字字符串；图片走 multimodal parts
@@ -2158,9 +2165,9 @@ git commit -m "docs: 记录实例对话功能三角色浏览器验证"
 - api_server 运行 & 端口：**已静态确认** = 启用（`API_SERVER_ENABLED=true`，render.go:107），监听 127.0.0.1:8642。
 - API_SERVER_KEY 来源：**无**（仓库未注入）→ api_server 不鉴权。
 - 鉴权路径：**A（无 patch、无 token）**——oc-ops 直接调 `/api/sessions`，`_api_server_key()` 返回空、不发 Authorization 头。
-- session JSON 字段：待真实 pod 复核（DTO 暂按源码观测：id/source/title/model/last_active）。
-- message JSON 字段：待真实 pod 复核（暂按 role/content）。
-- `/chat` 微信投递行为：待真实 pod 复核（不投递则 v1 不处理，设计已定）。
+- session JSON 字段：**已读源码确认**（`_session_response` safe_keys）= id/source/user_id/model/title/started_at/last_active/message_count/preview…，包装 `{object:list,data:[]}`。
+- message JSON 字段：**已读源码确认**（`_message_response` safe_keys）= id/role/content/timestamp/tool_calls/finish_reason/reasoning…，包装 `{object:list,session_id,data:[]}`。
+- `/chat` 微信投递行为：待真实 pod 复核（不投递则 v1 不处理，设计已定）——唯一仍需 pod 的 Spike 项。
 
 ---
 
