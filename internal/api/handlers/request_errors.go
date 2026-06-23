@@ -61,6 +61,13 @@ var mappedServiceErrorRules = []serviceErrorRule{
 	{target: service.ErrCronBadRequest, statusCode: http.StatusBadRequest, code: "CRON_BAD_REQUEST", message: "定时任务请求参数非法"},
 	{target: service.ErrCronCLI, statusCode: http.StatusBadGateway, code: "CRON_CLI_ERROR", message: "定时任务命令执行失败", safe: true},
 	{target: service.ErrCronOutputInvalid, statusCode: http.StatusBadGateway, code: "CRON_OUTPUT_INVALID", message: "Hermes Cron 版本可能不兼容，请联系平台管理员"},
+	// 实例会话 sentinel error 映射（语义与 kanban/cron 同模式）。
+	{target: service.ErrConversationForbidden, statusCode: http.StatusForbidden, code: "CONVERSATION_FORBIDDEN", message: "无权访问该实例会话"},
+	{target: service.ErrConversationRuntimeUnavailable, statusCode: http.StatusServiceUnavailable, code: "RUNTIME_NOT_AVAILABLE", message: "实例容器未运行，请先在运行时 tab 启动"},
+	{target: service.ErrConversationNotSupported, statusCode: http.StatusServiceUnavailable, code: "CONVERSATION_NOT_SUPPORTED_ON_STUB", message: "该实例运行的是 dev 镜像，会话不可用"},
+	validationErrorRule(service.ErrConversationBadRequest, http.StatusBadRequest, "CONVERSATION_BAD_REQUEST"),
+	{target: service.ErrConversationCLI, statusCode: http.StatusBadGateway, code: "CONVERSATION_CLI_ERROR", message: "会话命令执行失败", safe: true},
+	{target: service.ErrConversationOutputInvalid, statusCode: http.StatusBadGateway, code: "CONVERSATION_OUTPUT_INVALID", message: "Hermes 版本可能不兼容，请联系平台管理员"},
 }
 
 // writeBindError 将 Gin 的 JSON 绑定错误转成面向调用方的 400 文案。

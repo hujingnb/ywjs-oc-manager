@@ -469,6 +469,20 @@ type UpdateCustomSkillTargetsRequest struct {
 // 注:交付实际走 multipart/form-data(字段 ticket_id/description/targets(JSON 串)+ file),
 // 不以 JSON struct 绑定;此类型仅作文档占位与字段约定记录,不直接用于请求绑定。
 
+// ===== 实例会话 hermes-conversation =====
+
+// CreateConversationRequest 是 POST /hermes/conversations 的请求体（新建 web 会话）。
+type CreateConversationRequest struct {
+	// Title 是可选会话标题；前端不填时 service 层按默认逻辑命名。
+	Title string `json:"title"`
+}
+
+// ConversationChatRequest 是续聊请求体。v1 仅文字 Message；图片在后续增强中以 parts 承载。
+type ConversationChatRequest struct {
+	// Message 是文字内容，必填；空白内容由 ShouldBindJSON required tag 拦截。
+	Message string `json:"message" binding:"required"`
+}
+
 // ===== 公开配置 config =====
 
 // PublicConfigResponse 是 GET /api/v1/config 的响应：登录前可读的平台级前端配置。
