@@ -181,6 +181,27 @@ var ErrCronOutputInvalid = errors.New("cron 输出解析失败")
 // ErrCronBadRequest 表示 Cron 请求参数非法（job id / script / output file 等白名单校验失败）。
 var ErrCronBadRequest = errors.New("cron 请求参数非法")
 
+// 会话 --------------------------------------------------------------
+// 会话功能错误哨兵（语义对齐 kanban 同名错误，便于 handler 复用映射规则）。
+
+// ErrConversationForbidden 表示当前 principal 无权访问该实例会话。
+var ErrConversationForbidden = errors.New("无权访问该实例会话")
+
+// ErrConversationNotSupported 表示该实例运行的镜像不支持会话功能。
+var ErrConversationNotSupported = errors.New("当前实例不支持会话")
+
+// ErrConversationRuntimeUnavailable 表示实例容器未运行，会话运行时尚未就绪。
+var ErrConversationRuntimeUnavailable = errors.New("实例运行时尚未就绪")
+
+// ErrConversationBadRequest 表示会话请求参数非法（conversation id / message 等校验失败）。
+var ErrConversationBadRequest = errors.New("会话请求参数不合法")
+
+// ErrConversationCLI 表示会话上游 CLI 或 API 调用非零退出或网络失败。
+var ErrConversationCLI = errors.New("会话上游调用失败")
+
+// ErrConversationOutputInvalid 表示会话上游返回内容不符合预期协议格式。
+var ErrConversationOutputInvalid = errors.New("会话上游返回异常")
+
 // 助手版本 -----------------------------------------------------------
 
 // ErrAssistantVersionNotFound 助手版本不存在或已删除。

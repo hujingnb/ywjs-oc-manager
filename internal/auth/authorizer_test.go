@@ -513,3 +513,17 @@ func TestCanViewSkillTicket(t *testing.T) {
 	assert.True(t, CanViewSkillTicket(Principal{Role: domain.UserRoleOrgMember, UserID: "owner"}, "owner"))  // 本人可看
 	assert.False(t, CanViewSkillTicket(Principal{Role: domain.UserRoleOrgMember, UserID: "other"}, "owner")) // 同企业他人不可看
 }
+
+// TestCanViewAppConversations 验证查看实例会话的权限边界：
+// org_member 只能查看自己拥有的实例会话；同组织其他成员不可查看；平台管理员可跨组织查看。
+func TestCanViewAppConversations(t *testing.T) {
+	// 实例 owner 可查看自己实例的会话
+	owner := Principal{Role: domain.UserRoleOrgMember, OrgID: orgA, UserID: userA}
+	assert.True(t, CanViewAppConversations(owner, orgA, userA))
+	// 同组织其他成员不可查看他人实例会话
+	other := Principal{Role: domain.UserRoleOrgMember, OrgID: orgA, UserID: userB}
+	assert.False(t, CanViewAppConversations(other, orgA, userA))
+	// 平台管理员可跨组织查看任意实例会话
+	admin := Principal{Role: domain.UserRolePlatformAdmin}
+	assert.True(t, CanViewAppConversations(admin, orgA, userA))
+}

@@ -319,6 +319,21 @@ func CanManageAppKanban(p Principal, appOrgID, appOwnerUserID string) bool {
 	return CanViewApp(p, appOrgID, appOwnerUserID)
 }
 
+// 实例会话 ----------------------------------------------------------
+
+// CanViewAppConversations 判断 principal 能否查看实例会话。
+// 语义与 CanViewApp 一致：平台管理员、实例所属组织的 org_admin、实例 owner 本人可看。
+func CanViewAppConversations(p Principal, appOrgID, appOwnerUserID string) bool {
+	return CanViewApp(p, appOrgID, appOwnerUserID)
+}
+
+// CanManageAppConversations 判断 principal 能否在实例会话里发消息 / 新建 / 删除 / 重命名会话。
+// 当前与查看权限等价（委托 CanViewApp，与 kanban 的 CanManageAppKanban 同模式），
+// 保留独立函数以便将来收紧写权限。
+func CanManageAppConversations(p Principal, appOrgID, appOwnerUserID string) bool {
+	return CanViewApp(p, appOrgID, appOwnerUserID)
+}
+
 // Cron 任务 ---------------------------------------------------------
 
 // CanViewAppCron 判断 principal 能否查看应用的 Cron 任务。
