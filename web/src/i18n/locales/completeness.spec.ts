@@ -35,7 +35,11 @@ function namedTokens(s: string): Set<string> {
 }
 
 // pipeBranches 按 vue-i18n 管道复数分隔符切分，返回分支数（无管道则为 1）。
+// 多行值（如 platform.apiDocMarkdown 里的 Markdown 表格）含大量字面 `|`，但绝非
+// vue-i18n 复数消息（复数消息恒为单行短串），直接计 1，避免表格 `|` 触发与复数
+// 无关的「管道分支不一致」误报。
 function pipeBranches(s: string): number {
+  if (s.includes('\n')) return 1
   return s.split(/\s*\|\s*/).length
 }
 
