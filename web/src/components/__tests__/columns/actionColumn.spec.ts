@@ -3,9 +3,10 @@ import { actionColumn } from '../../columns/actionColumn'
 
 // actionColumn 测试确保行操作列保持默认 key，并能处理隐藏、禁用和动态文案。
 describe('actionColumn', () => {
-  it('default title=操作 and key=actions', () => {
+  // 默认标题取全局 i18n common.table.actions；测试环境 i18n 默认 locale 为 en，故为 'Actions'。
+  it('default title 取 i18n common.table.actions and key=actions', () => {
     const col = actionColumn<{ id: string }>([])
-    expect(col.title).toBe('操作')
+    expect(col.title).toBe('Actions')
     expect(col.key).toBe('actions')
   })
 

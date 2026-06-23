@@ -2,6 +2,8 @@ import { h } from 'vue'
 import { NButton, NSpace } from 'naive-ui'
 import type { DataTableBaseColumn } from 'naive-ui'
 
+import { i18n } from '@/i18n'
+
 // RowAction 描述列表行上的单个业务操作按钮。
 // hidden 和 disabled 都按行计算，用于表达权限、状态互斥或异步中的不可用态。
 export interface RowAction<T> {
@@ -25,7 +27,8 @@ export function actionColumn<T>(
   options: { title?: string; key?: string } = {},
 ): DataTableBaseColumn<T> {
   return {
-    title: options.title ?? '操作',
+    // 默认标题用全局 i18n（非 setup 上下文），不再硬编码中文「操作」，避免 en 界面漏译。
+    title: options.title ?? i18n.global.t('common.table.actions'),
     key: options.key ?? 'actions',
     render: (row) => h(NSpace, { size: 'small' }, {
       default: () => actions
