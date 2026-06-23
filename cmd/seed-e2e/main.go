@@ -213,21 +213,34 @@ func buildFixture(ctx context.Context, db *sql.DB) (fixture, error) {
 		}
 	}
 
-	// 3) 创建 fixture app（status=running）。owner_user_id 用 org_admin。
+	// 3) 创建一个 assistant_version 并绑定到 fixture app。实例相关查询（GetAppWithVersion /
+	// ListAppsByOrgWithVersion）经 INNER JOIN assistant_versions，未绑定版本的 app 既不出现在
+	// 实例列表，也会让 app locale 等按实例查询的端点查不到（404），故 fixture app 必须绑定版本。
+	versionID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO assistant_versions
+			(id, name, system_prompt, image_id, main_model)
+		VALUES (?, 'e2e-version', 'You are a test assistant.', 'e2e-image:dev', 'gpt-4')`,
+		versionID,
+	); err != nil {
+		return fx, fmt.Errorf("create assistant_version: %w", err)
+	}
+
+	// 4) 创建 fixture app（status=running，绑定上面的版本）。owner_user_id 用 org_admin。
 	// migration 000003 已删除 apps.runtime_node_id / container_id / container_name 列，
 	// INSERT 不含上述列；k8s 下应用无节点绑定，pod 落点由调度器决定。
 	fx.AppName = "e2e-app"
 	fx.AppID = uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO apps
-			(id, org_id, owner_user_id, name, status, api_key_status)
-		VALUES (?, ?, ?, ?, 'running', 'active')`,
-		fx.AppID, fx.OrgID, orgAdminID, fx.AppName,
+			(id, org_id, owner_user_id, name, status, api_key_status, version_id)
+		VALUES (?, ?, ?, ?, 'running', 'active', ?)`,
+		fx.AppID, fx.OrgID, orgAdminID, fx.AppName, versionID,
 	); err != nil {
 		return fx, fmt.Errorf("create app: %w", err)
 	}
 
-	// 4) 创建对应 channel_binding（unbound 占位，留给 e2e 走绑定流程）。
+	// 5) 创建对应 channel_binding（unbound 占位，留给 e2e 走绑定流程）。
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO channel_bindings (id, app_id, channel_type, status)
 		VALUES (?, ?, 'wechat', 'unbound')
