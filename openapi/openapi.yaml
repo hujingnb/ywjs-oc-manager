@@ -51,6 +51,14 @@ components:
       - new_password
       - old_password
       type: object
+    handlers.ConversationChatRequest:
+      properties:
+        message:
+          description: Message 是文字内容，必填；空白内容由 ShouldBindJSON required tag 拦截。
+          type: string
+      required:
+      - message
+      type: object
     handlers.CreateAssistantVersionRequest:
       properties:
         description:
@@ -76,6 +84,12 @@ components:
       - main_model
       - name
       - system_prompt
+      type: object
+    handlers.CreateConversationRequest:
+      properties:
+        title:
+          description: Title 是可选会话标题；前端不填时 service 层按默认逻辑命名。
+          type: string
       type: object
     handlers.CreateCronJobRequest:
       properties:
@@ -678,6 +692,58 @@ components:
           type: string
       required:
       - display_name
+      type: object
+    ocops.ConversationChatResult:
+      properties:
+        message:
+          $ref: '#/components/schemas/ocops.ConversationMessage'
+        session_id:
+          type: string
+        usage: {}
+      type: object
+    ocops.ConversationMessage:
+      properties:
+        content:
+          description: 字符串或 [{type,text|image_url}]
+        finish_reason:
+          type: string
+        role:
+          description: user / assistant
+          type: string
+        timestamp:
+          description: 消息时间戳
+          type: string
+        tool_calls:
+          description: 工具调用（透传，前端可忽略）
+      type: object
+    ocops.ConversationSession:
+      properties:
+        id:
+          type: string
+        last_active:
+          description: 最近活跃时间（列表按此排序）
+          type: string
+        message_count:
+          description: 消息数（列表展示）
+          type: integer
+        model:
+          description: 绑定模型（可空）
+          type: string
+        preview:
+          description: 末条消息预览（列表展示）
+          type: string
+        source:
+          description: 渠道来源：weixin / web / api_server 等
+          type: string
+        started_at:
+          description: 会话开始时间
+          type: string
+        title:
+          description: 会话标题（可空）
+          type: string
+        user_id:
+          description: 会话归属用户标识（渠道侧）
+          type: string
       type: object
     ocops.CronCapabilities:
       properties:
@@ -2406,6 +2472,238 @@ paths:
       summary: 解绑渠道
       tags:
       - channels
+  /apps/{appId}/hermes/conversations:
+    get:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 渠道来源过滤，如 weixin
+        in: query
+        name: source
+        schema:
+          type: string
+      - description: 分页大小，0 使用 service 默认值
+        in: query
+        name: limit
+        schema:
+          type: integer
+      - description: 分页偏移
+        in: query
+        name: offset
+        schema:
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/ocops.ConversationSession'
+                  type: array
+                type: object
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 列出实例会话
+      tags:
+      - hermes-conversation
+    post:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.CreateConversationRequest'
+                description: 新建会话请求（title 可选）
+                summary: body
+        description: 新建会话请求（title 可选）
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/ocops.ConversationSession'
+                type: object
+          description: Created
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 新建 web 会话
+      tags:
+      - hermes-conversation
+  /apps/{appId}/hermes/conversations/{sid}:
+    delete:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 会话 ID
+        in: path
+        name: sid
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: 删除成功
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 删除会话
+      tags:
+      - hermes-conversation
+  /apps/{appId}/hermes/conversations/{sid}/chat:
+    post:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 会话 ID
+        in: path
+        name: sid
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.ConversationChatRequest'
+                description: 续聊请求
+                summary: body
+        description: 续聊请求
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/ocops.ConversationChatResult'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 续聊一轮
+      tags:
+      - hermes-conversation
+  /apps/{appId}/hermes/conversations/{sid}/messages:
+    get:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 会话 ID
+        in: path
+        name: sid
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/ocops.ConversationMessage'
+                  type: array
+                type: object
+          description: OK
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      security:
+      - BearerAuth: []
+      summary: 读会话历史
+      tags:
+      - hermes-conversation
   /apps/{appId}/hermes/cron/capabilities:
     get:
       description: 返回 oc-cron 契约版本、支持的 verb 与 feature 开关，供前端按能力降级。

@@ -2,8 +2,6 @@
 // 字段名对齐 hermes api_server /api/sessions 响应（经 oc-ops 透传，已读源码确认）。
 package ocops
 
-import "encoding/json"
-
 // ConversationSession 是一条会话（跨渠道；source 标识来源渠道）。
 // 字段名对齐 api_server `_session_response` safe_keys。
 type ConversationSession struct {
@@ -34,10 +32,12 @@ type ConversationChatReq struct {
 }
 
 // ConversationChatResult 是续聊回复。
+// Usage 为上游用量统计的透传字段，用 any 容纳任意 JSON（swag v2 无法解析
+// json.RawMessage，故用 any）。
 type ConversationChatResult struct {
 	SessionID string              `json:"session_id"`
 	Message   ConversationMessage `json:"message"`
-	Usage     json.RawMessage     `json:"usage,omitempty"`
+	Usage     any                 `json:"usage,omitempty"`
 }
 
 // ConversationCreateReq 是新建会话请求体。

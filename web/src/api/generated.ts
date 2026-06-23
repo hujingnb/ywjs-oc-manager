@@ -573,6 +573,313 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/apps/{appId}/hermes/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 列出实例会话 */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 渠道来源过滤，如 weixin */
+                    source?: string;
+                    /** @description 分页大小，0 使用 service 默认值 */
+                    limit?: number;
+                    /** @description 分页偏移 */
+                    offset?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["ocops.ConversationSession"][];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** 新建 web 会话 */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                };
+                cookie?: never;
+            };
+            /** @description 新建会话请求（title 可选） */
+            requestBody?: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.CreateConversationRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["ocops.ConversationSession"];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/conversations/{sid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除会话 */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description 会话 ID */
+                    sid: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 删除成功 */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/conversations/{sid}/chat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 续聊一轮 */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description 会话 ID */
+                    sid: string;
+                };
+                cookie?: never;
+            };
+            /** @description 续聊请求 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.ConversationChatRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["ocops.ConversationChatResult"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/conversations/{sid}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 读会话历史 */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description 会话 ID */
+                    sid: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["ocops.ConversationMessage"][];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/apps/{appId}/hermes/cron/capabilities": {
         parameters: {
             query?: never;
@@ -11748,6 +12055,10 @@ export interface components {
             /** @description OldPassword 是当前登录密码，只用于本次校验，不写日志。 */
             old_password: string;
         };
+        "handlers.ConversationChatRequest": {
+            /** @description Message 是文字内容，必填；空白内容由 ShouldBindJSON required tag 拦截。 */
+            message: string;
+        };
         "handlers.CreateAssistantVersionRequest": {
             description?: string;
             image_id: string;
@@ -11757,6 +12068,10 @@ export interface components {
             name: string;
             routing?: components["schemas"]["handlers.AssistantVersionRoutingDTO"];
             system_prompt: string;
+        };
+        "handlers.CreateConversationRequest": {
+            /** @description Title 是可选会话标题；前端不填时 service 层按默认逻辑命名。 */
+            title?: string;
         };
         "handlers.CreateCronJobRequest": {
             /** @description BaseURL 是高级字段，仅平台管理员生效：任务指定 provider base URL。 */
@@ -12091,6 +12406,41 @@ export interface components {
             display_name: string;
             /** @description Role 为空表示保持原角色；非空时需要管理员权限并限制在企业角色内。 */
             role?: string;
+        };
+        "ocops.ConversationChatResult": {
+            message?: components["schemas"]["ocops.ConversationMessage"];
+            session_id?: string;
+            usage?: unknown;
+        };
+        "ocops.ConversationMessage": {
+            /** @description 字符串或 [{type,text|image_url}] */
+            content?: unknown;
+            finish_reason?: string;
+            /** @description user / assistant */
+            role?: string;
+            /** @description 消息时间戳 */
+            timestamp?: string;
+            /** @description 工具调用（透传，前端可忽略） */
+            tool_calls?: unknown;
+        };
+        "ocops.ConversationSession": {
+            id?: string;
+            /** @description 最近活跃时间（列表按此排序） */
+            last_active?: string;
+            /** @description 消息数（列表展示） */
+            message_count?: number;
+            /** @description 绑定模型（可空） */
+            model?: string;
+            /** @description 末条消息预览（列表展示） */
+            preview?: string;
+            /** @description 渠道来源：weixin / web / api_server 等 */
+            source?: string;
+            /** @description 会话开始时间 */
+            started_at?: string;
+            /** @description 会话标题（可空） */
+            title?: string;
+            /** @description 会话归属用户标识（渠道侧） */
+            user_id?: string;
         };
         "ocops.CronCapabilities": {
             /** @description ContractVersion 是 oc-cron 契约版本号。 */
