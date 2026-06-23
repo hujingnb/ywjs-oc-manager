@@ -32,7 +32,9 @@
           <!-- 标题或 id 兜底 -->
           <span class="session-title">{{ s.title || s.id }}</span>
         </div>
-        <!-- 操作按钮：重命名 / 删除 -->
+        <!-- 操作按钮：重命名 / 删除。容器加 @click.stop 拦截，避免点按钮区误触选中。
+             注意：actions 容器必须靠 .session-item 的 row 布局收窄到右侧，不能占满整行——
+             否则会吞掉条目主体点击，导致「点会话切换经常无效、要点好几次」（见 CSS）。 -->
         <div class="session-actions" @click.stop>
           <n-button
             size="tiny"
@@ -292,10 +294,14 @@ onMounted(loadSessions)
   font-size: 13px;
 }
 
+/* 行布局：标题区 .session-main 占满左侧（flex:1）作为主点击区，操作按钮收在右侧、
+   只占自身宽度——避免 actions 容器（带 @click.stop）铺满整行吞掉条目点击。 */
 .session-item {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 8px 12px;
   cursor: pointer;
   border-bottom: 1px solid var(--color-divider, #f0f0f0);
@@ -314,6 +320,7 @@ onMounted(loadSessions)
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: 1;
   min-width: 0;
 }
 
@@ -333,6 +340,7 @@ onMounted(loadSessions)
 .session-actions {
   display: flex;
   gap: 4px;
+  flex-shrink: 0;
 }
 
 /* ─── 右侧消息区 ──────────────────────────────── */
