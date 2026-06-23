@@ -504,6 +504,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// resolver 负责把 appID 解析为 oc-ops 坐标并判定 Supported（dev stub → UNSUPPORTED），
 	// 读写权限由 service 层统一校验。
 	hermesKanbanService := service.NewHermesKanbanService(ocopsClient, ocopsResolver)
+	hermesConversationService := service.NewHermesConversationService(ocopsClient, ocopsResolver)
 	hermesCronService := service.NewHermesCronService(ocopsClient, ocopsResolver)
 
 	// AppSkillService：实例级 skill 安装/卸载/更新与对账。
@@ -595,6 +596,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			SkillTicketMessageService:    skillTicketMessageService,
 			CustomSkillService:           customSkillService,
 			HermesKanbanService:          hermesKanbanService,
+			HermesConversationService:    hermesConversationService,
 			HermesCronService:            hermesCronService,
 			AppSkillService:              appSkillService,
 			SkillLibraryService:          skillLibraryService,

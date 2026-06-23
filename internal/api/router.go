@@ -60,6 +60,8 @@ type Dependencies struct {
 	PlatformOverview *service.PlatformOverviewService
 	// HermesKanbanService 提供实例任务看板能力；nil 时不注册 kanban 路由。
 	HermesKanbanService *service.HermesKanbanService
+	// HermesConversationService 提供实例会话能力；nil 时不注册会话路由。
+	HermesConversationService *service.HermesConversationService
 	// HermesCronService 提供实例定时任务能力；nil 时不注册 cron 路由。
 	HermesCronService *service.HermesCronService
 	// AppSkillService 提供实例级 skill 安装/卸载/更新与对账能力；nil 时不注册 skill 路由。
@@ -213,6 +215,9 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.HermesKanbanService != nil {
 		handlers.RegisterHermesKanbanRoutes(user, handlers.NewHermesKanbanHandler(dep.HermesKanbanService))
+	}
+	if dep.HermesConversationService != nil {
+		handlers.RegisterHermesConversationRoutes(user, handlers.NewHermesConversationHandler(dep.HermesConversationService))
 	}
 	if dep.HermesCronService != nil {
 		handlers.RegisterHermesCronRoutes(user, handlers.NewHermesCronHandler(dep.HermesCronService))
