@@ -18,11 +18,14 @@ export const useLocaleStore = defineStore('locale', () => {
   // locale 是当前激活的语言，始终与 i18n.global.locale 保持一致。
   const locale = ref<SupportedLocale>(DEFAULT_LOCALE)
 
-  // apply 把目标语言写入内存、vue-i18n 与 localStorage（单一出口，保证三者一致）。
+  // apply 把目标语言写入内存、vue-i18n、localStorage 与 <html lang>（单一出口，保证四者一致）。
+  // 同步 document.documentElement.lang 让无障碍工具/搜索引擎/浏览器翻译提示识别真实内容语言，
+  // 否则始终是 index.html 硬编码的 zh-CN，与实际界面语言不符。
   function apply(next: SupportedLocale): void {
     locale.value = next
     i18n.global.locale.value = next
     localStorage.setItem(STORAGE_KEY, next)
+    document.documentElement.lang = next
   }
 
   // fetchDefault 读取平台默认语言（登录页 localStorage 为空时使用）；端点不可达时回退 DEFAULT_LOCALE。

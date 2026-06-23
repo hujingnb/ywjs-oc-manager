@@ -36,13 +36,15 @@ describe('useLocaleStore', () => {
     expect(store.locale).toBe('zh')
   })
 
-  // setLocale 切换：写 i18n、写 localStorage；已登录时 PATCH 持久化
+  // setLocale 切换：写 i18n、写 localStorage、同步 <html lang>；已登录时 PATCH 持久化
   it('setLocale 已登录时持久化到后端', async () => {
     const store = useLocaleStore()
     await store.init()
     await store.setLocale('zh', { persist: true })
     expect(localStorage.getItem('ocm.locale')).toBe('zh')
     expect(i18n.global.locale.value).toBe('zh')
+    // <html lang> 必须随语言同步，供无障碍/SEO/浏览器翻译识别真实内容语言
+    expect(document.documentElement.lang).toBe('zh')
     expect(apiRequest).toHaveBeenCalledWith('/api/v1/auth/me/locale', expect.objectContaining({ method: 'PATCH', body: { locale: 'zh' } }))
   })
 
