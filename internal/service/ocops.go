@@ -1,15 +1,15 @@
 // ocops.go —— service 侧消费 oc-ops HTTP 客户端的窄接口、app 坐标解析与错误映射。
 //
 // 设计要点：
-//   - 用三个窄接口（cronOps/kanbanOps/channelOps）替代单个巨型 OcOps 接口，
-//     让各 service（Task 19/20/21）只依赖所需方法，单测假实现更小，
+//   - 用四个窄接口（cronOps/kanbanOps/channelOps/conversationOps）替代单个巨型 OcOps 接口，
+//     让各 service（Task 19/20/21/Task6）只依赖所需方法，单测假实现更小，
 //     沿用现有 cronExecer/kanbanExecer 的窄接口 + 假实现风格。
-//   - 三个接口的方法签名逐字镜像 *ocops.Client 对应方法（首参 ctx、次参
+//   - 四个接口的方法签名逐字镜像 *ocops.Client 对应方法（首参 ctx、次参
 //     ocops.Endpoint），并由 *ocops.Client 满足（见文件末编译期断言）。
 //   - OcOpsResolver 把 appID 解析为 oc-ops 调用坐标；真实 k8s Service DNS
 //     寻址与 per-app token 生成/注入是 spec-A，spec-E 仅由 store 最小实现。
-//   - mapOcOpsCronErr/mapOcOpsKanbanErr 把 ocops 哨兵错误翻译回 service 既有
-//     哨兵错误，保持语义不变。
+//   - mapOcOpsCronErr/mapOcOpsKanbanErr/mapOcOpsConversationErr 把 ocops 哨兵错误
+//     翻译回 service 既有哨兵错误，保持语义不变。
 package service
 
 import (
@@ -70,12 +70,23 @@ type channelOps interface {
 	ChannelLogin(ctx context.Context, ep ocops.Endpoint, channel string) (<-chan ocops.ChannelLoginEvent, error)
 }
 
-// 编译期断言：生产实现 *ocops.Client 必须同时满足三个窄接口；
+// conversationOps 抽象 oc-ops 的 5 个会话方法，供 HermesConversationService 注入假实现。
+// 方法签名镜像 *ocops.Client；由 *ocops.Client 满足。
+type conversationOps interface {
+	ListSessions(ctx context.Context, ep ocops.Endpoint, source string, limit, offset int) ([]ocops.ConversationSession, error)
+	SessionMessages(ctx context.Context, ep ocops.Endpoint, sid string) ([]ocops.ConversationMessage, error)
+	CreateSession(ctx context.Context, ep ocops.Endpoint, req ocops.ConversationCreateReq) (ocops.ConversationSession, error)
+	DeleteSession(ctx context.Context, ep ocops.Endpoint, sid string) error
+	SessionChat(ctx context.Context, ep ocops.Endpoint, sid string, req ocops.ConversationChatReq) (ocops.ConversationChatResult, error)
+}
+
+// 编译期断言：生产实现 *ocops.Client 必须同时满足四个窄接口；
 // 任一方法签名漂移都会在编译期被这里捕获。
 var (
-	_ cronOps    = (*ocops.Client)(nil)
-	_ kanbanOps  = (*ocops.Client)(nil)
-	_ channelOps = (*ocops.Client)(nil)
+	_ cronOps         = (*ocops.Client)(nil)
+	_ kanbanOps       = (*ocops.Client)(nil)
+	_ channelOps      = (*ocops.Client)(nil)
+	_ conversationOps = (*ocops.Client)(nil)
 )
 
 // OcOpsAppLocation 是执行 oc-ops 调用所需的全部 app 信息（取代旧 CronAppLocation/KanbanAppLocation）。
@@ -221,5 +232,24 @@ func mapOcOpsKanbanErr(err error) error {
 		return ErrKanbanOutputInvalid
 	default:
 		return ErrKanbanCLI
+	}
+}
+
+// mapOcOpsConversationErr 把 ocops 哨兵错误翻成 service 会话哨兵错误。
+// nil 透传 nil；未列举的错误兜底为 ErrConversationCLI（与 502/未知上游错误语义一致）。
+func mapOcOpsConversationErr(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, ocops.ErrBadRequest):
+		return ErrConversationBadRequest
+	case errors.Is(err, ocops.ErrNotFound):
+		return ErrNotFound
+	case errors.Is(err, ocops.ErrUnsupported):
+		return ErrConversationNotSupported
+	case errors.Is(err, ocops.ErrOutputInvalid):
+		return ErrConversationOutputInvalid
+	default:
+		return ErrConversationCLI
 	}
 }
