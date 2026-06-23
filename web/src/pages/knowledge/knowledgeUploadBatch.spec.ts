@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { KNOWLEDGE_UPLOAD_MAX_BYTES, KNOWLEDGE_UPLOAD_MAX_MESSAGE } from '@/api/hooks/useKnowledge'
+import { KNOWLEDGE_UPLOAD_MAX_BYTES, KNOWLEDGE_UPLOAD_MAX_LABEL, getKnowledgeUploadMaxMessage } from '@/api/hooks/useKnowledge'
+import { i18n } from '@/i18n'
 import {
   filterKnowledgeUploadFiles,
   hasKnowledgeFilesInDrag,
@@ -15,6 +16,11 @@ function fileWithSize(name: string, size: number): File {
   Object.defineProperty(file, 'size', { value: size, configurable: true })
   return file
 }
+
+// 切换到中文 locale，确保断言的是用户可见的中文文案。
+beforeEach(() => {
+  i18n.global.locale.value = 'zh'
+})
 
 describe('knowledgeUploadBatch', () => {
   // 覆盖 input 多选：原生 FileList 应按选择顺序转为数组。
@@ -74,7 +80,8 @@ describe('knowledgeUploadBatch', () => {
     const tooLarge = fileWithSize('too-large.md', KNOWLEDGE_UPLOAD_MAX_BYTES + 1)
 
     expect(filterKnowledgeUploadFiles([tooLarge, ok], warning)).toEqual([ok])
-    expect(warning).toHaveBeenCalledWith(KNOWLEDGE_UPLOAD_MAX_MESSAGE)
+    // 单文件超限时，提示文案应与 getKnowledgeUploadMaxMessage() 当前语言一致。
+    expect(warning).toHaveBeenCalledWith(getKnowledgeUploadMaxMessage())
   })
 
   // 覆盖多个文件超过上限：多文件批量过滤只提示一次，并在文案里说明跳过数量。
@@ -86,7 +93,8 @@ describe('knowledgeUploadBatch', () => {
 
     expect(filterKnowledgeUploadFiles([firstTooLarge, ok, secondTooLarge], warning)).toEqual([ok])
     expect(warning).toHaveBeenCalledTimes(1)
-    expect(warning).toHaveBeenCalledWith(`已跳过 2 个超过上限的文件，${KNOWLEDGE_UPLOAD_MAX_MESSAGE}`)
+    // 批量超限时应包含跳过数量和上限 label，断言当前语言下的实际文案。
+    expect(warning).toHaveBeenCalledWith(`已跳过 2 个超过上限的文件，单文件最大支持 ${KNOWLEDGE_UPLOAD_MAX_LABEL}`)
   })
 
   // 覆盖批量 items：上传队列 label 使用文件名，File 对象必须原样传递给 XHR 上传。

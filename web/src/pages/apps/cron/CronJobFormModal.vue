@@ -2,24 +2,24 @@
   <n-modal
     :show="show"
     preset="card"
-    :title="job ? '编辑定时任务' : '新建定时任务'"
+    :title="job ? t('apps.cron.form.titleEdit') : t('apps.cron.form.titleCreate')"
     style="width: 640px"
     @update:show="emit('update:show', $event)"
   >
     <n-form>
       <!-- ① 基础：name 必填 + prompt。 -->
       <n-form-item label="name" required>
-        <n-input v-model:value="form.name" placeholder="任务名称" />
+        <n-input v-model:value="form.name" :placeholder="t('apps.cron.form.namePlaceholder')" />
       </n-form-item>
       <n-form-item label="prompt">
-        <n-input v-model:value="form.prompt" type="textarea" placeholder="触发时交给 Hermes 的提示词" />
+        <n-input v-model:value="form.prompt" type="textarea" :placeholder="t('apps.cron.form.promptPlaceholder')" />
       </n-form-item>
 
       <!-- ② 调度：可视化点选器 + 运行次数上限（原 repeat）。 -->
       <n-form-item label="schedule" required>
         <ScheduleField v-model:value="form.schedule" />
       </n-form-item>
-      <n-form-item label="运行次数上限">
+      <n-form-item :label="t('apps.cron.form.repeatLabel')">
         <n-space vertical :size="2" style="width: 100%">
           <n-input-number
             :value="form.repeat"
@@ -27,7 +27,7 @@
             :clearable="!hasExistingRepeat"
             @update:value="onRepeatUpdate"
           />
-          <span class="field-hint">留空 = 一直按计划运行；填 N = 运行 N 次后停止</span>
+          <span class="field-hint">{{ t('apps.cron.form.repeatHint') }}</span>
         </n-space>
       </n-form-item>
 
@@ -42,10 +42,10 @@
       </n-form-item>
       <n-form-item label="no_agent">
         <n-space align="center" :size="6">
-          <n-checkbox v-model:checked="form.no_agent">不使用 AI，仅运行脚本</n-checkbox>
+          <n-checkbox v-model:checked="form.no_agent">{{ t('apps.cron.form.noAgentLabel') }}</n-checkbox>
           <n-tooltip>
             <template #trigger><span class="field-help">?</span></template>
-            勾选后跳过 AI agent，直接执行 script 指定脚本（更快、不消耗 token），适合纯脚本任务；不勾选则由 AI 按 prompt 执行。
+            {{ t('apps.cron.form.noAgentTooltip') }}
           </n-tooltip>
         </n-space>
       </n-form-item>
@@ -53,32 +53,32 @@
       <!-- 平台管理员·高级：workdir 与模型相关字段仅平台管理员可见，后端仍会做最终权限裁剪。 -->
       <template v-if="isPlatformAdmin">
         <n-form-item label="workdir">
-          <n-input v-model:value="form.workdir" placeholder="任务运行目录" />
+          <n-input v-model:value="form.workdir" :placeholder="t('apps.cron.form.workdirPlaceholder')" />
         </n-form-item>
         <n-form-item label="skills">
-          <n-input v-model:value="form.skills" placeholder="逗号分隔，如 shell,git" />
+          <n-input v-model:value="form.skills" :placeholder="t('apps.cron.form.skillsPlaceholder')" />
         </n-form-item>
         <n-form-item label="model">
-          <n-input v-model:value="form.model" placeholder="模型名称" />
+          <n-input v-model:value="form.model" :placeholder="t('apps.cron.form.modelPlaceholder')" />
         </n-form-item>
         <n-form-item label="provider">
-          <n-input v-model:value="form.provider" placeholder="provider 名称" />
+          <n-input v-model:value="form.provider" :placeholder="t('apps.cron.form.providerPlaceholder')" />
         </n-form-item>
         <n-form-item label="base_url">
-          <n-input v-model:value="form.base_url" placeholder="https://provider.example/v1" />
+          <n-input v-model:value="form.base_url" :placeholder="t('apps.cron.form.baseUrlPlaceholder')" />
         </n-form-item>
       </template>
     </n-form>
 
     <template #footer>
       <n-space justify="end">
-        <n-button @click="emit('update:show', false)">取消</n-button>
+        <n-button @click="emit('update:show', false)">{{ t('common.actions.cancel') }}</n-button>
         <n-button
           type="primary"
           :loading="submitting"
           :disabled="!canSubmit"
           @click="onSubmit"
-        >{{ job ? '保存' : '创建' }}</n-button>
+        >{{ job ? t('common.actions.save') : t('common.actions.create') }}</n-button>
       </n-space>
     </template>
   </n-modal>
@@ -86,7 +86,10 @@
 
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { NButton, NCheckbox, NForm, NFormItem, NInput, NInputNumber, NModal, NSpace, NTooltip } from 'naive-ui'
+
+const { t } = useI18n()
 
 import ScheduleField from './ScheduleField.vue'
 import DeliverField from './DeliverField.vue'

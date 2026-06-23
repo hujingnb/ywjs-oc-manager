@@ -2,7 +2,8 @@ import { mount } from '@vue/test-utils'
 import { defineComponent, h, ref, type PropType, type VNodeChild } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { KNOWLEDGE_UPLOAD_MAX_BYTES, KNOWLEDGE_UPLOAD_MAX_MESSAGE } from '@/api/hooks/useKnowledge'
+import { KNOWLEDGE_UPLOAD_MAX_BYTES, getKnowledgeUploadMaxMessage } from '@/api/hooks/useKnowledge'
+import { i18n } from '@/i18n'
 import OrgKnowledgePage from './OrgKnowledgePage.vue'
 
 const mocks = vi.hoisted(() => ({
@@ -158,9 +159,13 @@ vi.mock('@/api/hooks/useKnowledge', async () => {
   }
 })
 
+// mountPage 注入 i18n 插件，OrgKnowledgePage 通过 useI18n() 渲染文案。
+// locale 固定为 zh 使断言中文原文与翻译结果对齐。
 function mountPage() {
+  i18n.global.locale.value = 'zh'
   return mount(OrgKnowledgePage, {
     global: {
+      plugins: [i18n],
       stubs: {
         Card: { template: '<section><slot name="header" /><slot name="header-extra" /><slot /></section>' },
         NCard: { template: '<section><slot name="header" /><slot name="header-extra" /><slot /></section>' },
@@ -320,7 +325,8 @@ describe('OrgKnowledgePage', () => {
     Object.defineProperty(input.element, 'files', { value: [oversizedFile()], configurable: true })
     await input.trigger('change')
 
-    expect(mocks.warning).toHaveBeenCalledWith(KNOWLEDGE_UPLOAD_MAX_MESSAGE)
+    // 超限提示应与 getKnowledgeUploadMaxMessage() 在当前语言下的翻译一致。
+    expect(mocks.warning).toHaveBeenCalledWith(getKnowledgeUploadMaxMessage())
     expect(mocks.run).not.toHaveBeenCalled()
     expect(mocks.mutateAsync).not.toHaveBeenCalled()
   })

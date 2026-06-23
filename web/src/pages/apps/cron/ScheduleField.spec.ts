@@ -3,8 +3,9 @@
 // mock naive-ui：聚焦数据流，避免真实组件 teleport / 时间控件干扰。
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { i18n } from '@/i18n'
 import ScheduleField from './ScheduleField.vue'
 
 vi.mock('naive-ui', () => ({
@@ -40,8 +41,14 @@ vi.mock('naive-ui', () => ({
   NSpace: { template: '<div><slot /></div>' },
 }))
 
+// 每次用例前将 i18n 语言设为中文，确保预览文案断言与翻译文件对齐。
+beforeEach(() => {
+  i18n.global.locale.value = 'zh'
+})
+
 function mountField(value = '') {
-  return mount(ScheduleField, { props: { value, 'onUpdate:value': () => {} } })
+  // 注入 i18n 插件，使组件内 t() 调用能够解析翻译文案。
+  return mount(ScheduleField, { props: { value, 'onUpdate:value': () => {} }, global: { plugins: [i18n] } })
 }
 
 describe('ScheduleField', () => {

@@ -237,6 +237,15 @@ func (s *appServiceStoreStub) SetAppVersion(_ context.Context, arg sqlc.SetAppVe
 	return nil
 }
 
+// UpdateAppLocale 更新 stub 内 app 的 locale 字段，模拟数据库写入行为。
+func (s *appServiceStoreStub) UpdateAppLocale(_ context.Context, arg sqlc.UpdateAppLocaleParams) error {
+	if s.app.ID != arg.ID {
+		return sql.ErrNoRows
+	}
+	s.app.Locale = arg.Locale
+	return nil
+}
+
 // stubImageResolver 实现 AppImageResolver 的测试桩：固定把 image_id 映射到 ref。
 type stubImageResolver struct {
 	// refs 是 image_id → ref 的静态映射；id 不存在时 ResolveRuntimeImage 返回 false。
@@ -528,6 +537,78 @@ func TestSwitchAppVersionForbidden(t *testing.T) {
 			require.ErrorIs(t, err, ErrForbidden, "无权调用者应返回 ErrForbidden")
 		})
 	}
+}
+
+// TestUpdateAppLocaleSuccess 验证组织管理员可成功修改实例语言，并触发重启 job 与审计日志。
+func TestUpdateAppLocaleSuccess(t *testing.T) {
+	t.Parallel()
+	svc, store := newAppServiceWithStore(t)
+	store.mustSeedApp(t)
+
+	// 正常路径：传入合法语言 "zh"，期望持久化、入队重启 job、写审计日志。
+	result, err := svc.UpdateAppLocale(context.Background(), appOrgAdminPrincipal(store.organization), testAppServiceAppID, "zh")
+	require.NoError(t, err)
+
+	// 断言 locale 已写入 stub。
+	assert.Equal(t, "zh", result.Locale, "返回结果的 Locale 应为 zh")
+	// stub 里 app.Locale 也应更新。
+	assert.Equal(t, "zh", store.app.Locale.String)
+
+	// 断言触发了 restart job。
+	require.Len(t, store.jobs, 1, "UpdateAppLocale 应入队一个 restart job")
+	assert.Equal(t, "app_restart_container", store.jobs[0].Type)
+
+	// 断言审计日志被写入，且 action=update_locale、metadata 含 locale 字段。
+	require.Len(t, store.auditLogs, 1, "UpdateAppLocale 应写入一条审计日志")
+	assert.Equal(t, "update_locale", store.auditLogs[0].Action)
+	var meta map[string]any
+	require.NoError(t, json.Unmarshal(store.auditLogs[0].MetadataJson, &meta))
+	assert.Equal(t, "zh", meta["locale"], "审计 metadata 应含 locale 字段")
+}
+
+// TestUpdateAppLocaleInvalidLocale 验证不支持的语言代码被拒绝。
+func TestUpdateAppLocaleInvalidLocale(t *testing.T) {
+	t.Parallel()
+	svc, store := newAppServiceWithStore(t)
+	store.mustSeedApp(t)
+
+	// 传入非法语言代码，期望返回 ErrInvalidLocale 且不写库。
+	_, err := svc.UpdateAppLocale(context.Background(), appOrgAdminPrincipal(store.organization), testAppServiceAppID, "fr")
+	require.ErrorIs(t, err, ErrInvalidLocale, "不支持的语言应返回 ErrInvalidLocale")
+	assert.Empty(t, store.jobs, "校验失败时不应入队 job")
+}
+
+// TestUpdateAppLocaleForbidden 验证无权用户被拒绝。
+func TestUpdateAppLocaleForbidden(t *testing.T) {
+	t.Parallel()
+	svc, store := newAppServiceWithStore(t)
+	store.mustSeedApp(t)
+
+	// 非本组织的管理员无权修改语言。
+	outsider := auth.Principal{
+		Role:   domain.UserRoleOrgAdmin,
+		OrgID:  "00000000-0000-0000-0000-000000009999", // 不同组织
+		UserID: testAdminUID,
+	}
+	_, err := svc.UpdateAppLocale(context.Background(), outsider, testAppServiceAppID, "en")
+	require.ErrorIs(t, err, ErrForbidden, "非本组织管理员应返回 ErrForbidden")
+}
+
+// TestUpdateAppLocaleOwnerMemberAllowed 验证实例 owner（org_member）可修改自己实例的语言。
+func TestUpdateAppLocaleOwnerMemberAllowed(t *testing.T) {
+	t.Parallel()
+	svc, store := newAppServiceWithStore(t)
+	store.mustSeedApp(t)
+
+	// testMemUID 是 mustSeedApp 设置的 OwnerUserID。
+	ownerMember := auth.Principal{
+		Role:   domain.UserRoleOrgMember,
+		OrgID:  testOrgID,
+		UserID: testMemUID,
+	}
+	result, err := svc.UpdateAppLocale(context.Background(), ownerMember, testAppServiceAppID, "en")
+	require.NoError(t, err)
+	assert.Equal(t, "en", result.Locale, "owner 成员修改后 Locale 应为 en")
 }
 
 // TestSwitchAppVersionAppNotFound 验证实例不存在时返回 ErrNotFound。

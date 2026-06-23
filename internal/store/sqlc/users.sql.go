@@ -50,7 +50,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
 }
 
 const getOrgAdminByOrg = `-- name: GetOrgAdminByOrg :one
-SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at, platform_username_key
+SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at, platform_username_key, locale
 FROM users
 WHERE org_id = ?
   AND role = 'org_admin'
@@ -77,12 +77,13 @@ func (q *Queries) GetOrgAdminByOrg(ctx context.Context, orgID null.String) (User
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.PlatformUsernameKey,
+		&i.Locale,
 	)
 	return i, err
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at, platform_username_key
+SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at, platform_username_key, locale
 FROM users
 WHERE id = ?
 `
@@ -103,12 +104,13 @@ func (q *Queries) GetUser(ctx context.Context, id string) (User, error) {
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.PlatformUsernameKey,
+		&i.Locale,
 	)
 	return i, err
 }
 
 const getUserByOrgAndUsername = `-- name: GetUserByOrgAndUsername :one
-SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at, platform_username_key
+SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at, platform_username_key, locale
 FROM users
 WHERE org_id = ? AND username = ?
 `
@@ -134,12 +136,13 @@ func (q *Queries) GetUserByOrgAndUsername(ctx context.Context, arg GetUserByOrgA
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.PlatformUsernameKey,
+		&i.Locale,
 	)
 	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at, platform_username_key
+SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at, platform_username_key, locale
 FROM users
 WHERE org_id IS NULL AND username = ?
 `
@@ -160,12 +163,13 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.PlatformUsernameKey,
+		&i.Locale,
 	)
 	return i, err
 }
 
 const listUsersByOrg = `-- name: ListUsersByOrg :many
-SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at, platform_username_key
+SELECT id, org_id, username, password_hash, display_name, role, status, last_login_at, created_at, updated_at, deleted_at, platform_username_key, locale
 FROM users
 WHERE org_id = ?
 ORDER BY created_at DESC, id DESC
@@ -200,6 +204,7 @@ func (q *Queries) ListUsersByOrg(ctx context.Context, arg ListUsersByOrgParams) 
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.PlatformUsernameKey,
+			&i.Locale,
 		); err != nil {
 			return nil, err
 		}
@@ -215,7 +220,7 @@ func (q *Queries) ListUsersByOrg(ctx context.Context, arg ListUsersByOrgParams) 
 }
 
 const listUsersByOrgWithActiveApp = `-- name: ListUsersByOrgWithActiveApp :many
-SELECT u.id, u.org_id, u.username, u.password_hash, u.display_name, u.role, u.status, u.last_login_at, u.created_at, u.updated_at, u.deleted_at, u.platform_username_key, a.id AS active_app_id, a.name AS active_app_name
+SELECT u.id, u.org_id, u.username, u.password_hash, u.display_name, u.role, u.status, u.last_login_at, u.created_at, u.updated_at, u.deleted_at, u.platform_username_key, u.locale, a.id AS active_app_id, a.name AS active_app_name
 FROM users u
 LEFT JOIN apps a
   ON a.owner_user_id = u.id AND a.deleted_at IS NULL
@@ -243,6 +248,7 @@ type ListUsersByOrgWithActiveAppRow struct {
 	UpdatedAt           time.Time   `db:"updated_at" json:"updated_at"`
 	DeletedAt           null.Time   `db:"deleted_at" json:"deleted_at"`
 	PlatformUsernameKey null.String `db:"platform_username_key" json:"platform_username_key"`
+	Locale              null.String `db:"locale" json:"locale"`
 	ActiveAppID         null.String `db:"active_app_id" json:"active_app_id"`
 	ActiveAppName       null.String `db:"active_app_name" json:"active_app_name"`
 }
@@ -272,6 +278,7 @@ func (q *Queries) ListUsersByOrgWithActiveApp(ctx context.Context, arg ListUsers
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.PlatformUsernameKey,
+			&i.Locale,
 			&i.ActiveAppID,
 			&i.ActiveAppName,
 		); err != nil {
@@ -326,6 +333,23 @@ WHERE id = ? AND deleted_at IS NULL
 // 真软删除：仅设置 deleted_at（不动 status）；status 与 deleted_at 语义独立。
 func (q *Queries) SoftDeleteUser(ctx context.Context, id string) error {
 	_, err := q.db.ExecContext(ctx, softDeleteUser, id)
+	return err
+}
+
+const updateUserLocale = `-- name: UpdateUserLocale :exec
+UPDATE users
+SET locale = ?, updated_at = now()
+WHERE id = ?
+`
+
+type UpdateUserLocaleParams struct {
+	Locale null.String `db:"locale" json:"locale"`
+	ID     string      `db:"id" json:"id"`
+}
+
+// 更新用户界面语言偏好。locale 由 handler 校验取值集合后传入；NULL 表示重置为「未选择」。
+func (q *Queries) UpdateUserLocale(ctx context.Context, arg UpdateUserLocaleParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserLocale, arg.Locale, arg.ID)
 	return err
 }
 

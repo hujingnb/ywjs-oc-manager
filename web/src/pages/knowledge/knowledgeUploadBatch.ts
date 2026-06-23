@@ -1,6 +1,7 @@
 // knowledgeUploadBatch 提供知识库多文件上传的前端编排 helper。
 // 后端仍是单文件接口，这里只负责把 input/drop 事件转成 uploadProgress 可消费的队列。
-import { KNOWLEDGE_UPLOAD_MAX_MESSAGE, isKnowledgeUploadTooLarge } from '@/api/hooks/useKnowledge'
+import { KNOWLEDGE_UPLOAD_MAX_LABEL, getKnowledgeUploadMaxMessage, isKnowledgeUploadTooLarge } from '@/api/hooks/useKnowledge'
+import { i18n } from '@/i18n'
 import type { RunItem } from '@/stores/uploadProgress'
 
 type WarningFn = (message: string) => void
@@ -45,9 +46,11 @@ export function filterKnowledgeUploadFiles(files: File[], warning: WarningFn): F
     accepted.push(file)
   }
   if (rejectedCount === 1) {
-    warning(KNOWLEDGE_UPLOAD_MAX_MESSAGE)
+    // 单文件超限：直接展示上限提示。
+    warning(getKnowledgeUploadMaxMessage())
   } else if (rejectedCount > 1) {
-    warning(`已跳过 ${rejectedCount} 个超过上限的文件，${KNOWLEDGE_UPLOAD_MAX_MESSAGE}`)
+    // 多文件批量超限：说明跳过数量并附上单文件上限提示。
+    warning(i18n.global.t('knowledge.messages.uploadSkipMultiple', { count: rejectedCount, label: KNOWLEDGE_UPLOAD_MAX_LABEL }))
   }
   return accepted
 }

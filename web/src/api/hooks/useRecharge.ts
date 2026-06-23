@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 
 import { apiRequest } from '@/api/client'
+import { i18n } from '@/i18n'
 
 // RechargeRecordDTO 是组织充值流水。
 export interface RechargeRecordDTO {
@@ -112,7 +113,7 @@ export function useRechargeMutation(orgId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (input: { credit_amount: number; remark?: string }) => {
-      if (!orgId.value) throw new Error('缺少企业 ID')
+      if (!orgId.value) throw new Error(i18n.global.t('common.errors.missingOrgId'))
       const response = await apiRequest<{ recharge: RechargeRecordDTO }>(
         `/api/v1/organizations/${orgId.value}/recharge`,
         { method: 'POST', body: input },

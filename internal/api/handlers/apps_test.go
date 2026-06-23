@@ -27,6 +27,9 @@ type appsStub struct {
 	updateKnowledgeQuotaResult service.AppResult
 	updateKnowledgeQuotaErr    error
 	lastQuotaBytes             int64
+	updateLocaleResult         service.AppResult
+	updateLocaleErr            error
+	lastLocale                 string
 }
 
 func (s *appsStub) Get(_ context.Context, _ auth.Principal, _ string) (service.AppResult, error) {
@@ -49,6 +52,15 @@ func (s *appsStub) UpdateAppKnowledgeQuota(_ context.Context, _ auth.Principal, 
 		return service.AppResult{}, s.updateKnowledgeQuotaErr
 	}
 	return s.updateKnowledgeQuotaResult, nil
+}
+
+// UpdateAppLocale 实现 appService 接口的语言更新方法，记录请求语言便于断言。
+func (s *appsStub) UpdateAppLocale(_ context.Context, _ auth.Principal, _ string, locale string) (service.AppResult, error) {
+	s.lastLocale = locale
+	if s.updateLocaleErr != nil {
+		return service.AppResult{}, s.updateLocaleErr
+	}
+	return s.updateLocaleResult, nil
 }
 
 // newAppsTestRouter 构建用于测试的 gin router。
@@ -194,6 +206,62 @@ func TestSwitchVersionBadRequest(t *testing.T) {
 	body := strings.NewReader(`{}`)
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/apps/app-1/version", body)
+	req.Header.Set("Content-Type", "application/json")
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router.ServeHTTP(w, req)
+
+	// 必填字段缺失映射为 400，错误码为 INVALID_REQUEST。
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "INVALID_REQUEST")
+}
+
+// TestUpdateLocaleHappy 验证 PATCH /apps/:appId/locale 的成功路径：语言持久化后返回 200 及更新后实例。
+func TestUpdateLocaleHappy(t *testing.T) {
+	// stub 返回已更新 locale 字段的实例视图。
+	stub := &appsStub{updateLocaleResult: service.AppResult{ID: "app-1", Locale: "zh"}}
+	router := newAppsTestRouter(t, stub)
+
+	body := strings.NewReader(`{"locale":"zh"}`)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/apps/app-1/locale", body)
+	req.Header.Set("Content-Type", "application/json")
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router.ServeHTTP(w, req)
+
+	// 成功路径：200 + app 结构体 + locale 字段已更新。
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"zh"`)
+	assert.Equal(t, "zh", stub.lastLocale, "stub 应记录传入的 locale")
+}
+
+// TestUpdateLocaleInvalidLocale 验证不支持的语言代码返回 400 且错误码为 INVALID_LOCALE。
+func TestUpdateLocaleInvalidLocale(t *testing.T) {
+	// stub 返回 ErrInvalidLocale，模拟 service 层校验失败。
+	stub := &appsStub{updateLocaleErr: service.ErrInvalidLocale}
+	router := newAppsTestRouter(t, stub)
+
+	body := strings.NewReader(`{"locale":"fr"}`)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/apps/app-1/locale", body)
+	req.Header.Set("Content-Type", "application/json")
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router.ServeHTTP(w, req)
+
+	// 不支持的语言映射为 400，错误码为 INVALID_LOCALE。
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "INVALID_LOCALE")
+}
+
+// TestUpdateLocaleBadRequest 验证请求体缺少 locale 字段时返回 400。
+func TestUpdateLocaleBadRequest(t *testing.T) {
+	// binding 校验失败，不依赖 stub 返回值。
+	stub := &appsStub{}
+	router := newAppsTestRouter(t, stub)
+
+	// 请求体缺少必填字段 locale，ShouldBindJSON 应返回绑定错误。
+	body := strings.NewReader(`{}`)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/apps/app-1/locale", body)
 	req.Header.Set("Content-Type", "application/json")
 	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
 	router.ServeHTTP(w, req)

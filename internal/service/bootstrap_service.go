@@ -245,6 +245,11 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 	}
 
 	// 6. 组装 AppInputData 并通过 renderer 渲染 manifest YAML、persona 与 platform 文本。
+	// Language：优先取实例 locale（已在创建/手动更新时快照），空时留空由 renderer 回退平台默认。
+	appLanguage := ""
+	if app.Locale.Valid {
+		appLanguage = app.Locale.String
+	}
 	in := hermes.AppInputData{
 		AppID:                   app.ID,
 		AppName:                 app.Name,
@@ -259,6 +264,7 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 		SkillRelPaths:           skillRelPaths,
 		OrgName:                 org.Name,
 		OwnerName:               owner.DisplayName,
+		Language:                appLanguage,
 	}
 	manifestYAML, persona, platform, err := s.renderer.Render(in)
 	if err != nil {

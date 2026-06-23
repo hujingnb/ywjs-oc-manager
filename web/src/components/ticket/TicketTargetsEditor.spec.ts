@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { defineComponent, h } from 'vue'
 
 import TicketTargetsEditor from './TicketTargetsEditor.vue'
+import { i18n } from '@/i18n'
 
 vi.mock('naive-ui', async () => {
   const { defineComponent: dc, h: _h } = await import('vue')
@@ -26,6 +27,8 @@ vi.mock('naive-ui', async () => {
 })
 
 function mountEditor() {
+  // i18n 插件注入确保 useI18n() 可在组件内正常调用；locale 设为 zh 使断言沿用中文文案。
+  i18n.global.locale.value = 'zh'
   return mount(
     defineComponent({
       components: { TicketTargetsEditor },
@@ -46,6 +49,7 @@ function mountEditor() {
         })
       },
     }),
+    { global: { plugins: [i18n] } },
   )
 }
 
@@ -64,11 +68,11 @@ describe('TicketTargetsEditor', () => {
   it('adds and removes target rows', async () => {
     const wrapper = mountEditor()
     await wrapper.find('.select-org-2').trigger('click')
-    await wrapper.findAll('button').find((btn) => btn.text() === '加组织')!.trigger('click')
+    await wrapper.findAll('button').find((btn) => btn.text() === '加组织')!.trigger('click') // zh: 加组织
     expect(wrapper.vm.$data.targets).toHaveLength(2)
     expect(wrapper.vm.$data.targets[1]).toEqual({ org_id: 'org-2', audience: 'all_org' })
 
-    await wrapper.findAll('button').find((btn) => btn.text() === '移除')!.trigger('click')
+    await wrapper.findAll('button').find((btn) => btn.text() === '移除')!.trigger('click') // zh: 移除
     expect(wrapper.vm.$data.targets).toHaveLength(1)
     expect(wrapper.vm.$data.targets[0].org_id).toBe('org-2')
   })

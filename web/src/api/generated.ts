@@ -3663,6 +3663,100 @@ export interface paths {
         };
         trace?: never;
     };
+    "/apps/{appId}/locale": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 更新实例语言
+         * @description 更新实例 hermes bot 对终端用户说话的语言（en/zh），持久化后触发容器重启使配置生效
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                };
+                cookie?: never;
+            };
+            /** @description 目标语言 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.UpdateAppLocaleRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.AppResult"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
     "/apps/{appId}/runtime": {
         parameters: {
             query?: never;
@@ -5669,6 +5763,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/me/locale": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 更新界面语言
+         * @description 保存当前用户的界面语言偏好（en/zh），登录后跟随用户
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description 语言请求 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.UpdateLocaleRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
     "/auth/password": {
         parameters: {
             query?: never;
@@ -5865,6 +6019,45 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 公开前端配置
+         * @description 登录前可读的平台级配置：默认界面语言与受支持语言集合
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.PublicConfigResponse"];
                     };
                 };
             };
@@ -11781,6 +11974,12 @@ export interface components {
             /** @description Remark 是平台管理员维护的内部备注，可置空。 */
             remark?: string;
         };
+        "handlers.PublicConfigResponse": {
+            /** @description DefaultLocale 是平台默认界面语言（en/zh），登录页 localStorage 为空时采用。 */
+            default_locale?: string;
+            /** @description SupportedLocales 是平台受支持的界面语言集合，供前端渲染语言选择器。 */
+            supported_locales?: string[];
+        };
         "handlers.RechargeRequest": {
             /** @description CreditAmount 是充值额度，必须为正数，service 层会同步写入 new-api。 */
             credit_amount: number;
@@ -11821,6 +12020,10 @@ export interface components {
         "handlers.UpdateAppKnowledgeQuotaRequest": {
             /** @description QuotaBytes 是实例知识库累计容量上限，单位字节，必须大于 0。 */
             quota_bytes: number;
+        };
+        "handlers.UpdateAppLocaleRequest": {
+            /** @description Locale 是 hermes bot 对终端用户说话的语言（en/zh）；取值集合由 service 层校验。 */
+            locale: string;
         };
         "handlers.UpdateAppSkillRequest": {
             /** @description Version 是目标版本号，必须与 source 端已发布的版本对应。 */
@@ -11878,6 +12081,10 @@ export interface components {
             name: string;
             /** @description Provider 是模型来源；为空时后端按 name 做唯一匹配。 */
             provider?: string;
+        };
+        "handlers.UpdateLocaleRequest": {
+            /** @description Locale 是目标界面语言，例如 en / zh。 */
+            locale: string;
         };
         "handlers.UpdateMemberRequest": {
             /** @description DisplayName 是成员展示名，更新接口要求显式传入非空值。 */
@@ -12188,6 +12395,11 @@ export interface components {
             last_error_message?: string;
             /** @description LastErrorStatus 上次进入 error 时所在的状态值;前端用 formatAppStatus 转中文文案。 */
             last_error_status?: string;
+            /**
+             * @description Locale 是 hermes bot 对终端用户说话的语言（en/zh）；
+             *     空表示使用平台默认语言（历史数据或未设置）。
+             */
+            locale?: string;
             name?: string;
             /**
              * @description NewapiKeyID 是 new-api 中 token 的数值 id；schema 上是 text 列存的字符串，
@@ -12271,7 +12483,9 @@ export interface components {
         "service.AuditResult": {
             action?: string;
             /**
-             * @description ActionDetail 是写入时冻结的详情字符串，直接读自 audit_logs.detail_message 列。
+             * @description ActionDetail 读自 audit_logs.detail_message 列，仅为历史数据兼容 fallback。
+             *     新记录不再写入此列；前端应优先用 action + metadata 按语言渲染详情，
+             *     当 metadata 为空时可 fallback 展示 action_detail（旧记录）。
              *     空字符串表示无详情，前端展示「—」。
              */
             action_detail?: string;
@@ -12312,6 +12526,8 @@ export interface components {
         "service.AuthUser": {
             display_name?: string;
             id?: string;
+            /** @description Locale 是用户界面语言偏好（en/zh）；空字符串表示未显式选择，前端回退平台默认。 */
+            locale?: string;
             org_id?: string;
             role?: string;
             status?: string;

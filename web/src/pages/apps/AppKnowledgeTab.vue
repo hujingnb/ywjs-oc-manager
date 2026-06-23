@@ -11,19 +11,19 @@
     <template #header>
       <div>
         <p class="eyebrow">Instance · Knowledge</p>
-        <h2 style="margin: 0">实例知识库</h2>
+        <h2 style="margin: 0">{{ t('apps.knowledge.heading') }}</h2>
       </div>
     </template>
     <template #header-extra>
       <div v-if="canManage || canEditQuota" class="upload-actions">
         <n-button v-if="canManageRAGFlowInfo" size="small" @click="ragflowDialogOpen = true">
-          RAGFlow 信息
+          {{ t('apps.knowledge.ragflowInfo') }}
         </n-button>
-        <n-button v-if="canEditQuota" size="small" @click="openQuotaModal">编辑空间</n-button>
+        <n-button v-if="canEditQuota" size="small" @click="openQuotaModal">{{ t('apps.knowledge.editQuota') }}</n-button>
         <template v-if="canManage">
-          <span class="upload-limit">{{ KNOWLEDGE_UPLOAD_MAX_MESSAGE }}</span>
+          <span class="upload-limit">{{ t('knowledge.messages.uploadMaxMessage', { label: KNOWLEDGE_UPLOAD_MAX_LABEL }) }}</span>
           <label class="secondary-button file-picker" :class="{ disabled: uploading }">
-            上传文件
+            {{ t('apps.knowledge.upload') }}
             <input type="file" multiple :disabled="uploading" @change="onUploadFile" />
           </label>
         </template>
@@ -33,24 +33,25 @@
     <n-space align="center" style="margin-bottom: 12px">
       <n-input
         v-model:value="keyword"
-        placeholder="搜索文件名称"
+        :placeholder="t('apps.knowledge.searchPlaceholder')"
         clearable
         style="width: 220px"
       />
+      <!-- parseStatusOptions 是 computed，语言切换时选项文案响应式更新。 -->
       <n-select
         v-model:value="status"
-        :options="PARSE_STATUS_FILTER_OPTIONS"
+        :options="parseStatusOptions"
         clearable
-        placeholder="全部状态"
+        :placeholder="t('apps.knowledge.statusAll')"
         style="width: 160px"
       />
     </n-space>
 
     <p v-if="quotaSummary" class="state-text">{{ quotaSummary }}</p>
-    <p v-if="!app" class="state-text">尚未加载实例信息</p>
+    <p v-if="!app" class="state-text">{{ t('apps.knowledge.noApp') }}</p>
     <p v-else-if="errorMessage" class="state-text danger">{{ errorMessage }}</p>
-    <div v-else-if="listing.isLoading.value" class="state-text">加载中…</div>
-    <p v-else-if="listing.error.value" class="state-text danger">查询失败：{{ listing.error.value?.message }}</p>
+    <div v-else-if="listing.isLoading.value" class="state-text">{{ t('common.status.loading') }}</div>
+    <p v-else-if="listing.error.value" class="state-text danger">{{ t('apps.knowledge.queryError') }}{{ listing.error.value?.message }}</p>
     <n-data-table
       v-else
       :columns="columns"
@@ -62,14 +63,14 @@
       :row-key="(row) => row.id"
     />
 
-    <n-modal v-model:show="showQuotaModal" preset="card" title="编辑实例知识库空间" style="width: 420px">
+    <n-modal v-model:show="showQuotaModal" preset="card" :title="t('apps.knowledge.quotaTitle')" style="width: 420px">
       <n-form label-placement="top" @submit.prevent="submitQuota">
-        <n-form-item label="空间大小 (GB)">
+        <n-form-item :label="t('apps.knowledge.quotaLabel')">
           <n-input-number v-model:value="quotaGB" :min="1" :precision="0" style="width: 100%" />
         </n-form-item>
         <n-space justify="end">
-          <n-button @click="showQuotaModal = false">取消</n-button>
-          <n-button type="primary" attr-type="submit" :loading="updateQuotaMutation.isPending.value">保存</n-button>
+          <n-button @click="showQuotaModal = false">{{ t('common.actions.cancel') }}</n-button>
+          <n-button type="primary" attr-type="submit" :loading="updateQuotaMutation.isPending.value">{{ t('common.actions.save') }}</n-button>
         </n-space>
         <p v-if="quotaFeedback" class="state-text" :class="{ danger: quotaError }">{{ quotaFeedback }}</p>
       </n-form>
@@ -87,10 +88,11 @@
 <script setup lang="ts">
 import { computed, h, inject, ref, watch, type Ref } from 'vue'
 import { NButton, NCard, NDataTable, NForm, NFormItem, NInput, NInputNumber, NModal, NSelect, NSpace, NTag, useMessage, type DataTableColumns } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 import { useUpdateAppKnowledgeQuota, type AppDTO } from '@/api/hooks/useApps'
 import {
-  KNOWLEDGE_UPLOAD_MAX_MESSAGE,
+  KNOWLEDGE_UPLOAD_MAX_LABEL,
   downloadAppKnowledgeFile,
   formatKnowledgeBytes,
   useAppKnowledgeQuery,
@@ -110,10 +112,13 @@ import {
   toKnowledgeUploadItems,
 } from '@/pages/knowledge/knowledgeUploadBatch'
 import { parseStatusLabel, parseStatusTagType, PARSE_STATUS_FILTER_OPTIONS } from '@/domain/parseStatus'
+// parseStatusOptions 在 computed 中翻译选项标签，确保语言切换时下拉选项文案响应式更新。
+const parseStatusOptions = computed(() => PARSE_STATUS_FILTER_OPTIONS.map(opt => ({ ...opt, label: t(opt.label) })))
 import RAGFlowDatasetInfoDialog from '@/components/RAGFlowDatasetInfoDialog.vue'
 
 // AppKnowledgeTab 管理单个应用的 RAGFlow 知识库文件，权限来自应用详情注入。
 const props = defineProps<{ appId: string }>()
+const { t } = useI18n()
 const bytesPerGB = 1024 * 1024 * 1024
 const appIdRef = computed<string | undefined>(() => props.appId)
 const auth = useAuthStore()
@@ -153,11 +158,16 @@ const canEditQuota = computed(() => canUpdateAppKnowledgeQuota(auth.user, app?.v
 // canManageRAGFlowInfo 控制远端 dataset 运维入口，仅平台管理员可见。
 const canManageRAGFlowInfo = computed(() => canManageRAGFlowDatasetInfo(auth.user))
 // ragflowTargetName 给运维弹框展示实例名；注入值缺失时保留稳定兜底文案。
-const ragflowTargetName = computed(() => app?.value?.name || '实例知识库')
+// app 未加载时用「实例知识库」文案作为兜底，确保运维弹框标题始终有值。
+const ragflowTargetName = computed(() => app?.value?.name || t('apps.knowledge.heading'))
 const uploading = computed(() => uploadMutation.isPending.value)
 const deleting = computed(() => deleteMutation.isPending.value)
 const quotaSummary = computed(() => listing.data.value
-  ? `已用 ${formatKnowledgeBytes(listing.data.value.used_bytes)} / 上限 ${formatKnowledgeBytes(listing.data.value.quota_bytes)}，剩余 ${formatKnowledgeBytes(listing.data.value.remaining_bytes)}`
+  ? t('apps.knowledge.quotaSummary', {
+      used: formatKnowledgeBytes(listing.data.value.used_bytes),
+      quota: formatKnowledgeBytes(listing.data.value.quota_bytes),
+      remaining: formatKnowledgeBytes(listing.data.value.remaining_bytes),
+    })
   : '')
 // downloading 标记当前页面正在触发浏览器下载，避免重复点击生成多次下载请求。
 const downloading = ref(false)
@@ -170,7 +180,7 @@ const tablePagination = computed(() => ({
   itemCount: listing.data.value?.total ?? 0,
   showSizePicker: true,
   pageSizes: [10, 20, 50, 100],
-  prefix: () => `共 ${listing.data.value?.total ?? 0} 个文件`,
+  prefix: () => t('apps.knowledge.fileCountPrefix', { count: listing.data.value?.total ?? 0 }),
   onUpdatePage: (nextPage: number) => {
     page.value = nextPage
   },
@@ -216,7 +226,7 @@ async function uploadFiles(files: File[]) {
       })
     })
   } catch (err) {
-    message.warning(err instanceof Error ? err.message : '已有上传任务正在进行')
+    message.warning(err instanceof Error ? err.message : t('apps.knowledge.uploadError'))
   }
 }
 
@@ -279,7 +289,7 @@ async function submitQuota() {
     showQuotaModal.value = false
   } catch (err) {
     quotaError.value = true
-    quotaFeedback.value = err instanceof Error ? err.message : '更新空间失败'
+    quotaFeedback.value = err instanceof Error ? err.message : t('apps.knowledge.quotaError')
   }
 }
 
@@ -290,7 +300,7 @@ async function deleteEntry(documentId: string) {
   try {
     await deleteMutation.mutateAsync(documentId)
   } catch (err) {
-    errorMessage.value = err instanceof Error ? err.message : '删除失败'
+    errorMessage.value = err instanceof Error ? err.message : t('apps.knowledge.deleteError')
   }
 }
 
@@ -301,7 +311,7 @@ async function onDownload(entry: KnowledgeDocument) {
   try {
     await downloadAppKnowledgeFile(props.appId, entry.id, entry.name)
   } catch (err) {
-    message.error(err instanceof Error ? err.message : '下载失败')
+    message.error(err instanceof Error ? err.message : t('apps.knowledge.downloadError'))
   } finally {
     downloading.value = false
   }
@@ -314,7 +324,7 @@ async function reparseEntry(documentId: string) {
   try {
     await reparseMutation.mutateAsync(documentId)
   } catch (err) {
-    errorMessage.value = err instanceof Error ? err.message : '重解析失败'
+    errorMessage.value = err instanceof Error ? err.message : t('apps.knowledge.reparseError')
   }
 }
 
@@ -323,28 +333,30 @@ function canReparse(row: KnowledgeDocument): boolean {
 }
 
 // columns 展示 RAGFlow 文档；可读用户可下载，可管理用户额外可删除和重解析。
-const columns: DataTableColumns<KnowledgeDocument> = [
-  { title: '文件名称', key: 'name', render: (row) => h('strong', row.name) },
-  { title: '大小', key: 'size', render: (row) => formatBytes(row.size) },
-  { title: '类型', key: 'type', render: (row) => documentTypeLabel(row) },
+// 使用 computed 包裹以确保语言切换时列标题响应式更新。
+const columns = computed<DataTableColumns<KnowledgeDocument>>(() => [
+  { title: t('apps.knowledge.colName'), key: 'name', render: (row) => h('strong', row.name) },
+  { title: t('apps.knowledge.colSize'), key: 'size', render: (row) => formatBytes(row.size) },
+  { title: t('apps.knowledge.colType'), key: 'type', render: (row) => documentTypeLabel(row) },
   {
-    title: '解析状态', key: 'parse_status',
+    title: t('apps.knowledge.colParseStatus'), key: 'parse_status',
     render: (row) => h('div', { style: 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap' }, [
-      h(NTag, { type: parseStatusTagType(row.parse_status), size: 'small', bordered: false }, { default: () => parseStatusLabel(row.parse_status) }),
+      // parseStatusLabel 返回 i18n 键（已知状态）或原始值（未知状态）；t() 对非键字符串原样返回。
+      h(NTag, { type: parseStatusTagType(row.parse_status), size: 'small', bordered: false }, { default: () => t(parseStatusLabel(row.parse_status)) }),
       row.parse_status === 'running' ? h('span', { class: 'state-text', style: 'margin: 0; font-size: 12px' }, `${row.progress}%`) : null,
       row.last_error ? h('span', { style: 'color: var(--color-danger); font-size: 12px' }, row.last_error) : null,
     ]),
   },
-  { title: '创建时间', key: 'created_at', render: (row) => formatTime(row.created_at) },
+  { title: t('apps.knowledge.colCreatedAt'), key: 'created_at', render: (row) => formatTime(row.created_at) },
   {
-    title: '操作', key: 'actions',
+    title: t('apps.knowledge.colActions'), key: 'actions',
     render: (row) => {
       const actions = [
         h(NButton, {
           size: 'small',
           disabled: downloading.value,
           onClick: () => onDownload(row),
-        }, { default: () => downloading.value ? '下载中…' : '下载' }),
+        }, { default: () => downloading.value ? t('apps.knowledge.actionDownloading') : t('apps.knowledge.actionDownload') }),
       ]
       if (canManage.value) {
         if (canReparse(row)) {
@@ -352,19 +364,19 @@ const columns: DataTableColumns<KnowledgeDocument> = [
             size: 'small',
             disabled: reparseMutation.isPending.value,
             onClick: () => reparseEntry(row.id),
-          }, { default: () => reparseMutation.isPending.value ? '提交中…' : '重解析' }))
+          }, { default: () => reparseMutation.isPending.value ? t('apps.knowledge.actionReparsePending') : t('apps.knowledge.actionReparse') }))
         }
         actions.push(h(NButton, {
           size: 'small',
           type: 'error',
           disabled: deleting.value,
           onClick: () => deleteEntry(row.id),
-        }, { default: () => '删除' }))
+        }, { default: () => t('apps.knowledge.actionDelete') }))
       }
       return actions.length ? h('div', { style: 'display: flex; gap: 8px; flex-wrap: wrap' }, actions) : null
     },
   },
-]
+])
 </script>
 
 <style scoped>

@@ -9,32 +9,33 @@
           size="small"
           style="width: 180px"
         />
-        <n-input v-model:value="search" size="small" placeholder="搜索任务标题" style="width: 200px" />
+        <n-input v-model:value="search" size="small" :placeholder="t('apps.kanban.tab.searchPlaceholder')" style="width: 200px" />
         <span class="spacer" />
         <!-- stats 徽标：任务总数 + 最老就绪任务等待时长（来自 kanban stats 端点）-->
         <!-- stats !== false：features 未知时默认显示，明确 false 才隐藏 -->
         <span v-if="statsSummary && kanbanFeatures?.stats !== false" class="stat-badge">
-          <span><strong>{{ statsSummary.total }}</strong> 个任务</span>
-          <span v-if="statsSummary.oldestReady">最老就绪 <strong class="warn">{{ statsSummary.oldestReady }}</strong></span>
+          <!-- t('apps.kanban.tab.taskCount') 含插值 {n}，用 v-html 内联渲染 bold 数字 -->
+          <span>{{ t('apps.kanban.tab.taskCount', { n: statsSummary.total }) }}</span>
+          <span v-if="statsSummary.oldestReady">{{ t('apps.kanban.tab.oldestReady', { age: statsSummary.oldestReady }) }}</span>
         </span>
         <!-- streamConnected 为 true 时显示绿点「实时」，否则显示「重连实时流」按钮 -->
-        <span v-if="streamConnected" class="live-tag">● 实时</span>
-        <n-button v-else size="small" tertiary @click="reconnectStream">重连实时流</n-button>
+        <span v-if="streamConnected" class="live-tag">{{ t('apps.kanban.tab.liveLabel') }}</span>
+        <n-button v-else size="small" tertiary @click="reconnectStream">{{ t('apps.kanban.tab.reconnect') }}</n-button>
         <!-- write !== false：features 未知时默认显示，明确 false 才隐藏 -->
-        <n-button v-if="kanbanFeatures?.write !== false" class="create-task-btn" size="small" type="primary" @click="showCreate = true">+ 新建任务</n-button>
+        <n-button v-if="kanbanFeatures?.write !== false" class="create-task-btn" size="small" type="primary" @click="showCreate = true">{{ t('apps.kanban.tab.createTask') }}</n-button>
       </n-space>
     </n-card>
 
     <!-- stub 镜像降级提示：当后端返回 KANBAN_NOT_SUPPORTED_ON_STUB 时显示 -->
     <n-card v-if="isStubInstance" :bordered="true">
-      <n-empty description="该实例运行的是本地 dev 镜像，任务看板不可用；切换到生产镜像后该功能自动启用。" />
+      <n-empty :description="t('apps.kanban.tab.stubDesc')" />
     </n-card>
 
     <!-- 左右分屏：左侧任务列表 + 右侧详情面板 -->
     <div v-else class="split">
       <div class="list-col">
         <!-- 加载中状态 -->
-        <p v-if="tasksQuery.isLoading.value" class="state-text">加载中…</p>
+        <p v-if="tasksQuery.isLoading.value" class="state-text">{{ t('common.status.loading') }}</p>
         <!-- 非 stub 的加载错误 -->
         <p v-else-if="tasksQuery.error.value" class="state-text danger">{{ errorText }}</p>
         <!-- 任务列表：按状态分组、可折叠 -->
@@ -75,6 +76,7 @@
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NCard, NSpace, NSelect, NInput, NButton, NEmpty, useMessage } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import KanbanTaskList from './kanban/KanbanTaskList.vue'
 import KanbanTaskDetail from './kanban/KanbanTaskDetail.vue'
 import KanbanCreateModal from './kanban/KanbanCreateModal.vue'
@@ -96,6 +98,7 @@ import type { ApiError } from '@/api/client'
 const props = defineProps<{ appId: string }>()
 // 转为 Ref 供 composable 使用（composable 接受 Ref<string | undefined>）。
 const appId = computed(() => props.appId)
+const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
@@ -134,11 +137,12 @@ const capabilitiesQuery = useKanbanCapabilitiesQuery(appId)
 const kanbanFeatures = computed(() => capabilitiesQuery.data.value?.features)
 
 // formatAge 把秒数格式化为人类可读的时长（用于「最老就绪等待时长」）。
+// 使用 i18n key 确保英文/中文单位随语言切换。
 function formatAge(seconds: number): string {
-  if (seconds < 60) return `${Math.floor(seconds)} 秒`
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟`
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)} 小时`
-  return `${Math.floor(seconds / 86400)} 天`
+  if (seconds < 60) return t('apps.kanban.tab.ageSeconds', { n: Math.floor(seconds) })
+  if (seconds < 3600) return t('apps.kanban.tab.ageMinutes', { n: Math.floor(seconds / 60) })
+  if (seconds < 86400) return t('apps.kanban.tab.ageHours', { n: Math.floor(seconds / 3600) })
+  return t('apps.kanban.tab.ageDays', { n: Math.floor(seconds / 86400) })
 }
 
 // statsSummary：把 stats 端点数据归纳为工具栏徽标用的两项 —— 任务总数、最老就绪等待时长。
@@ -169,7 +173,7 @@ const isStubInstance = computed(
   () => isStubError(tasksQuery.error.value) || isStubError(boardsQuery.error.value),
 )
 // errorText：非 stub 的加载错误文本，直接显示给用户。
-const errorText = computed(() => String(tasksQuery.error.value?.message ?? '加载失败'))
+const errorText = computed(() => String(tasksQuery.error.value?.message ?? t('apps.kanban.tab.loadError')))
 
 // ─── Board 下拉选项 ───────────────────────────────────────────────────────────
 // boardOptions：若 boards 未加载完成则显示 default 占位，防止下拉为空。
@@ -220,9 +224,9 @@ async function onCreate(payload: Record<string, unknown>) {
   try {
     await createMutation.mutateAsync(payload as never)
     showCreate.value = false
-    message.success('任务已创建')
+    message.success(t('apps.kanban.tab.successCreate'))
   } catch (e) {
-    message.error(e instanceof Error ? e.message : '创建失败')
+    message.error(e instanceof Error ? e.message : t('apps.kanban.tab.errorCreate'))
   }
 }
 
@@ -236,10 +240,10 @@ async function onAction(verb: string) {
 
   // 需要文本输入的操作：key 是追加到 mutation payload 的字段名，title 是提示文本。
   const NEEDS_INPUT: Record<string, { title: string; key: string }> = {
-    comment: { title: '添加评论', key: 'body' },
-    block: { title: '阻塞原因', key: 'reason' },
-    complete: { title: '完成结果（可选）', key: 'result' },
-    reassign: { title: '重新分配给（profile）', key: 'to' },
+    comment: { title: t('apps.kanban.tab.promptComment'), key: 'body' },
+    block: { title: t('apps.kanban.tab.promptBlock'), key: 'reason' },
+    complete: { title: t('apps.kanban.tab.promptComplete'), key: 'result' },
+    reassign: { title: t('apps.kanban.tab.promptReassign'), key: 'to' },
   }
   // 高风险操作：执行前弹二次确认。
   const NEEDS_CONFIRM = new Set(['archive', 'reclaim'])
@@ -253,15 +257,15 @@ async function onAction(verb: string) {
       await actionMutation.mutateAsync({ verb, taskId, [cfg.key]: value } as never)
     } else if (NEEDS_CONFIRM.has(verb)) {
       // window.confirm 作为二次确认，取消则中止。
-      const ok = window.confirm(`确定要执行「${verb}」吗？`)
+      const ok = window.confirm(t('apps.kanban.tab.confirmAction', { verb }))
       if (!ok) return
       await actionMutation.mutateAsync({ verb, taskId } as never)
     } else {
       await actionMutation.mutateAsync({ verb, taskId } as never)
     }
-    message.success('操作成功')
+    message.success(t('apps.kanban.tab.successAction'))
   } catch (e) {
-    message.error(e instanceof Error ? e.message : '操作失败')
+    message.error(e instanceof Error ? e.message : t('apps.kanban.tab.errorAction'))
   }
 }
 

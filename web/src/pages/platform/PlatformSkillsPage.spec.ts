@@ -4,6 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, ref, type PropType, type VNodeChild } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { i18n } from '@/i18n'
 import PlatformSkillsPage from './PlatformSkillsPage.vue'
 import type { PlatformSkill } from '@/api'
 
@@ -108,6 +109,8 @@ const ButtonStub = {
 function mountPage() {
   return mount(PlatformSkillsPage, {
     global: {
+      // 注入 i18n 插件，PlatformSkillsPage 使用 useI18n() 需要。
+      plugins: [i18n],
       stubs: {
         NCard: { template: '<section v-bind="$attrs"><slot name="header" /><slot name="header-extra" /><slot /></section>' },
         'n-card': { template: '<section v-bind="$attrs"><slot name="header" /><slot name="header-extra" /><slot /></section>' },
@@ -150,6 +153,8 @@ describe('PlatformSkillsPage', () => {
     mocks.deleteMutateAsync.mockReset()
     mocks.uploadIsPending.value = false as boolean
     mocks.deleteIsPending.value = false as boolean
+    // 测试断言中文文案，设置 zh 语言以匹配 t() 返回值。
+    i18n.global.locale.value = 'zh'
   })
 
   // 覆盖平台库列表首列：skill 名称必须渲染在 name 列。

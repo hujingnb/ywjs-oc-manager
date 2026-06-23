@@ -5,15 +5,16 @@ import {
   KNOWLEDGE_DEFAULT_QUOTA_BYTES,
   KNOWLEDGE_UPLOAD_MAX_BYTES,
   KNOWLEDGE_UPLOAD_MAX_LABEL,
-  KNOWLEDGE_UPLOAD_MAX_MESSAGE,
   buildKnowledgeListQuery,
   downloadAppKnowledgeFile,
   downloadOrgKnowledgeFile,
   formatKnowledgeBytes,
+  getKnowledgeUploadMaxMessage,
   isKnowledgeUploadOverRemaining,
   isKnowledgeUploadTooLarge,
   normalizeKnowledgeListing,
 } from './useKnowledge'
+import { i18n } from '@/i18n'
 
 let clickSpy: ReturnType<typeof vi.spyOn>
 const originalCreateObjectURLDescriptor = Object.getOwnPropertyDescriptor(URL, 'createObjectURL')
@@ -28,7 +29,9 @@ function restoreURLDescriptor(name: 'createObjectURL' | 'revokeObjectURL', descr
   Reflect.deleteProperty(URL, name)
 }
 
+// 切换到中文 locale，确保断言的是用户可见的中文文案。
 beforeEach(() => {
+  i18n.global.locale.value = 'zh'
   setStoredTokens({ accessToken: 'access-1', refreshToken: 'refresh-1' })
   Object.defineProperty(URL, 'createObjectURL', {
     value: vi.fn(() => 'blob:knowledge'),
@@ -54,7 +57,8 @@ describe('知识库上传大小限制', () => {
   it('导出 1024MB 上限和统一提示文案', () => {
     expect(KNOWLEDGE_UPLOAD_MAX_BYTES).toBe(1024 * 1024 * 1024)
     expect(KNOWLEDGE_UPLOAD_MAX_LABEL).toBe('1024MB')
-    expect(KNOWLEDGE_UPLOAD_MAX_MESSAGE).toBe('单文件最大支持 1024MB')
+    // getKnowledgeUploadMaxMessage 通过 i18n 动态生成当前语言的提示文案。
+    expect(getKnowledgeUploadMaxMessage()).toBe('单文件最大支持 1024MB')
   })
 
   // 覆盖边界：刚好达到上限允许上传，超过 1 字节立即拒绝。

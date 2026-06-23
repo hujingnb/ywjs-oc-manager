@@ -4,6 +4,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 import { apiRequest } from '@/api/client'
+import { i18n } from '@/i18n'
 
 // Kanban 任务状态枚举（与 hermes kanban 状态机一致）。
 // 状态流转：triage → todo → ready → running → blocked/done/archived
@@ -297,7 +298,7 @@ export function useCreateKanbanTask(appId: Ref<string | undefined>, board: Ref<s
       max_retries?: number
     }) => {
       // appId 为空时拒绝执行，避免向错误路径发起请求。
-      if (!appId.value) throw new Error('缺少实例 ID')
+      if (!appId.value) throw new Error(i18n.global.t('common.errors.missingAppId'))
       const res = await apiRequest<{ task: KanbanTaskDetail }>(
         `/api/v1/apps/${appId.value}/hermes/kanban/tasks`,
         { method: 'POST', body: { board: board.value, ...payload } },
@@ -334,7 +335,7 @@ export function useKanbanTaskAction(appId: Ref<string | undefined>, board: Ref<s
   return useMutation({
     mutationFn: async (action: KanbanWriteAction) => {
       // appId 为空时拒绝执行，避免向错误路径发起请求。
-      if (!appId.value) throw new Error('缺少实例 ID')
+      if (!appId.value) throw new Error(i18n.global.t('common.errors.missingAppId'))
       // 解构 verb 和 taskId 作为 URL 路径参数，剩余字段作为请求体追加 board。
       const { verb, taskId, ...rest } = action
       const res = await apiRequest<{ task: KanbanTaskDetail }>(

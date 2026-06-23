@@ -1,8 +1,9 @@
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick, ref } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 
+import { i18n } from '@/i18n'
 import CreateMemberPage from './CreateMemberPage.vue'
 
 const onboardMock = vi.hoisted(() => vi.fn(async () => ({
@@ -69,7 +70,8 @@ function mountPage() {
   return mount(CreateMemberPage, {
     global: {
       // 注入 QueryClient，解决 useQuery 调用报 "No 'queryClient' found" 的问题。
-      plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }]],
+      // 注入 i18n 插件，使组件内 t() 调用能够解析翻译文案。
+      plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }], i18n],
       stubs: {
         RouterLink: defineComponent({
           setup(_, { slots }) {
@@ -150,6 +152,11 @@ function mountPage() {
 }
 
 describe('CreateMemberPage', () => {
+  // 每次用例前将 i18n 语言设为中文，确保断言中文文案的测试与翻译文件对齐。
+  beforeEach(() => {
+    i18n.global.locale.value = 'zh'
+  })
+
   // 选择助手版本后提交，mutation 应携带 version_id，不包含 model_id。
   it('提交创建成员并初始化实例时包含 version_id 且不包含 model_id', async () => {
     onboardMock.mockClear()

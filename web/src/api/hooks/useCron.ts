@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { computed, type Ref } from 'vue'
 
 import { apiRequest } from '@/api/client'
+import { i18n } from '@/i18n'
 
 // CronSchedule 描述 Cron 任务的规整调度表达式。
 export interface CronSchedule {
@@ -341,7 +342,7 @@ export function useCronOutputQuery(
 // ─── 写 mutation hooks ───────────────────────────────────────────────
 
 function ensureAppId(appId: Ref<string | undefined>): string {
-  if (!appId.value) throw new Error('缺少实例 ID')
+  if (!appId.value) throw new Error(i18n.global.t('common.errors.missingAppId'))
   return appId.value
 }
 

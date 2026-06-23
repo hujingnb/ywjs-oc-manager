@@ -151,6 +151,49 @@ func TestAuthChangePasswordMapsInvalidNewPasswordToBadRequest(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "新密码至少 8 位")
 }
 
+// TestUpdateLocaleReturnsNoContent 验证合法 locale 时 PATCH /auth/me/locale 返回 204。
+func TestUpdateLocaleReturnsNoContent(t *testing.T) {
+	svc := &authServiceStub{}
+	router := newAuthTestRouter(t, svc)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/auth/me/locale", bytes.NewBufferString(`{"locale":"zh"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: "org_member", OrgID: "org-1"})
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusNoContent, recorder.Code)
+	assert.Equal(t, "zh", svc.lastLocale)
+}
+
+// TestUpdateLocaleRejectsInvalidLocale 验证 service 返回 ErrInvalidLocale 时 handler 响应 400 INVALID_LOCALE。
+func TestUpdateLocaleRejectsInvalidLocale(t *testing.T) {
+	router := newAuthTestRouter(t, &authServiceStub{updateLocaleErr: service.ErrInvalidLocale})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/auth/me/locale", bytes.NewBufferString(`{"locale":"fr"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: "org_member", OrgID: "org-1"})
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "INVALID_LOCALE")
+}
+
+// TestUpdateLocaleRejectsMissingLocaleField 验证请求体缺少 locale 字段时返回 400。
+func TestUpdateLocaleRejectsMissingLocaleField(t *testing.T) {
+	router := newAuthTestRouter(t, &authServiceStub{})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/auth/me/locale", bytes.NewBufferString(`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: "org_member", OrgID: "org-1"})
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "locale")
+}
+
 func newAuthTestRouter(t *testing.T, svc *authServiceStub) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
@@ -200,9 +243,12 @@ type authServiceStub struct {
 	loginErr                error
 	meResult                service.AuthUser
 	changePasswordErr       error
+	updateLocaleErr         error
 	lastLoginInput          service.LoginInput
 	lastPrincipal           auth.Principal
 	lastChangePasswordInput service.ChangePasswordInput
+	// lastLocale 记录最后一次 UpdateLocale 调用传入的 locale 参数。
+	lastLocale string
 }
 
 func (s *authServiceStub) Login(_ context.Context, input service.LoginInput) (service.LoginResult, error) {
@@ -227,4 +273,10 @@ func (s *authServiceStub) ChangePassword(_ context.Context, principal auth.Princ
 	s.lastPrincipal = principal
 	s.lastChangePasswordInput = input
 	return s.changePasswordErr
+}
+
+// UpdateLocale 记录调用入参并按预置错误返回，供 handler 测试断言。
+func (s *authServiceStub) UpdateLocale(_ context.Context, _ string, locale string) error {
+	s.lastLocale = locale
+	return s.updateLocaleErr
 }

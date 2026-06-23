@@ -6,11 +6,11 @@
     placement="right"
     @update:show="(value: boolean) => emit('update:show', value)"
   >
-    <n-drawer-content :title="`使用手册 · ${manual.roleLabel}`" closable :native-scrollbar="false">
+    <n-drawer-content :title="t('components.helpDrawer.drawerTitle', { roleLabel: manual.roleLabel })" closable :native-scrollbar="false">
       <p class="help-summary">{{ manual.summary }}</p>
 
       <!-- 功能介绍：逐个菜单分区说明用途、范围与边界 -->
-      <h2 class="help-group-title">功能介绍</h2>
+      <h2 class="help-group-title">{{ t('components.helpDrawer.featuresTitle') }}</h2>
       <section
         v-for="section in manual.sections"
         :key="section.title"
@@ -23,7 +23,7 @@
       </section>
 
       <!-- 操作指引：面向常见任务的分步教程，回答「怎么用」 -->
-      <h2 class="help-group-title">操作指引</h2>
+      <h2 class="help-group-title">{{ t('components.helpDrawer.guidesTitle') }}</h2>
       <section
         v-for="guide in manual.guides"
         :key="guide.title"
@@ -41,6 +41,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NDrawer, NDrawerContent } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 import { getHelpManual } from '@/domain/helpContent'
 
@@ -58,8 +59,10 @@ const emit = defineEmits<{
   (event: 'update:show', value: boolean): void
 }>()
 
-// manual 根据角色解析对应手册，role 变化时自动切换内容。
-const manual = computed(() => getHelpManual(props.role))
+const { t, locale } = useI18n()
+
+// manual 根据角色与当前语言解析对应手册；role 或 locale 变化时均自动切换内容。
+const manual = computed(() => getHelpManual(props.role, locale.value))
 
 // drawerWidth 取较宽的固定值以容纳详细文案与操作步骤；窄屏按视口宽度的 92% 自适应收窄，避免溢出。
 // 后台为桌面端使用，这里取一次即可，不监听 resize。

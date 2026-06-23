@@ -37,6 +37,9 @@ class Manifest:
     # knowledge：manager runtime API 配置；不包含 RAGFlow 凭证。
     knowledge_runtime_base_url: str = ""
     knowledge_app_token: str = ""
+    # app_language：应用界面语言，由 manager 写入 manifest（"en"/"zh"）；
+    # 缺省空串表示未配置，渲染时回落 "en"。
+    app_language: str = ""
 
 
 def _require(d: dict, *path: str) -> Any:
@@ -63,6 +66,8 @@ def load(path: Union[str, Path]) -> Manifest:
     skills = resources.get("skills") if isinstance(resources, dict) else None
     knowledge = raw.get("knowledge")
     knowledge = knowledge if isinstance(knowledge, dict) else {}
+    # 从 app 节点读取可选字段 language；不存在或为空时缺省空串，渲染侧回落 "en"。
+    app_section = raw.get("app") if isinstance(raw.get("app"), dict) else {}
     return Manifest(
         app_id=_require(raw, "app", "id"),
         app_name=_require(raw, "app", "name"),
@@ -77,4 +82,5 @@ def load(path: Union[str, Path]) -> Manifest:
         skills=[str(s) for s in skills] if isinstance(skills, list) else [],
         knowledge_runtime_base_url=str(knowledge.get("runtime_base_url") or ""),
         knowledge_app_token=str(knowledge.get("app_token") or ""),
+        app_language=str(app_section.get("language") or ""),
     )

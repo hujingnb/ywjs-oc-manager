@@ -47,11 +47,19 @@ type MemberOnboardingService struct {
 	tx                TxRunner
 	hashPassword      PasswordHasher
 	knowledgeDatasets KnowledgeDatasetProvisioner
+	// defaultLocale 是平台默认语言（en/zh），在创建实例时作为 locale 的回退值。
+	// owner 未显式设置语言时，实例 locale 落此值；否则快照 owner 的 locale。
+	defaultLocale string
 }
 
 // NewMemberOnboardingService 创建 onboarding 服务。
-func NewMemberOnboardingService(tx TxRunner, hash PasswordHasher) *MemberOnboardingService {
-	return &MemberOnboardingService{tx: tx, hashPassword: hash}
+// defaultLocale 是平台默认语言（en/zh），用于在 owner locale 未设置时回退；空时按 "en" 处理。
+func NewMemberOnboardingService(tx TxRunner, hash PasswordHasher, defaultLocale ...string) *MemberOnboardingService {
+	dl := "en"
+	if len(defaultLocale) > 0 && defaultLocale[0] != "" {
+		dl = defaultLocale[0]
+	}
+	return &MemberOnboardingService{tx: tx, hashPassword: hash, defaultLocale: dl}
 }
 
 // SetKnowledgeDatasetProvisioner 注入实例创建后的知识库 dataset 预创建能力。
@@ -156,6 +164,7 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 			return fmt.Errorf("创建成员失败: %w", err)
 		}
 		// CreateApp 为 :exec；k8s 模型下不写 runtime_node_id，由调度器决定落点。
+		// locale 快照：新成员尚无语言偏好，直接使用平台默认语言作为初始 locale。
 		if err := store.CreateApp(ctx, sqlc.CreateAppParams{
 			ID:           appID,
 			OrgID:        org.ID,
@@ -165,6 +174,7 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 			Status:       domain.AppStatusDraft,
 			ApiKeyStatus: domain.APIKeyStatusPending,
 			VersionID:    null.StringFrom(input.VersionID),
+			Locale:       null.StringFrom(s.defaultLocale),
 		}); err != nil {
 			return fmt.Errorf("创建应用失败: %w", err)
 		}
@@ -179,38 +189,48 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 			return fmt.Errorf("创建渠道绑定失败: %w", err)
 		}
 		// 成员创建审计。
+		// metadata 存储结构化参数：member_name/app_name，供前端按语言渲染详情。
+		memberAuditMeta, err := json.Marshal(map[string]any{
+			"member_name": displayNameOrUsername(sqlc.User{DisplayName: input.DisplayName, Username: input.Username}),
+			"app_name":    input.AppName,
+		})
+		if err != nil {
+			return fmt.Errorf("序列化成员创建审计元数据失败: %w", err)
+		}
 		if err := store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-			ID:            auditID1,
-			ActorID:       null.StringFrom(principal.UserID),
-			ActorRole:     principal.Role,
-			OrgID:         null.StringFrom(org.ID),
-			TargetType:    "member",
-			TargetID:      userID,
-			Action:        "create_with_app",
-			Result:        "succeeded",
-			DetailMessage: null.StringFrom(fmt.Sprintf("新建成员 %s（含应用 %s）", displayNameOrUsername(sqlc.User{DisplayName: input.DisplayName, Username: input.Username}), input.AppName)),
+			ID:           auditID1,
+			ActorID:      null.StringFrom(principal.UserID),
+			ActorRole:    principal.Role,
+			OrgID:        null.StringFrom(org.ID),
+			TargetType:   "member",
+			TargetID:     userID,
+			Action:       "create_with_app",
+			Result:       "succeeded",
+			MetadataJson: memberAuditMeta,
 		}); err != nil {
 			return fmt.Errorf("写入审计日志失败: %w", err)
 		}
+		// 应用创建审计：合并 owner_user_id/channel_type（原有）与 member_name/app_name 到同一 metadata。
 		appAuditMetadata, err := json.Marshal(map[string]any{
 			"owner_user_id": userID,
 			"channel_type":  channelType,
+			"member_name":   input.DisplayName,
+			"app_name":      input.AppName,
 		})
 		if err != nil {
 			return fmt.Errorf("序列化应用创建审计元数据失败: %w", err)
 		}
 		// 应用创建审计。
 		if err := store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-			ID:            auditID2,
-			ActorID:       null.StringFrom(principal.UserID),
-			ActorRole:     principal.Role,
-			OrgID:         null.StringFrom(org.ID),
-			TargetType:    "app",
-			TargetID:      appID,
-			Action:        "create",
-			Result:        "succeeded",
-			MetadataJson:  appAuditMetadata,
-			DetailMessage: null.StringFrom(fmt.Sprintf("归属成员 %s，渠道 %s", input.DisplayName, channelLabel(channelType))),
+			ID:           auditID2,
+			ActorID:      null.StringFrom(principal.UserID),
+			ActorRole:    principal.Role,
+			OrgID:        null.StringFrom(org.ID),
+			TargetType:   "app",
+			TargetID:     appID,
+			Action:       "create",
+			Result:       "succeeded",
+			MetadataJson: appAuditMetadata,
 		}); err != nil {
 			return fmt.Errorf("写入应用创建审计日志失败: %w", err)
 		}
@@ -326,6 +346,11 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 			return fmt.Errorf("查询成员应用失败: %w", err)
 		}
 		// k8s 模型下不写 runtime_node_id，由调度器决定落点。
+		// locale 快照：优先使用 owner 已设置的语言偏好；未设置时回退平台默认语言，确保 hermes 容器有确定语言。
+		appLocale := s.defaultLocale
+		if user.Locale.Valid && user.Locale.String != "" {
+			appLocale = user.Locale.String
+		}
 		if err := store.CreateApp(ctx, sqlc.CreateAppParams{
 			ID:           appID,
 			OrgID:        org.ID,
@@ -335,6 +360,7 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 			Status:       domain.AppStatusDraft,
 			ApiKeyStatus: domain.APIKeyStatusPending,
 			VersionID:    null.StringFrom(input.VersionID),
+			Locale:       null.StringFrom(appLocale),
 		}); err != nil {
 			if isAppsOwnerActiveUniqueViolation(err) {
 				return fmt.Errorf("%w: 成员已有未删除实例", ErrMemberCreateInvalid)
@@ -350,24 +376,26 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 		}); err != nil {
 			return fmt.Errorf("创建渠道绑定失败: %w", err)
 		}
+		// metadata 存储结构化参数：owner_user_id/channel_type/member_name/app_name，供前端按语言渲染详情。
 		metadata, err := json.Marshal(map[string]any{
 			"owner_user_id": user.ID,
 			"channel_type":  channelType,
+			"member_name":   displayNameOrUsername(user),
+			"app_name":      input.AppName,
 		})
 		if err != nil {
 			return fmt.Errorf("序列化应用创建审计元数据失败: %w", err)
 		}
 		if err := store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-			ID:            auditID,
-			ActorID:       null.StringFrom(principal.UserID),
-			ActorRole:     principal.Role,
-			OrgID:         null.StringFrom(org.ID),
-			TargetType:    "app",
-			TargetID:      appID,
-			Action:        "create_for_existing_member",
-			Result:        "succeeded",
-			MetadataJson:  metadata,
-			DetailMessage: null.StringFrom(fmt.Sprintf("归属成员 %s，渠道 %s", user.DisplayName, channelLabel(channelType))),
+			ID:           auditID,
+			ActorID:      null.StringFrom(principal.UserID),
+			ActorRole:    principal.Role,
+			OrgID:        null.StringFrom(org.ID),
+			TargetType:   "app",
+			TargetID:     appID,
+			Action:       "create_for_existing_member",
+			Result:       "succeeded",
+			MetadataJson: metadata,
 		}); err != nil {
 			return fmt.Errorf("写入应用创建审计日志失败: %w", err)
 		}
@@ -487,13 +515,3 @@ func displayNameOrUsername(user sqlc.User) string {
 	return "成员"
 }
 
-// channelLabel 把 channel_type 枚举（如 "wechat"）翻译为中文便于审计展示。
-// 未知枚举回退到原始字符串，给后端扩展新渠道时保持自描述。
-func channelLabel(channelType string) string {
-	switch channelType {
-	case domain.ChannelTypeWeChat:
-		return "微信"
-	default:
-		return channelType
-	}
-}

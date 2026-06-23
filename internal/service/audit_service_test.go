@@ -166,9 +166,10 @@ func TestAuditServiceListByOrgPopulatesNameColumns(t *testing.T) {
 	require.Equal(t, "gpt-4o → claude-opus-4-7", results[0].ActionDetail)
 }
 
-// TestAuditServiceRecordPersistsDetailMessage 验证 Record 把 DetailMessage 透传到 CreateAuditLog。
+// TestAuditServiceRecordPersistsDetailMessage 验证 Record 在 DetailMessage 非空时仍会透传到 CreateAuditLog，
+// 以兼容少数仍传旧字段的历史代码路径；新代码不应再使用 DetailMessage，改用 Metadata。
 func TestAuditServiceRecordPersistsDetailMessage(t *testing.T) {
-	// 场景：写入端用 DetailMessage 字段时，落库参数携带相同字符串。
+	// 场景：少数旧路径仍填写 DetailMessage 时，落库参数应携带相同字符串（历史兼容）。
 	store := &auditStoreStub{}
 	svc := NewAuditService(store)
 
@@ -181,8 +182,36 @@ func TestAuditServiceRecordPersistsDetailMessage(t *testing.T) {
 		DetailMessage: "+5000.00 元，备注 vip 续费",
 	})
 	require.NoError(t, err)
+	// 历史兼容：DetailMessage 不为空时应仍透传到 detail_message 列。
 	require.True(t, store.created.DetailMessage.Valid)
 	require.Equal(t, "+5000.00 元，备注 vip 续费", store.created.DetailMessage.String)
+}
+
+// TestAuditServiceRecordNoDetailMessageNewPaths 验证迁移后新写入路径不再设置 detail_message，
+// 而是通过 Metadata 传递结构化参数。
+func TestAuditServiceRecordNoDetailMessageNewPaths(t *testing.T) {
+	// 场景：新写入路径（如充值、skill 操作）不再填 DetailMessage，
+	// 改用 Metadata 存储动态参数，确保历史文案不冻结到数据库。
+	store := &auditStoreStub{}
+	svc := NewAuditService(store)
+
+	_, err := svc.Record(context.Background(), AuditEvent{
+		ActorRole:  domain.UserRolePlatformAdmin,
+		TargetType: "organization",
+		TargetID:   "00000000-0000-0000-0000-000000000101",
+		Action:     "recharge",
+		Result:     "succeeded",
+		// 新路径：仅传 Metadata，不传 DetailMessage。
+		Metadata: map[string]any{
+			"amount": 5000,
+			"remark": "vip 续费",
+		},
+	})
+	require.NoError(t, err)
+	// 新记录不应写入冻结文案。
+	require.False(t, store.created.DetailMessage.Valid, "新写入路径不应设置 detail_message")
+	// Metadata 应序列化写入 metadata_json。
+	require.NotEmpty(t, store.created.MetadataJson, "Metadata 应写入 metadata_json")
 }
 
 // mustOptionalUUID 返回 null.String 表示一个有效的 UUID 值（MySQL 侧 CHAR(36) 可空列）。

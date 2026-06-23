@@ -629,6 +629,11 @@ func (s *authStoreStub) RevokeRefreshTokensByUser(_ context.Context, userID stri
 	return nil
 }
 
+// UpdateUserLocale 是 AuthStore 接口新增方法的测试桩实现；既有测试不调用此方法，故为空操作。
+func (s *authStoreStub) UpdateUserLocale(_ context.Context, _ sqlc.UpdateUserLocaleParams) error {
+	return nil
+}
+
 // loginFakeCaptcha 是 CaptchaVerifier 的测试桩，按预置 err 返回。
 type loginFakeCaptcha struct{ err error }
 
@@ -666,6 +671,36 @@ func TestAuthServiceLoginPassesWithGoodCaptcha(t *testing.T) {
 	require.Equal(t, "admin", result.User.Username)
 }
 
+// fakeLocaleStore 仅实现 UpdateLocale 测试所需的存储方法，记录最后一次写入参数。
+// 嵌入 AuthStore 接口（nil 实现），以满足 AuthStore 的完整方法集；
+// 只覆盖 UpdateUserLocale，其余方法若被调用会 panic，测试中不会触发。
+type fakeLocaleStore struct {
+	AuthStore
+	gotID, gotLocale string
+	err              error
+}
+
+func (f *fakeLocaleStore) UpdateUserLocale(_ context.Context, arg sqlc.UpdateUserLocaleParams) error {
+	f.gotID, f.gotLocale = arg.ID, arg.Locale.String
+	return f.err
+}
+
+// TestAuthService_UpdateLocale 覆盖语言持久化：合法 locale 写库、非法 locale 被拒。
+func TestAuthService_UpdateLocale(t *testing.T) {
+	// 合法 zh：应写入对应用户行
+	store := &fakeLocaleStore{}
+	svc := &AuthService{store: store}
+	require.NoError(t, svc.UpdateLocale(context.Background(), "u1", "zh"))
+	assert.Equal(t, "u1", store.gotID)
+	assert.Equal(t, "zh", store.gotLocale)
+
+	// 非法 fr：应返回 ErrInvalidLocale，不写库
+	store2 := &fakeLocaleStore{}
+	svc2 := &AuthService{store: store2}
+	require.ErrorIs(t, svc2.UpdateLocale(context.Background(), "u1", "fr"), ErrInvalidLocale)
+	assert.Equal(t, "", store2.gotID)
+}
+
 // mustUUID 返回字符串 UUID（MySQL 侧 CHAR(36)，无需解析）。
 func mustUUID(t *testing.T, value string) string {
 	t.Helper()
@@ -678,4 +713,16 @@ func uuidToString(id string) string { return id }
 // fakeAuthHash 为修改密码测试提供确定性的 hash 结果，避免引入 Argon2 成本。
 func fakeAuthHash(password string) (string, error) {
 	return "hashed:" + password, nil
+}
+
+// TestToAuthUser_LocaleMapping 覆盖 toAuthUser 把 users.locale(null.String) 正确映射到 AuthUser.Locale：
+// 已选语言透传，NULL（未选择）映射为空字符串，交由前端回退平台默认。
+func TestToAuthUser_LocaleMapping(t *testing.T) {
+	// 已显式选择 zh：应原样透传
+	got := toAuthUser(sqlc.User{ID: "u1", Username: "a", DisplayName: "A", Role: "org_member", Status: "active", Locale: null.StringFrom("zh")})
+	assert.Equal(t, "zh", got.Locale)
+
+	// locale 为 NULL（未选择）：应映射为空字符串
+	got = toAuthUser(sqlc.User{ID: "u2", Username: "b", DisplayName: "B", Role: "org_member", Status: "active"})
+	assert.Equal(t, "", got.Locale)
 }

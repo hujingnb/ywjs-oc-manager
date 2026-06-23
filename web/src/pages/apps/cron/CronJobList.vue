@@ -1,7 +1,7 @@
 <template>
   <n-card :bordered="true" content-style="padding: 0">
     <!-- 空列表保留最小高度，避免加载完成后左右分屏高度明显跳动。 -->
-    <n-empty v-if="jobs.length === 0" class="list-empty" description="暂无定时任务" />
+    <n-empty v-if="jobs.length === 0" class="list-empty" :description="t('apps.cron.list.empty')" />
     <div v-else class="card-list">
       <div
         v-for="job in jobs"
@@ -10,22 +10,22 @@
         :class="{ selected: job.id === selectedId }"
         @click="onSelect(job)"
       >
-        <!-- 第一行：任务名称 + 中文状态标签，名称过长才省略，状态始终完整。 -->
+        <!-- 第一行：任务名称 + i18n 状态标签，名称过长才省略，状态始终完整。 -->
         <div class="card-head">
-          <span class="job-name">{{ job.name || '未命名任务' }}</span>
-          <n-tag size="small" :type="stateTagType(job.state)">{{ translateState(job.state) }}</n-tag>
+          <span class="job-name">{{ job.name || t('apps.cron.list.unnamed') }}</span>
+          <n-tag size="small" :type="stateTagType(job.state)">{{ stateLabel(job.state) }}</n-tag>
         </div>
         <!-- 次要灰色小字展示 job_id，便于排查。 -->
         <code class="job-id">{{ job.id || '—' }}</code>
         <!-- 调度走统一展示入口：上游 display 优先，缺失时前端兜底翻译。 -->
         <div class="card-row">
-          <span class="k">调度</span>
-          <span class="v">{{ scheduleDisplay(job.schedule) }}</span>
+          <span class="k">{{ t('apps.cron.list.schedule') }}</span>
+          <span class="v">{{ scheduleText(job.schedule) }}</span>
         </div>
-        <!-- 下次执行与投递渠道同行展示，投递中文化。 -->
+        <!-- 下次执行与投递渠道同行展示，投递 i18n 化。 -->
         <div class="card-row">
-          <span class="k">下次</span>
-          <span class="v">{{ formatTime(job.next_run_at) }} · {{ translateDeliver(job.deliver) }}</span>
+          <span class="k">{{ t('apps.cron.list.next') }}</span>
+          <span class="v">{{ formatTime(job.next_run_at) }} · {{ deliverLabel(job.deliver) }}</span>
         </div>
       </div>
     </div>
@@ -33,10 +33,20 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { NCard, NEmpty, NTag } from 'naive-ui'
 
-import type { CronJob } from '@/api/hooks/useCron'
+import type { CronJob, CronSchedule } from '@/api/hooks/useCron'
 import { scheduleDisplay, translateDeliver, translateState } from './cronDisplay'
+
+const { t } = useI18n()
+
+// stateLabel / deliverLabel / scheduleText 在 computed 中传入 t，保证语言切换时响应式更新。
+// 使用工厂函数而非直接在模板插值调用，使每次语言变化时整个 computed 重新求值。
+const stateLabel = computed(() => (state: string | undefined) => translateState(state, t))
+const deliverLabel = computed(() => (deliver: string | undefined) => translateDeliver(deliver, t))
+const scheduleText = computed(() => (schedule: CronSchedule | undefined) => scheduleDisplay(schedule, t))
 
 // CronJobList 渲染 Cron 任务左侧卡片列表；选择态只改变背景和左侧色条，不改变卡片结构。
 const props = defineProps<{

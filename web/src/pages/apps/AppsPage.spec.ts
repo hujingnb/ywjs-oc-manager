@@ -1,7 +1,8 @@
 import { mount } from '@vue/test-utils'
 import { computed, defineComponent, h, ref } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { i18n } from '@/i18n'
 import AppsPage from './AppsPage.vue'
 
 // 平台管理员没有 auth.user.org_id，页面需要先从组织列表选择一个组织再拉实例列表。
@@ -99,11 +100,16 @@ const globalStubs = {
   },
 }
 
+// 每次用例前将 i18n 语言设为中文，确保断言中文文案的测试与翻译文件对齐。
+beforeEach(() => {
+  i18n.global.locale.value = 'zh'
+})
+
 describe('AppsPage', () => {
   // 验证平台管理员在不传 orgId prop 时，页面默认使用组织列表中第一个组织加载实例列表。
   it('平台管理员默认使用第一个企业加载实例列表', () => {
     const wrapper = mount(AppsPage, {
-      global: { stubs: globalStubs },
+      global: { stubs: globalStubs, plugins: [i18n] },
     })
 
     expect(wrapper.text()).toContain('企业实例')
@@ -113,7 +119,7 @@ describe('AppsPage', () => {
   // 验证 version_synced=false 的实例行，状态列渲染「需重启」警告标签。
   it('version_synced=false 的实例显示「需重启」标签', () => {
     const wrapper = mount(AppsPage, {
-      global: { stubs: globalStubs },
+      global: { stubs: globalStubs, plugins: [i18n] },
     })
 
     expect(wrapper.text()).toContain('需重启')
@@ -123,7 +129,7 @@ describe('AppsPage', () => {
   // 通过检查「企业实例」所在行不含「需重启」来保证条件是严格判断 false，而非 falsy。
   it('version_synced 非 false 的实例不显示「需重启」标签', () => {
     const wrapper = mount(AppsPage, {
-      global: { stubs: globalStubs },
+      global: { stubs: globalStubs, plugins: [i18n] },
     })
 
     // 找到「企业实例」行，该行 version_synced 字段缺省，不应包含「需重启」。

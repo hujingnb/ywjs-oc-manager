@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -42,9 +43,12 @@ func TestChannelServiceBeginAuthSuccess(t *testing.T) {
 	require.Equal(t, testChannelAppID, store.auditLogs[0].TargetID)
 	require.Equal(t, "channel_auth_start", store.auditLogs[0].Action)
 	require.Equal(t, "succeeded", store.auditLogs[0].Result)
-	// 详情字段应展示渠道名称（中文），便于审计列表一眼识别。
-	require.True(t, store.auditLogs[0].DetailMessage.Valid)
-	require.Equal(t, "渠道 微信", store.auditLogs[0].DetailMessage.String)
+	// 审计迁移：不再写冻结中文文案，改用 metadata.channel_type 存储渠道类型 code，供前端按语言渲染。
+	require.False(t, store.auditLogs[0].DetailMessage.Valid, "新记录不应写入冻结文案")
+	require.NotEmpty(t, store.auditLogs[0].MetadataJson, "channel_auth_start 应写入 metadata")
+	var meta map[string]any
+	require.NoError(t, json.Unmarshal(store.auditLogs[0].MetadataJson, &meta))
+	require.Equal(t, domain.ChannelTypeWeChat, meta["channel_type"], "metadata.channel_type 应为渠道类型 code")
 }
 
 // TestChannelServiceBeginAuthMissingAdapter 验证渠道服务开始认证缺失适配器的异常或拒绝路径场景。

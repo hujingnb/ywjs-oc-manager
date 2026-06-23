@@ -1,16 +1,22 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import TicketStatusStepper from './TicketStatusStepper.vue'
+import { i18n } from '@/i18n'
 
 vi.mock('naive-ui', () => ({
   NTag: { template: '<span class="n-tag"><slot /></span>' },
 }))
 
 describe('TicketStatusStepper', () => {
+  beforeEach(() => {
+    // locale 设为 zh，确保步进器文案断言与中文词条一致。
+    i18n.global.locale.value = 'zh'
+  })
+
   // processing 状态应渲染三步并高亮制作中节点。
   it('highlights current step', () => {
-    const wrapper = mount(TicketStatusStepper, { props: { status: 'processing' } })
+    const wrapper = mount(TicketStatusStepper, { props: { status: 'processing' }, global: { plugins: [i18n] } })
     expect(wrapper.text()).toContain('待处理')
     expect(wrapper.text()).toContain('制作中')
     expect(wrapper.text()).toContain('已交付')
@@ -20,7 +26,7 @@ describe('TicketStatusStepper', () => {
 
   // rejected 状态不推进主线,应显示独立的已拒绝红色标记。
   it('shows rejected badge for rejected status', () => {
-    const wrapper = mount(TicketStatusStepper, { props: { status: 'rejected' } })
+    const wrapper = mount(TicketStatusStepper, { props: { status: 'rejected' }, global: { plugins: [i18n] } })
     expect(wrapper.text()).toContain('已拒绝')
     expect(wrapper.find('.n-tag').exists()).toBe(true)
   })

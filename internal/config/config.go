@@ -40,6 +40,15 @@ type Config struct {
 	Captcha CaptchaConfig `yaml:"captcha"`
 	// Logging 控制结构化日志的级别、格式与 SQL 慢查询阈值；整段可缺省，由 loader 填默认。
 	Logging LoggingConfig `yaml:"logging"`
+	// I18n 控制平台默认界面语言；整段可缺省，applyDefaults 回填 en。
+	I18n I18nConfig `yaml:"i18n"`
+}
+
+// I18nConfig 描述平台国际化默认行为。
+// DefaultLocale 是用户未显式选择语言时的回退（也下发给登录页）；缺省 en。
+type I18nConfig struct {
+	// DefaultLocale 是平台默认界面语言（en/zh）；空时由 applyDefaults 回填 en。
+	DefaultLocale string `yaml:"default_locale"`
 }
 
 // LoggingConfig 描述 manager 结构化日志的输出行为。

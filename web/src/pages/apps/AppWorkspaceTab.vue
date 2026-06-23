@@ -3,11 +3,11 @@
     <template #header>
       <div>
         <p class="eyebrow">Instance · Workspace</p>
-        <h2 style="margin: 0">工作目录</h2>
+        <h2 style="margin: 0">{{ t('apps.workspace.heading') }}</h2>
       </div>
     </template>
     <template #header-extra>
-      <n-button v-if="appId" :disabled="downloading" @click="downloadArchive">下载归档</n-button>
+      <n-button v-if="appId" :disabled="downloading" @click="downloadArchive">{{ t('apps.workspace.download') }}</n-button>
     </template>
 
     <n-space align="center" style="margin-bottom: 12px">
@@ -15,21 +15,21 @@
         v-model:value="searchInput"
         clearable
         size="small"
-        placeholder="搜索文件（递归整个工作目录）"
+        :placeholder="t('apps.workspace.searchPlaceholder')"
         style="max-width: 260px"
       />
       <template v-if="!searching">
-        <span class="state-text" style="margin: 0">当前路径：<code>{{ relativePath || '/' }}</code></span>
-        <n-button v-if="relativePath" size="small" @click="goUp">返回上级</n-button>
+        <span class="state-text" style="margin: 0">{{ t('apps.workspace.currentPath') }}<code>{{ relativePath || '/' }}</code></span>
+        <n-button v-if="relativePath" size="small" @click="goUp">{{ t('apps.workspace.goUp') }}</n-button>
       </template>
       <span v-else class="state-text" style="margin: 0">
-        搜索「{{ keyword }}」：{{ listing?.entries?.length ?? 0 }} 个结果
+        {{ t('apps.workspace.searchResults', { keyword, count: listing?.entries?.length ?? 0 }) }}
       </span>
     </n-space>
 
-    <div v-if="!appId" class="state-text">请选择目标实例</div>
-    <div v-else-if="isLoading" class="state-text">加载中…</div>
-    <div v-else-if="error" class="state-text danger">查询失败：{{ error.message }}</div>
+    <div v-if="!appId" class="state-text">{{ t('apps.workspace.noApp') }}</div>
+    <div v-else-if="isLoading" class="state-text">{{ t('common.status.loading') }}</div>
+    <div v-else-if="error" class="state-text danger">{{ t('apps.workspace.queryError') }}{{ error.message }}</div>
     <n-data-table
       v-else
       :columns="columns"
@@ -44,6 +44,7 @@
 <script setup lang="ts">
 import { computed, h, ref, toRef, watch } from 'vue'
 import { NButton, NCard, NDataTable, NInput, NSpace, type DataTableColumns } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 import {
   archiveWorkspace,
@@ -54,6 +55,7 @@ import {
 
 // AppWorkspaceTab 浏览和下载应用工作目录文件，路径始终以应用工作目录为根。
 const props = defineProps<{ appId?: string }>()
+const { t } = useI18n()
 const appId = toRef(props, 'appId')
 // relativePath 保存当前目录相对路径，空字符串表示工作目录根。
 const relativePath = ref('')
@@ -139,23 +141,24 @@ function entryRelativePath(entryPath: string): string {
 }
 
 // columns 提供目录进入和文件下载操作，目录不展示下载按钮。
-const columns: DataTableColumns<WorkspaceEntry> = [
+// 使用 computed 包裹以确保语言切换时列标题响应式更新。
+const columns = computed<DataTableColumns<WorkspaceEntry>>(() => [
   {
-    title: '文件名称', key: 'name',
+    title: t('apps.workspace.colName'), key: 'name',
     render: (row) => row.is_dir
       ? h('strong', { style: 'cursor: pointer; color: var(--color-info-text); text-decoration: underline dotted', onClick: () => enter(row) }, `${row.name}/`)
       : (searching.value ? row.path : row.name),
   },
-  { title: '大小', key: 'size', render: (row) => row.is_dir ? '—' : formatSize(row.size) },
+  { title: t('apps.workspace.colSize'), key: 'size', render: (row) => row.is_dir ? '—' : formatSize(row.size) },
   {
-    title: '创建时间', key: 'mod_time',
+    title: t('apps.workspace.colCreatedAt'), key: 'mod_time',
     render: (row) => (row.is_dir || isZeroTime(row.mod_time)) ? '—' : formatTime(row.mod_time),
   },
   {
-    title: '操作', key: 'actions',
+    title: t('apps.workspace.colActions'), key: 'actions',
     render: (row) => !row.is_dir && appId.value
-      ? h(NButton, { size: 'small', disabled: downloading.value, onClick: () => downloadEntry(row) }, { default: () => '下载' })
+      ? h(NButton, { size: 'small', disabled: downloading.value, onClick: () => downloadEntry(row) }, { default: () => t('apps.workspace.actionDownload') })
       : null,
   },
-]
+])
 </script>

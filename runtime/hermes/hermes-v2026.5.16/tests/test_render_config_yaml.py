@@ -6,8 +6,9 @@ from lib.manifest import Manifest
 from renderer.render_config_yaml import render
 
 
-def make_manifest(routing: dict | None = None) -> Manifest:
-    # 构造一个最小合法 Manifest 给渲染用；routing 缺省空（全部走主模型）。
+def make_manifest(routing: dict | None = None, app_language: str = "") -> Manifest:
+    # 构造一个最小合法 Manifest 给渲染用；routing 缺省空（全部走主模型），
+    # app_language 缺省空串（渲染时回落 "en"）。
     return Manifest(
         app_id="app-x", app_name="X", app_model="claude-3.7-sonnet",
         openai_api_key="sk-test",
@@ -15,6 +16,7 @@ def make_manifest(routing: dict | None = None) -> Manifest:
         persona_rel="resources/persona.md",
         rule_platform_rel="resources/platform-rules.md",
         routing=routing or {},
+        app_language=app_language,
     )
 
 
@@ -58,12 +60,28 @@ def test_render_is_atomic(tmp_data: Path) -> None:
     assert leftovers == []
 
 
-def test_render_sets_display_language_zh(tmp_data: Path) -> None:
-    # display.language=zh 必须就位：hermes i18n 据此把所有走 t() 的用户可见文案
-    # 输出为简体中文（审批提示、/status、reset/restart 通知等）。缺这一项会回落英文。
-    render(make_manifest(), tmp_data)
+def test_render_display_language_defaults_en(tmp_data: Path) -> None:
+    # manifest 未指定 app.language（空串）时，display.language 应回落 "en"。
+    # hermes i18n 据此把所有走 t() 的文案输出为英文。
+    render(make_manifest(app_language=""), tmp_data)
+    out = yaml.safe_load((tmp_data / "config.yaml").read_text())
+    assert out["display"]["language"] == "en"
+
+
+def test_render_display_language_zh(tmp_data: Path) -> None:
+    # manifest app.language="zh" 时，display.language 应为 "zh"，
+    # hermes i18n 输出简体中文文案。
+    render(make_manifest(app_language="zh"), tmp_data)
     out = yaml.safe_load((tmp_data / "config.yaml").read_text())
     assert out["display"]["language"] == "zh"
+
+
+def test_render_display_language_en(tmp_data: Path) -> None:
+    # manifest app.language="en" 时，display.language 应为 "en"，
+    # hermes i18n 输出英文文案。
+    render(make_manifest(app_language="en"), tmp_data)
+    out = yaml.safe_load((tmp_data / "config.yaml").read_text())
+    assert out["display"]["language"] == "en"
 
 
 def test_render_writes_approvals_skip_block(tmp_data: Path) -> None:

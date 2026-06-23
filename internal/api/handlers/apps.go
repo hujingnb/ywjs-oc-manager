@@ -24,6 +24,7 @@ type appService interface {
 	ListByOrg(ctx context.Context, principal auth.Principal, orgID string, limit, offset int32) ([]service.AppResult, error)
 	SwitchAppVersion(ctx context.Context, principal auth.Principal, appID, versionID string) (service.AppResult, error)
 	UpdateAppKnowledgeQuota(ctx context.Context, principal auth.Principal, appID string, quotaBytes int64) (service.AppResult, error)
+	UpdateAppLocale(ctx context.Context, principal auth.Principal, appID, locale string) (service.AppResult, error)
 }
 
 // NewAppsHandler 创建 handler。
@@ -38,6 +39,7 @@ func RegisterAppRoutes(router gin.IRouter, handler *AppsHandler) {
 	router.GET("/api/v1/apps/:appId", handler.Get)
 	router.POST("/api/v1/apps/:appId/version", handler.SwitchVersion)
 	router.PATCH("/api/v1/apps/:appId/knowledge/quota", handler.UpdateKnowledgeQuota)
+	router.PATCH("/api/v1/apps/:appId/locale", handler.UpdateLocale)
 }
 
 // List 列出组织内的应用。
@@ -156,6 +158,38 @@ func (h *AppsHandler) UpdateKnowledgeQuota(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"app": result})
 }
 
+// UpdateLocale 修改实例语言（hermes bot 对终端用户说话的语言）。
+//
+// @Summary      更新实例语言
+// @Description  更新实例 hermes bot 对终端用户说话的语言（en/zh），持久化后触发容器重启使配置生效
+// @Tags         apps
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId  path      string                  true  "应用 ID"
+// @Param        body   body      UpdateAppLocaleRequest  true  "目标语言"
+// @Success      200    {object}  map[string]service.AppResult
+// @Failure      400    {object}  ErrorResponse
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /apps/{appId}/locale [patch]
+func (h *AppsHandler) UpdateLocale(c *gin.Context) {
+	var req UpdateAppLocaleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "请求体格式错误"))
+		return
+	}
+	principal := principalFromCtx(c)
+	result, err := h.service.UpdateAppLocale(c.Request.Context(), principal, c.Param("appId"), req.Locale)
+	if err != nil {
+		writeAppsError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"app": result})
+}
+
 // writeAppsError 将 AppService 的 sentinel error 映射为 HTTP 状态码。
 // 未识别错误统一返回 500 和安全文案，避免把数据库或 new-api 细节暴露给前端。
 func writeAppsError(c *gin.Context, err error) {
@@ -168,6 +202,8 @@ func writeAppsError(c *gin.Context, err error) {
 		c.JSON(http.StatusBadRequest, apierror.New("MEMBER_INVALID", validationServiceMessage(err, service.ErrMemberCreateInvalid)))
 	case errors.Is(err, service.ErrVersionNotInAllowlist):
 		c.JSON(http.StatusBadRequest, apierror.New("VERSION_NOT_ALLOWED", "助手版本不在企业允许列表内"))
+	case errors.Is(err, service.ErrInvalidLocale):
+		c.JSON(http.StatusBadRequest, apierror.New("INVALID_LOCALE", "不支持的语言，请使用 en 或 zh"))
 	default:
 		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "服务暂时不可用"))
 	}

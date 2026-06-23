@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/guregu/null/v5"
 
@@ -31,6 +33,8 @@ type AppStore interface {
 	GetOrganization(ctx context.Context, id string) (sqlc.Organization, error)
 	// SetAppVersion 更新实例绑定的助手版本 id，返回更新后的实例记录。
 	SetAppVersion(ctx context.Context, arg sqlc.SetAppVersionParams) error
+	// UpdateAppLocale 更新实例语言偏好（hermes 对终端用户说话的语言）。
+	UpdateAppLocale(ctx context.Context, arg sqlc.UpdateAppLocaleParams) error
 }
 
 // AppImageResolver 把版本 image_id 解析成镜像 ref，用于计算 version_synced 的镜像维度。
@@ -95,6 +99,9 @@ type AppResult struct {
 	// VersionSynced 标记实例运行时是否已与绑定版本对齐（修订 + 镜像都一致）；
 	// false 表示版本被编辑过，需重启实例生效。
 	VersionSynced bool `json:"version_synced"`
+	// Locale 是 hermes bot 对终端用户说话的语言（en/zh）；
+	// 空表示使用平台默认语言（历史数据或未设置）。
+	Locale string `json:"locale,omitempty"`
 }
 
 // Get 查询应用。
@@ -184,6 +191,10 @@ func toAppResult(app sqlc.App) AppResult {
 	// VersionID：Valid=false 时跳过（历史数据无版本绑定）。
 	if app.VersionID.Valid {
 		result.VersionID = app.VersionID.String
+	}
+	// Locale：NULL 时省略（由 omitempty 控制），前端按平台默认值处理。
+	if app.Locale.Valid {
+		result.Locale = app.Locale.String
 	}
 	return result
 }
@@ -280,5 +291,91 @@ func (s *AppService) UpdateAppKnowledgeQuota(ctx context.Context, principal auth
 		result.RuntimeImageRef = newRow.App.RuntimeImageRef
 		result.RuntimeImageSha256 = newRow.App.RuntimeImageSha256
 	}
+	return result, nil
+}
+
+// UpdateAppLocale 更新实例语言偏好（hermes bot 对终端用户说话的语言）。
+//
+// 持久化新 locale 后入队 app_restart_container job，让容器以新语言配置重新启动；
+// 同时写入审计日志，记录操作者与目标语言。
+//
+// 权限：平台管理员、本组织管理员或实例 owner 可修改。
+// 校验：locale 必须在 SupportedLocales 中，否则返回 ErrInvalidLocale。
+func (s *AppService) UpdateAppLocale(ctx context.Context, principal auth.Principal, appID, locale string) (AppResult, error) {
+	// 校验目标语言在受支持集合内。
+	if !isSupportedLocale(locale) {
+		return AppResult{}, ErrInvalidLocale
+	}
+	// 加载实例记录（含绑定版本信息，用于 version_synced 计算）。
+	row, err := s.store.GetAppWithVersion(ctx, appID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return AppResult{}, ErrNotFound
+	}
+	if err != nil {
+		return AppResult{}, fmt.Errorf("查询应用失败: %w", err)
+	}
+	// 权限校验：平台管理员、本组织管理员或实例 owner 可修改语言。
+	if !auth.CanUpdateAppLocale(principal, row.App.OrgID, row.App.OwnerUserID) {
+		return AppResult{}, ErrForbidden
+	}
+	// 持久化新语言偏好。
+	if err := s.store.UpdateAppLocale(ctx, sqlc.UpdateAppLocaleParams{
+		ID:     row.App.ID,
+		Locale: null.StringFrom(locale),
+	}); err != nil {
+		return AppResult{}, fmt.Errorf("更新实例语言失败: %w", err)
+	}
+	// 入队重启任务，让 hermes 容器以新语言配置重新初始化。
+	// payload 与 runtime_operation_service.Trigger 的 restart 分支一致。
+	restartPayload, err := json.Marshal(map[string]any{
+		"app_id":       row.App.ID,
+		"operation":    string(RuntimeOperationRestart),
+		"requested_by": principal.UserID,
+	})
+	if err != nil {
+		return AppResult{}, fmt.Errorf("序列化重启 payload 失败: %w", err)
+	}
+	jobID := newUUID()
+	if err := s.store.CreateJob(ctx, sqlc.CreateJobParams{
+		ID:          jobID,
+		Type:        domain.JobTypeAppRestartContainer,
+		Priority:    100,
+		RunAfter:    time.Now(),
+		MaxAttempts: 3,
+		PayloadJson: restartPayload,
+	}); err != nil {
+		return AppResult{}, fmt.Errorf("创建重启任务失败: %w", err)
+	}
+	// 写入审计日志；metadata 存储语言代码，前端按语言渲染详情文案。
+	auditMeta, err := json.Marshal(map[string]any{
+		"locale": locale,
+	})
+	if err != nil {
+		return AppResult{}, fmt.Errorf("序列化审计元数据失败: %w", err)
+	}
+	if err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
+		ID:           newUUID(),
+		ActorID:      null.StringFrom(principal.UserID),
+		ActorRole:    principal.Role,
+		OrgID:        null.StringFrom(row.App.OrgID),
+		TargetType:   "app",
+		TargetID:     row.App.ID,
+		Action:       "update_locale",
+		Result:       "succeeded",
+		MetadataJson: auditMeta,
+	}); err != nil {
+		return AppResult{}, fmt.Errorf("写入审计日志失败: %w", err)
+	}
+	// 即时唤醒 worker（如有 notifier 注入）。
+	if s.notifier != nil {
+		_ = s.notifier.Enqueue(ctx, jobID)
+	}
+	// 重新加载以确保返回值含最新状态。
+	newRow, err := s.store.GetAppWithVersion(ctx, appID)
+	if err != nil {
+		return AppResult{}, fmt.Errorf("重新查询应用失败: %w", err)
+	}
+	result := toAppResult(newRow.App)
+	result.VersionSynced = computeVersionSynced(newRow.App, newRow.VersionRevision, newRow.VersionImageID, s.imageResolver)
 	return result, nil
 }

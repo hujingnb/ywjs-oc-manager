@@ -562,6 +562,18 @@ func TestCaptchaEnabledAppliesDefaults(t *testing.T) {
 	assert.Equal(t, 5*time.Minute, c.Captcha.TTL.Duration) // 默认有效期
 }
 
+// TestLoad_DefaultsI18nLocale 覆盖：未配置 i18n.default_locale 时回退 en，
+// 显式配置 zh 时保留，保证平台默认语言可由配置文件控制。
+func TestLoad_DefaultsI18nLocale(t *testing.T) {
+	var c Config            // 未配置
+	c.applyDefaults()
+	assert.Equal(t, "en", c.I18n.DefaultLocale) // 缺省回退 en
+
+	c2 := Config{I18n: I18nConfig{DefaultLocale: "zh"}} // 显式 zh
+	c2.applyDefaults()
+	assert.Equal(t, "zh", c2.I18n.DefaultLocale)
+}
+
 // 关闭验证码时缺省全部字段也应通过（向后兼容）。
 func TestCaptchaDisabledNeedsNothing(t *testing.T) {
 	c := validBaseConfig()

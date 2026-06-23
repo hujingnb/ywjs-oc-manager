@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { i18n } from '@/i18n'
 import RoleAwareHome from './RoleAwareHome.vue'
 
 const routerReplace = vi.hoisted(() => vi.fn())
@@ -33,8 +34,11 @@ vi.mock('@/composables/useMemberApp', () => ({
 
 const mountedWrappers: { unmount: () => void }[] = []
 
+// mountHome 注入 i18n 插件，RoleAwareHome 通过 useI18n() 渲染文案。
+// locale 固定为 zh 使文案断言与中文原文对齐，与其他已迁移页面规范一致。
 function mountHome() {
-  const wrapper = mount(RoleAwareHome)
+  i18n.global.locale.value = 'zh'
+  const wrapper = mount(RoleAwareHome, { global: { plugins: [i18n] } })
   mountedWrappers.push(wrapper)
   return wrapper
 }

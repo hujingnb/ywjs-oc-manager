@@ -210,15 +210,17 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 	}); err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("创建运行操作任务失败: %w", err)
 	}
-	// app.delete 详情附带级联渠道绑定数，便于审计列表识别本次删除会清理掉多少渠道。
-	// 其他 op (start/stop/restart/disable_api_key/restore_api_key) 与 actor 列重复，留空。
-	var detail null.String
+	// app.delete 时在 metadata 附带级联渠道绑定数，供前端按语言渲染详情。
+	// 其他 op (start/stop/restart/disable_api_key/restore_api_key) 无需额外 metadata。
+	var auditMeta []byte
 	if op == RuntimeOperationDelete {
 		cascadeCount, err := s.store.CountChannelBindingsByApp(ctx, app.ID)
 		if err != nil {
 			return RuntimeOperationResult{}, fmt.Errorf("统计渠道绑定数失败: %w", err)
 		}
-		detail = null.StringFrom(fmt.Sprintf("级联：%d 个渠道绑定", cascadeCount))
+		auditMeta, _ = json.Marshal(map[string]any{
+			"cascade_count": cascadeCount,
+		})
 	}
 	if err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
 		ID:        newUUID(),
@@ -230,10 +232,8 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 		Action:     string(op),
 		// audit_logs.result CHECK 仅允许 succeeded/failed；
 		// 这里 audit 的语义是「操作已成功提交入队」，与其他 service 写 audit 的写法保持一致。
-		Result:        "succeeded",
-		DetailMessage: detail,
-		// 非 delete op 不填详情：start/stop/restart/disable_api_key/restore_api_key
-		// 的详情与「谁触发」列重复，按设计文档落 NULL（前端展示「—」）。
+		Result:       "succeeded",
+		MetadataJson: auditMeta,
 	}); err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("写入审计日志失败: %w", err)
 	}

@@ -2,7 +2,7 @@
   <div style="display: grid; gap: 18px">
     <!-- 组织列表 -->
     <DataTableList
-      title="企业列表"
+      :title="t('platform.orgs.title')"
       eyebrow="Platform"
       :columns="columns"
       :data="organizations ?? []"
@@ -13,7 +13,7 @@
       <template #toolbar>
         <n-button type="primary" @click="openForm">
           <template #icon><Plus :size="16" /></template>
-          新增企业
+          {{ t('platform.orgs.addButton') }}
         </n-button>
       </template>
     </DataTableList>
@@ -25,7 +25,7 @@
         <div style="display: flex; align-items: center; justify-content: space-between">
           <div>
             <p class="eyebrow">{{ modalMode === 'create' ? 'New' : 'Edit' }}</p>
-            <h2 style="margin: 0">{{ modalMode === 'create' ? '创建企业' : '编辑企业' }}</h2>
+            <h2 style="margin: 0">{{ modalMode === 'create' ? t('platform.orgs.form.createTitle') : t('platform.orgs.form.editTitle') }}</h2>
           </div>
           <n-button quaternary circle @click="closeAnyForm">
             <template #icon><X :size="18" /></template>
@@ -36,78 +36,78 @@
       <n-form :model="modalMode === 'create' ? form : editForm" label-placement="top" @submit.prevent="submitAnyForm">
         <n-grid :cols="2" :x-gap="14">
           <n-grid-item>
-            <n-form-item label="名称 *">
+            <n-form-item :label="t('platform.orgs.form.labelName')">
               <n-input
                 v-if="modalMode === 'create'"
                 v-model:value="form.name"
-                placeholder="企业名称"
+                :placeholder="t('platform.orgs.form.placeholderName')"
               />
               <n-input
                 v-else
                 v-model:value="editForm.name"
-                placeholder="企业名称"
+                :placeholder="t('platform.orgs.form.placeholderName')"
               />
             </n-form-item>
           </n-grid-item>
           <!-- 组织标识：创建时必填，编辑时只读展示 -->
           <n-grid-item v-if="modalMode === 'create'">
-            <n-form-item label="企业标识 *">
-              <n-input v-model:value="form.code" placeholder="test-org" />
+            <n-form-item :label="t('platform.orgs.form.labelCode')">
+              <n-input v-model:value="form.code" :placeholder="t('platform.orgs.form.placeholderCode')" />
             </n-form-item>
           </n-grid-item>
           <n-grid-item v-else>
-            <n-form-item label="企业标识（不可修改）">
+            <n-form-item :label="t('platform.orgs.form.labelCodeReadonly')">
               <n-input :value="editingOrg?.code ?? ''" disabled />
             </n-form-item>
           </n-grid-item>
           <!-- 管理员账号字段仅创建模式展示 -->
           <template v-if="modalMode === 'create'">
             <n-grid-item>
-              <n-form-item label="管理员用户名 *">
-                <n-input v-model:value="form.admin_username" placeholder="登录用户名" />
+              <n-form-item :label="t('platform.orgs.form.labelAdminUsername')">
+                <n-input v-model:value="form.admin_username" :placeholder="t('platform.orgs.form.placeholderAdminUsername')" />
               </n-form-item>
             </n-grid-item>
             <n-grid-item>
-              <n-form-item label="管理员姓名 *">
-                <n-input v-model:value="form.admin_display_name" placeholder="管理员显示名" />
+              <n-form-item :label="t('platform.orgs.form.labelAdminDisplayName')">
+                <n-input v-model:value="form.admin_display_name" :placeholder="t('platform.orgs.form.placeholderAdminDisplayName')" />
               </n-form-item>
             </n-grid-item>
             <n-grid-item>
-              <n-form-item label="管理员密码 *">
-                <n-input v-model:value="form.admin_password" type="password" show-password-on="click" placeholder="初始登录密码" />
+              <n-form-item :label="t('platform.orgs.form.labelAdminPassword')">
+                <n-input v-model:value="form.admin_password" type="password" show-password-on="click" :placeholder="t('platform.orgs.form.placeholderAdminPassword')" />
               </n-form-item>
             </n-grid-item>
           </template>
           <n-grid-item>
-            <n-form-item label="联系人">
+            <n-form-item :label="t('platform.orgs.form.labelContact')">
               <n-input
                 v-if="modalMode === 'create'"
                 v-model:value="form.contact_name"
-                placeholder="联系人姓名"
+                :placeholder="t('platform.orgs.form.placeholderContact')"
               />
               <n-input
                 v-else
                 v-model:value="editForm.contact_name"
-                placeholder="联系人姓名"
+                :placeholder="t('platform.orgs.form.placeholderContact')"
               />
             </n-form-item>
           </n-grid-item>
           <n-grid-item>
-            <n-form-item label="联系电话">
+            <n-form-item :label="t('platform.orgs.form.labelPhone')">
               <n-input
                 v-if="modalMode === 'create'"
                 v-model:value="form.contact_phone"
-                placeholder="手机号"
+                :placeholder="t('platform.orgs.form.placeholderPhone')"
               />
               <n-input
                 v-else
                 v-model:value="editForm.contact_phone"
-                placeholder="手机号"
+                :placeholder="t('platform.orgs.form.placeholderPhone')"
               />
             </n-form-item>
           </n-grid-item>
           <n-grid-item>
-            <n-form-item label="余额预警阈值 (%)">
+            <n-form-item :label="t('platform.orgs.form.labelCreditWarning')">
               <n-input-number
                 v-if="modalMode === 'create'"
                 v-model:value="form.credit_warning_threshold"
@@ -121,23 +121,23 @@
             </n-form-item>
           </n-grid-item>
           <n-grid-item>
-            <n-form-item label="实例数量上限（留空 = 不限制）">
+            <n-form-item :label="t('platform.orgs.form.labelMaxInstance')">
               <n-input-number
                 v-if="modalMode === 'create'"
                 v-model:value="form.max_instance_count"
                 :min="1" :precision="0" clearable style="width: 100%"
-                placeholder="留空表示不限制"
+                :placeholder="t('platform.orgs.form.placeholderMaxInstance')"
               />
               <n-input-number
                 v-else
                 v-model:value="editForm.max_instance_count"
                 :min="1" :precision="0" clearable style="width: 100%"
-                placeholder="留空表示不限制"
+                :placeholder="t('platform.orgs.form.placeholderMaxInstance')"
               />
             </n-form-item>
           </n-grid-item>
           <n-grid-item>
-            <n-form-item label="企业知识库空间 (GB)">
+            <n-form-item :label="t('platform.orgs.form.labelKnowledgeQuota')">
               <n-input-number
                 v-if="modalMode === 'create'"
                 v-model:value="form.knowledge_quota_gb"
@@ -151,7 +151,7 @@
             </n-form-item>
           </n-grid-item>
           <n-grid-item :span="2">
-            <n-form-item label="备注">
+            <n-form-item :label="t('platform.orgs.form.labelRemark')">
               <n-input
                 v-if="modalMode === 'create'"
                 v-model:value="form.remark"
@@ -167,14 +167,14 @@
             </n-form-item>
           </n-grid-item>
           <n-grid-item :span="2">
-            <n-form-item label="可用助手版本">
+            <n-form-item :label="t('platform.orgs.form.labelVersions')">
               <n-select
                 v-if="modalMode === 'create'"
                 v-model:value="form.assistant_version_ids"
                 multiple
                 :loading="versionsQuery.isLoading.value"
                 :options="versionOptions"
-                placeholder="选择该企业可用的助手版本（可多选，可留空）"
+                :placeholder="t('platform.orgs.form.placeholderVersions')"
               />
               <n-select
                 v-else
@@ -182,19 +182,19 @@
                 multiple
                 :loading="versionsQuery.isLoading.value"
                 :options="versionOptions"
-                placeholder="选择该企业可用的助手版本（可多选，可留空）"
+                :placeholder="t('platform.orgs.form.placeholderVersions')"
               />
             </n-form-item>
           </n-grid-item>
           <n-grid-item :span="2">
             <n-space justify="end">
-              <n-button @click="closeAnyForm">取消</n-button>
+              <n-button @click="closeAnyForm">{{ t('common.actions.cancel') }}</n-button>
               <n-button
                 type="primary"
                 attr-type="submit"
                 :loading="modalMode === 'create' ? creating : editSubmitting"
                 :disabled="modalMode === 'create' ? creating : editSubmitting"
-              >保存</n-button>
+              >{{ t('common.actions.save') }}</n-button>
             </n-space>
             <p v-if="modalMode === 'create' ? submitError : editError" class="state-text danger">
               {{ modalMode === 'create' ? submitError : editError }}
@@ -205,36 +205,36 @@
     </n-card>
 
     <!-- 组织充值弹框 -->
-    <n-modal v-model:show="rechargeVisible" preset="card" style="max-width: 560px" title="企业充值">
+    <n-modal v-model:show="rechargeVisible" preset="card" style="max-width: 560px" :title="t('platform.orgs.rechargeModal.title')">
       <div v-if="selectedOrg" class="recharge-dialog">
         <div>
           <p class="eyebrow">Billing</p>
           <h3 style="margin: 0">{{ selectedOrg.name }}</h3>
         </div>
         <p class="state-text">
-          当前余额：
-          <strong v-if="balanceQuery.isLoading.value">加载中…</strong>
+          {{ t('platform.orgs.rechargeModal.currentBalance') }}
+          <strong v-if="balanceQuery.isLoading.value">{{ t('platform.orgs.rechargeModal.balanceLoading') }}</strong>
           <strong v-else-if="balance">
-            剩余 {{ formatQuotaValue(balance.remain_quota, billingStatus) }} ｜ 已用 {{ formatQuotaValue(balance.used_quota, billingStatus) }}
+            {{ t('platform.orgs.rechargeModal.remain', { remain: formatQuotaValue(balance.remain_quota, billingStatus) }) }} ｜ {{ t('platform.orgs.rechargeModal.used', { used: formatQuotaValue(balance.used_quota, billingStatus) }) }}
           </strong>
-          <strong v-else class="danger">查询失败</strong>
+          <strong v-else class="danger">{{ t('platform.orgs.rechargeModal.balanceFail') }}</strong>
         </p>
         <n-form label-placement="top" @submit.prevent="submitRecharge">
-          <n-form-item label="充值金额（正整数）">
-            <n-input-number v-model:value="rechargeAmount" :min="1" :precision="0" style="width: 100%" placeholder="输入金额" />
+          <n-form-item :label="t('platform.orgs.rechargeModal.labelAmount')">
+            <n-input-number v-model:value="rechargeAmount" :min="1" :precision="0" style="width: 100%" :placeholder="t('platform.orgs.rechargeModal.placeholderAmount')" />
           </n-form-item>
-          <n-form-item label="备注">
-            <n-input v-model:value="rechargeRemark" placeholder="业务说明，可选" />
+          <n-form-item :label="t('platform.orgs.rechargeModal.labelRemark')">
+            <n-input v-model:value="rechargeRemark" :placeholder="t('platform.orgs.rechargeModal.placeholderRemark')" />
           </n-form-item>
           <n-space justify="end">
-            <n-button @click="closeRecharge">取消</n-button>
+            <n-button @click="closeRecharge">{{ t('common.actions.cancel') }}</n-button>
             <n-button
               type="primary"
               attr-type="submit"
               :disabled="!selectedOrgId"
               :loading="rechargeMutation.isPending.value"
             >
-              确认充值
+              {{ t('platform.orgs.rechargeModal.confirmButton') }}
             </n-button>
           </n-space>
           <p v-if="rechargeFeedback" class="state-text" :class="{ danger: rechargeFeedbackError }">
@@ -249,32 +249,32 @@
       v-model:show="rechargeHistoryVisible"
       preset="card"
       style="max-width: 720px"
-      :title="rechargeHistoryOrg ? `充值记录 · ${rechargeHistoryOrg.name}` : '充值记录'"
+      :title="rechargeHistoryOrg ? t('platform.orgs.historyModal.titleWithOrg', { name: rechargeHistoryOrg.name }) : t('platform.orgs.historyModal.titleFallback')"
     >
       <div v-if="rechargeHistoryOrg" style="display: grid; gap: 16px">
         <!-- 概况卡片 -->
         <n-grid :cols="2" :x-gap="14">
           <n-grid-item>
-            <n-statistic label="累计充值金额">
+            <n-statistic :label="t('platform.orgs.historyModal.totalRecharged')">
               <template v-if="rechargeHistoryBalanceQuery.isLoading.value">—</template>
               <template v-else-if="rechargeHistoryBalance">
                 {{ formatDisplayAmount(rechargeHistoryBalance.total_recharged, billingStatus) }}
               </template>
-              <template v-else>查询失败</template>
+              <template v-else>{{ t('platform.orgs.historyModal.queryFail') }}</template>
             </n-statistic>
           </n-grid-item>
           <n-grid-item>
-            <n-statistic label="当前剩余金额">
+            <n-statistic :label="t('platform.orgs.historyModal.currentBalance')">
               <template v-if="rechargeHistoryBalanceQuery.isLoading.value">—</template>
               <template v-else-if="rechargeHistoryBalance">
                 {{ formatQuotaValue(rechargeHistoryBalance.remain_quota, billingStatus) }}
               </template>
-              <template v-else>查询失败</template>
+              <template v-else>{{ t('platform.orgs.historyModal.queryFail') }}</template>
             </n-statistic>
           </n-grid-item>
         </n-grid>
         <!-- 充值记录表格 -->
-        <div v-if="rechargeHistoryLoading" class="state-text">加载中…</div>
+        <div v-if="rechargeHistoryLoading" class="state-text">{{ t('platform.orgs.historyModal.loading') }}</div>
         <n-data-table
           v-else
           size="small"
@@ -289,6 +289,7 @@
 
 <script setup lang="ts">
 import { computed, h, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useQueries, type UseMutationReturnType } from '@tanstack/vue-query'
 import { Plus, X } from 'lucide-vue-next'
 import {
@@ -312,6 +313,7 @@ import { useFormModal } from '@/composables/useFormModal'
 import { formatDisplayAmount, formatQuotaValue } from '@/pages/usage/usageFormatting'
 
 // OrganizationsPage 是平台组织管理页，负责创建组织、编辑组织、启停组织和给组织充值。
+const { t } = useI18n()
 const { data: organizations, isLoading, error } = useOrganizationsQuery()
 const createMutation = useCreateOrganization()
 const updateMutation = useUpdateOrganization()
@@ -436,7 +438,7 @@ async function submitEditOrganization() {
     editFormVisible.value = false
     modalMode.value = 'create'
   } catch (err) {
-    editError.value = err instanceof Error ? err.message : '编辑失败'
+    editError.value = err instanceof Error ? err.message : t('platform.orgs.editError')
   } finally {
     editSubmitting.value = false
   }
@@ -493,7 +495,8 @@ const rechargeFeedback = ref('')
 const rechargeFeedbackError = ref(false)
 const copyFeedback = ref('')
 const copyFeedbackError = ref(false)
-const adminPasswordCopyHint = '<创建时设置，系统不保存明文；如忘记请重置密码>'
+// adminPasswordCopyHint 是复制企业信息时密码字段的占位文本，提示管理员密码不保存明文。
+const adminPasswordCopyHint = t('platform.orgs.copy.adminPasswordHint')
 // createFormMutation 适配 useFormModal 的同型表单/提交泛型，调用真实 API 前去掉 UI-only GB 字段。
 const createFormMutation = {
   ...createMutation,
@@ -565,11 +568,11 @@ async function submitOrganization() {
   await submitForm()
 }
 
-// columns 展示组织基础信息、状态、余额和操作；改为 computed 以引用响应式的 balanceByOrgId。
+// columns 展示组织基础信息、状态、余额和操作；改为 computed 以引用响应式的 balanceByOrgId 和 t()。
 const columns = computed(() => [
   // 名称列：含 remark 副标题
   {
-    title: '名称',
+    title: t('platform.orgs.columns.name'),
     key: 'name',
     render: (row: Organization) => [
       h('strong', row.name),
@@ -578,32 +581,32 @@ const columns = computed(() => [
         : null,
     ],
   },
-  { title: '企业标识', key: 'code', render: (row: Organization) => row.code || '—' },
-  statusColumn<Organization>('状态', r => formatOrgStatus(r.status)),
+  { title: t('platform.orgs.columns.code'), key: 'code', render: (row: Organization) => row.code || '—' },
+  statusColumn<Organization>(t('platform.orgs.columns.status'), r => formatOrgStatus(r.status)),
   // 联系人/电话/预警阈值列
-  { title: '联系人', key: 'contact_name', render: (row: Organization) => row.contact_name || '—' },
-  { title: '电话', key: 'contact_phone', render: (row: Organization) => row.contact_phone || '—' },
+  { title: t('platform.orgs.columns.contact'), key: 'contact_name', render: (row: Organization) => row.contact_name || '—' },
+  { title: t('platform.orgs.columns.phone'), key: 'contact_phone', render: (row: Organization) => row.contact_phone || '—' },
   {
-    title: '预警阈值',
+    title: t('platform.orgs.columns.warningThreshold'),
     key: 'credit_warning_threshold',
     render: (row: Organization) => typeof row.credit_warning_threshold === 'number'
       ? `${row.credit_warning_threshold}%` : '—',
   },
   {
-    title: '实例上限',
+    title: t('platform.orgs.columns.maxInstance'),
     key: 'max_instance_count',
     render: (row: Organization) => typeof row.max_instance_count === 'number'
-      ? String(row.max_instance_count) : '不限',
+      ? String(row.max_instance_count) : t('platform.orgs.columns.unlimited'),
   },
   {
-    title: '知识库空间',
+    title: t('platform.orgs.columns.knowledgeQuota'),
     key: 'knowledge_quota_bytes',
     render: (row: Organization) => typeof row.knowledge_quota_bytes === 'number'
       ? `${Math.round(row.knowledge_quota_bytes / bytesPerGB)}GB` : '1GB',
   },
   // 当前余额列：从并发查询结果映射到对应行，未加载时显示省略号。
   {
-    title: '当前余额',
+    title: t('platform.orgs.columns.balance'),
     key: 'remain_quota',
     render: (row: Organization) => {
       const b = balanceByOrgId.value[row.id]
@@ -613,12 +616,12 @@ const columns = computed(() => [
   },
   // 启用/禁用互斥：用两条 RowAction + hidden 分别渲染；编辑按钮放在首位方便操作
   actionColumn<Organization>([
-    { label: '编辑', onClick: openEditForm },
-    { label: '复制信息', onClick: r => { void copyOrganizationInfo(r) } },
-    { label: '充值记录', onClick: openRechargeHistory },
-    { label: '充值', type: 'primary', onClick: openRecharge },
-    { label: '禁用', onClick: r => onToggle(r, 'disable'), hidden: r => r.status !== 'active' },
-    { label: '启用', type: 'primary', onClick: r => onToggle(r, 'enable'), hidden: r => r.status === 'active' },
+    { label: t('platform.orgs.actions.edit'), onClick: openEditForm },
+    { label: t('platform.orgs.actions.copyInfo'), onClick: r => { void copyOrganizationInfo(r) } },
+    { label: t('platform.orgs.actions.rechargeHistory'), onClick: openRechargeHistory },
+    { label: t('platform.orgs.actions.recharge'), type: 'primary', onClick: openRecharge },
+    { label: t('platform.orgs.actions.disable'), onClick: r => onToggle(r, 'disable'), hidden: r => r.status !== 'active' },
+    { label: t('platform.orgs.actions.enable'), type: 'primary', onClick: r => onToggle(r, 'enable'), hidden: r => r.status === 'active' },
   ]),
 ])
 
@@ -629,10 +632,10 @@ function optionalAdminUsername(org: Organization) {
 // formatOrganizationCopyInfo 固定对外复制格式，便于平台管理员直接发送给组织管理员。
 function formatOrganizationCopyInfo(org: Organization) {
   return [
-    `标识： ${org.code || ''}`,
-    `名称： ${org.name}`,
-    `管理员用户名： ${optionalAdminUsername(org)}`,
-    `管理员密码： ${adminPasswordCopyHint}`,
+    t('platform.orgs.copy.formatCode', { code: org.code || '' }),
+    t('platform.orgs.copy.formatName', { name: org.name }),
+    t('platform.orgs.copy.formatAdminUsername', { username: optionalAdminUsername(org) }),
+    t('platform.orgs.copy.formatAdminPassword', { hint: adminPasswordCopyHint }),
   ].join('\n')
 }
 
@@ -642,10 +645,10 @@ async function copyOrganizationInfo(org: Organization) {
   copyFeedbackError.value = false
   try {
     await navigator.clipboard.writeText(formatOrganizationCopyInfo(org))
-    copyFeedback.value = `已复制 ${org.name} 的企业信息`
+    copyFeedback.value = t('platform.orgs.copy.successMsg', { name: org.name })
   } catch {
     copyFeedbackError.value = true
-    copyFeedback.value = '复制失败，请检查浏览器剪贴板权限'
+    copyFeedback.value = t('platform.orgs.copy.failMsg')
   }
 }
 
@@ -678,7 +681,7 @@ async function submitRecharge() {
   if (!selectedOrgId.value) return
   if (!((rechargeAmount.value ?? 0) > 0)) {
     rechargeFeedbackError.value = true
-    rechargeFeedback.value = '请输入正整数充值金额'
+    rechargeFeedback.value = t('platform.orgs.rechargeModal.invalidAmount')
     return
   }
   rechargeFeedback.value = ''
@@ -688,31 +691,31 @@ async function submitRecharge() {
       credit_amount: rechargeAmount.value ?? 0,
       remark: rechargeRemark.value || undefined,
     })
-    rechargeFeedback.value = `已充值 ${formatDisplayAmount(result.credit_amount, billingStatus.value)}`
+    rechargeFeedback.value = t('platform.orgs.rechargeModal.successMsg', { amount: formatDisplayAmount(result.credit_amount, billingStatus.value) })
     rechargeAmount.value = null
     rechargeRemark.value = ''
   } catch (err: unknown) {
     rechargeFeedbackError.value = true
-    rechargeFeedback.value = err instanceof Error ? err.message : '充值失败'
+    rechargeFeedback.value = err instanceof Error ? err.message : t('platform.orgs.rechargeModal.failMsg')
   }
 }
 
 // rechargeHistoryColumns 是充值记录弹窗的表格列定义；含操作人 ID（平台管理员可见）。
-const rechargeHistoryColumns = [
-  { title: '时间', key: 'created_at', render: (r: { created_at: string }) => r.created_at.replace('T', ' ').slice(0, 19) },
+const rechargeHistoryColumns = computed(() => [
+  { title: t('platform.orgs.historyModal.columns.time'), key: 'created_at', render: (r: { created_at: string }) => r.created_at.replace('T', ' ').slice(0, 19) },
   {
-    title: '金额',
+    title: t('platform.orgs.historyModal.columns.amount'),
     key: 'credit_amount',
     render: (r: { credit_amount: number }) => formatDisplayAmount(r.credit_amount, billingStatus.value),
   },
-  { title: '备注', key: 'remark', render: (r: { remark?: string }) => r.remark || '—' },
+  { title: t('platform.orgs.historyModal.columns.remark'), key: 'remark', render: (r: { remark?: string }) => r.remark || '—' },
   {
-    title: '状态',
+    title: t('platform.orgs.historyModal.columns.status'),
     key: 'status',
-    render: (r: { status: string }) => r.status === 'succeeded' ? '成功' : '失败',
+    render: (r: { status: string }) => r.status === 'succeeded' ? t('platform.orgs.historyModal.columns.statusSucceeded') : t('platform.orgs.historyModal.columns.statusFailed'),
   },
-  { title: '操作人', key: 'operator_id', render: (r: { operator_id?: string }) => r.operator_id ? r.operator_id.slice(0, 8) + '…' : '—' },
-]
+  { title: t('platform.orgs.historyModal.columns.operator'), key: 'operator_id', render: (r: { operator_id?: string }) => r.operator_id ? r.operator_id.slice(0, 8) + '…' : '—' },
+])
 </script>
 
 <style scoped>

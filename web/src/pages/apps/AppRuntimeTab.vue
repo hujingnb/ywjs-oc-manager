@@ -3,33 +3,33 @@
     <template #header>
       <div>
         <p class="eyebrow">Instance · Runtime</p>
-        <h2 style="margin: 0">运行时</h2>
+        <h2 style="margin: 0">{{ t('apps.runtime.heading') }}</h2>
       </div>
     </template>
     <template #header-extra>
       <n-space :size="8">
-        <n-button size="small" :disabled="!canStart || mutation.isPending.value" @click="onAction('start')">启动</n-button>
-        <n-button size="small" :disabled="!canStop || mutation.isPending.value" @click="onAction('stop')">停止</n-button>
-        <n-button size="small" :disabled="!canStop || mutation.isPending.value" @click="onAction('restart')">重启</n-button>
-        <n-button v-if="canDelete" size="small" type="error" :disabled="mutation.isPending.value" @click="onAction('delete')">删除</n-button>
+        <n-button size="small" :disabled="!canStart || mutation.isPending.value" @click="onAction('start')">{{ t('apps.runtime.start') }}</n-button>
+        <n-button size="small" :disabled="!canStop || mutation.isPending.value" @click="onAction('stop')">{{ t('apps.runtime.stop') }}</n-button>
+        <n-button size="small" :disabled="!canStop || mutation.isPending.value" @click="onAction('restart')">{{ t('apps.runtime.restart') }}</n-button>
+        <n-button v-if="canDelete" size="small" type="error" :disabled="mutation.isPending.value" @click="onAction('delete')">{{ t('apps.runtime.delete') }}</n-button>
       </n-space>
     </template>
 
-    <p v-if="runtimeQuery.isLoading.value" class="state-text">加载中…</p>
-    <p v-else-if="runtimeQuery.error.value" class="state-text danger">查询失败：{{ runtimeQuery.error.value?.message }}</p>
+    <p v-if="runtimeQuery.isLoading.value" class="state-text">{{ t('common.status.loading') }}</p>
+    <p v-else-if="runtimeQuery.error.value" class="state-text danger">{{ t('apps.runtime.loadError') }}{{ runtimeQuery.error.value?.message }}</p>
     <div v-else>
       <!-- 运行时状态：no_container 转为业务文案，其余状态展示原值 -->
       <p class="state-text" style="margin-bottom: 12px">
-        当前状态：
+        {{ t('apps.runtime.currentStatus') }}
         <strong>{{ runtimeStatusLabel }}</strong>
       </p>
       <!-- 最近一次快照：展示采集时间与采集错误，首次采集前提示等待 -->
       <p class="state-text" style="margin-top: 12px">
         <template v-if="runtime?.snapshot">
-          最新采样：{{ formatTime(runtime.snapshot.collected_at) }}
-          <span v-if="runtime.snapshot.last_error" class="danger"> ｜ 采样错误：{{ runtime.snapshot.last_error }}</span>
+          {{ t('apps.runtime.latestSnapshot') }}{{ formatTime(runtime.snapshot.collected_at) }}
+          <span v-if="runtime.snapshot.last_error" class="danger"> {{ t('apps.runtime.snapshotError') }}{{ runtime.snapshot.last_error }}</span>
         </template>
-        <template v-else>资源指标尚未采集（首次采集需 30s 内完成）。</template>
+        <template v-else>{{ t('apps.runtime.noSnapshot') }}</template>
       </p>
     </div>
 
@@ -37,7 +37,7 @@
 
     <JobProgressPanel
       v-if="trackingJobId"
-      :title="'最近运行操作'"
+      :title="t('apps.runtime.recentOp')"
       :subtitle="trackingJobId"
       :job="trackedJob ?? undefined"
       style="margin-top: 12px"
@@ -45,24 +45,24 @@
 
     <ConfirmActionModal
       :visible="confirmDelete"
-      title="确认删除实例"
-      message="将提交删除任务，实例容器、API key 和工作目录都会被回收。该操作不可撤销。"
-      confirm-label="确认删除"
+      :title="t('apps.runtime.deleteTitle')"
+      :message="t('apps.runtime.deleteMessage')"
+      :confirm-label="t('apps.runtime.deleteConfirm')"
       :busy="mutation.isPending.value"
       :verify-value="app?.name ?? ''"
-      :verify-hint='app ? `输入实例名 "${app.name}" 以确认删除` : ""'
+      :verify-hint='app ? t("apps.runtime.deleteVerifyHint", { name: app.name }) : ""'
       @confirm="onConfirmDelete"
       @cancel="confirmDelete = false"
     />
 
     <ConfirmActionModal
       :visible="confirmStop"
-      title="确认停止容器"
-      message="停止后 Hermes 容器对话立即中断；可在恢复时重新启动。"
-      confirm-label="确认停止"
+      :title="t('apps.runtime.stopTitle')"
+      :message="t('apps.runtime.stopMessage')"
+      :confirm-label="t('apps.runtime.stopConfirm')"
       :busy="mutation.isPending.value"
       :verify-value="app?.name ?? ''"
-      :verify-hint='app ? `输入实例名 "${app.name}" 以确认停止运行` : ""'
+      :verify-hint='app ? t("apps.runtime.stopVerifyHint", { name: app.name }) : ""'
       @confirm="onConfirmStop"
       @cancel="confirmStop = false"
     />
@@ -72,6 +72,7 @@
 <script setup lang="ts">
 import { computed, inject, ref, type Ref } from 'vue'
 import { NButton, NCard, NSpace } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 import {
   useAppRuntimeQuery,
@@ -88,6 +89,7 @@ import { useAuthStore } from '@/stores/auth'
 // spec-A2b：删除节点信息、ResourceTrendChart 资源趋势图与 container 详情展示；
 // 保留启停/重启/删除触发按钮（useTriggerRuntimeOperation）与 k8s 运行状态/快照时间展示。
 const props = defineProps<{ appId: string }>()
+const { t } = useI18n()
 const appId = computed<string | undefined>(() => props.appId)
 
 const app = inject<Ref<AppDTO | null>>('app')
@@ -112,7 +114,7 @@ const confirmStop = ref(false)
 const runtimeStatusLabel = computed(() => {
   const status = runtime.value?.status
   if (!status) return '—'
-  if (status === 'no_container') return '尚未创建容器'
+  if (status === 'no_container') return t('apps.runtime.noContainer')
   return status
 })
 
@@ -149,10 +151,10 @@ async function runMutation(op: 'start' | 'stop' | 'restart' | 'delete') {
   try {
     const result = await mutation.mutateAsync(op)
     trackingJobId.value = result.job_id
-    actionFeedback.value = `已提交 ${op}：${result.job_id}`
+    actionFeedback.value = t('apps.runtime.opSubmitted', { op, jobId: result.job_id })
   } catch (err: unknown) {
     actionError.value = true
-    actionFeedback.value = err instanceof Error ? err.message : `${op} 操作失败`
+    actionFeedback.value = err instanceof Error ? err.message : t('apps.runtime.opFailed', { op })
   }
 }
 </script>

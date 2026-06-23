@@ -150,7 +150,7 @@ func (s *ChannelService) BeginAuth(ctx context.Context, principal auth.Principal
 		Action:        "channel_auth_start",
 		Result:        "succeeded",
 		MetadataJson:  auditMetadata,
-		DetailMessage: null.StringFrom(fmt.Sprintf("渠道 %s", channelLabel(channelType))),
+		// DetailMessage 已迁移到 metadata.channel_type，此处不再写入冻结中文文案。
 	}); err != nil {
 		return ChallengeResult{}, fmt.Errorf("写入渠道发起审计日志失败: %w", err)
 	}

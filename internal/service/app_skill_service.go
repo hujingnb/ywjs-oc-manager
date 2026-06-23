@@ -269,6 +269,7 @@ func (s *AppSkillService) Install(ctx context.Context, principal auth.Principal,
 		return AppSkillResult{}, fmt.Errorf("写入实例 skill 失败: %w", err)
 	}
 	// 写审计日志（记录安装操作，target_type=app_skill，action=skill.install）
+	// metadata 存储结构化参数：skill_name/skill_version/app_id，供前端按语言渲染详情。
 	_, _ = s.audit.Record(ctx, AuditEvent{
 		ActorID:    principal.UserID,
 		ActorRole:  string(principal.Role),
@@ -277,7 +278,11 @@ func (s *AppSkillService) Install(ctx context.Context, principal auth.Principal,
 		TargetID:   appID + "/" + in.Name,
 		Action:     "skill.install",
 		Result:     "succeeded",
-		DetailMessage: fmt.Sprintf("安装 skill %s@%s 到实例 %s", in.Name, in.Version, appID),
+		Metadata: map[string]any{
+			"skill_name":    in.Name,
+			"skill_version": in.Version,
+			"app_id":        appID,
+		},
 	})
 	// oc-ops 热装 + reload（失败 → pending，不回滚 app_skills，等待对账重试）
 	status := "active"
@@ -350,15 +355,19 @@ func (s *AppSkillService) Uninstall(ctx context.Context, principal auth.Principa
 		return fmt.Errorf("删除实例 skill 失败: %w", err)
 	}
 	// 写审计日志（记录卸载操作，target_type=app_skill，action=skill.uninstall）
+	// metadata 存储结构化参数：skill_name/app_id，供前端按语言渲染详情。
 	_, _ = s.audit.Record(ctx, AuditEvent{
-		ActorID:       principal.UserID,
-		ActorRole:     string(principal.Role),
-		OrgID:         loc.OrgID,
-		TargetType:    "app_skill",
-		TargetID:      appID + "/" + name,
-		Action:        "skill.uninstall",
-		Result:        "succeeded",
-		DetailMessage: fmt.Sprintf("从实例 %s 卸载 skill %s", appID, name),
+		ActorID:    principal.UserID,
+		ActorRole:  string(principal.Role),
+		OrgID:      loc.OrgID,
+		TargetType: "app_skill",
+		TargetID:   appID + "/" + name,
+		Action:     "skill.uninstall",
+		Result:     "succeeded",
+		Metadata: map[string]any{
+			"skill_name": name,
+			"app_id":     appID,
+		},
 	})
 	// oc-ops 热删 + reload（失败静默忽略：app_skills 已删，对账可识别并清理容器侧残留）
 	if loc.Supported {
@@ -521,15 +530,20 @@ func (s *AppSkillService) Update(ctx context.Context, principal auth.Principal, 
 		return AppSkillResult{}, fmt.Errorf("更新实例 skill 版本失败: %w", err)
 	}
 	// 写审计日志（记录更新操作，action=skill.update）
+	// metadata 存储结构化参数：skill_name/skill_version/app_id，供前端按语言渲染详情。
 	_, _ = s.audit.Record(ctx, AuditEvent{
-		ActorID:       principal.UserID,
-		ActorRole:     string(principal.Role),
-		OrgID:         loc.OrgID,
-		TargetType:    "app_skill",
-		TargetID:      appID + "/" + name,
-		Action:        "skill.update",
-		Result:        "succeeded",
-		DetailMessage: fmt.Sprintf("更新实例 %s 的 skill %s 到版本 %s", appID, name, targetVersion),
+		ActorID:    principal.UserID,
+		ActorRole:  string(principal.Role),
+		OrgID:      loc.OrgID,
+		TargetType: "app_skill",
+		TargetID:   appID + "/" + name,
+		Action:     "skill.update",
+		Result:     "succeeded",
+		Metadata: map[string]any{
+			"skill_name":    name,
+			"skill_version": targetVersion,
+			"app_id":        appID,
+		},
 	})
 	// oc-ops 热替换（SkillInstall 覆盖安装）+ reload（失败 → pending，不回滚）
 	status := "active"
@@ -612,15 +626,20 @@ func (s *AppSkillService) Reinstall(ctx context.Context, principal auth.Principa
 		return AppSkillResult{}, ErrAppSkillArchiveTooDangerous
 	}
 	// 写审计日志（记录重试操作，action=skill.reinstall）
+	// metadata 存储结构化参数：skill_name/skill_version/app_id，供前端按语言渲染详情。
 	_, _ = s.audit.Record(ctx, AuditEvent{
-		ActorID:       principal.UserID,
-		ActorRole:     string(principal.Role),
-		OrgID:         loc.OrgID,
-		TargetType:    "app_skill",
-		TargetID:      appID + "/" + name,
-		Action:        "skill.reinstall",
-		Result:        "succeeded",
-		DetailMessage: fmt.Sprintf("重新安装实例 %s 的 skill %s@%s", appID, name, row.Version),
+		ActorID:    principal.UserID,
+		ActorRole:  string(principal.Role),
+		OrgID:      loc.OrgID,
+		TargetType: "app_skill",
+		TargetID:   appID + "/" + name,
+		Action:     "skill.reinstall",
+		Result:     "succeeded",
+		Metadata: map[string]any{
+			"skill_name":    name,
+			"skill_version": row.Version,
+			"app_id":        appID,
+		},
 	})
 	// oc-ops 热装（覆盖安装）+ reload（失败仍 pending，可继续重试）
 	status := "active"

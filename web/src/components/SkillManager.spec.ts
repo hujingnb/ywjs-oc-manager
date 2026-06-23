@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import SkillManager from './SkillManager.vue'
 import type { AppSkill } from '@/api'
+import { i18n } from '@/i18n'
 
 // ======================== hoisted mocks ========================
 // vi.hoisted 内只能使用 vi.fn()，不可用 ref()（hoisting 早于模块初始化）。
@@ -183,9 +184,12 @@ const defaultApp = {
 }
 
 function mountManager() {
+  // i18n 插件注入确保 useI18n() 在组件内可用；locale 设为 zh 使文案断言沿用中文词条。
+  i18n.global.locale.value = 'zh'
   return mount(SkillManager, {
     props: { appId: 'app-1' },
     global: {
+      plugins: [i18n],
       provide: { app: ref(defaultApp) },
     },
   })

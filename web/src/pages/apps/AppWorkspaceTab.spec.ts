@@ -1,7 +1,8 @@
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, ref, type PropType, type VNodeChild } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { i18n } from '@/i18n'
 import AppWorkspaceTab from './AppWorkspaceTab.vue'
 
 type RenderableColumn = {
@@ -50,6 +51,7 @@ function mountTab() {
   return mount(AppWorkspaceTab, {
     props: { appId: 'app-1' },
     global: {
+      plugins: [i18n],
       stubs: {
         NCard: { template: '<section><slot name="header" /><slot name="header-extra" /><slot /></section>' },
         NSpace: { template: '<div><slot /></div>' },
@@ -63,6 +65,11 @@ function mountTab() {
 }
 
 describe('AppWorkspaceTab', () => {
+  beforeEach(() => {
+    // 每次用例前将 i18n 语言设为中文，确保断言中文文案的测试与翻译文件对齐。
+    i18n.global.locale.value = 'zh'
+  })
+
   // 覆盖工作目录文件列表列头文案：文件和目录的名称列必须明确显示为「文件名称」。
   it('工作目录文件列表首列展示文件名称', () => {
     const wrapper = mountTab()

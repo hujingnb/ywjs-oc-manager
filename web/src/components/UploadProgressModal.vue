@@ -5,7 +5,7 @@
     :mask-closable="false"
     :closable="!isUploading"
     preset="card"
-    title="文件上传"
+    :title="t('components.uploadProgressModal.modalTitle')"
     style="max-width: 480px"
     @close="onClose"
   >
@@ -21,19 +21,19 @@
         <NProgress type="line" :percentage="currentPct" :processing="isFinalizing" />
         <!-- 合并阶段：字节已传完，服务端在合并并推送 RAGFlow，显示「合并中…」避免看起来卡死在 100% -->
         <p class="state-text">
-          <template v-if="isFinalizing">合并中…</template>
+          <template v-if="isFinalizing">{{ t('components.uploadProgressModal.finalizing') }}</template>
           <template v-else>{{ formatBytes(session.currentLoaded) }} / {{ formatBytes(currentItem.size) }}</template>
         </p>
-        <NButton v-if="!isFinalizing" type="warning" @click="store.cancel()">取消上传</NButton>
+        <NButton v-if="!isFinalizing" type="warning" @click="store.cancel()">{{ t('components.uploadProgressModal.cancelUpload') }}</NButton>
       </template>
 
       <!-- 全部结束：汇总 + 失败详情 + 关闭按钮 -->
       <template v-else>
         <p>
-          成功 {{ counts.succeeded }} · 失败 {{ counts.failed }} · 取消 {{ counts.cancelled }}
+          {{ t('components.uploadProgressModal.summaryText', { succeeded: counts.succeeded, failed: counts.failed, cancelled: counts.cancelled }) }}
         </p>
         <NCollapse v-if="failedItems.length">
-          <NCollapseItem title="失败详情" name="failed">
+          <NCollapseItem :title="t('components.uploadProgressModal.failedDetails')" name="failed">
             <ul style="margin: 0; padding-left: 16px">
               <li v-for="it in failedItems" :key="it.id">
                 {{ it.label }}：{{ it.error }}
@@ -41,7 +41,7 @@
             </ul>
           </NCollapseItem>
         </NCollapse>
-        <NButton type="primary" @click="onClose">关闭</NButton>
+        <NButton type="primary" @click="onClose">{{ t('components.uploadProgressModal.closeBtn') }}</NButton>
       </template>
     </div>
   </NModal>
@@ -50,6 +50,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NButton, NCollapse, NCollapseItem, NModal, NProgress } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 import { useUploadProgressStore } from '@/stores/uploadProgress'
 
@@ -57,6 +58,7 @@ import { useUploadProgressStore } from '@/stores/uploadProgress'
 // 关闭时直接卸载 NModal，避免 show=false 过渡期间留下无内容弹窗。
 // App.vue 根节点统一挂载，业务页面不需要自己渲染 modal。
 const store = useUploadProgressStore()
+const { t } = useI18n()
 const session = computed(() => store.session)
 const isUploading = computed(() => store.isUploading)
 const currentItem = computed(() => store.session?.items[store.session.currentIndex] ?? null)

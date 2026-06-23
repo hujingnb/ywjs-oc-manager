@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 
 import { apiRequest, type ApiError } from '@/api/client'
+import { i18n } from '@/i18n'
 import type { AggregatedUsage } from '@/api/hooks/useUsage'
 
 // AppDTO 是应用详情与列表接口共用的前端视图。
@@ -178,7 +179,7 @@ export function useTriggerRuntimeOperation(appId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (op: 'start' | 'stop' | 'restart' | 'delete') => {
-      if (!appId.value) throw new Error('缺少实例 ID')
+      if (!appId.value) throw new Error(i18n.global.t('common.errors.missingAppId'))
       const response = await apiRequest<{ runtime_operation: RuntimeOperationResult }>(
         `/api/v1/apps/${appId.value}/runtime/${op}`,
         { method: 'POST' },
@@ -199,7 +200,7 @@ export function useToggleAppAPIKey(appId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (action: 'disable' | 'restore') => {
-      if (!appId.value) throw new Error('缺少实例 ID')
+      if (!appId.value) throw new Error(i18n.global.t('common.errors.missingAppId'))
       const response = await apiRequest<{ runtime_operation: RuntimeOperationResult }>(
         `/api/v1/apps/${appId.value}/api-key/${action}`,
         { method: 'POST' },
@@ -219,7 +220,7 @@ export function useInitializeAppMutation(appId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async () => {
-      if (!appId.value) throw new Error('缺少实例 ID')
+      if (!appId.value) throw new Error(i18n.global.t('common.errors.missingAppId'))
       const response = await apiRequest<{ runtime_operation: RuntimeOperationResult }>(
         `/api/v1/apps/${appId.value}/initialize`,
         { method: 'POST' },
@@ -308,7 +309,7 @@ export function useSwitchAppVersion(appId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (versionId: string) => {
-      if (!appId.value) throw new Error('缺少实例 ID')
+      if (!appId.value) throw new Error(i18n.global.t('common.errors.missingAppId'))
       const response = await apiRequest<{ app: AppDTO }>(
         `/api/v1/apps/${appId.value}/version`,
         { method: 'POST', body: { version_id: versionId } },
@@ -324,7 +325,7 @@ export function useUpdateAppKnowledgeQuota(appId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (quotaBytes: number) => {
-      if (!appId.value) throw new Error('缺少实例 ID')
+      if (!appId.value) throw new Error(i18n.global.t('common.errors.missingAppId'))
       const response = await apiRequest<{ app: AppDTO }>(
         `/api/v1/apps/${appId.value}/knowledge/quota`,
         { method: 'PATCH', body: { quota_bytes: quotaBytes } },

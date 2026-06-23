@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 
+import { i18n } from '@/i18n'
 import TicketDetailPage from './TicketDetailPage.vue'
 
 const detailState = {
@@ -79,12 +80,14 @@ vi.mock('@/components/ticket/TicketTargetsEditor.vue', () => ({
 }))
 
 function mountPage() {
-  return mount(TicketDetailPage)
+  return mount(TicketDetailPage, { global: { plugins: [i18n] } })
 }
 
 describe('TicketDetailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // 每次用例前将 i18n 语言设为中文，确保断言中文文案的测试与翻译文件对齐。
+    i18n.global.locale.value = 'zh'
     detailState.isLoading.value = false
     detailState.error.value = null
     detailState.refetch.mockResolvedValue(undefined)
@@ -165,7 +168,7 @@ describe('TicketDetailPage', () => {
     expect(wrapper.text()).not.toContain('bda67aa4-92cd-4448-a5fb-a93a23813ab9')
   })
 
-  // 需求描述统一进入对话消息流后,详情页不再渲染独立“需求”区块。
+  // 需求描述统一进入对话消息流后,详情页不再渲染独立"需求"区块。
   it('does not render standalone requirement description section', () => {
     detailState.data.value = {
       id: 't-1',

@@ -16,8 +16,11 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { NTag } from 'naive-ui'
 import type { KanbanTask } from '@/api/hooks/useKanban'
+
+const { t } = useI18n()
 
 // KanbanTaskRow 渲染左侧列表的单个任务行。
 const props = defineProps<{
@@ -31,15 +34,15 @@ const emit = defineEmits<{ select: [taskId: string] }>()
 const priorityType = computed(() => ((props.task.priority ?? 0) >= 3 ? 'error' : 'warning'))
 const priorityLabel = computed(() => ((props.task.priority ?? 0) >= 3 ? 'high' : 'medium'))
 
-// relativeTime：把 created_at（秒级 epoch）转成相对时间中文。
-// created_at 缺失时返回占位符，避免 fallback 到 epoch(0) 显示「20000+ 天前」。
+// relativeTime：把 created_at（秒级 epoch）转成相对时间，随 i18n 语言切换。
+// created_at 缺失时返回占位符，避免 fallback 到 epoch(0) 显示错误时间。
 const relativeTime = computed(() => {
   if (!props.task.created_at) return '—'
   const diff = Date.now() / 1000 - props.task.created_at
-  if (diff < 60) return '刚刚'
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`
-  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
-  return `${Math.floor(diff / 86400)} 天前`
+  if (diff < 60) return t('apps.kanban.taskRow.justNow')
+  if (diff < 3600) return t('apps.kanban.taskRow.minutesAgo', { n: Math.floor(diff / 60) })
+  if (diff < 86400) return t('apps.kanban.taskRow.hoursAgo', { n: Math.floor(diff / 3600) })
+  return t('apps.kanban.taskRow.daysAgo', { n: Math.floor(diff / 86400) })
 })
 </script>
 

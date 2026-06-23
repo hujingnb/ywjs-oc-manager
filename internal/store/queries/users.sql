@@ -83,3 +83,9 @@ LEFT JOIN apps a
 WHERE u.org_id = ?
 ORDER BY u.created_at DESC, u.id DESC
 LIMIT ? OFFSET ?;
+
+-- name: UpdateUserLocale :exec
+-- 更新用户界面语言偏好。locale 由 handler 校验取值集合后传入；NULL 表示重置为「未选择」。
+UPDATE users
+SET locale = sqlc.arg(locale), updated_at = now()
+WHERE id = sqlc.arg(id);

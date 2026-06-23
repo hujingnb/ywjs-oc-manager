@@ -6,15 +6,16 @@ import { apiRequest } from '@/api/client'
 import { xhrUpload } from '@/api/xhrUpload'
 
 // AUXILIARY_SLOTS 是智能路由的 8 个 auxiliary 槽位，key 与后端约定一致，顺序固定用于表单渲染。
+// labelKey 是 platform.versions.routingSlots 命名空间下的 i18n 键路径，消费方通过 t(slot.labelKey) 翻译。
 export const AUXILIARY_SLOTS = [
-  { key: 'vision', label: '图像识别' },
-  { key: 'compression', label: '上下文压缩' },
-  { key: 'web_extract', label: '网页提取' },
-  { key: 'session_search', label: '会话搜索' },
-  { key: 'title_generation', label: '标题生成' },
-  { key: 'approval', label: '智能审批' },
-  { key: 'skills_hub', label: '技能检索' },
-  { key: 'mcp', label: 'MCP 路由' },
+  { key: 'vision', labelKey: 'platform.versions.routingSlots.vision' },
+  { key: 'compression', labelKey: 'platform.versions.routingSlots.compression' },
+  { key: 'web_extract', labelKey: 'platform.versions.routingSlots.web_extract' },
+  { key: 'session_search', labelKey: 'platform.versions.routingSlots.session_search' },
+  { key: 'title_generation', labelKey: 'platform.versions.routingSlots.title_generation' },
+  { key: 'approval', labelKey: 'platform.versions.routingSlots.approval' },
+  { key: 'skills_hub', labelKey: 'platform.versions.routingSlots.skills_hub' },
+  { key: 'mcp', labelKey: 'platform.versions.routingSlots.mcp' },
 ] as const
 
 // AssistantVersionRoutingPayload 是创建/更新请求里的 8 槽位路由对象；空字符串表示该场景走主模型。

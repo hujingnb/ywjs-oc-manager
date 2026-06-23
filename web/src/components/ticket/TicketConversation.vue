@@ -1,7 +1,7 @@
 <template>
   <section class="ticket-conversation">
     <div class="message-list">
-      <div v-if="!messages.length" class="message-empty">暂无消息</div>
+      <div v-if="!messages.length" class="message-empty">{{ t('components.ticketConversation.noMessages') }}</div>
       <article
         v-for="message in messages"
         :key="message.id"
@@ -9,7 +9,7 @@
         :class="message.author_user_id === currentUserId ? 'mine' : 'theirs'"
       >
         <div class="message-meta">
-          <span>{{ message.author_user_id === currentUserId ? '我' : '对方' }}</span>
+          <span>{{ message.author_user_id === currentUserId ? t('components.ticketConversation.authorMe') : t('components.ticketConversation.authorOther') }}</span>
           <time>{{ fmtTime(message.created_at) }}</time>
         </div>
         <div class="message-bubble">
@@ -20,11 +20,11 @@
             type="button"
             @click="onImageMessageClick(message)"
           >
-            <img v-if="imageUrls[message.id]" :src="imageUrls[message.id]" :alt="message.file_name || '图片消息'" />
-            <span v-else>图片加载中</span>
+            <img v-if="imageUrls[message.id]" :src="imageUrls[message.id]" :alt="message.file_name || t('components.ticketConversation.imageAlt')" />
+            <span v-else>{{ t('components.ticketConversation.imagePlaceholder') }}</span>
           </button>
           <button v-else class="file-message" type="button" @click="downloadTicketMessage(ticketId, message)">
-            <span class="file-name">{{ message.file_name || '文件' }}</span>
+            <span class="file-name">{{ message.file_name || t('components.ticketConversation.fileDefault') }}</span>
             <span class="file-size">{{ formatSize(message.file_size) }}</span>
           </button>
         </div>
@@ -36,12 +36,12 @@
         v-model:value="text"
         type="textarea"
         :autosize="{ minRows: 2, maxRows: 5 }"
-        placeholder="输入消息"
+        :placeholder="t('components.ticketConversation.inputPlaceholder')"
         @keydown.ctrl.enter.prevent="onSendText"
       />
       <div class="composer-actions">
         <input ref="fileInput" class="file-input" type="file" @change="onPickFile" />
-        <n-button size="small" @click="triggerFileInput">图片/文件</n-button>
+        <n-button size="small" @click="triggerFileInput">{{ t('components.ticketConversation.attachBtn') }}</n-button>
         <n-button
           type="primary"
           size="small"
@@ -49,7 +49,7 @@
           :disabled="!text.trim()"
           @click="onSendText"
         >
-          发送
+          {{ t('components.ticketConversation.sendBtn') }}
         </n-button>
       </div>
     </div>
@@ -70,6 +70,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { NButton, NInput, NModal, useMessage } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 import type { SkillTicketMessage } from '@/api'
 import {
@@ -89,6 +90,7 @@ const props = withDefaults(
 )
 
 const message = useMessage()
+const { t } = useI18n()
 const ticketIDRef = ref<string | undefined>(props.ticketId)
 const sendMut = useSendTicketMessage(ticketIDRef)
 const uploadMut = useUploadTicketMessage(ticketIDRef)
@@ -148,7 +150,7 @@ async function onSendText() {
     await sendMut.mutateAsync({ text: body })
     text.value = ''
   } catch {
-    message.error('消息发送失败')
+    message.error(t('components.ticketConversation.sendFailed'))
   }
 }
 
@@ -161,7 +163,7 @@ function onImageMessageClick(item: SkillTicketMessage) {
   previewImage.value = {
     id: item.id,
     url,
-    alt: item.file_name || '图片消息',
+    alt: item.file_name || t('components.ticketConversation.imageAlt'),
   }
   previewOpen.value = true
 }
@@ -178,7 +180,7 @@ async function onPickFile(event: Event) {
     await uploadMut.mutateAsync(file)
     input.value = ''
   } catch {
-    message.error('文件发送失败')
+    message.error(t('components.ticketConversation.uploadFailed'))
   }
 }
 

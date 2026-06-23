@@ -1,6 +1,6 @@
 <template>
   <div class="ticket-status-stepper" :data-status="status">
-    <div class="status-line" aria-label="工单状态">
+    <div class="status-line" :aria-label="t('components.ticketStatusStepper.ariaLabel')">
       <div
         v-for="step in steps"
         :key="step.value"
@@ -11,24 +11,27 @@
         <span class="status-label">{{ step.label }}</span>
       </div>
     </div>
-    <n-tag v-if="status === 'rejected'" type="error" size="small" :bordered="false">已拒绝</n-tag>
+    <n-tag v-if="status === 'rejected'" type="error" size="small" :bordered="false">{{ t('components.ticketStatusStepper.tagRejected') }}</n-tag>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NTag } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{ status: string }>()
 
+const { t } = useI18n()
 const order = ['pending', 'processing', 'delivered']
 
 // steps 根据当前状态高亮已到达节点;rejected 不推进主线,单独显示红色状态标记。
+// 标签使用 computed 包装，确保语言切换时步进器文案随之更新。
 const steps = computed(() => {
   const labels: Record<string, string> = {
-    pending: '待处理',
-    processing: '制作中',
-    delivered: '已交付',
+    pending: t('components.ticketStatusStepper.stepPending'),
+    processing: t('components.ticketStatusStepper.stepProcessing'),
+    delivered: t('components.ticketStatusStepper.stepDelivered'),
   }
   const idx = order.indexOf(props.status)
   return order.map((value, index) => ({

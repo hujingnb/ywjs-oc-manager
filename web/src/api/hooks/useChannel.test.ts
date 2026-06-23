@@ -1,13 +1,19 @@
 // 渠道认证纯函数测试覆盖挑战元数据还原和本地 pending 提示条件。
 // 这些逻辑不依赖 Vue Query，可直接用同步断言验证状态边界。
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 
+import { i18n } from '@/i18n'
 import {
   channelChallengeFromProgress,
   formatChannelStatus,
   shouldShowChallengePending,
   type ChannelProgress,
 } from '@/api/hooks/useChannel'
+
+// 切换到中文 locale，确保断言的是用户可见的中文文案而非英文。
+beforeEach(() => {
+  i18n.global.locale.value = 'zh'
+})
 
 describe('channelChallengeFromProgress', () => {
   it('builds qrcode challenge from pending progress metadata', () => {
@@ -37,7 +43,7 @@ describe('channelChallengeFromProgress', () => {
 })
 
 describe('formatChannelStatus', () => {
-  // 常见渠道状态：后端原值应映射为用户能理解的中文业务文案。
+  // 常见渠道状态：后端原值应通过 i18n 映射为用户能理解的中文业务文案。
   it.each([
     ['unbound', '未绑定'], // 初始渠道记录：还没有绑定账号。
     ['pending_auth', '等待扫码授权'], // 登录任务已发起，等待二维码扫码或确认。
@@ -50,7 +56,7 @@ describe('formatChannelStatus', () => {
     expect(formatChannelStatus(status)).toBe(label)
   })
 
-  // 空进度：轮询尚未返回数据时展示“未发起”，不展示 undefined。
+  // 空进度：轮询尚未返回数据时展示"未发起"，不展示 undefined。
   it('status 为空时展示未发起', () => {
     expect(formatChannelStatus(undefined)).toBe('未发起')
   })

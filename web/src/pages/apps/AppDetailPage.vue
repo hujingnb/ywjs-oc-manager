@@ -5,16 +5,16 @@
         <div style="display: flex; align-items: center; justify-content: space-between">
           <div>
             <p class="eyebrow">Instance · Detail</p>
-            <h2 style="margin: 0">{{ app?.name ?? '实例详情' }}</h2>
+            <h2 style="margin: 0">{{ app?.name ?? t('apps.detail.title') }}</h2>
             <!-- 平台管理员需要用 manager UUID 跨系统排障；组织用户不展示这类底层标识。 -->
             <p v-if="app && auth.isPlatformAdmin" class="instance-uuid">
-              实例 UUID：<code>{{ app.id }}</code>
+              {{ t('apps.detail.uuid') }}<code>{{ app.id }}</code>
             </p>
           </div>
           <AppStatusTag v-if="app" :status="app.status" />
         </div>
-        <p v-if="appQuery.isLoading.value" class="state-text" style="padding: 12px 0 0">加载中…</p>
-        <p v-else-if="appQuery.error.value" class="state-text danger" style="padding: 12px 0 0">查询失败：{{ appQuery.error.value?.message }}</p>
+        <p v-if="appQuery.isLoading.value" class="state-text" style="padding: 12px 0 0">{{ t('apps.detail.loading') }}</p>
+        <p v-else-if="appQuery.error.value" class="state-text danger" style="padding: 12px 0 0">{{ t('apps.detail.loadError') }}{{ appQuery.error.value?.message }}</p>
         <div v-if="app && showTabNav" class="tab-nav">
           <button
             v-for="tab in tabs"
@@ -35,12 +35,14 @@
 import { computed, provide } from 'vue'
 import { useRoute, useRouter, RouterView } from 'vue-router'
 import { NCard } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 import { useAppQuery, type AppDTO } from '@/api/hooks/useApps'
 import AppStatusTag from '@/components/AppStatusTag.vue'
 import { useAuthStore } from '@/stores/auth'
 
 // AppDetailPage 是应用详情的父页面，负责加载应用基础信息并向子 tab 注入应用上下文。
+const { t } = useI18n()
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
@@ -55,22 +57,23 @@ const showTabNav = computed(() => !auth.isOrgMember)
 provide<typeof app>('app', app)
 
 // allTabs 定义详情页的全部业务分区，path 必须和子路由末段保持一致。
-const allTabs: ReadonlyArray<{ path: string; label: string }> = [
-  { path: 'overview', label: '概览' },
-  { path: 'kanban', label: '任务' },
-  { path: 'cron', label: '定时任务' },
-  { path: 'runtime', label: '运行时' },
-  { path: 'channels', label: '渠道' },
-  { path: 'knowledge', label: '实例知识库' },
+// 使用 computed 包裹以支持语言切换时 tab 标签响应式更新。
+const allTabs = computed<ReadonlyArray<{ path: string; label: string }>>(() => [
+  { path: 'overview', label: t('apps.detail.tabs.overview') },
+  { path: 'kanban', label: t('apps.detail.tabs.kanban') },
+  { path: 'cron', label: t('apps.detail.tabs.cron') },
+  { path: 'runtime', label: t('apps.detail.tabs.runtime') },
+  { path: 'channels', label: t('apps.detail.tabs.channels') },
+  { path: 'knowledge', label: t('apps.detail.tabs.knowledge') },
   // skills tab：管理员（platform_admin / org_admin）可通过此 tab 管理实例的技能。
-  { path: 'skills', label: '技能' },
-  { path: 'workspace', label: '工作目录' },
-  { path: 'audit', label: '审计' },
-]
+  { path: 'skills', label: t('apps.detail.tabs.skills') },
+  { path: 'workspace', label: t('apps.detail.tabs.workspace') },
+  { path: 'audit', label: t('apps.detail.tabs.audit') },
+])
 
 // 运行时 tab 仅对平台管理员可见，属基础设施层信息不向组织用户暴露。
 const tabs = computed(() =>
-  auth.isPlatformAdmin ? allTabs : allTabs.filter(t => t.path !== 'runtime')
+  auth.isPlatformAdmin ? allTabs.value : allTabs.value.filter(tab => tab.path !== 'runtime')
 )
 
 // currentTab 根据当前路由末段驱动 Naive tabs 激活态。

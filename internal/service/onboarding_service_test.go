@@ -42,12 +42,20 @@ func TestOnboardMemberCommitsOnSuccess(t *testing.T) {
 	assert.Equal(t, "create", store.auditLogs[1].Action)
 	assert.Equal(t, result.App.ID, store.auditLogs[1].TargetID)
 	assert.Positive(t, store.jobs)
-	// auditLogs[0] = create_with_app; 详情应为「新建成员 <显示名>（含应用 <应用名>）」。
-	require.True(t, store.auditLogs[0].DetailMessage.Valid)
-	require.Equal(t, "新建成员 Alice（含应用 alice-bot）", store.auditLogs[0].DetailMessage.String)
-	// auditLogs[1] = app create; 详情应为「归属成员 Alice，渠道 微信」。
-	require.True(t, store.auditLogs[1].DetailMessage.Valid)
-	require.Equal(t, "归属成员 Alice，渠道 微信", store.auditLogs[1].DetailMessage.String)
+	// 审计迁移：不再写冻结中文文案，改用 metadata 存储结构化参数供前端按语言渲染。
+	// auditLogs[0] = create_with_app; metadata 应包含 member_name 和 app_name。
+	require.False(t, store.auditLogs[0].DetailMessage.Valid, "create_with_app 不应写入冻结文案")
+	var memberMeta map[string]any
+	require.NoError(t, json.Unmarshal(store.auditLogs[0].MetadataJson, &memberMeta))
+	require.Equal(t, "Alice", memberMeta["member_name"], "metadata.member_name 应为显示名")
+	require.Equal(t, "alice-bot", memberMeta["app_name"], "metadata.app_name 应为应用名")
+	// auditLogs[1] = app create; metadata 应包含 member_name/app_name/channel_type/owner_user_id。
+	require.False(t, store.auditLogs[1].DetailMessage.Valid, "app create 不应写入冻结文案")
+	var appMeta map[string]any
+	require.NoError(t, json.Unmarshal(store.auditLogs[1].MetadataJson, &appMeta))
+	require.Equal(t, "Alice", appMeta["member_name"], "metadata.member_name 应为归属成员显示名")
+	require.Equal(t, "alice-bot", appMeta["app_name"], "metadata.app_name 应为应用名")
+	require.Equal(t, domain.ChannelTypeWeChat, appMeta["channel_type"], "metadata.channel_type 应为渠道类型 code")
 }
 
 // TestOnboardMemberEnsuresKnowledgeDataset 验证成员引导成功创建实例后会预创建实例级 RAGFlow dataset。
@@ -172,9 +180,15 @@ func TestCreateAppForMember_PlatformAdminCreatesAfterDelete(t *testing.T) {
 	require.Len(t, store.auditLogs, 1)
 	assert.Equal(t, "app", store.auditLogs[0].TargetType)
 	assert.Equal(t, "create_for_existing_member", store.auditLogs[0].Action)
-	// 详情格式与 OnboardMember 的 create 一致：归属成员 + 渠道。
-	require.True(t, store.auditLogs[0].DetailMessage.Valid)
-	require.Equal(t, "归属成员 Alice，渠道 微信", store.auditLogs[0].DetailMessage.String)
+	// 审计迁移：不再写冻结中文文案，改用 metadata 存储结构化参数供前端按语言渲染。
+	// create_for_existing_member 的 metadata 应包含 member_name/app_name/channel_type/owner_user_id。
+	require.False(t, store.auditLogs[0].DetailMessage.Valid, "create_for_existing_member 不应写入冻结文案")
+	require.NotEmpty(t, store.auditLogs[0].MetadataJson, "create_for_existing_member 应写入 metadata")
+	var appMeta map[string]any
+	require.NoError(t, json.Unmarshal(store.auditLogs[0].MetadataJson, &appMeta))
+	require.Equal(t, domain.ChannelTypeWeChat, appMeta["channel_type"], "metadata.channel_type 应为渠道类型 code")
+	require.NotEmpty(t, appMeta["member_name"], "metadata.member_name 应为归属成员名")
+	require.Equal(t, "alice-new-bot", appMeta["app_name"], "metadata.app_name 应为应用名")
 	// 创建的应用应绑定指定的助手版本 ID。
 	assert.Equal(t, testVersionID, store.lastAppVersionID)
 }
@@ -281,7 +295,8 @@ type onboardingStub struct {
 	appErr           error
 	jobErr           error
 	lastAppOwnerID   string
-	lastAppVersionID string // 记录最近一次 CreateApp 使用的 VersionID，供断言校验。
+	lastAppVersionID string     // 记录最近一次 CreateApp 使用的 VersionID，供断言校验。
+	lastAppLocale    null.String // 记录最近一次 CreateApp 使用的 Locale，供断言校验。
 }
 
 type counters struct{ users, apps, bindings, audits, jobs int }
@@ -360,7 +375,7 @@ func (s *onboardingStub) CreateUser(_ context.Context, _ sqlc.CreateUserParams) 
 	return nil
 }
 
-// CreateApp 为 :exec；stub 计数并记录 owner ID / version ID，不需要读回。
+// CreateApp 为 :exec；stub 计数并记录 owner ID / version ID / locale，不需要读回。
 // k8s 模型下 CreateAppParams 不含 RuntimeNodeID，验证字段无需断言节点。
 func (s *onboardingStub) CreateApp(_ context.Context, arg sqlc.CreateAppParams) error {
 	if s.appErr != nil {
@@ -370,6 +385,8 @@ func (s *onboardingStub) CreateApp(_ context.Context, arg sqlc.CreateAppParams) 
 	s.lastAppOwnerID = arg.OwnerUserID
 	// VersionID 为 null.String；取 .String 字段即可（有效时等于 version id）。
 	s.lastAppVersionID = arg.VersionID.String
+	// Locale 快照：记录创建时传入的 locale，供断言校验。
+	s.lastAppLocale = arg.Locale
 	return nil
 }
 
@@ -580,4 +597,63 @@ func TestOnboardMember_RejectsWhenInstanceLimitReached(t *testing.T) {
 
 	require.ErrorIs(t, err, ErrInstanceLimitReached)
 	require.False(t, tx.committed)
+}
+
+// TestOnboardMember_LocaleSnapshotUsesDefaultWhenOwnerHasNoLocale 验证 OnboardMember 创建实例时，
+// 新成员尚无语言偏好，应使用平台默认语言作为 app.locale。
+func TestOnboardMember_LocaleSnapshotUsesDefaultWhenOwnerHasNoLocale(t *testing.T) {
+	store := newOnboardingStub(t)
+	tx := &txRunnerStub{store: store}
+	// 传入平台默认语言 "zh"。
+	svc := NewMemberOnboardingService(tx, fakeHash, "zh")
+
+	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
+		Username: "carol", DisplayName: "Carol", Password: "secret-456",
+		AppName: "carol-bot", VersionID: testVersionID,
+	})
+
+	require.NoError(t, err)
+	// 新成员无语言偏好，app.locale 应回退平台默认 "zh"。
+	require.True(t, store.lastAppLocale.Valid, "locale 应被写入（非 NULL）")
+	assert.Equal(t, "zh", store.lastAppLocale.String, "app.locale 应等于平台默认语言")
+}
+
+// TestCreateAppForMember_LocaleSnapshotOwnerLocale 验证 CreateAppForMember 创建实例时，
+// owner 已设置语言偏好，快照其 locale 到 app.locale。
+func TestCreateAppForMember_LocaleSnapshotOwnerLocale(t *testing.T) {
+	store := newOnboardingStub(t)
+	// owner 已设置语言偏好 "en"。
+	store.user.Locale = null.StringFrom("en")
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash, "zh")
+
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
+		AppName:   "en-bot",
+		VersionID: testVersionID,
+	})
+
+	require.NoError(t, err)
+	// owner locale="en"，app.locale 应快照为 "en"（不使用平台默认 zh）。
+	require.True(t, store.lastAppLocale.Valid, "locale 应被写入（非 NULL）")
+	assert.Equal(t, "en", store.lastAppLocale.String, "app.locale 应等于 owner 的语言偏好")
+}
+
+// TestCreateAppForMember_LocaleSnapshotFallsBackToDefaultWhenOwnerLocaleEmpty 验证 CreateAppForMember
+// 创建实例时，owner 未设置语言偏好，回退到平台默认语言。
+func TestCreateAppForMember_LocaleSnapshotFallsBackToDefaultWhenOwnerLocaleEmpty(t *testing.T) {
+	store := newOnboardingStub(t)
+	// owner 无语言偏好（Locale 为 NULL）。
+	store.user.Locale = null.String{}
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash, "en")
+
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
+		AppName:   "default-bot",
+		VersionID: testVersionID,
+	})
+
+	require.NoError(t, err)
+	// owner locale 未设置，app.locale 应回退平台默认 "en"。
+	require.True(t, store.lastAppLocale.Valid, "locale 应被写入（非 NULL）")
+	assert.Equal(t, "en", store.lastAppLocale.String, "owner locale 未设置时应回退平台默认")
 }

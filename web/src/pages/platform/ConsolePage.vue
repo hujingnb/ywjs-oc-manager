@@ -20,24 +20,24 @@
     <n-card :bordered="true" style="flex: 1">
       <n-tabs v-model:value="activeTab" type="line" animated @update:value="onTabChange">
         <!-- Tab 1：Token 趋势 -->
-        <n-tab-pane name="token" tab="Token 趋势">
-          <div v-if="platformUsageLoading" class="chart-state">加载中…</div>
-          <div v-else-if="platformUsageError" class="chart-state danger">用量服务不可用</div>
+        <n-tab-pane name="token" :tab="t('platform.console.tabs.tokenTrend')">
+          <div v-if="platformUsageLoading" class="chart-state">{{ t('platform.console.chart.loading') }}</div>
+          <div v-else-if="platformUsageError" class="chart-state danger">{{ t('platform.console.chart.usageUnavail') }}</div>
           <div v-else ref="tokenChartEl" class="chart-container" />
         </n-tab-pane>
 
         <!-- Tab 2：各组织用量 -->
-        <n-tab-pane name="orgs" tab="各企业用量">
-          <div v-if="orgBreakdownLoading" class="chart-state">加载中…</div>
-          <div v-else-if="orgBreakdownError" class="chart-state danger">用量服务不可用</div>
-          <div v-else-if="!orgBreakdownData?.length" class="chart-state">暂无数据</div>
+        <n-tab-pane name="orgs" :tab="t('platform.console.tabs.orgUsage')">
+          <div v-if="orgBreakdownLoading" class="chart-state">{{ t('platform.console.chart.loading') }}</div>
+          <div v-else-if="orgBreakdownError" class="chart-state danger">{{ t('platform.console.chart.usageUnavail') }}</div>
+          <div v-else-if="!orgBreakdownData?.length" class="chart-state">{{ t('platform.console.chart.empty') }}</div>
           <div v-else ref="orgChartEl" class="chart-container" />
         </n-tab-pane>
 
         <!-- Tab 3：实例状态 -->
-        <n-tab-pane name="status" tab="实例状态">
-          <div v-if="overviewLoading" class="chart-state">加载中…</div>
-          <div v-else-if="overviewError" class="chart-state danger">平台数据不可用</div>
+        <n-tab-pane name="status" :tab="t('platform.console.tabs.instanceStatus')">
+          <div v-if="overviewLoading" class="chart-state">{{ t('platform.console.chart.loading') }}</div>
+          <div v-else-if="overviewError" class="chart-state danger">{{ t('platform.console.chart.platformUnavail') }}</div>
           <div v-else ref="statusChartEl" class="chart-container" />
         </n-tab-pane>
       </n-tabs>
@@ -47,6 +47,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { NCard, NGrid, NGridItem, NStatistic, NTabPane, NTabs } from 'naive-ui'
 import { init, use } from 'echarts/core'
 import { LineChart, BarChart, PieChart } from 'echarts/charts'
@@ -75,6 +76,7 @@ const CHART_MUTED_COLOR = '#8a94a6'
 const CHART_DANGER_COLOR = '#d93026'
 const CHART_PIE_BORDER = '#ffffff'
 
+const { t } = useI18n()
 const auth = useAuthStore()
 const isPlatformAdmin = computed(() => auth.isPlatformAdmin)
 
@@ -110,19 +112,23 @@ const todayTokenTotal = computed(() => {
     .reduce((acc, item) => acc + item.quota, 0)
 })
 
-// stats 将 overview + today token 转为统计卡片数组。
+// stats 将 overview + today token 转为统计卡片数组，标签响应语言切换。
 const stats = computed(() => {
   const o = overview.value
   return [
-    { label: '企业数', value: String(o?.organization_count ?? '—'), note: '', noteColor: undefined, suffix: undefined },
-    { label: '成员数', value: String(o?.member_count ?? '—'), note: '不含平台管理员', noteColor: undefined, suffix: undefined },
-    { label: '实例数', value: String(o?.app_count ?? '—'), note: '', noteColor: undefined, suffix: undefined },
-    { label: '运行中', value: String(o?.running_app_count ?? '—'), note: '', noteColor: 'var(--color-success)', suffix: undefined },
-    { label: '异常', value: String(o?.error_app_count ?? '—'), note: '', noteColor: 'var(--color-danger)', suffix: undefined },
+    { label: t('platform.console.stats.orgCount'), value: String(o?.organization_count ?? '—'), note: '', noteColor: undefined, suffix: undefined },
+    { label: t('platform.console.stats.memberCount'), value: String(o?.member_count ?? '—'), note: t('platform.console.stats.memberNote'), noteColor: undefined, suffix: undefined },
+    { label: t('platform.console.stats.instanceCount'), value: String(o?.app_count ?? '—'), note: '', noteColor: undefined, suffix: undefined },
+    { label: t('platform.console.stats.running'), value: String(o?.running_app_count ?? '—'), note: '', noteColor: 'var(--color-success)', suffix: undefined },
+    { label: t('platform.console.stats.error'), value: String(o?.error_app_count ?? '—'), note: '', noteColor: 'var(--color-danger)', suffix: undefined },
     {
-      label: '今日 Token',
+      label: t('platform.console.stats.todayToken'),
       value: todayTokenTotal.value !== null ? String(todayTokenTotal.value.toLocaleString('en-US')) : '—',
-      note: todayTokenTotal.value !== null ? 'new-api 实时' : platformUsageLoading.value ? '加载中…' : '不可用',
+      note: todayTokenTotal.value !== null
+        ? t('platform.console.stats.todayTokenNoteRealtime')
+        : platformUsageLoading.value
+          ? t('platform.console.stats.todayTokenNoteLoading')
+          : t('platform.console.stats.todayTokenNoteUnavail'),
       noteColor: undefined,
       suffix: undefined,
     },
@@ -225,7 +231,7 @@ function buildOrgChart() {
   })
 }
 
-// ── 实例状态图（饼图） ──
+// ── 实例状态图（饼图）：饼图 legend 标签随语言响应式切换 ──
 function buildStatusChart() {
   if (!statusChartEl.value || !overview.value) return
   if (!statusChart) statusChart = init(statusChartEl.value)
@@ -243,9 +249,9 @@ function buildStatusChart() {
       itemStyle: { borderWidth: 2, borderColor: CHART_PIE_BORDER },
       label: { show: false },
       data: [
-        { name: '运行中', value: o.running_app_count ?? 0, itemStyle: { color: CHART_SUCCESS_COLOR } },
-        { name: '停止', value: stopped < 0 ? 0 : stopped, itemStyle: { color: CHART_MUTED_COLOR } },
-        { name: '异常', value: o.error_app_count ?? 0, itemStyle: { color: CHART_DANGER_COLOR } },
+        { name: t('platform.console.chart.pieRunning'), value: o.running_app_count ?? 0, itemStyle: { color: CHART_SUCCESS_COLOR } },
+        { name: t('platform.console.chart.pieStopped'), value: stopped < 0 ? 0 : stopped, itemStyle: { color: CHART_MUTED_COLOR } },
+        { name: t('platform.console.chart.pieError'), value: o.error_app_count ?? 0, itemStyle: { color: CHART_DANGER_COLOR } },
       ],
     }],
   })

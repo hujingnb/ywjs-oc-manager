@@ -10,13 +10,13 @@
       </div>
     </template>
 
-    <div v-if="!job" style="color: var(--color-text-secondary); font-size: 13px">尚未触发任务</div>
+    <div v-if="!job" style="color: var(--color-text-secondary); font-size: 13px">{{ t('components.jobProgressPanel.notTriggered') }}</div>
     <n-descriptions v-else :column="2" size="small" label-style="color:var(--color-text-secondary)" content-style="font-weight:600">
-      <n-descriptions-item label="类型">{{ job.type }}</n-descriptions-item>
-      <n-descriptions-item label="尝试次数">{{ job.attempts }} / {{ job.max_attempts }}</n-descriptions-item>
-      <n-descriptions-item label="下一次执行">{{ formatTime(job.run_after) }}</n-descriptions-item>
-      <n-descriptions-item label="完成时间">{{ formatTime(job.finished_at) }}</n-descriptions-item>
-      <n-descriptions-item v-if="job.last_error" label="最近错误" :span="2">
+      <n-descriptions-item :label="t('components.jobProgressPanel.labelType')">{{ job.type }}</n-descriptions-item>
+      <n-descriptions-item :label="t('components.jobProgressPanel.labelAttempts')">{{ job.attempts }} / {{ job.max_attempts }}</n-descriptions-item>
+      <n-descriptions-item :label="t('components.jobProgressPanel.labelRunAfter')">{{ formatTime(job.run_after) }}</n-descriptions-item>
+      <n-descriptions-item :label="t('components.jobProgressPanel.labelFinishedAt')">{{ formatTime(job.finished_at) }}</n-descriptions-item>
+      <n-descriptions-item v-if="job.last_error" :label="t('components.jobProgressPanel.labelLastError')" :span="2">
         <span style="color: var(--color-danger-text)">{{ job.last_error }}</span>
       </n-descriptions-item>
     </n-descriptions>
@@ -26,6 +26,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NCard, NDescriptions, NDescriptionsItem, NTag } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 // JobProgressPanel 展示异步任务的执行状态、重试次数和最近错误。
 // job 为空表示当前页面尚未触发任务，而不是查询失败。
@@ -38,18 +39,22 @@ const props = defineProps<{
   } | null
 }>()
 
-// statusViews 是任务状态到中文文案和标签色的局部映射；未知状态保留原值便于排查。
-const statusViews: Record<string, { label: string; tone: string }> = {
-  pending: { label: '待执行', tone: 'warning' },
-  running: { label: '执行中', tone: 'warning' },
-  succeeded: { label: '已完成', tone: 'success' },
-  failed: { label: '失败', tone: 'error' },
-  canceled: { label: '已取消', tone: 'default' },
+const { t } = useI18n()
+
+// statusViews 是任务状态到 i18n key 和标签色的局部映射；未知状态保留原值便于排查。
+const statusViews: Record<string, { labelKey: string; tone: string }> = {
+  pending: { labelKey: 'components.jobProgressPanel.statusPending', tone: 'warning' },
+  running: { labelKey: 'components.jobProgressPanel.statusRunning', tone: 'warning' },
+  succeeded: { labelKey: 'components.jobProgressPanel.statusSucceeded', tone: 'success' },
+  failed: { labelKey: 'components.jobProgressPanel.statusFailed', tone: 'error' },
+  canceled: { labelKey: 'components.jobProgressPanel.statusCanceled', tone: 'default' },
 }
 
 // labelFor 负责处理未触发和未知状态两种降级展示。
 function labelFor(status?: string) {
-  return status ? (statusViews[status]?.label ?? status) : '未触发'
+  if (!status) return t('components.jobProgressPanel.statusNotTriggered')
+  const view = statusViews[status]
+  return view ? t(view.labelKey) : status
 }
 
 // tagType 将任务 tone 收敛到 Naive UI 支持的 NTag 类型。

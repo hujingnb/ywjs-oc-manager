@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -151,22 +152,22 @@ func (s *RechargeService) Recharge(ctx context.Context, principal auth.Principal
 	if err != nil {
 		return RechargeRecordResult{}, fmt.Errorf("读取充值记录失败: %w", err)
 	}
-	// 详情字段把「+金额 点」与可选「备注 ...」拼接，让审计列表一眼看出充值动作的关键参数。
+	// metadata 存储结构化参数：amount/remark，供前端按语言渲染充值详情。
 	// 金额单位与 recharge_records.credit_amount 一致（点，整数避免浮点误差）。
-	detail := fmt.Sprintf("+%d 点", amount)
-	if remark != "" {
-		detail = fmt.Sprintf("%s，备注 %s", detail, remark)
-	}
+	rechargeMeta, _ := json.Marshal(map[string]any{
+		"amount": amount,
+		"remark": remark,
+	})
 	if err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-		ID:            newUUID(),
-		ActorID:       null.StringFrom(principal.UserID),
-		ActorRole:     principal.Role,
-		OrgID:         null.StringFrom(orgID),
-		TargetType:    "organization",
-		TargetID:      orgID,
-		Action:        "recharge",
-		Result:        status,
-		DetailMessage: null.StringFrom(detail),
+		ID:           newUUID(),
+		ActorID:      null.StringFrom(principal.UserID),
+		ActorRole:    principal.Role,
+		OrgID:        null.StringFrom(orgID),
+		TargetType:   "organization",
+		TargetID:     orgID,
+		Action:       "recharge",
+		Result:       status,
+		MetadataJson: rechargeMeta,
 	}); err != nil {
 		return RechargeRecordResult{}, fmt.Errorf("写入审计日志失败: %w", err)
 	}

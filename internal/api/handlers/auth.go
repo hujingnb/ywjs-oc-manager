@@ -22,6 +22,8 @@ type AuthService interface {
 	Logout(ctx context.Context, refreshToken string) error
 	Me(ctx context.Context, principal auth.Principal) (service.AuthUser, error)
 	ChangePassword(ctx context.Context, principal auth.Principal, input service.ChangePasswordInput) error
+	// UpdateLocale 持久化当前用户的界面语言偏好；locale 须属于受支持集合，否则返回 service.ErrInvalidLocale。
+	UpdateLocale(ctx context.Context, userID, locale string) error
 }
 
 // AuthHandler 承载认证相关 HTTP 路由。
@@ -53,6 +55,7 @@ func RegisterAuthMeRoutes(router gin.IRouter, handler *AuthHandler) {
 	group := router.Group("/api/v1/auth")
 	group.GET("/me", handler.Me)
 	group.POST("/password", handler.ChangePassword)
+	group.PATCH("/me/locale", handler.UpdateLocale)
 }
 
 // Login 处理用户名密码登录。
@@ -204,6 +207,36 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		OldPassword: req.OldPassword,
 		NewPassword: req.NewPassword,
 	}); err != nil {
+		writeAuthError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// UpdateLocale 持久化当前登录用户的界面语言偏好。
+//
+// @Summary      更新界面语言
+// @Description  保存当前用户的界面语言偏好（en/zh），登录后跟随用户
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        body  body      UpdateLocaleRequest  true  "语言请求"
+// @Success      204
+// @Failure      400   {object}  ErrorResponse
+// @Failure      401   {object}  ErrorResponse
+// @Router       /auth/me/locale [patch]
+func (h *AuthHandler) UpdateLocale(c *gin.Context) {
+	var req UpdateLocaleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeBindError(c, err)
+		return
+	}
+	principal := principalFromCtx(c)
+	if err := h.service.UpdateLocale(c.Request.Context(), principal.UserID, req.Locale); err != nil {
+		if errors.Is(err, service.ErrInvalidLocale) {
+			c.AbortWithStatusJSON(http.StatusBadRequest, apierror.New("INVALID_LOCALE", "不支持的语言"))
+			return
+		}
 		writeAuthError(c, err)
 		return
 	}

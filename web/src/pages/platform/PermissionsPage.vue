@@ -1,6 +1,10 @@
 <script setup lang="ts">
 // PermissionsPage 展示平台权限矩阵，仅平台管理员可访问。
 // 内容为静态数据，不调用任何 API；与 docs/superpowers/specs/2026-05-22-permission-refactor-design.md 保持一致。
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 interface PermRow {
   // op 是操作名称。
@@ -16,157 +20,166 @@ interface PermSection {
   rows: PermRow[]
 }
 
-// sections 包含全量权限矩阵，按功能模块分组。
-const sections: PermSection[] = [
-  {
-    title: '企业管理',
-    rows: [
-      { op: '创建企业', admin: '✅', orgAdmin: '❌', member: '❌' },
-      { op: '企业列表', admin: '✅', orgAdmin: '❌', member: '❌' },
-      { op: '查看企业详情', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 本企业' },
-      { op: '修改企业信息', admin: '✅', orgAdmin: '❌', member: '❌' },
-      { op: '启用 / 禁用企业', admin: '✅', orgAdmin: '❌', member: '❌' },
-    ],
-  },
-  {
-    title: '成员管理',
-    rows: [
-      { op: '成员列表', admin: '✅', orgAdmin: '🟡 本企业', member: '❌' },
-      { op: '查看成员详情', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
-      { op: '创建成员', admin: '❌', orgAdmin: '🟡 本企业', member: '❌' },
-      { op: '修改成员资料', admin: '🟡 仅自己', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
-      { op: '启用 / 禁用成员', admin: '❌', orgAdmin: '🟡 本企业', member: '❌' },
-      { op: '删除成员', admin: '❌', orgAdmin: '🟡 本企业', member: '❌' },
-      { op: '重置成员密码', admin: '❌', orgAdmin: '🟡 本企业', member: '❌' },
-      { op: 'Onboard（初始建实例）', admin: '❌', orgAdmin: '🟡 本企业', member: '❌' },
-      { op: '为成员复建实例', admin: '✅', orgAdmin: '🟡 本企业', member: '❌' },
-    ],
-  },
-  {
-    title: '应用实例',
-    rows: [
-      { op: '应用列表', admin: '✅', orgAdmin: '🟡 本企业全部', member: '🟡 仅自己' },
-      { op: '查看应用详情', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
-      { op: '切换助手版本', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
-    ],
-  },
-  {
-    title: '运行时操作',
-    rows: [
-      { op: '启动 / 停止 / 重启', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
-    ],
-  },
-  {
-    title: '渠道（Channel）',
-    rows: [
-      { op: '查看渠道信息', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
-      { op: '绑定渠道', admin: '❌', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
-    ],
-  },
-  {
-    title: '知识库',
-    rows: [
-      { op: '读取企业知识库', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 本企业' },
-      { op: '写入 / 重解析企业知识库', admin: '❌', orgAdmin: '🟡 本企业', member: '❌' },
-      { op: '读取应用知识库', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
-      { op: '写入 / 重解析应用知识库', admin: '❌', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
-    ],
-  },
-  {
-    title: '助手版本',
-    rows: [
-      { op: '查看助手版本列表 / 详情', admin: '✅', orgAdmin: '✅', member: '✅' },
-      { op: '创建 / 修改 / 删除助手版本', admin: '✅', orgAdmin: '❌', member: '❌' },
-      { op: '上传技能包', admin: '✅', orgAdmin: '❌', member: '❌' },
-    ],
-  },
-  {
-    title: '任务看板（Kanban）',
-    rows: [
-      { op: '查看任务看板', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
-      { op: '写操作（评论 / 完成 / 阻塞）', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
-    ],
-  },
-  {
-    title: 'Cron 任务',
-    rows: [
-      { op: '查看 Cron 列表 / 详情', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
-      { op: '创建 / 修改 / 启停 / 删除 Cron', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
-    ],
-  },
-  {
-    title: '用量',
-    rows: [
-      { op: '查看企业聚合用量', admin: '✅', orgAdmin: '🟡 本企业', member: '❌' },
-      { op: '查看成员用量', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
-      { op: '查看应用用量', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
-    ],
-  },
-  {
-    title: '审计日志',
-    rows: [
-      { op: '查看企业审计', admin: '✅', orgAdmin: '🟡 本企业', member: '❌' },
-      { op: '查看应用审计', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
-      { op: '查看"我的审计"', admin: '✅', orgAdmin: '✅', member: '✅' },
-    ],
-  },
-  {
-    title: '充值记录',
-    rows: [
-      { op: '查看充值记录', admin: '✅', orgAdmin: '🟡 本企业', member: '❌' },
-      { op: '查看余额', admin: '✅', orgAdmin: '🟡 本企业', member: '❌' },
-    ],
-  },
-  {
-    title: '运行时节点',
-    rows: [
-      { op: '节点列表 / 详情', admin: '✅', orgAdmin: '❌', member: '❌' },
-      { op: '启用 / 禁用节点', admin: '✅', orgAdmin: '❌', member: '❌' },
-    ],
-  },
-  {
-    title: '平台总览',
-    rows: [
-      { op: '平台总览统计', admin: '✅', orgAdmin: '❌', member: '❌' },
-    ],
-  },
-  {
-    title: '模型列表',
-    rows: [
-      { op: '查看可用模型列表', admin: '✅', orgAdmin: '❌', member: '❌' },
-    ],
-  },
-  {
-    title: '后台任务（Jobs）',
-    rows: [
-      { op: '查看后台任务列表', admin: '✅', orgAdmin: '❌', member: '❌' },
-    ],
-  },
-  {
-    title: '工作区',
-    rows: [
-      { op: '查看 / 下载 / 打包工作区文件', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
-    ],
-  },
-  {
-    title: '资源指标',
-    rows: [
-      { op: '查看应用资源指标', admin: '✅', orgAdmin: '🟡 本企业', member: '🟡 仅自己' },
-    ],
-  },
-]
+// sections 包含全量权限矩阵，按功能模块分组；转为 computed 以响应语言切换。
+const sections = computed<PermSection[]>(() => {
+  // 权限值常量：各角色完整可操作、无权限和有条件的标记
+  const FULL = '✅'
+  const NONE = '❌'
+  const ORG = t('platform.permissions.condOrg')
+  const ORG_ALL = t('platform.permissions.condOrgAll')
+  const SELF = t('platform.permissions.condSelf')
+
+  return [
+    {
+      title: t('platform.permissions.sections.orgMgmt'),
+      rows: [
+        { op: t('platform.permissions.ops.createOrg'), admin: FULL, orgAdmin: NONE, member: NONE },
+        { op: t('platform.permissions.ops.listOrgs'), admin: FULL, orgAdmin: NONE, member: NONE },
+        { op: t('platform.permissions.ops.viewOrgDetail'), admin: FULL, orgAdmin: ORG, member: ORG },
+        { op: t('platform.permissions.ops.editOrgInfo'), admin: FULL, orgAdmin: NONE, member: NONE },
+        { op: t('platform.permissions.ops.toggleOrg'), admin: FULL, orgAdmin: NONE, member: NONE },
+      ],
+    },
+    {
+      title: t('platform.permissions.sections.memberMgmt'),
+      rows: [
+        { op: t('platform.permissions.ops.listMembers'), admin: FULL, orgAdmin: ORG, member: NONE },
+        { op: t('platform.permissions.ops.viewMemberDetail'), admin: FULL, orgAdmin: ORG, member: SELF },
+        { op: t('platform.permissions.ops.createMember'), admin: NONE, orgAdmin: ORG, member: NONE },
+        { op: t('platform.permissions.ops.editMember'), admin: SELF, orgAdmin: ORG, member: SELF },
+        { op: t('platform.permissions.ops.toggleMember'), admin: NONE, orgAdmin: ORG, member: NONE },
+        { op: t('platform.permissions.ops.deleteMember'), admin: NONE, orgAdmin: ORG, member: NONE },
+        { op: t('platform.permissions.ops.resetPassword'), admin: NONE, orgAdmin: ORG, member: NONE },
+        { op: t('platform.permissions.ops.onboard'), admin: NONE, orgAdmin: ORG, member: NONE },
+        { op: t('platform.permissions.ops.rebuildInstance'), admin: FULL, orgAdmin: ORG, member: NONE },
+      ],
+    },
+    {
+      title: t('platform.permissions.sections.appInstance'),
+      rows: [
+        { op: t('platform.permissions.ops.listApps'), admin: FULL, orgAdmin: ORG_ALL, member: SELF },
+        { op: t('platform.permissions.ops.viewAppDetail'), admin: FULL, orgAdmin: ORG, member: SELF },
+        { op: t('platform.permissions.ops.switchVersion'), admin: FULL, orgAdmin: ORG, member: SELF },
+      ],
+    },
+    {
+      title: t('platform.permissions.sections.runtime'),
+      rows: [
+        { op: t('platform.permissions.ops.startStopRestart'), admin: FULL, orgAdmin: ORG, member: SELF },
+      ],
+    },
+    {
+      title: t('platform.permissions.sections.channel'),
+      rows: [
+        { op: t('platform.permissions.ops.viewChannel'), admin: FULL, orgAdmin: ORG, member: SELF },
+        { op: t('platform.permissions.ops.bindChannel'), admin: NONE, orgAdmin: ORG, member: SELF },
+      ],
+    },
+    {
+      title: t('platform.permissions.sections.knowledge'),
+      rows: [
+        { op: t('platform.permissions.ops.readOrgKnowledge'), admin: FULL, orgAdmin: ORG, member: ORG },
+        { op: t('platform.permissions.ops.writeOrgKnowledge'), admin: NONE, orgAdmin: ORG, member: NONE },
+        { op: t('platform.permissions.ops.readAppKnowledge'), admin: FULL, orgAdmin: ORG, member: SELF },
+        { op: t('platform.permissions.ops.writeAppKnowledge'), admin: NONE, orgAdmin: ORG, member: SELF },
+      ],
+    },
+    {
+      title: t('platform.permissions.sections.version'),
+      rows: [
+        { op: t('platform.permissions.ops.viewVersions'), admin: FULL, orgAdmin: FULL, member: FULL },
+        { op: t('platform.permissions.ops.manageVersions'), admin: FULL, orgAdmin: NONE, member: NONE },
+        { op: t('platform.permissions.ops.uploadSkill'), admin: FULL, orgAdmin: NONE, member: NONE },
+      ],
+    },
+    {
+      title: t('platform.permissions.sections.kanban'),
+      rows: [
+        { op: t('platform.permissions.ops.viewKanban'), admin: FULL, orgAdmin: ORG, member: SELF },
+        { op: t('platform.permissions.ops.writeKanban'), admin: FULL, orgAdmin: ORG, member: SELF },
+      ],
+    },
+    {
+      title: t('platform.permissions.sections.cron'),
+      rows: [
+        { op: t('platform.permissions.ops.viewCron'), admin: FULL, orgAdmin: ORG, member: SELF },
+        { op: t('platform.permissions.ops.manageCron'), admin: FULL, orgAdmin: ORG, member: SELF },
+      ],
+    },
+    {
+      title: t('platform.permissions.sections.usage'),
+      rows: [
+        { op: t('platform.permissions.ops.viewOrgUsage'), admin: FULL, orgAdmin: ORG, member: NONE },
+        { op: t('platform.permissions.ops.viewMemberUsage'), admin: FULL, orgAdmin: ORG, member: SELF },
+        { op: t('platform.permissions.ops.viewAppUsage'), admin: FULL, orgAdmin: ORG, member: SELF },
+      ],
+    },
+    {
+      title: t('platform.permissions.sections.audit'),
+      rows: [
+        { op: t('platform.permissions.ops.viewOrgAudit'), admin: FULL, orgAdmin: ORG, member: NONE },
+        { op: t('platform.permissions.ops.viewAppAudit'), admin: FULL, orgAdmin: ORG, member: SELF },
+        { op: t('platform.permissions.ops.viewMyAudit'), admin: FULL, orgAdmin: FULL, member: FULL },
+      ],
+    },
+    {
+      title: t('platform.permissions.sections.recharge'),
+      rows: [
+        { op: t('platform.permissions.ops.viewRecharge'), admin: FULL, orgAdmin: ORG, member: NONE },
+        { op: t('platform.permissions.ops.viewBalance'), admin: FULL, orgAdmin: ORG, member: NONE },
+      ],
+    },
+    {
+      title: t('platform.permissions.sections.node'),
+      rows: [
+        { op: t('platform.permissions.ops.viewNodes'), admin: FULL, orgAdmin: NONE, member: NONE },
+        { op: t('platform.permissions.ops.toggleNode'), admin: FULL, orgAdmin: NONE, member: NONE },
+      ],
+    },
+    {
+      title: t('platform.permissions.sections.overview'),
+      rows: [
+        { op: t('platform.permissions.ops.viewOverview'), admin: FULL, orgAdmin: NONE, member: NONE },
+      ],
+    },
+    {
+      title: t('platform.permissions.sections.models'),
+      rows: [
+        { op: t('platform.permissions.ops.viewModels'), admin: FULL, orgAdmin: NONE, member: NONE },
+      ],
+    },
+    {
+      title: t('platform.permissions.sections.jobs'),
+      rows: [
+        { op: t('platform.permissions.ops.viewJobs'), admin: FULL, orgAdmin: NONE, member: NONE },
+      ],
+    },
+    {
+      title: t('platform.permissions.sections.workspace'),
+      rows: [
+        { op: t('platform.permissions.ops.workspaceAccess'), admin: FULL, orgAdmin: ORG, member: SELF },
+      ],
+    },
+    {
+      title: t('platform.permissions.sections.metrics'),
+      rows: [
+        { op: t('platform.permissions.ops.viewMetrics'), admin: FULL, orgAdmin: ORG, member: SELF },
+      ],
+    },
+  ]
+})
 </script>
 
 <template>
   <div style="padding: 24px; max-width: 900px;">
-    <n-h2 style="margin-bottom: 4px;">权限说明</n-h2>
-    <n-p depth="3" style="margin-bottom: 24px;">各角色可见 / 可操作范围一览</n-p>
+    <n-h2 style="margin-bottom: 4px;">{{ t('platform.permissions.title') }}</n-h2>
+    <n-p depth="3" style="margin-bottom: 24px;">{{ t('platform.permissions.subtitle') }}</n-p>
 
     <!-- 图例 -->
     <n-space style="margin-bottom: 24px;">
-      <n-tag type="success" :bordered="false">✅ 可操作（无条件）</n-tag>
-      <n-tag type="error" :bordered="false">❌ 无权限</n-tag>
-      <n-tag type="warning" :bordered="false">🟡 有条件（本企业 / 仅自己）</n-tag>
+      <n-tag type="success" :bordered="false">{{ t('platform.permissions.legendFull') }}</n-tag>
+      <n-tag type="error" :bordered="false">{{ t('platform.permissions.legendNone') }}</n-tag>
+      <n-tag type="warning" :bordered="false">{{ t('platform.permissions.legendCond') }}</n-tag>
     </n-space>
 
     <!-- 每个功能模块一个表格 -->
@@ -179,10 +192,10 @@ const sections: PermSection[] = [
       <n-table size="small" :bordered="true" :single-line="false">
         <thead>
           <tr>
-            <th style="width: 40%;">操作</th>
-            <th style="width: 20%; text-align: center;">平台管理员</th>
-            <th style="width: 20%; text-align: center;">企业管理员</th>
-            <th style="width: 20%; text-align: center;">企业成员</th>
+            <th style="width: 40%;">{{ t('platform.permissions.tableOp') }}</th>
+            <th style="width: 20%; text-align: center;">{{ t('platform.permissions.tableAdmin') }}</th>
+            <th style="width: 20%; text-align: center;">{{ t('platform.permissions.tableOrgAdmin') }}</th>
+            <th style="width: 20%; text-align: center;">{{ t('platform.permissions.tableMember') }}</th>
           </tr>
         </thead>
         <tbody>

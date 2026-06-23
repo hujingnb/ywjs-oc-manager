@@ -1,9 +1,9 @@
 <template>
   <div style="display: grid; gap: 18px">
     <DataTableList
-      title="行业知识库"
+      :title="t('platform.industry.title')"
       eyebrow="Platform"
-      subtitle="平台级通用资料库，可被助手版本选择参与运行时检索。"
+      :subtitle="t('platform.industry.subtitle')"
       :columns="baseColumns"
       :data="bases?.items ?? []"
       :loading="basesLoading"
@@ -11,8 +11,8 @@
       :row-key="(row: IndustryKnowledgeBase) => row.id"
     >
       <template #toolbar>
-        <n-input v-model:value="keyword" placeholder="搜索行业名称" clearable style="width: 180px" />
-        <n-button @click="apiDocDialogOpen = true">接口文档</n-button>
+        <n-input v-model:value="keyword" :placeholder="t('platform.industry.toolbar.searchPlaceholder')" clearable style="width: 180px" />
+        <n-button @click="apiDocDialogOpen = true">{{ t('platform.industry.toolbar.apiDocButton') }}</n-button>
         <n-button
           type="primary"
           :disabled="createMutation.isPending.value"
@@ -20,7 +20,7 @@
           @click="openCreateDialog"
         >
           <template #icon><Plus :size="16" /></template>
-          新建行业库
+          {{ t('platform.industry.toolbar.createButton') }}
         </n-button>
       </template>
     </DataTableList>
@@ -34,7 +34,7 @@
       </template>
       <template #header-extra>
         <div class="upload-actions">
-          <span class="upload-limit">{{ KNOWLEDGE_UPLOAD_MAX_MESSAGE }}</span>
+          <span class="upload-limit">{{ t('knowledge.messages.uploadMaxMessage', { label: KNOWLEDGE_UPLOAD_MAX_LABEL }) }}</span>
           <n-button
             size="small"
             type="error"
@@ -42,43 +42,44 @@
             :loading="clearFilesMutation.isPending.value"
             @click="clearFilesDialogOpen = true"
           >
-            清空文件
+            {{ t('platform.industry.fileSection.clearButton') }}
           </n-button>
           <label class="primary-button">
             <input class="hidden-input" type="file" multiple @change="onUpload" />
-            上传文件
+            {{ t('platform.industry.fileSection.uploadButton') }}
           </label>
         </div>
       </template>
 
       <n-alert type="warning" :bordered="false" style="margin-bottom: 12px">
-        同名文件会覆盖当前行业库内的旧文件。
+        {{ t('platform.industry.fileSection.overwriteAlert') }}
       </n-alert>
       <n-space align="center" style="margin-bottom: 12px">
         <n-input
           v-model:value="fileKeyword"
-          placeholder="搜索文件名称"
+          :placeholder="t('platform.industry.fileSection.fileSearchPlaceholder')"
           clearable
           style="width: 220px"
         />
+        <!-- parseStatusOptions 是 computed，语言切换时选项文案响应式更新。 -->
         <n-select
           v-model:value="fileStatus"
-          :options="PARSE_STATUS_FILTER_OPTIONS"
+          :options="parseStatusOptions"
           clearable
-          placeholder="全部状态"
+          :placeholder="t('platform.industry.fileSection.fileStatusPlaceholder')"
           style="width: 160px"
         />
         <n-date-picker
           v-model:value="createdDateRange"
           type="daterange"
           clearable
-          start-placeholder="创建开始日期"
-          end-placeholder="创建结束日期"
+          :start-placeholder="t('platform.industry.fileSection.dateStartPlaceholder')"
+          :end-placeholder="t('platform.industry.fileSection.dateEndPlaceholder')"
           style="width: 280px"
         />
       </n-space>
-      <div v-if="filesLoading" class="state-text">加载中…</div>
-      <div v-else-if="filesError" class="state-text danger">查询失败：{{ filesError.message }}</div>
+      <div v-if="filesLoading" class="state-text">{{ t('platform.industry.fileSection.loading') }}</div>
+      <div v-else-if="filesError" class="state-text danger">{{ t('platform.industry.fileSection.queryFail', { msg: filesError.message }) }}</div>
       <n-data-table
         v-else
         :columns="fileColumns"
@@ -92,36 +93,36 @@
     </n-card>
 
     <n-card v-else :bordered="true">
-      <div class="state-text">暂无行业知识库</div>
+      <div class="state-text">{{ t('platform.industry.empty') }}</div>
     </n-card>
 
     <n-modal v-model:show="createDialogOpen" transform-origin="center">
       <n-card
         class="create-dialog-card"
-        title="新建行业库"
+        :title="t('platform.industry.createDialog.title')"
         :bordered="false"
         role="dialog"
         aria-modal="true"
       >
         <div class="create-dialog-body">
-          <span class="field-label">行业名称</span>
+          <span class="field-label">{{ t('platform.industry.createDialog.fieldLabel') }}</span>
           <n-input
             v-model:value="newBaseName"
-            placeholder="请输入行业名称"
+            :placeholder="t('platform.industry.createDialog.placeholder')"
             clearable
             @keyup.enter="onCreateBase"
           />
         </div>
         <template #footer>
           <div class="dialog-actions">
-            <n-button :disabled="createMutation.isPending.value" @click="closeCreateDialog">取消</n-button>
+            <n-button :disabled="createMutation.isPending.value" @click="closeCreateDialog">{{ t('common.actions.cancel') }}</n-button>
             <n-button
               type="primary"
               :disabled="createMutation.isPending.value"
               :loading="createMutation.isPending.value"
               @click="onCreateBase"
             >
-              确认创建
+              {{ t('platform.industry.createDialog.confirmButton') }}
             </n-button>
           </div>
         </template>
@@ -131,52 +132,56 @@
     <n-modal v-model:show="apiDocDialogOpen" transform-origin="center">
       <n-card
         class="api-doc-card"
-        title="行业知识库外部上传接口"
+        :title="t('platform.industry.apiDoc.title')"
         :bordered="false"
         role="dialog"
         aria-modal="true"
       >
         <div class="api-doc-head">
           <p class="api-doc-summary">
-            外部商业知识库服务可通过固定 token 上传行业资料。manager 会按行业名称自动创建或复用行业库，同名文件会覆盖旧文件。
+            {{ t('platform.industry.apiDoc.summary') }}
           </p>
           <n-button type="primary" :disabled="apiDocCopyDisabled" :loading="uploadTokenLoading" @click="copyApiDocMarkdown">
-            复制 Markdown
+            {{ t('platform.industry.apiDoc.copyMarkdownButton') }}
           </n-button>
         </div>
 
         <div class="api-doc-section">
-          <h3>请求</h3>
+          <h3>{{ t('platform.industry.apiDoc.sectionRequest') }}</h3>
           <p><strong>POST</strong> <code>/api/v1/external/industry-knowledge/files</code></p>
-          <p>鉴权 Header：<code>X-OC-Industry-Knowledge-Token</code>，当前值：<code>{{ industryUploadTokenText }}</code>。</p>
+          <p>
+            {{ t('platform.industry.apiDoc.authHeader') }}
+            <code>X-OC-Industry-Knowledge-Token</code>{{ t('platform.industry.apiDoc.authHeaderCurrentValue') }}
+            <code>{{ industryUploadTokenText }}</code>{{ t('platform.industry.apiDoc.authHeaderSuffix') }}
+          </p>
         </div>
 
         <div class="api-doc-section">
-          <h3>表单字段</h3>
+          <h3>{{ t('platform.industry.apiDoc.sectionFields') }}</h3>
           <ul>
-            <li><code>industry_name</code>：行业名称，必填；不存在时自动创建行业库。</li>
-            <li><code>file</code>：上传文件，必填；同一行业库内同名文件会覆盖。</li>
+            <li><code>industry_name</code>：{{ t('platform.industry.apiDoc.fieldIndustryName') }}</li>
+            <li><code>file</code>：{{ t('platform.industry.apiDoc.fieldFile') }}</li>
           </ul>
         </div>
 
         <div class="api-doc-section">
-          <h3>curl 示例</h3>
+          <h3>{{ t('platform.industry.apiDoc.sectionCurl') }}</h3>
           <pre class="api-doc-code">{{ industryExternalUploadCurl }}</pre>
         </div>
 
         <div class="api-doc-section">
-          <h3>返回码</h3>
+          <h3>{{ t('platform.industry.apiDoc.sectionStatusCodes') }}</h3>
           <ul>
-            <li><code>202</code>：上传成功，文件进入 RAGFlow 解析队列。</li>
-            <li><code>400</code>：参数缺失、行业名称为空或请求体格式错误。</li>
-            <li><code>401</code>：缺少或错误的 <code>X-OC-Industry-Knowledge-Token</code>。</li>
-            <li><code>413</code>：文件大小超过平台上传限制。</li>
+            <li><code>202</code>：{{ t('platform.industry.apiDoc.status202') }}</li>
+            <li><code>400</code>：{{ t('platform.industry.apiDoc.status400') }}</li>
+            <li><code>401</code>：{{ t('platform.industry.apiDoc.status401') }} <code>X-OC-Industry-Knowledge-Token</code>。</li>
+            <li><code>413</code>：{{ t('platform.industry.apiDoc.status413') }}</li>
           </ul>
         </div>
 
         <template #footer>
           <div class="dialog-actions">
-            <n-button @click="apiDocDialogOpen = false">关闭</n-button>
+            <n-button @click="apiDocDialogOpen = false">{{ t('common.actions.close') }}</n-button>
           </div>
         </template>
       </n-card>
@@ -184,12 +189,12 @@
 
     <ConfirmActionModal
       :visible="clearFilesDialogOpen"
-      title="确认清空行业知识库文件"
-      :message='selectedBase ? `将删除行业库「${selectedBase.name}」中的全部文件内容，行业库记录和助手版本关联会保留。该操作不可撤销。` : ""'
-      confirm-label="确认清空"
+      :title="t('platform.industry.clearDialog.title')"
+      :message='selectedBase ? t("platform.industry.clearDialog.message", { name: selectedBase.name }) : ""'
+      :confirm-label="t('platform.industry.clearDialog.confirmLabel')"
       :busy="clearFilesMutation.isPending.value"
       :verify-value="selectedBase?.name"
-      :verify-hint='selectedBase ? `输入行业库名称 "${selectedBase.name}" 以确认清空` : ""'
+      :verify-hint='selectedBase ? t("platform.industry.clearDialog.verifyHint", { name: selectedBase.name }) : ""'
       @confirm="onConfirmClearFiles"
       @cancel="clearFilesDialogOpen = false"
     />
@@ -206,6 +211,7 @@
 
 <script setup lang="ts">
 import { computed, h, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Plus } from 'lucide-vue-next'
 import { NAlert, NButton, NCard, NDataTable, NDatePicker, NInput, NModal, NSelect, NSpace, NTag, useMessage, type DataTableColumns } from 'naive-ui'
 
@@ -213,7 +219,7 @@ import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import DataTableList from '@/components/DataTableList.vue'
 import RAGFlowDatasetInfoDialog from '@/components/RAGFlowDatasetInfoDialog.vue'
 import {
-  KNOWLEDGE_UPLOAD_MAX_MESSAGE,
+  KNOWLEDGE_UPLOAD_MAX_LABEL,
   formatKnowledgeBytes,
   type KnowledgeDocument,
 } from '@/api/hooks/useKnowledge'
@@ -231,6 +237,7 @@ import {
   useUploadIndustryKnowledgeFile,
   type IndustryKnowledgeBase,
 } from '@/api/hooks/useIndustryKnowledge'
+import zhPlatform from '@/i18n/locales/zh/platform'
 import { canManageRAGFlowDatasetInfo } from '@/domain/permissions'
 import { PARSE_STATUS_FILTER_OPTIONS, parseStatusLabel, parseStatusTagType } from '@/domain/parseStatus'
 import { useAuthStore } from '@/stores/auth'
@@ -242,6 +249,9 @@ import {
 } from '@/pages/knowledge/knowledgeUploadBatch'
 
 // IndustryKnowledgePage 是平台管理员管理行业知识库和库内文件的页面。
+const { t } = useI18n()
+// parseStatusOptions 在 computed 中翻译选项标签，确保语言切换时下拉选项文案响应式更新。
+const parseStatusOptions = computed(() => PARSE_STATUS_FILTER_OPTIONS.map(opt => ({ ...opt, label: t(opt.label) })))
 const message = useMessage()
 const auth = useAuthStore()
 const uploadProgress = useUploadProgressStore()
@@ -291,13 +301,11 @@ const {
   error: uploadTokenError,
 } = useIndustryKnowledgeUploadTokenQuery()
 
-// uploadTokenUnavailableText 说明配置缺失时的真实接口状态，避免外部服务误以为占位 token 可调用。
-const uploadTokenUnavailableText = '未配置，外部上传入口禁用'
 const industryUploadToken = computed(() => uploadTokenConfig.value?.upload_token ?? '')
 const industryUploadTokenText = computed(() => {
-  if (uploadTokenLoading.value) return '读取中...'
-  if (uploadTokenError.value) return '读取失败，请刷新页面'
-  return industryUploadToken.value || uploadTokenUnavailableText
+  if (uploadTokenLoading.value) return t('platform.industry.apiDoc.tokenLoading')
+  if (uploadTokenError.value) return t('platform.industry.apiDoc.tokenError')
+  return industryUploadToken.value || t('platform.industry.apiDoc.tokenMissing')
 })
 const apiDocCopyDisabled = computed(() => uploadTokenLoading.value || Boolean(uploadTokenError.value))
 // canManageRAGFlowInfo 控制远端 dataset 运维入口；后端接口仍做最终平台管理员校验。
@@ -311,7 +319,7 @@ const fileTablePagination = computed(() => ({
   itemCount: files.value?.total ?? 0,
   showSizePicker: true,
   pageSizes: [10, 20, 50, 100],
-  prefix: () => `共 ${files.value?.total ?? 0} 个文件`,
+  prefix: () => t('platform.industry.fileSection.fileCountPrefix', { n: files.value?.total ?? 0 }),
   onUpdatePage: (nextPage: number) => {
     filePage.value = nextPage
   },
@@ -328,60 +336,21 @@ function shellSingleQuote(value: string): string {
 }
 
 // industryExternalUploadCurl 是页面展示和 Markdown 文档共用的 curl 调用模板，直接内联当前配置 token。
+// industry_name 示例值取自 zh 语言包，与正文一致（此处直接读对象绕过 vue-i18n 编译器限制）。
 const industryExternalUploadCurl = computed(() => `curl -i \\
   -H ${shellSingleQuote(`X-OC-Industry-Knowledge-Token: ${industryUploadTokenText.value}`)} \\
-  -F "industry_name=保险" \\
+  -F "industry_name=${zhPlatform.industry.apiDoc.curlExampleIndustryName}" \\
   -F "file=@./policy.pdf;type=application/pdf" \\
   https://<manager-domain>/api/v1/external/industry-knowledge/files`)
 
 // industryExternalUploadMarkdown 是复制给外部商业知识库服务方的 Markdown 接口文档。
-const industryExternalUploadMarkdown = computed(() => `# 行业知识库外部上传接口
-
-外部商业知识库服务通过固定鉴权字符串把文件上传到平台级行业知识库。manager 会按行业名称自动创建或复用行业库，同一行业库内同名文件会覆盖旧文件。
-
-## 接口
-
-- Method: \`POST\`
-- URL: \`https://<manager-domain>/api/v1/external/industry-knowledge/files\`
-- Content-Type: \`multipart/form-data\`
-
-## 鉴权
-
-请求必须携带 Header：
-
-\`\`\`text
-X-OC-Industry-Knowledge-Token: ${industryUploadTokenText.value}
-\`\`\`
-
-token 来自 manager 配置项 \`industry_knowledge.upload_token\`。该配置为空时外部上传入口禁用；只包含空白字符时 manager 会启动失败。
-
-## 表单字段
-
-| 字段 | 必填 | 说明 |
-|---|---|---|
-| \`industry_name\` | 是 | 行业名称。不存在时自动创建行业库；未删除行业库中名称唯一。 |
-| \`file\` | 是 | 上传文件。同一行业库内同名文件会覆盖旧文件。 |
-
-## curl 示例
-
-\`\`\`bash
-${industryExternalUploadCurl.value}
-\`\`\`
-
-## 返回码
-
-| 状态码 | 说明 |
-|---|---|
-| \`202\` | 上传成功，文件已进入 RAGFlow 解析队列。 |
-| \`400\` | 参数缺失、行业名称为空或请求体格式错误。 |
-| \`401\` | 缺少或错误的 \`X-OC-Industry-Knowledge-Token\`。 |
-| \`413\` | 文件大小超过平台上传限制。 |
-
-## 注意事项
-
-- 上传成功后通常先返回 \`parse_status=queued\`，解析完成后才能稳定参与检索。
-- 外部上传只负责写入行业库；实例是否检索该行业库，由助手版本的行业知识库关联决定。
-- 每个关联行业库都会在检索时单独召回最多 \`top_k\` 条结果，关联过多会增加上下文长度和响应成本。`)
+// Markdown 内含 Pipe 表格语法，会被 vue-i18n 消息编译器误判为复数分隔符；因此直接从 zh 语言包
+// 读取原始模板字符串，用 replace() 注入当前 token 与 curl 示例，绕过 vue-i18n 编译器。
+const industryExternalUploadMarkdown = computed(() =>
+  zhPlatform.industry.apiDoc.apiDocMarkdown
+    .replace('{uploadToken}', industryUploadTokenText.value)
+    .replace('{curlExample}', industryExternalUploadCurl.value)
+)
 
 watch(
   () => bases.value?.items ?? [],
@@ -439,7 +408,7 @@ function openRAGFlowInfo(row: IndustryKnowledgeBase) {
 async function onCreateBase() {
   const name = newBaseName.value.trim()
   if (!name) {
-    message.warning('请输入行业名称')
+    message.warning(t('platform.industry.createDialog.emptyWarning'))
     return
   }
   try {
@@ -447,39 +416,39 @@ async function onCreateBase() {
     selectedBaseId.value = created.id
     newBaseName.value = ''
     createDialogOpen.value = false
-    message.success(`已创建行业库 ${created.name}`)
+    message.success(t('platform.industry.createDialog.successMsg', { name: created.name }))
   } catch (err) {
-    message.error(err instanceof Error ? err.message : '创建失败')
+    message.error(err instanceof Error ? err.message : t('platform.industry.createDialog.failMsg'))
   }
 }
 
 async function copyApiDocMarkdown() {
   try {
     await navigator.clipboard.writeText(industryExternalUploadMarkdown.value)
-    message.success('已复制 Markdown 文档')
+    message.success(t('platform.industry.apiDoc.copySuccess'))
   } catch {
-    message.error('复制失败，请手动复制文档内容')
+    message.error(t('platform.industry.apiDoc.copyFail'))
   }
 }
 
 async function onRenameBase(row: IndustryKnowledgeBase) {
-  const name = window.prompt('新的行业名称', row.name)?.trim()
+  const name = window.prompt(t('platform.industry.baseActions.renamePrompt'), row.name)?.trim()
   if (!name || name === row.name) return
   try {
     const renamed = await renameMutation.mutateAsync({ id: row.id, name })
-    message.success(`已重命名为 ${renamed.name}`)
+    message.success(t('platform.industry.baseActions.renameSuccess', { name: renamed.name }))
   } catch (err) {
-    message.error(err instanceof Error ? err.message : '重命名失败')
+    message.error(err instanceof Error ? err.message : t('platform.industry.baseActions.renameFail'))
   }
 }
 
 async function onDeleteBase(row: IndustryKnowledgeBase) {
-  if (!window.confirm(`确认删除行业库「${row.name}」？`)) return
+  if (!window.confirm(t('platform.industry.baseActions.deleteConfirm', { name: row.name }))) return
   try {
     await deleteBaseMutation.mutateAsync(row.id)
-    message.success(`已删除行业库 ${row.name}`)
+    message.success(t('platform.industry.baseActions.deleteSuccess', { name: row.name }))
   } catch (err) {
-    message.error(err instanceof Error ? err.message : '删除失败')
+    message.error(err instanceof Error ? err.message : t('platform.industry.baseActions.deleteFail'))
   }
 }
 
@@ -497,7 +466,7 @@ async function onUpload(event: Event) {
       })
     })
   } catch (err) {
-    message.warning(err instanceof Error ? err.message : '已有上传任务正在进行')
+    message.warning(err instanceof Error ? err.message : t('platform.industry.uploadConflict'))
   }
 }
 
@@ -507,14 +476,14 @@ async function onDownload(row: KnowledgeDocument) {
   try {
     await downloadIndustryKnowledgeFile(selectedBase.value.id, row.id, row.name)
   } catch (err) {
-    message.error(err instanceof Error ? err.message : '下载失败')
+    message.error(err instanceof Error ? err.message : t('platform.industry.fileActions.downloadFail'))
   } finally {
     downloading.value = false
   }
 }
 
 async function onDeleteFile(row: KnowledgeDocument) {
-  if (!window.confirm(`确认删除 ${row.name} ？`)) return
+  if (!window.confirm(t('platform.industry.fileActions.deleteConfirm', { name: row.name }))) return
   await deleteFileMutation.mutateAsync(row.id)
 }
 
@@ -525,9 +494,9 @@ async function onConfirmClearFiles() {
     const baseName = selectedBase.value.name
     await clearFilesMutation.mutateAsync()
     clearFilesDialogOpen.value = false
-    message.success(`已清空行业库「${baseName}」文件`)
+    message.success(t('platform.industry.clearDialog.successMsg', { name: baseName }))
   } catch (err) {
-    message.error(err instanceof Error ? err.message : '清空失败')
+    message.error(err instanceof Error ? err.message : t('platform.industry.clearDialog.failMsg'))
   }
 }
 
@@ -535,62 +504,65 @@ async function onReparse(row: KnowledgeDocument) {
   await reparseMutation.mutateAsync(row.id)
 }
 
-const baseColumns: DataTableColumns<IndustryKnowledgeBase> = [
+// baseColumns 随语言响应式切换，转为 computed。
+const baseColumns = computed<DataTableColumns<IndustryKnowledgeBase>>(() => [
   {
-    title: '行业名称',
+    title: t('platform.industry.baseColumns.name'),
     key: 'name',
     render: row => h('strong', row.name),
   },
-  { title: '文件数', key: 'document_count', render: row => String(row.document_count ?? 0) },
-  { title: '更新时间', key: 'updated_at', render: row => formatTime(row.updated_at) },
+  { title: t('platform.industry.baseColumns.docCount'), key: 'document_count', render: row => String(row.document_count ?? 0) },
+  { title: t('platform.industry.baseColumns.updatedAt'), key: 'updated_at', render: row => formatTime(row.updated_at) },
   {
-    title: '操作',
+    title: t('common.table.actions'),
     key: 'actions',
     render: row => {
       const actions = [
-        h(NButton, { size: 'small', type: selectedBaseId.value === row.id ? 'primary' : 'default', onClick: () => { selectedBaseId.value = row.id } }, { default: () => '文件' }),
+        h(NButton, { size: 'small', type: selectedBaseId.value === row.id ? 'primary' : 'default', onClick: () => { selectedBaseId.value = row.id } }, { default: () => t('platform.industry.baseActions.files') }),
       ]
       if (canManageRAGFlowInfo.value) {
-        actions.push(h(NButton, { size: 'small', onClick: () => openRAGFlowInfo(row) }, { default: () => 'RAGFlow 信息' }))
+        actions.push(h(NButton, { size: 'small', onClick: () => openRAGFlowInfo(row) }, { default: () => t('platform.industry.baseActions.ragflow') }))
       }
       actions.push(
-        h(NButton, { size: 'small', onClick: () => onRenameBase(row) }, { default: () => '重命名' }),
-        h(NButton, { size: 'small', type: 'error', disabled: deleteBaseMutation.isPending.value, onClick: () => onDeleteBase(row) }, { default: () => '删除' }),
+        h(NButton, { size: 'small', onClick: () => onRenameBase(row) }, { default: () => t('platform.industry.baseActions.rename') }),
+        h(NButton, { size: 'small', type: 'error', disabled: deleteBaseMutation.isPending.value, onClick: () => onDeleteBase(row) }, { default: () => t('platform.industry.baseActions.delete') }),
       )
       return h('div', { style: 'display: flex; gap: 8px; flex-wrap: wrap' }, actions)
     },
   },
-]
+])
 
-const fileColumns: DataTableColumns<KnowledgeDocument> = [
-  { title: '文件名称', key: 'name', render: row => h('strong', row.name) },
-  { title: '大小', key: 'size', render: row => formatKnowledgeBytes(row.size) },
-  { title: '类型', key: 'type', render: row => row.suffix || row.mime_type || '—' },
+// fileColumns 随语言响应式切换，转为 computed。
+const fileColumns = computed<DataTableColumns<KnowledgeDocument>>(() => [
+  { title: t('platform.industry.fileColumns.name'), key: 'name', render: row => h('strong', row.name) },
+  { title: t('platform.industry.fileColumns.size'), key: 'size', render: row => formatKnowledgeBytes(row.size) },
+  { title: t('platform.industry.fileColumns.type'), key: 'type', render: row => row.suffix || row.mime_type || '—' },
   {
-    title: '解析状态',
+    title: t('platform.industry.fileColumns.parseStatus'),
     key: 'parse_status',
     render: row => h('div', { style: 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap' }, [
-      h(NTag, { type: parseStatusTagType(row.parse_status), size: 'small', bordered: false }, { default: () => parseStatusLabel(row.parse_status) }),
+      // parseStatusLabel 返回 i18n 键（已知状态）或原始值（未知状态）；t() 对非键字符串原样返回。
+      h(NTag, { type: parseStatusTagType(row.parse_status), size: 'small', bordered: false }, { default: () => t(parseStatusLabel(row.parse_status)) }),
       row.parse_status === 'running' ? h('span', { class: 'state-text', style: 'margin: 0; font-size: 12px' }, `${row.progress}%`) : null,
       row.last_error ? h('span', { style: 'color: var(--color-danger); font-size: 12px' }, row.last_error) : null,
     ]),
   },
-  { title: '创建时间', key: 'created_at', render: row => formatTime(row.created_at) },
+  { title: t('platform.industry.fileColumns.createdAt'), key: 'created_at', render: row => formatTime(row.created_at) },
   {
-    title: '操作',
+    title: t('common.table.actions'),
     key: 'actions',
     render: row => {
       const actions = [
-        h(NButton, { size: 'small', disabled: downloading.value, onClick: () => onDownload(row) }, { default: () => downloading.value ? '下载中…' : '下载' }),
+        h(NButton, { size: 'small', disabled: downloading.value, onClick: () => onDownload(row) }, { default: () => downloading.value ? t('platform.industry.fileActions.downloading') : t('platform.industry.fileActions.download') }),
       ]
       if (canReparse(row)) {
-        actions.push(h(NButton, { size: 'small', disabled: reparseMutation.isPending.value, onClick: () => onReparse(row) }, { default: () => reparseMutation.isPending.value ? '提交中…' : '重解析' }))
+        actions.push(h(NButton, { size: 'small', disabled: reparseMutation.isPending.value, onClick: () => onReparse(row) }, { default: () => reparseMutation.isPending.value ? t('platform.industry.fileActions.reparsing') : t('platform.industry.fileActions.reparse') }))
       }
-      actions.push(h(NButton, { size: 'small', type: 'error', disabled: deleteFileMutation.isPending.value, onClick: () => onDeleteFile(row) }, { default: () => '删除' }))
+      actions.push(h(NButton, { size: 'small', type: 'error', disabled: deleteFileMutation.isPending.value, onClick: () => onDeleteFile(row) }, { default: () => t('platform.industry.fileActions.delete') }))
       return h('div', { style: 'display: flex; gap: 8px; flex-wrap: wrap' }, actions)
     },
   },
-]
+])
 </script>
 
 <style scoped>

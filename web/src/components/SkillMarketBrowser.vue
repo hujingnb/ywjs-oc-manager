@@ -17,14 +17,14 @@
           {{ filter.label }}
         </n-tag>
       </div>
-      <n-input v-model:value="searchText" placeholder="搜索技能名称…" clearable size="small" class="market-search" />
+      <n-input v-model:value="searchText" :placeholder="t('components.skillMarketBrowser.searchPlaceholder')" clearable size="small" class="market-search" />
     </div>
 
-    <div v-if="skillMarketQuery.isLoading.value" class="state-text">加载中…</div>
+    <div v-if="skillMarketQuery.isLoading.value" class="state-text">{{ t('common.status.loading') }}</div>
     <p v-else-if="skillMarketQuery.error.value" class="state-text danger">
-      市场查询失败：{{ skillMarketQuery.error.value?.message }}
+      {{ t('components.skillMarketBrowser.loadFailed', { message: skillMarketQuery.error.value?.message }) }}
     </p>
-    <div v-else-if="!marketEntries.length" class="state-text">暂无技能</div>
+    <div v-else-if="!marketEntries.length" class="state-text">{{ t('components.skillMarketBrowser.noSkills') }}</div>
     <div v-else class="market-grid">
       <n-card
         v-for="entry in pagedEntries"
@@ -51,7 +51,7 @@
           >
             {{ audienceTag(entry.audience).label }}
           </n-tag>
-          <span v-if="entry.requester_name" class="market-card-requester">由 {{ entry.requester_name }} 申请</span>
+          <span v-if="entry.requester_name" class="market-card-requester">{{ t('components.skillMarketBrowser.requestedBy', { name: entry.requester_name }) }}</span>
         </template>
         <div class="market-card-footer">
           <span class="market-card-version">v{{ entry.version }}</span>
@@ -97,6 +97,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { NButton, NCard, NInput, NPagination, NTag } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import type { SkillEntry } from '@/api'
 import { useSkillMarketQuery } from '@/api/hooks/useSkills'
 import { useAuthStore } from '@/stores/auth'
@@ -104,6 +105,7 @@ import SkillDetailDrawer, { type SkillDetail } from './SkillDetailDrawer.vue'
 
 // auth 用于判断是否平台管理员，控制详情抽屉「下载」按钮的可见性。
 const auth = useAuthStore()
+const { t } = useI18n()
 
 const props = withDefaults(
   defineProps<{
@@ -119,8 +121,8 @@ const props = withDefaults(
   }>(),
   {
     existingNames: () => new Set<string>(),
-    actionLabel: '安装',
-    existingLabel: '已安装',
+    actionLabel: undefined,
+    existingLabel: undefined,
     actionPending: false,
     canAction: true,
     allowVersionPick: false,
@@ -130,13 +132,14 @@ const props = withDefaults(
 // action 事件：携带来源/标识/名称/选定版本，由父级执行安装或加入版本。
 const emit = defineEmits<{ action: [{ source: string; source_ref: string; name: string; version: string }] }>()
 
-// 来源筛选项：全部 / 平台技能 / ClawHub / 定制（custom 定向定制技能）。
-const sourceFilters = [
-  { label: '全部', value: '' },
-  { label: '平台技能', value: 'platform' },
-  { label: 'ClawHub', value: 'clawhub' },
-  { label: '定制', value: 'custom' },
-] as const
+// 来源筛选项：使用 computed 确保语言切换时标签随之更新。
+const sourceFilters = computed(() => [
+  { label: t('components.skillMarketBrowser.filterAll'), value: '' },
+  { label: t('components.skillMarketBrowser.filterPlatform'), value: 'platform' },
+  { label: t('components.skillMarketBrowser.filterClawhub'), value: 'clawhub' },
+  { label: t('components.skillMarketBrowser.filterCustom'), value: 'custom' },
+])
+
 // selectedSource：当前激活的来源筛选值。
 // 以 prop.source 初始化；prop 变化时（如父组件「去安装」切到 custom）同步更新，
 // 但用户手动点击筛选 chip 后内部自由切换，不做双向绑定。
@@ -254,11 +257,15 @@ function emitAction(entry: SkillEntry, version: string) {
   emit('action', { source: entry.source, source_ref: entry.source_ref, name: entry.name, version })
 }
 
+// actionLabel/existingLabel 优先用调用方传入的 prop，无传入则取 i18n 默认值。
+const actionLabel = computed(() => props.actionLabel ?? t('components.skillMarketBrowser.defaultInstallLabel'))
+const existingLabel = computed(() => props.existingLabel ?? t('components.skillMarketBrowser.defaultExistingLabel'))
+
 function sourceLabel(source?: string): string {
-  if (source === 'platform') return '平台技能'
+  if (source === 'platform') return t('components.skillMarketBrowser.filterPlatform')
   if (source === 'clawhub') return 'ClawHub'
-  if (source === 'custom') return '定制'
-  return source || '内置'
+  if (source === 'custom') return t('components.skillMarketBrowser.sourceCustom')
+  return source || t('components.skillMarketBrowser.sourceBuiltin')
 }
 // sourceTagType 将来源映射为 NaiveUI tag 颜色：platform→info(蓝)、clawhub→warning(橙)、
 // custom→error(紫/红，Naive UI 无原生紫色 type，error 在多数主题下呈紫红色，视觉上与其他来源区分)。
@@ -273,16 +280,17 @@ function sourceTagType(source?: string): 'info' | 'warning' | 'default' | 'error
 // all_org→整企业可见(success 绿)、org_admins→仅企业管理员可见(warning 橙)、
 // requester_only→仅本人可见(default 灰)；未知值返回灰色空文案。
 function audienceTag(audience?: string): { type: 'success' | 'warning' | 'default'; label: string } {
-  if (audience === 'all_org') return { type: 'success', label: '整企业可见' }
-  if (audience === 'org_admins') return { type: 'warning', label: '仅企业管理员可见' }
-  if (audience === 'requester_only') return { type: 'default', label: '仅本人可见' }
+  if (audience === 'all_org') return { type: 'success', label: t('components.skillMarketBrowser.audienceAllOrg') }
+  if (audience === 'org_admins') return { type: 'warning', label: t('components.skillMarketBrowser.audienceOrgAdmins') }
+  if (audience === 'requester_only') return { type: 'default', label: t('components.skillMarketBrowser.audienceRequesterOnly') }
   return { type: 'default', label: '' }
 }
 function formatCount(n?: number): string {
   if (!n || n < 10000) return String(n ?? 0)
   const fmt = (val: number, unit: string) => `${val.toFixed(1).replace(/\.0$/, '')}${unit}`
-  if (n >= 1_000_000) return fmt(n / 1_000_000, '百万')
-  return fmt(n / 10_000, '万')
+  // 数量单位随语言切换，复用 skillDetailDrawer 的同名词条。
+  if (n >= 1_000_000) return fmt(n / 1_000_000, t('components.skillDetailDrawer.unitMillion'))
+  return fmt(n / 10_000, t('components.skillDetailDrawer.unitTenThousand'))
 }
 </script>
 

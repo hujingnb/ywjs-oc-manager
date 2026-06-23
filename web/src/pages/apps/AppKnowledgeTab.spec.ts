@@ -2,7 +2,8 @@ import { mount } from '@vue/test-utils'
 import { defineComponent, h, ref, type PropType, type VNodeChild } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { KNOWLEDGE_UPLOAD_MAX_BYTES, KNOWLEDGE_UPLOAD_MAX_MESSAGE } from '@/api/hooks/useKnowledge'
+import { i18n } from '@/i18n'
+import { KNOWLEDGE_UPLOAD_MAX_BYTES, getKnowledgeUploadMaxMessage } from '@/api/hooks/useKnowledge'
 import AppKnowledgeTab from './AppKnowledgeTab.vue'
 
 const mocks = vi.hoisted(() => ({
@@ -157,6 +158,7 @@ function mountTab() {
   return mount(AppKnowledgeTab, {
     props: { appId: 'app-1' },
     global: {
+      plugins: [i18n],
       provide: {
         app: ref({
           id: 'app-1',
@@ -205,6 +207,8 @@ function fileDragTransfer(dropEffect = 'none') {
 
 describe('AppKnowledgeTab', () => {
   beforeEach(() => {
+    // 每次用例前将 i18n 语言设为中文，确保断言中文文案的测试与翻译文件对齐。
+    i18n.global.locale.value = 'zh'
     mocks.authUser = { id: 'user-1', role: 'org_member', org_id: 'org-1' }
     mocks.canManage.mockReturnValue(true)
     mocks.downloadAppKnowledgeFile.mockReset()
@@ -295,7 +299,8 @@ describe('AppKnowledgeTab', () => {
     Object.defineProperty(input.element, 'files', { value: [oversizedFile()], configurable: true })
     await input.trigger('change')
 
-    expect(mocks.warning).toHaveBeenCalledWith(KNOWLEDGE_UPLOAD_MAX_MESSAGE)
+    // 超限提示应与 getKnowledgeUploadMaxMessage() 在当前语言下的翻译一致。
+    expect(mocks.warning).toHaveBeenCalledWith(getKnowledgeUploadMaxMessage())
     expect(mocks.run).not.toHaveBeenCalled()
     expect(mocks.mutateAsync).not.toHaveBeenCalled()
   })

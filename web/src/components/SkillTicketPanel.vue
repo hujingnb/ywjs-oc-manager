@@ -1,11 +1,11 @@
 <template>
   <div class="skill-ticket-panel">
     <div class="ticket-toolbar">
-      <n-button type="primary" size="small" @click="showSubmit = true">提交需求</n-button>
+      <n-button type="primary" size="small" @click="showSubmit = true">{{ t('components.skillTicketPanel.submitBtn') }}</n-button>
     </div>
 
-    <div v-if="ticketsQuery.isLoading.value" class="state-text">加载中…</div>
-    <p v-else-if="ticketsQuery.error.value" class="state-text danger">工单查询失败：{{ ticketsQuery.error.value?.message }}</p>
+    <div v-if="ticketsQuery.isLoading.value" class="state-text">{{ t('common.status.loading') }}</div>
+    <p v-else-if="ticketsQuery.error.value" class="state-text danger">{{ t('components.skillTicketPanel.queryFailed', { message: ticketsQuery.error.value?.message }) }}</p>
     <n-data-table
       v-else
       :columns="columns"
@@ -16,23 +16,23 @@
       :row-props="ticketRowProps"
     />
 
-    <n-modal v-model:show="showSubmit" preset="card" title="提交定制技能需求" :style="{ width: '520px' }">
+    <n-modal v-model:show="showSubmit" preset="card" :title="t('components.skillTicketPanel.modalTitle')" :style="{ width: '520px' }">
       <n-form>
-        <n-form-item label="标题" required>
-          <n-input v-model:value="submitTitle" placeholder="一句话说明需要什么技能" />
+        <n-form-item :label="t('components.skillTicketPanel.fieldTitle')" required>
+          <n-input v-model:value="submitTitle" :placeholder="t('components.skillTicketPanel.fieldTitlePlaceholder')" />
         </n-form-item>
-        <n-form-item label="描述" required>
-          <n-input v-model:value="submitDescription" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="描述场景、输入输出、期望行为" />
+        <n-form-item :label="t('components.skillTicketPanel.fieldDescription')" required>
+          <n-input v-model:value="submitDescription" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" :placeholder="t('components.skillTicketPanel.fieldDescriptionPlaceholder')" />
         </n-form-item>
-        <n-form-item label="附件">
+        <n-form-item :label="t('components.skillTicketPanel.fieldAttachment')">
           <input ref="submitFileInput" type="file" multiple @change="onPickSubmitFiles" />
         </n-form-item>
       </n-form>
       <template #footer>
         <div class="modal-footer">
-          <n-button @click="showSubmit = false">取消</n-button>
+          <n-button @click="showSubmit = false">{{ t('components.skillTicketPanel.cancelBtn') }}</n-button>
           <n-button type="primary" :loading="submitMut.isPending.value || uploadMut.isPending.value" :disabled="!submitTitle.trim() || !submitDescription.trim()" @click="onSubmit">
-            提交
+            {{ t('components.skillTicketPanel.submitModalBtn') }}
           </n-button>
         </div>
       </template>
@@ -44,6 +44,7 @@
 import { computed, h, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { NButton, NDataTable, NForm, NFormItem, NInput, NModal, NTag, useMessage, type DataTableColumns } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 import type { SkillTicket } from '@/api'
 import { useMySkillTicketsQuery, useSubmitSkillTicket, useUploadTicketMessage } from '@/api/hooks/useSkillTickets'
@@ -52,6 +53,7 @@ const emit = defineEmits<{ goInstall: [name: string | undefined] }>()
 
 const router = useRouter()
 const message = useMessage()
+const { t } = useI18n()
 const ticketsQuery = useMySkillTicketsQuery()
 const submitMut = useSubmitSkillTicket()
 const uploadTargetID = ref<string | undefined>()
@@ -64,36 +66,36 @@ const submitFiles = ref<File[]>([])
 
 const tickets = computed<SkillTicket[]>(() => ticketsQuery.data.value ?? [])
 
-const columns: DataTableColumns<SkillTicket> = [
-  { title: '标题', key: 'title' },
-  { title: '状态', key: 'status', render: (row) => h(NTag, { type: statusTag(row.status).type, bordered: false, size: 'small' }, () => statusTag(row.status).label) },
-  { title: '报价', key: 'quote', render: (row) => yuan(row.quote_amount_cents) },
+// columns 使用 computed 确保语言切换时列头和状态文案随之更新。
+const columns = computed<DataTableColumns<SkillTicket>>(() => [
+  { title: t('components.skillTicketPanel.colTitle'), key: 'title' },
+  { title: t('components.skillTicketPanel.colStatus'), key: 'status', render: (row) => h(NTag, { type: statusTag(row.status).type, bordered: false, size: 'small' }, () => statusTag(row.status).label) },
+  { title: t('components.skillTicketPanel.colQuote'), key: 'quote', render: (row) => yuan(row.quote_amount_cents) },
   {
-    title: '操作',
+    title: t('components.skillTicketPanel.colActions'),
     key: 'actions',
     render: (row) =>
       h('div', { class: 'row-actions' }, [
         row.status === 'delivered'
-          ? h(NButton, { size: 'small', type: 'primary', onClick: (event: MouseEvent) => onGoInstall(event, row) }, () => '去安装')
+          ? h(NButton, { size: 'small', type: 'primary', onClick: (event: MouseEvent) => onGoInstall(event, row) }, () => t('components.skillTicketPanel.goInstallBtn'))
           : null,
       ]),
   },
-]
+])
 
 interface StatusTag {
   type: 'default' | 'warning' | 'success' | 'error'
   label: string
 }
 
-const statusTags: Record<string, StatusTag> = {
-  pending: { type: 'default', label: '待处理' },
-  processing: { type: 'warning', label: '制作中' },
-  delivered: { type: 'success', label: '已交付' },
-  rejected: { type: 'error', label: '已拒绝' },
-}
-
 function statusTag(status: string | undefined): StatusTag {
-  return statusTags[status ?? ''] ?? { type: 'default', label: status || '未知' }
+  const statusTags: Record<string, StatusTag> = {
+    pending: { type: 'default', label: t('components.skillTicketPanel.statusPending') },
+    processing: { type: 'warning', label: t('components.skillTicketPanel.statusProcessing') },
+    delivered: { type: 'success', label: t('components.skillTicketPanel.statusDelivered') },
+    rejected: { type: 'error', label: t('components.skillTicketPanel.statusRejected') },
+  }
+  return statusTags[status ?? ''] ?? { type: 'default', label: status || t('components.skillTicketPanel.statusUnknown') }
 }
 
 function yuan(cents: number | null | undefined) {
@@ -148,7 +150,7 @@ async function onSubmit() {
     submitFiles.value = []
     await router.push(`/skill-tickets/${ticket.id}`)
   } catch {
-    message.error('提交失败')
+    message.error(t('components.skillTicketPanel.submitFailed'))
   }
 }
 </script>

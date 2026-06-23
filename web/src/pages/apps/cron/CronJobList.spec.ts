@@ -1,8 +1,9 @@
 // CronJobList.spec.ts —— Cron 任务左侧卡片列表单元测试。
 // 覆盖：卡片渲染中文状态与翻译后调度、空列表占位、缺 id 行不可选、选中态。
 import { mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { i18n } from '@/i18n'
 import type { CronJob } from '@/api/hooks/useCron'
 import CronJobList from './CronJobList.vue'
 
@@ -13,8 +14,14 @@ vi.mock('naive-ui', () => ({
   NTag: { props: ['type'], template: '<span class="tag"><slot /></span>' },
 }))
 
+// 每次用例前将 i18n 语言设为中文，确保断言中文文案的测试与翻译文件对齐。
+beforeEach(() => {
+  i18n.global.locale.value = 'zh'
+})
+
 function mountList(jobs: CronJob[], selectedId?: string) {
-  return mount(CronJobList, { props: { jobs, selectedId } })
+  // 注入 i18n 插件，使组件内 t() 调用能够解析翻译文案。
+  return mount(CronJobList, { props: { jobs, selectedId }, global: { plugins: [i18n] } })
 }
 
 describe('CronJobList', () => {

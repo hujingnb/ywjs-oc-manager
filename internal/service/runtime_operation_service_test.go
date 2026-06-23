@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -229,8 +230,8 @@ type runtimeOperationStub struct {
 	progressCleared bool
 	// channelBindingCount 控制 CountChannelBindingsByApp 返回的渠道绑定数；默认 0。
 	channelBindingCount int64
-	// lastAuditDetail 记录最近一次 CreateAuditLog 传入的 DetailMessage，供断言使用。
-	lastAuditDetail null.String
+	// lastAuditMeta 记录最近一次 CreateAuditLog 传入的 MetadataJson，供断言使用。
+	lastAuditMeta []byte
 }
 
 func newRuntimeOperationStub(t *testing.T) *runtimeOperationStub {
@@ -261,10 +262,10 @@ func (s *runtimeOperationStub) CreateJob(_ context.Context, arg sqlc.CreateJobPa
 	return nil
 }
 
-// CreateAuditLog 为 :exec；stub 记录是否写入及详情字段。
+// CreateAuditLog 为 :exec；stub 记录是否写入及结构化元数据字段。
 func (s *runtimeOperationStub) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) error {
 	s.auditWritten = true
-	s.lastAuditDetail = arg.DetailMessage
+	s.lastAuditMeta = arg.MetadataJson
 	return nil
 }
 
@@ -321,7 +322,8 @@ func TestTrigger_DisabledPrincipal_Denied(t *testing.T) {
 	require.ErrorIs(t, err, ErrRuntimeOperationDenied)
 }
 
-// TestRuntimeOperationTriggerDeleteEmitsCascadeDetail 验证 delete 操作审计详情包含级联渠道绑定数。
+// TestRuntimeOperationTriggerDeleteEmitsCascadeDetail 验证 delete 操作审计 metadata 包含级联渠道绑定数。
+// 审计迁移后不再写入冻结中文文案，改用 metadata.cascade_count 存储供前端按语言渲染。
 func TestRuntimeOperationTriggerDeleteEmitsCascadeDetail(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	store.channelBindingCount = 2
@@ -329,20 +331,23 @@ func TestRuntimeOperationTriggerDeleteEmitsCascadeDetail(t *testing.T) {
 
 	_, err := svc.Trigger(context.Background(), runtimeOrgAdminPrincipal(), testRuntimeOpAppID, RuntimeOperationDelete)
 	require.NoError(t, err)
-	// delete 操作的审计详情必须展示级联渠道绑定数。
-	require.True(t, store.lastAuditDetail.Valid, "delete 操作的 DetailMessage 应为 Valid")
-	require.Equal(t, "级联：2 个渠道绑定", store.lastAuditDetail.String)
+	// delete 操作的审计 metadata 必须包含级联渠道绑定数（cascade_count），供前端渲染详情。
+	require.NotEmpty(t, store.lastAuditMeta, "delete 操作应写入 metadata")
+	var meta map[string]any
+	require.NoError(t, json.Unmarshal(store.lastAuditMeta, &meta))
+	require.Equal(t, float64(2), meta["cascade_count"], "metadata.cascade_count 应为渠道绑定数")
 }
 
-// TestRuntimeOperationTriggerStartHasNoDetail 验证非 delete 操作（如 start）的审计详情留空。
+// TestRuntimeOperationTriggerStartHasNoDetail 验证非 delete 操作（如 start）的审计 metadata 为空。
+// 非 delete 操作无需额外 metadata，action 字段本身已描述操作类型。
 func TestRuntimeOperationTriggerStartHasNoDetail(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	svc := NewRuntimeOperationService(store, newDiscardLogger())
 
 	_, err := svc.Trigger(context.Background(), runtimeOrgAdminPrincipal(), testRuntimeOpAppID, RuntimeOperationStart)
 	require.NoError(t, err)
-	// 非 delete op 的 DetailMessage.Valid 必须为 false。
-	require.False(t, store.lastAuditDetail.Valid, "非 delete 操作的 DetailMessage 应为 NULL")
+	// 非 delete op 不需要 metadata，MetadataJson 应为空。
+	require.Empty(t, store.lastAuditMeta, "非 delete 操作的 metadata 应为空")
 }
 
 // TestRequestInitialize_DisabledPrincipal_Denied 验证请求初始化禁用PrincipalDenied的预期行为场景。

@@ -4,6 +4,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -37,9 +38,14 @@ func TestRecharge_HappyPath(t *testing.T) {
 	if client.lastInput.NewAPIUserID != 1234 || client.lastInput.CreditAmount != 1000 {
 		t.Fatalf("client 调用 = %+v", client.lastInput)
 	}
-	// 详情字段应同时拼出金额和备注（金额单位是「点」，与 recharge_records.credit_amount 一致）。
-	require.True(t, store.lastAuditCreate.DetailMessage.Valid)
-	require.Equal(t, "+1000 点，备注 test", store.lastAuditCreate.DetailMessage.String)
+	// 审计不再写入冻结中文文案，改用 metadata 存储结构化参数：amount/remark。
+	require.False(t, store.lastAuditCreate.DetailMessage.Valid, "新记录不应写入 detail_message")
+	require.NotEmpty(t, store.lastAuditCreate.MetadataJson, "metadata 必须存储 amount/remark")
+	// 验证 metadata 包含结构化充值参数：金额和备注。
+	var meta map[string]any
+	require.NoError(t, json.Unmarshal(store.lastAuditCreate.MetadataJson, &meta))
+	require.Equal(t, float64(1000), meta["amount"], "metadata.amount 应为充值金额") // JSON 数字解析为 float64
+	require.Equal(t, "test", meta["remark"], "metadata.remark 应为备注")
 }
 
 // TestRecharge_DeniesNonPlatformAdmin 验证充值Denies非平台管理员的预期行为场景。
@@ -86,9 +92,13 @@ func TestRecharge_NewAPIErrorStillWritesFailedRecord(t *testing.T) {
 	require.True(t, store.recordWritten)
 	require.Equal(t, "failed", store.lastRecordStatus)
 	require.True(t, store.auditWritten)
-	// 场景：失败路径下空备注详情仅有金额。
-	require.True(t, store.lastAuditCreate.DetailMessage.Valid)
-	require.Equal(t, "+1000 点", store.lastAuditCreate.DetailMessage.String)
+	// 审计不再写入冻结中文文案，改用 metadata 存储结构化参数。
+	// 场景：失败路径下 metadata 仍包含 amount，remark 为空字符串。
+	require.False(t, store.lastAuditCreate.DetailMessage.Valid, "失败路径新记录也不应写入 detail_message")
+	var meta map[string]any
+	require.NoError(t, json.Unmarshal(store.lastAuditCreate.MetadataJson, &meta))
+	require.Equal(t, float64(1000), meta["amount"], "metadata.amount 应为充值金额")
+	require.Equal(t, "", meta["remark"], "空备注下 metadata.remark 应为空字符串")
 }
 
 // TestListRecharges_DeniesOrgMember 验证普通成员无权查看充值记录。

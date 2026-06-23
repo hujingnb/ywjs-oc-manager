@@ -2,23 +2,23 @@
   <n-card :bordered="true">
     <!-- 未选中任务时展示引导文案，避免右侧区域空白。 -->
     <template v-if="!job">
-      <p class="state-text">从左侧选择一个定时任务查看详情。</p>
+      <p class="state-text">{{ t('apps.cron.detail.selectHint') }}</p>
     </template>
 
     <template v-else>
       <div class="detail-head">
         <div>
-          <p class="status-line">● {{ translateState(job.state) }}</p>
-          <h3>{{ job.name || '未命名任务' }}</h3>
+          <p class="status-line">● {{ stateText }}</p>
+          <h3>{{ job.name || t('apps.cron.detail.unnamed') }}</h3>
           <p class="detail-sub">job_id <code>{{ job.id || '—' }}</code></p>
         </div>
         <n-space v-if="canWrite" :size="8">
-          <n-button size="small" tertiary @click="emit('action', 'run')">立即运行</n-button>
+          <n-button size="small" tertiary @click="emit('action', 'run')">{{ t('apps.cron.detail.runNow') }}</n-button>
           <n-button size="small" tertiary @click="emit('action', pauseVerb)">
-            {{ pauseVerb === 'resume' ? '恢复' : '暂停' }}
+            {{ pauseVerb === 'resume' ? t('apps.cron.detail.resume') : t('apps.cron.detail.pause') }}
           </n-button>
-          <n-button size="small" tertiary @click="emit('edit')">编辑</n-button>
-          <n-button size="small" type="error" tertiary @click="emit('action', 'delete')">删除</n-button>
+          <n-button size="small" tertiary @click="emit('edit')">{{ t('common.actions.edit') }}</n-button>
+          <n-button size="small" type="error" tertiary @click="emit('action', 'delete')">{{ t('common.actions.delete') }}</n-button>
         </n-space>
       </div>
 
@@ -28,7 +28,7 @@
       </div>
 
       <div class="section">
-        <p class="section-title">基础字段</p>
+        <p class="section-title">{{ t('apps.cron.detail.sectionBasic') }}</p>
         <div class="meta-grid">
           <div><span class="k">schedule</span><span class="v">{{ scheduleText }}</span></div>
           <div><span class="k">repeat</span><span class="v">{{ repeatText }}</span></div>
@@ -47,7 +47,7 @@
       </div>
 
       <div v-if="isPlatformAdmin" class="section">
-        <p class="section-title">平台高级字段</p>
+        <p class="section-title">{{ t('apps.cron.detail.sectionAdvanced') }}</p>
         <div class="meta-grid">
           <div><span class="k">skills</span><span class="v">{{ job.skills?.length ? job.skills.join(', ') : '—' }}</span></div>
           <div><span class="k">model</span><span class="v">{{ job.model || '—' }}</span></div>
@@ -57,7 +57,7 @@
       </div>
 
       <div class="section">
-        <p class="section-title">执行历史</p>
+        <p class="section-title">{{ t('apps.cron.detail.sectionHistory') }}</p>
         <CronRunHistory
           :runs="history"
           :selected-file="selectedFile"
@@ -66,9 +66,9 @@
       </div>
 
       <div class="section">
-        <p class="section-title">输出预览</p>
+        <p class="section-title">{{ t('apps.cron.detail.sectionOutput') }}</p>
         <pre v-if="output?.content" class="output-pane">{{ output.content }}</pre>
-        <p v-else class="state-text">选择一条有输出文件的执行记录查看内容。</p>
+        <p v-else class="state-text">{{ t('apps.cron.detail.selectOutputHint') }}</p>
       </div>
     </template>
   </n-card>
@@ -76,11 +76,17 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { NButton, NCard, NSpace } from 'naive-ui'
 
 import type { CronJob, CronRunEntry, CronRunOutput } from '@/api/hooks/useCron'
 import CronRunHistory from './CronRunHistory.vue'
 import { scheduleDisplay, translateState } from './cronDisplay'
+
+const { t } = useI18n()
+
+// stateText 将当前任务状态 i18n 化；在 computed 中传入 t 保证语言切换时响应式更新。
+const stateText = computed(() => translateState(props.job?.state, t))
 
 type CronActionVerb = 'run' | 'pause' | 'resume' | 'delete'
 
@@ -118,13 +124,14 @@ const pauseVerb = computed<CronActionVerb>(() =>
 )
 
 // scheduleText 走统一展示入口：上游 display 优先，缺失时前端兜底翻译，再退原文。
-const scheduleText = computed(() => scheduleDisplay(props.job?.schedule))
+// 在 computed 中传入 t 保证语言切换时响应式更新。
+const scheduleText = computed(() => scheduleDisplay(props.job?.schedule, t))
 
 // repeatText 同时展示重复上限和已完成次数，便于排查有限重复任务进度。
 const repeatText = computed(() => {
   const repeat = props.job?.repeat
-  if (!repeat) return '不限'
-  const times = typeof repeat.times === 'number' ? repeat.times : '不限'
+  if (!repeat) return t('apps.cron.detail.repeatUnlimited')
+  const times = typeof repeat.times === 'number' ? repeat.times : t('apps.cron.detail.repeatUnlimited')
   const completed = typeof repeat.completed === 'number' ? repeat.completed : 0
   return `${completed} / ${times}`
 })

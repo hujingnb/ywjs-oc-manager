@@ -1,5 +1,6 @@
 // HTTP 客户端封装。
 // 统一处理 base URL、Authorization 头部、JSON 解析和错误抛出，避免每个 hook 重复实现。
+import { i18n } from '@/i18n'
 
 const TOKEN_STORAGE_KEY = 'ocm.access_token'
 const REFRESH_STORAGE_KEY = 'ocm.refresh_token'
@@ -73,6 +74,15 @@ export function clearStoredTokens(): void {
   writeStorage(REFRESH_STORAGE_KEY, null)
 }
 
+// 当前 locale 提供者：由 locale store 在初始化时注入，apiRequest 据此附加 Accept-Language。
+// 用函数注入而非直接 import store，避免 client 与 pinia 形成循环依赖。
+let currentLocaleProvider: (() => string) | null = null
+
+// setLocaleProvider 注册 locale 读取函数；传 null 可清除（测试用）。
+export function setLocaleProvider(provider: (() => string) | null): void {
+  currentLocaleProvider = provider
+}
+
 // onUnauthorized 是全局 401 处理钩子（app 入口注册）。
 // apiRequest 收到 401 时调一次，便于 router 跳 login + 清 token；
 // 不直接在 client 引 router 是为了避免依赖循环，调用方通过 setUnauthorizedHandler 注入。
@@ -123,6 +133,12 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     if (csrf) {
       headers['X-CSRF-Token'] = csrf
     }
+  }
+
+  // 附加 Accept-Language：后端本期不消费（翻译在前端），但提前带上便于未来后端直出文案场景。
+  const locale = currentLocaleProvider?.()
+  if (locale) {
+    headers['Accept-Language'] = locale
   }
 
   const url = buildUrl(path, options.query)
@@ -241,7 +257,7 @@ export function extractErrorMessage(body: unknown, status: number): string {
   if (body && typeof body === 'object' && 'message' in body && typeof (body as { message: unknown }).message === 'string') {
     return (body as { message: string }).message
   }
-  return `请求失败 (${status})`
+  return i18n.global.t('common.errors.requestFailed', { status })
 }
 
 function extractErrorCode(body: unknown): string | null {

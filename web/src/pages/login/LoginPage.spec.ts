@@ -4,6 +4,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { i18n } from '@/i18n'
 import LoginPage from './LoginPage.vue'
 
 // ======================== mocks ========================
@@ -16,17 +17,22 @@ vi.mock('@/stores/auth', () => ({
 vi.mock('vue-router', () => ({
   useRouter: () => ({ currentRoute: { value: { query: {} } }, replace: replaceMock }),
 }))
+// LocaleSwitcher 依赖 i18n 与 Pinia 插件，登录页测试环境无这两个插件；
+// 用占位桩替代，避免引入无关的插件配置影响既有验证码测试用例。
+vi.mock('@/components/LocaleSwitcher.vue', () => ({
+  default: { template: '<div />' },
+}))
 
 // 把出题探测 fetch 固定为指定状态码。
 function stubChallenge(status: number) {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status }))
 }
 
-// mountPage：挂载登录页。
+// mountPage：挂载登录页，注入 i18n 插件（LoginPage 使用 useI18n() 需要）。
 // altcha-widget 是 isCustomElement 注册的原生自定义元素，不走 Vue 组件 stub；
 // 通过 vi.fn() 直接挂在 DOM 实例上来拦截 reset()（见各测试用例）。
 function mountPage() {
-  return mount(LoginPage)
+  return mount(LoginPage, { global: { plugins: [i18n] } })
 }
 
 // dispatchVerified：在 altcha-widget 元素上派发带 verified detail 的 statechange 事件，

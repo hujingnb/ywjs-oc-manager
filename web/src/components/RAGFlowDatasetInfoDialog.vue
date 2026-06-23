@@ -1,53 +1,53 @@
 <template>
-  <n-modal :show="visible" preset="card" title="RAGFlow 信息" style="width: min(560px, 92vw)" @update:show="emitVisible">
+  <n-modal :show="visible" preset="card" :title="t('components.ragflowDatasetInfoDialog.title')" style="width: min(560px, 92vw)" @update:show="emitVisible">
     <div class="ragflow-info-dialog">
       <n-spin :show="infoQuery.isLoading.value || modelsQuery.isLoading.value">
         <n-alert v-if="infoQuery.error.value" type="error" :bordered="false">
           {{ infoQuery.error.value.message }}
-          <n-button class="retry-button" size="small" @click="refetchAll">重试</n-button>
+          <n-button class="retry-button" size="small" @click="refetchAll">{{ t('components.ragflowDatasetInfoDialog.retryBtn') }}</n-button>
         </n-alert>
         <n-alert v-else-if="info?.status === 'error'" type="error" :bordered="false">
-          {{ info.error_message || '读取 RAGFlow 信息失败' }}
-          <n-button class="retry-button" size="small" @click="refetchAll">重试</n-button>
+          {{ info.error_message || t('components.ragflowDatasetInfoDialog.loadFailed') }}
+          <n-button class="retry-button" size="small" @click="refetchAll">{{ t('components.ragflowDatasetInfoDialog.retryBtn') }}</n-button>
         </n-alert>
         <n-alert v-else-if="info?.status === 'not_created'" type="warning" :bordered="false">
-          当前知识库尚未创建 RAGFlow dataset，上传文件或初始化完成后再查看。
+          {{ t('components.ragflowDatasetInfoDialog.notCreatedHint') }}
         </n-alert>
 
         <n-descriptions v-if="info" :column="1" bordered size="small">
-          <n-descriptions-item label="知识库">
+          <n-descriptions-item :label="t('components.ragflowDatasetInfoDialog.labelKnowledgeBase')">
             {{ scopeLabel }} · {{ targetName || info.target_name || targetId }}
           </n-descriptions-item>
-          <n-descriptions-item label="RAGFlow dataset ID">
+          <n-descriptions-item :label="t('components.ragflowDatasetInfoDialog.labelDatasetId')">
             {{ info.ragflow_dataset_id || '-' }}
           </n-descriptions-item>
-          <n-descriptions-item label="RAGFlow dataset 名称">
+          <n-descriptions-item :label="t('components.ragflowDatasetInfoDialog.labelDatasetName')">
             {{ info.ragflow_dataset_name || '-' }}
           </n-descriptions-item>
-          <n-descriptions-item label="当前模型">
+          <n-descriptions-item :label="t('components.ragflowDatasetInfoDialog.labelCurrentModel')">
             {{ info.embedding_model?.label || info.embedding_model?.name || '-' }}
           </n-descriptions-item>
-          <n-descriptions-item v-if="info.doc_num !== undefined" label="文档数">
+          <n-descriptions-item v-if="info.doc_num !== undefined" :label="t('components.ragflowDatasetInfoDialog.labelDocNum')">
             {{ info.doc_num }}
           </n-descriptions-item>
-          <n-descriptions-item v-if="info.chunk_num !== undefined" label="Chunk 数">
+          <n-descriptions-item v-if="info.chunk_num !== undefined" :label="t('components.ragflowDatasetInfoDialog.labelChunkNum')">
             {{ info.chunk_num }}
           </n-descriptions-item>
         </n-descriptions>
 
         <n-form class="model-form" label-placement="top" @submit.prevent="openConfirm">
-          <n-form-item label="Embedding 模型">
+          <n-form-item :label="t('components.ragflowDatasetInfoDialog.labelEmbeddingModel')">
             <n-select
               v-model:value="selectedModelKey"
               :options="modelOptions"
               :disabled="!canSubmit"
-              placeholder="选择模型"
+              :placeholder="t('components.ragflowDatasetInfoDialog.selectModelPlaceholder')"
             />
           </n-form-item>
           <n-space justify="end">
-            <n-button @click="emitVisible(false)">关闭</n-button>
+            <n-button @click="emitVisible(false)">{{ t('common.actions.close') }}</n-button>
             <n-button type="primary" attr-type="submit" :disabled="!canSubmit || selectedModelUnchanged">
-              保存并重新解析
+              {{ t('components.ragflowDatasetInfoDialog.saveReparse') }}
             </n-button>
           </n-space>
         </n-form>
@@ -56,9 +56,9 @@
 
     <ConfirmActionModal
       :visible="confirmOpen"
-      title="确认修改 RAGFlow 模型"
-      message="将更新 RAGFlow dataset 的 embedding 模型，并使该知识库下全部文件重新进入解析流程。"
-      confirm-label="确认修改"
+      :title="t('components.ragflowDatasetInfoDialog.confirmTitle')"
+      :message="t('components.ragflowDatasetInfoDialog.confirmMessage')"
+      :confirm-label="t('components.ragflowDatasetInfoDialog.confirmLabel')"
       :busy="mutation.isPending.value"
       @confirm="submit"
       @cancel="confirmOpen = false"
@@ -81,6 +81,7 @@ import {
   NSpace,
   NSpin,
 } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 import {
   useKnowledgeEmbeddingModelsQuery,
@@ -102,6 +103,8 @@ const emit = defineEmits<{
   (event: 'updated'): void
 }>()
 
+const { t } = useI18n()
+
 const scope = toRef(props, 'scope')
 const targetId = toRef(props, 'targetId')
 const selectedModelKey = ref<string | null>(null)
@@ -120,9 +123,9 @@ const canSubmit = computed(() => info.value?.status === 'ok' && modelOptions.val
 const selectedModelUnchanged = computed(() => selectedModelKey.value === null || selectedModelKey.value === currentModelKey.value)
 
 const scopeLabel = computed(() => {
-  if (props.scope === 'org') return '企业知识库'
-  if (props.scope === 'app') return '实例知识库'
-  return '行业知识库'
+  if (props.scope === 'org') return t('components.ragflowDatasetInfoDialog.scopeOrg')
+  if (props.scope === 'app') return t('components.ragflowDatasetInfoDialog.scopeApp')
+  return t('components.ragflowDatasetInfoDialog.scopeIndustry')
 })
 
 const modelOptions = computed(() => {

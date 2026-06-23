@@ -125,3 +125,59 @@ resources:
     assert m.routing == {}
     assert m.skills == []
     assert m.rule_platform_rel == "resources/platform-rules.md"
+
+
+def test_load_app_language_zh(tmp_path: Path) -> None:
+    # 验证 manifest app.language="zh" 被解析到 Manifest.app_language。
+    p = write(tmp_path / "manifest.yaml", """
+app:
+  id: app-x
+  name: x
+  model: m
+  language: zh
+credentials:
+  openai: { api_key: sk-x, base_url: http://x }
+resources:
+  persona: resources/persona.md
+  rules:
+    platform: resources/platform-rules.md
+""")
+    m = load(p)
+    assert m.app_language == "zh"
+
+
+def test_load_app_language_en(tmp_path: Path) -> None:
+    # 验证 manifest app.language="en" 被解析到 Manifest.app_language。
+    p = write(tmp_path / "manifest.yaml", """
+app:
+  id: app-x
+  name: x
+  model: m
+  language: en
+credentials:
+  openai: { api_key: sk-x, base_url: http://x }
+resources:
+  persona: resources/persona.md
+  rules:
+    platform: resources/platform-rules.md
+""")
+    m = load(p)
+    assert m.app_language == "en"
+
+
+def test_load_app_language_absent_defaults_empty(tmp_path: Path) -> None:
+    # 验证 manifest 不含 app.language 时，Manifest.app_language 缺省为空串（渲染侧回落 "en"）。
+    p = write(tmp_path / "manifest.yaml", """
+app:
+  id: app-x
+  name: x
+  model: m
+credentials:
+  openai: { api_key: sk-x, base_url: http://x }
+resources:
+  persona: resources/persona.md
+  rules:
+    platform: resources/platform-rules.md
+""")
+    m = load(p)
+    assert m.app_language == ""

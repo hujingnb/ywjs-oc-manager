@@ -1,12 +1,15 @@
 <template>
   <n-select :value="value" :options="options" @update:value="emit('update:value', $event)" />
-  <p v-if="boundTypes.length === 0" class="deliver-hint">暂无已绑定渠道，去「渠道」页绑定后可在此选择。</p>
+  <p v-if="boundTypes.length === 0" class="deliver-hint">{{ t('apps.cron.deliver.noChannelHint') }}</p>
 </template>
 
 <script setup lang="ts">
 import { computed, toRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { NSelect } from 'naive-ui'
 import type { SelectOption } from 'naive-ui'
+
+const { t } = useI18n()
 
 import { useChannelProgressQuery } from '@/api/hooks/useChannel'
 import { buildDeliverOptions } from './deliverOptions'
@@ -29,7 +32,8 @@ const boundTypes = computed(() => {
 
 // 强制转为 SelectOption[]：DeliverOption 结构与 SelectOption 兼容，但 naive-ui 类型联合
 // 导致 TS 无法自动收窄；显式断言避免 TS2322 误报。
-const options = computed(() => buildDeliverOptions(boundTypes.value, props.value) as SelectOption[])
+// 在 computed 中传入 t 保证语言切换时选项标签响应式更新。
+const options = computed(() => buildDeliverOptions(boundTypes.value, props.value, t) as SelectOption[])
 </script>
 
 <style scoped>

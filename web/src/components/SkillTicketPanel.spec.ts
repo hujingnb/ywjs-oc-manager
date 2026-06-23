@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref, nextTick, type VNodeChild } from 'vue'
 
 import SkillTicketPanel from './SkillTicketPanel.vue'
+import { i18n } from '@/i18n'
 
 const ticketsState = {
   data: ref<Record<string, unknown>[]>([]),
@@ -63,12 +64,14 @@ describe('SkillTicketPanel', () => {
     ticketsState.data.value = []
     ticketsState.isLoading.value = false
     ticketsState.error.value = null
+    // locale 设为 zh，使文案断言沿用中文词条。
+    i18n.global.locale.value = 'zh'
   })
 
   // 工单列表不再显示查看按钮，点击整行进入详情；delivered 行保留去安装快捷入口且不触发行跳转。
   it('navigates to detail and emits goInstall for delivered ticket', async () => {
     ticketsState.data.value = [{ id: 't-1', title: '需求', status: 'delivered', custom_skill_name: 'weekly' }]
-    const wrapper = mount(SkillTicketPanel)
+    const wrapper = mount(SkillTicketPanel, { global: { plugins: [i18n] } })
     expect(wrapper.findAll('button').some((button) => button.text() === '查看')).toBe(false)
     await wrapper.find('[data-test="skill-ticket-row-t-1"]').trigger('click')
     expect(router.push).toHaveBeenCalledWith('/skill-tickets/t-1')
@@ -81,7 +84,7 @@ describe('SkillTicketPanel', () => {
   // 提交需求后先创建工单,再把选择的附件逐个作为消息上传,最后跳详情页。
   it('submits ticket and uploads selected files', async () => {
     mocks.submit.mockResolvedValueOnce({ id: 't-new', status: 'pending', title: '新需求' })
-    const wrapper = mount(SkillTicketPanel)
+    const wrapper = mount(SkillTicketPanel, { global: { plugins: [i18n] } })
     await wrapper.findAll('button').find((button) => button.text() === '提交需求')!.trigger('click')
     await nextTick()
     const inputs = wrapper.findAll('input')

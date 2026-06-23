@@ -454,6 +454,18 @@ components:
       required:
       - name
       type: object
+    handlers.PublicConfigResponse:
+      properties:
+        default_locale:
+          description: DefaultLocale 是平台默认界面语言（en/zh），登录页 localStorage 为空时采用。
+          type: string
+        supported_locales:
+          description: SupportedLocales 是平台受支持的界面语言集合，供前端渲染语言选择器。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
+      type: object
     handlers.RechargeRequest:
       properties:
         credit_amount:
@@ -529,6 +541,14 @@ components:
           type: integer
       required:
       - quota_bytes
+      type: object
+    handlers.UpdateAppLocaleRequest:
+      properties:
+        locale:
+          description: Locale 是 hermes bot 对终端用户说话的语言（en/zh）；取值集合由 service 层校验。
+          type: string
+      required:
+      - locale
       type: object
     handlers.UpdateAppSkillRequest:
       properties:
@@ -639,6 +659,14 @@ components:
           type: string
       required:
       - name
+      type: object
+    handlers.UpdateLocaleRequest:
+      properties:
+        locale:
+          description: Locale 是目标界面语言，例如 en / zh。
+          type: string
+      required:
+      - locale
       type: object
     handlers.UpdateMemberRequest:
       properties:
@@ -1119,6 +1147,11 @@ components:
         last_error_status:
           description: LastErrorStatus 上次进入 error 时所在的状态值;前端用 formatAppStatus 转中文文案。
           type: string
+        locale:
+          description: |-
+            Locale 是 hermes bot 对终端用户说话的语言（en/zh）；
+            空表示使用平台默认语言（历史数据或未设置）。
+          type: string
         name:
           type: string
         newapi_key_id:
@@ -1247,7 +1280,9 @@ components:
           type: string
         action_detail:
           description: |-
-            ActionDetail 是写入时冻结的详情字符串，直接读自 audit_logs.detail_message 列。
+            ActionDetail 读自 audit_logs.detail_message 列，仅为历史数据兼容 fallback。
+            新记录不再写入此列；前端应优先用 action + metadata 按语言渲染详情，
+            当 metadata 为空时可 fallback 展示 action_detail（旧记录）。
             空字符串表示无详情，前端展示「—」。
           type: string
         action_label:
@@ -1305,6 +1340,9 @@ components:
         display_name:
           type: string
         id:
+          type: string
+        locale:
+          description: Locale 是用户界面语言偏好（en/zh）；空字符串表示未显式选择，前端回退平台默认。
           type: string
         org_id:
           type: string
@@ -4537,6 +4575,71 @@ paths:
       summary: 修改应用 RAGFlow dataset embedding 模型
       tags:
       - knowledge
+  /apps/{appId}/locale:
+    patch:
+      description: 更新实例 hermes bot 对终端用户说话的语言（en/zh），持久化后触发容器重启使配置生效
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.UpdateAppLocaleRequest'
+                description: 目标语言
+                summary: body
+        description: 目标语言
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AppResult'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 更新实例语言
+      tags:
+      - apps
   /apps/{appId}/runtime:
     get:
       description: 返回应用 k8s 运行时状态与最近快照；status=no_container 表示容器尚未创建
@@ -5855,6 +5958,38 @@ paths:
       summary: 当前用户信息
       tags:
       - auth
+  /auth/me/locale:
+    patch:
+      description: 保存当前用户的界面语言偏好（en/zh），登录后跟随用户
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.UpdateLocaleRequest'
+                description: 语言请求
+                summary: body
+        description: 语言请求
+        required: true
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+      summary: 更新界面语言
+      tags:
+      - auth
   /auth/password:
     post:
       description: 已登录用户输入当前密码后修改自己的 manager 登录密码
@@ -5972,6 +6107,19 @@ paths:
       summary: 查询计费展示配置
       tags:
       - recharge
+  /config:
+    get:
+      description: 登录前可读的平台级配置：默认界面语言与受支持语言集合
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.PublicConfigResponse'
+          description: OK
+      summary: 公开前端配置
+      tags:
+      - config
   /custom-skills/deliver:
     post:
       requestBody:

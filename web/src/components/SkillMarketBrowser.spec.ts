@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import SkillMarketBrowser from './SkillMarketBrowser.vue'
 import type { SkillEntry } from '@/api'
+import { i18n } from '@/i18n'
 
 // ======================== hoisted mocks ========================
 const mocks = vi.hoisted(() => ({
@@ -91,8 +92,11 @@ vi.mock('./SkillDetailDrawer.vue', () => ({
 
 // ======================== 挂载辅助 ========================
 function mountBrowser(props: Record<string, unknown> = {}) {
+  // i18n 插件注入确保 useI18n() 在组件内可用；locale 设为 zh 使文案断言沿用中文词条。
+  i18n.global.locale.value = 'zh'
   return mount(SkillMarketBrowser, {
     props: { canAction: true, ...props },
+    global: { plugins: [i18n] },
   })
 }
 

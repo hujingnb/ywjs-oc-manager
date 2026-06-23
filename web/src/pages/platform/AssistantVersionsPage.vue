@@ -2,7 +2,7 @@
   <div style="display: grid; gap: 18px">
     <!-- 版本列表 -->
     <DataTableList
-      title="助手版本"
+      :title="t('platform.versions.listTitle')"
       eyebrow="Platform"
       :columns="columns"
       :data="versions ?? []"
@@ -13,7 +13,7 @@
       <template #toolbar>
         <n-button type="primary" @click="openCreate">
           <template #icon><Plus :size="16" /></template>
-          新增版本
+          {{ t('platform.versions.addButton') }}
         </n-button>
       </template>
     </DataTableList>
@@ -25,80 +25,80 @@
         <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px">
           <div>
             <p class="eyebrow">{{ editingId ? 'Edit' : 'New' }}</p>
-            <h2 style="margin: 0">{{ editingId ? '编辑助手版本' : '新建助手版本' }}</h2>
+            <h2 style="margin: 0">{{ editingId ? t('platform.versions.form.editTitle') : t('platform.versions.form.createTitle') }}</h2>
           </div>
           <!-- 保存/取消固定在表单顶部：下方 Skill 列表会持续撑高表单，按钮放底部时够不到，放顶部确保始终可点 -->
           <n-space align="center">
-            <n-button @click="closeForm">取消</n-button>
-            <n-button type="primary" :loading="submitting" :disabled="!canSubmit" @click="submit">保存</n-button>
+            <n-button @click="closeForm">{{ t('common.actions.cancel') }}</n-button>
+            <n-button type="primary" :loading="submitting" :disabled="!canSubmit" @click="submit">{{ t('common.actions.save') }}</n-button>
           </n-space>
         </div>
       </template>
       <n-form :model="form" label-placement="top" @submit.prevent="submit">
         <n-grid :cols="2" :x-gap="14">
           <n-grid-item>
-            <n-form-item label="名称 *">
-              <n-input v-model:value="form.name" placeholder="版本名称（唯一）" />
+            <n-form-item :label="t('platform.versions.form.labelName')">
+              <n-input v-model:value="form.name" :placeholder="t('platform.versions.form.placeholderName')" />
             </n-form-item>
           </n-grid-item>
           <n-grid-item>
-            <n-form-item label="使用镜像 *">
+            <n-form-item :label="t('platform.versions.form.labelImage')">
               <n-select
                 v-model:value="form.image_id"
                 :loading="imagesQuery.isLoading.value"
                 :disabled="imagesQuery.isError.value"
                 :options="imageOptions"
-                placeholder="选择 Hermes 镜像"
+                :placeholder="t('platform.versions.form.placeholderImage')"
               />
-              <p v-if="imagesQuery.isError.value" class="state-text danger">镜像列表获取失败，请重试</p>
+              <p v-if="imagesQuery.isError.value" class="state-text danger">{{ t('platform.versions.form.imageLoadFail') }}</p>
             </n-form-item>
           </n-grid-item>
           <n-grid-item :span="2">
-            <n-form-item label="描述">
-              <n-input v-model:value="form.description" type="textarea" :rows="2" placeholder="版本用途说明" />
+            <n-form-item :label="t('platform.versions.form.labelDesc')">
+              <n-input v-model:value="form.description" type="textarea" :rows="2" :placeholder="t('platform.versions.form.placeholderDesc')" />
             </n-form-item>
           </n-grid-item>
           <n-grid-item :span="2">
-            <n-form-item label="内置提示词 *">
+            <n-form-item :label="t('platform.versions.form.labelSystemPrompt')">
               <n-input
                 v-model:value="form.system_prompt"
                 type="textarea"
                 :rows="4"
-                placeholder="可填写助手人设、行为规则等；将注入容器 SOUL.md 的版本层"
+                :placeholder="t('platform.versions.form.placeholderSystemPrompt')"
               />
             </n-form-item>
           </n-grid-item>
           <n-grid-item :span="2">
-            <n-form-item label="主模型 *">
+            <n-form-item :label="t('platform.versions.form.labelMainModel')">
               <n-select
                 v-model:value="form.main_model"
                 filterable
                 :loading="modelsQuery.isLoading.value"
                 :disabled="modelsQuery.isError.value"
                 :options="modelOptions"
-                placeholder="选择主对话模型"
+                :placeholder="t('platform.versions.form.placeholderMainModel')"
               />
-              <p v-if="modelsQuery.isError.value" class="state-text danger">模型列表获取失败，请重试</p>
+              <p v-if="modelsQuery.isError.value" class="state-text danger">{{ t('platform.versions.form.modelLoadFail') }}</p>
             </n-form-item>
           </n-grid-item>
           <n-grid-item :span="2">
-            <p class="eyebrow" style="margin: 4px 0">智能路由（留空走主模型）</p>
+            <p class="eyebrow" style="margin: 4px 0">{{ t('platform.versions.form.labelRouting') }}</p>
           </n-grid-item>
           <n-grid-item v-for="slot in AUXILIARY_SLOTS" :key="slot.key">
-            <n-form-item :label="slot.label">
+            <n-form-item :label="t(slot.labelKey)">
               <n-select
                 v-model:value="form.routing[slot.key]"
                 filterable
                 clearable
                 :options="modelOptions"
-                placeholder="默认走主模型"
+                :placeholder="t('platform.versions.form.placeholderRouting')"
               />
             </n-form-item>
           </n-grid-item>
 
           <!-- 行业知识库：运行时检索额外范围，保存后立即生效，不触发版本 revision 变化。 -->
           <n-grid-item :span="2">
-            <n-form-item label="行业知识库">
+            <n-form-item :label="t('platform.versions.form.labelIndustryKnowledge')">
               <div style="display: grid; gap: 8px; width: 100%">
                 <n-select
                   v-model:value="form.industry_knowledge_base_ids"
@@ -108,22 +108,22 @@
                   :loading="industryBasesQuery.isLoading.value"
                   :disabled="industryBasesQuery.isError.value"
                   :options="industryKnowledgeOptions"
-                  placeholder="选择该版本运行时要额外检索的行业知识库"
+                  :placeholder="t('platform.versions.form.placeholderIndustry')"
                 />
                 <n-alert type="warning" :bordered="false">
-                  每选一个行业知识库，系统都会多查一批参考内容。选得越多，回答要处理的内容越多，速度和费用都可能增加。建议只选当前版本真正需要的行业库。
+                  {{ t('platform.versions.form.industryAlert') }}
                 </n-alert>
-                <p v-if="industryBasesQuery.isError.value" class="state-text danger">行业知识库列表获取失败，请重试</p>
+                <p v-if="industryBasesQuery.isError.value" class="state-text danger">{{ t('platform.versions.form.industryLoadFail') }}</p>
               </div>
             </n-form-item>
           </n-grid-item>
 
           <!-- skill 管理：从市场（平台库/ClawHub）选 skill 配进版本；编辑态即时生效，新建态暂不支持（需先保存版本） -->
           <n-grid-item :span="2">
-            <n-form-item label="Skill 列表">
+            <n-form-item :label="t('platform.versions.form.labelSkills')">
               <div style="display: grid; gap: 8px; width: 100%">
                 <!-- 已配 skill 列表展示 name/version + 删除 -->
-                <div v-if="editingSkills.length === 0" class="state-text">暂无 skill</div>
+                <div v-if="editingSkills.length === 0" class="state-text">{{ t('platform.versions.form.noSkill') }}</div>
                 <div
                   v-for="skill in editingSkills"
                   :key="skill.name"
@@ -133,20 +133,20 @@
                     {{ skill.name }}
                     <small v-if="skill.version" class="data-table-subtitle">v{{ skill.version }}</small>
                   </span>
-                  <n-button size="small" tertiary @click="onDeleteSkill(skill.name)">删除</n-button>
+                  <n-button size="small" tertiary @click="onDeleteSkill(skill.name)">{{ t('platform.versions.form.skillDeleteButton') }}</n-button>
                 </div>
                 <!-- 编辑态才可从市场选 skill；新建态需先保存版本才有 ID -->
                 <template v-if="editingId">
                   <skill-market-browser
-                    action-label="添加"
-                    existing-label="已添加"
+                    :action-label="t('platform.versions.form.skillActionLabel')"
+                    :existing-label="t('platform.versions.form.skillExistingLabel')"
                     :allow-version-pick="true"
                     :action-pending="skillAdding"
                     :existing-names="editingSkillNames"
                     @action="onAddFromMarket"
                   />
                 </template>
-                <p v-else class="state-text">保存版本后可配置 skill</p>
+                <p v-else class="state-text">{{ t('platform.versions.form.skillSaveFirst') }}</p>
                 <p v-if="skillFeedback" class="state-text" :class="{ danger: skillFeedbackError }">{{ skillFeedback }}</p>
               </div>
             </n-form-item>
@@ -162,10 +162,10 @@
     <!-- 删除二次确认：删除是破坏性操作，需用户确认后才发起请求 -->
     <ConfirmActionModal
       :visible="deleteTarget !== null"
-      title="删除助手版本"
-      :message="deleteTarget ? `确定删除版本「${deleteTarget.name}」？删除后不可恢复。` : ''"
+      :title="t('platform.versions.deleteDialog.title')"
+      :message="deleteTarget ? t('platform.versions.deleteDialog.message', { name: deleteTarget.name }) : ''"
       :busy="deleteBusy"
-      confirm-label="删除"
+      :confirm-label="t('platform.versions.deleteDialog.confirmLabel')"
       @confirm="confirmDelete"
       @cancel="cancelDelete"
     />
@@ -174,6 +174,7 @@
 
 <script setup lang="ts">
 import { computed, h, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Plus } from 'lucide-vue-next'
 import { NAlert, NButton, NCard, NForm, NFormItem, NGrid, NGridItem, NInput, NSelect, NSpace } from 'naive-ui'
 
@@ -199,6 +200,7 @@ import {
 } from '@/api/hooks/useAssistantVersions'
 
 // AssistantVersionsPage 是平台管理员的助手版本目录管理页：列表 + 新建/编辑 + 删除。
+const { t } = useI18n()
 const { data: versions, isLoading, error } = useAssistantVersionsQuery()
 const createMutation = useCreateAssistantVersion()
 const updateMutation = useUpdateAssistantVersion()
@@ -229,10 +231,10 @@ async function onAddFromMarket(p: { source: string; source_ref: string; name: st
     })
     // 后端返回更新后的完整版本，取其 skills 字段刷新本地状态。
     editingSkills.value = updated.skills ?? []
-    skillFeedback.value = `已添加 skill ${p.name} v${p.version}`
+    skillFeedback.value = t('platform.versions.form.skillAdded', { name: p.name, version: p.version })
   } catch (err) {
     skillFeedbackError.value = true
-    skillFeedback.value = err instanceof Error ? err.message : '添加失败'
+    skillFeedback.value = err instanceof Error ? err.message : t('platform.versions.form.skillAddFail')
   } finally {
     skillAdding.value = false
   }
@@ -246,10 +248,10 @@ async function onDeleteSkill(skillName: string) {
   try {
     const updated = await deleteSkillMutation.mutateAsync({ id: editingId.value, skillName })
     editingSkills.value = updated.skills ?? []
-    skillFeedback.value = `已删除 skill ${skillName}`
+    skillFeedback.value = t('platform.versions.form.skillDeletedMsg', { name: skillName })
   } catch (err) {
     skillFeedbackError.value = true
-    skillFeedback.value = err instanceof Error ? err.message : '删除失败'
+    skillFeedback.value = err instanceof Error ? err.message : t('platform.versions.form.skillDeleteFail')
   }
 }
 
@@ -369,10 +371,10 @@ async function submit() {
     const created = await createMutation.mutateAsync(buildPayload())
     editingId.value = created.id
     editingSkills.value = created.skills ?? []
-    skillFeedback.value = '版本已创建，可在下方从市场选择 skill'
+    skillFeedback.value = t('platform.versions.form.createSuccessHint')
     formVisible.value = false
   } catch (err) {
-    submitError.value = err instanceof Error ? err.message : '保存失败'
+    submitError.value = err instanceof Error ? err.message : t('platform.versions.form.saveFail')
   } finally {
     submitting.value = false
   }
@@ -401,10 +403,10 @@ async function confirmDelete() {
   actionFeedbackError.value = false
   try {
     await deleteMutation.mutateAsync(version.id)
-    actionFeedback.value = `已删除版本 ${version.name}`
+    actionFeedback.value = t('platform.versions.deleteSuccess', { name: version.name })
   } catch (err) {
     actionFeedbackError.value = true
-    actionFeedback.value = err instanceof Error ? err.message : '删除失败'
+    actionFeedback.value = err instanceof Error ? err.message : t('platform.versions.deleteFail')
   } finally {
     deleteBusy.value = false
     deleteTarget.value = null
@@ -414,20 +416,20 @@ async function confirmDelete() {
 // columns 展示版本基础信息、修订号、skill 数与操作。
 const columns = computed(() => [
   {
-    title: '名称',
+    title: t('platform.versions.columns.name'),
     key: 'name',
     render: (row: AssistantVersionDTO) => [
       h('strong', row.name),
       row.description ? h('small', { class: 'data-table-subtitle' }, row.description) : null,
     ],
   },
-  { title: '镜像', key: 'image_id', render: (row: AssistantVersionDTO) => imageLabelMap.value.get(row.image_id) || row.image_id || '—' },
-  { title: '主模型', key: 'main_model', render: (row: AssistantVersionDTO) => row.main_model || '—' },
-  { title: '修订号', key: 'revision', render: (row: AssistantVersionDTO) => `r${row.revision}` },
-  { title: 'Skill 数', key: 'skills', render: (row: AssistantVersionDTO) => String(row.skills?.length ?? 0) },
+  { title: t('platform.versions.columns.image'), key: 'image_id', render: (row: AssistantVersionDTO) => imageLabelMap.value.get(row.image_id) || row.image_id || '—' },
+  { title: t('platform.versions.columns.mainModel'), key: 'main_model', render: (row: AssistantVersionDTO) => row.main_model || '—' },
+  { title: t('platform.versions.columns.revision'), key: 'revision', render: (row: AssistantVersionDTO) => `r${row.revision}` },
+  { title: t('platform.versions.columns.skillCount'), key: 'skills', render: (row: AssistantVersionDTO) => String(row.skills?.length ?? 0) },
   actionColumn<AssistantVersionDTO>([
-    { label: '编辑', type: 'primary', onClick: openEdit },
-    { label: '删除', onClick: requestDelete },
+    { label: t('platform.versions.actions.edit'), type: 'primary', onClick: openEdit },
+    { label: t('platform.versions.actions.delete'), onClick: requestDelete },
   ]),
 ])
 </script>

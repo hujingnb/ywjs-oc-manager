@@ -5,7 +5,12 @@ package hermes
 // 保证两条路径产出的 manifest 完全一致。
 func BuildManifest(in AppInputData) Manifest {
 	m := Manifest{
-		App: ManifestApp{ID: in.AppID, Name: in.AppName, Model: in.Model},
+		App: ManifestApp{
+			ID:       in.AppID,
+			Name:     in.AppName,
+			Model:    in.Model,
+			Language: in.Language, // hermes bot 对终端用户说话的语言；空时 renderer 回退平台默认。
+		},
 		Credentials: ManifestCredentials{
 			OpenAI: ManifestOpenAI{APIKey: in.OpenAIAPIKey, BaseURL: in.OpenAIBaseURL},
 		},

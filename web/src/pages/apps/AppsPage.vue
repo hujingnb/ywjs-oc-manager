@@ -1,7 +1,7 @@
 <template>
   <DataTableList
-    :title="'实例列表'"
-    :eyebrow="auth.user?.role === 'platform_admin' ? 'Platform · Instances' : '企业 · Instances'"
+    :title="t('apps.list.title')"
+    :eyebrow="auth.user?.role === 'platform_admin' ? t('apps.list.eyebrowAdmin') : t('apps.list.eyebrowOrg')"
     :columns="columns"
     :data="visibleApps"
     :loading="isLoading || organizationsLoading"
@@ -14,20 +14,20 @@
         v-model:value="selectedOrgId"
         :options="orgOptions"
         style="width: 220px"
-        placeholder="选择企业"
+        :placeholder="t('apps.list.orgFilter')"
       />
-      <n-button v-if="canCreateApp" type="primary" @click="router.push('/members/new')">创建成员并初始化</n-button>
+      <n-button v-if="canCreateApp" type="primary" @click="router.push('/members/new')">{{ t('apps.list.createMember') }}</n-button>
     </template>
   </DataTableList>
 
   <ConfirmActionModal
     :visible="!!toDelete"
-    title="确认删除实例"
-    :message='toDelete ? `将提交删除任务，实例 "${toDelete.name}" 关联的容器和 API key 都会被回收。是否继续？` : ""'
-    confirm-label="确认删除"
+    :title="t('apps.list.deleteTitle')"
+    :message='toDelete ? t("apps.list.deleteMessage", { name: toDelete.name }) : ""'
+    :confirm-label="t('apps.list.deleteConfirm')"
     :busy="deleting"
     :verify-value="toDelete?.name"
-    :verify-hint='toDelete ? `输入实例名 "${toDelete.name}" 以确认删除` : ""'
+    :verify-hint='toDelete ? t("apps.list.deleteVerifyHint", { name: toDelete.name }) : ""'
     @confirm="onConfirmDelete"
     @cancel="toDelete = null"
   />
@@ -38,6 +38,7 @@ import { computed, h, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
 import { NButton, NSelect, NTag, NTooltip } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import DataTableList from '@/components/DataTableList.vue'
@@ -52,6 +53,7 @@ import { useAuthStore } from '@/stores/auth'
 
 // AppsPage 展示当前组织的应用列表，并提供运行时快捷操作和删除确认。
 const props = defineProps<{ orgId?: string }>()
+const { t } = useI18n()
 const auth = useAuthStore()
 const router = useRouter()
 const client = useQueryClient()
@@ -78,10 +80,10 @@ const visibleApps = computed(() => {
   return apps.value
 })
 
-// errorMessage 区分平台管理员未选组织和组织用户无归属，避免平台读页面误报“未关联组织”。
+// errorMessage 区分平台管理员未选组织和组织用户无归属，避免平台读页面误报”未关联组织”。
 const errorMessage = computed(() => {
   if (organizationsError.value) return String(organizationsError.value)
-  if (!effectiveOrgId.value) return isPlatformAdmin.value ? '暂无可查看企业' : '当前账号未关联企业'
+  if (!effectiveOrgId.value) return isPlatformAdmin.value ? t('apps.list.noOrgsAdmin') : t('apps.list.noOrgsUser')
   return undefined
 })
 
@@ -89,15 +91,16 @@ const toDelete = ref<AppDTO | null>(null)
 const deleting = ref(false)
 
 // columns 组合链接、状态和操作列；运行时操作按钮按行权限隐藏。
-const columns = [
+// 使用 computed 包裹确保语言切换时列标题和操作文案响应式更新。
+const columns = computed(() => [
   linkColumn<AppDTO>({
-    title: '名称',
+    title: t('apps.list.colName'),
     text: r => r.name,
     onClick: r => router.push(`/apps/${r.id}/overview`),
   }),
   // 状态列：version_synced=false 时附加「需重启」标签，提示绑定的助手版本已更新、尚未生效。
   {
-    title: '状态',
+    title: t('apps.list.colStatus'),
     key: 'status',
     render: (r: AppDTO) => {
       const badge = h(StatusBadge, { view: formatAppStatus(r.status) })
@@ -105,21 +108,21 @@ const columns = [
         return h('span', { style: 'display:inline-flex;align-items:center;gap:6px' }, [
           badge,
           h(NTooltip, null, {
-            trigger: () => h(NTag, { type: 'warning', size: 'small', bordered: false }, () => '需重启'),
-            default: () => '版本已更新，需重启生效',
+            trigger: () => h(NTag, { type: 'warning', size: 'small', bordered: false }, () => t('apps.list.restartNeeded')),
+            default: () => t('apps.list.restartNeededTip'),
           }),
         ])
       }
       return badge
     },
   },
-  { title: 'API key', key: 'api_key_status' },
+  { title: t('apps.list.colApiKey'), key: 'api_key_status' },
   actionColumn<AppDTO>([
-    { label: '重启', hidden: r => !canManageApp(auth.user, r), onClick: r => trigger(r, 'restart') },
-    { label: '停止', hidden: r => !canManageApp(auth.user, r), onClick: r => trigger(r, 'stop') },
-    { label: '删除', type: 'error', hidden: r => !canManageApp(auth.user, r), onClick: r => confirmDelete(r) },
+    { label: t('apps.list.actionRestart'), hidden: r => !canManageApp(auth.user, r), onClick: r => trigger(r, 'restart') },
+    { label: t('apps.list.actionStop'), hidden: r => !canManageApp(auth.user, r), onClick: r => trigger(r, 'stop') },
+    { label: t('apps.list.actionDelete'), type: 'error', hidden: r => !canManageApp(auth.user, r), onClick: r => confirmDelete(r) },
   ]),
-]
+])
 
 // confirmDelete 只记录待删除应用，真正删除在二次确认后提交。
 function confirmDelete(app: AppDTO) { toDelete.value = app }

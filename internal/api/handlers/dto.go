@@ -35,6 +35,12 @@ type RefreshRequest struct {
 	RefreshToken string `json:"refresh_token" binding:"required"`
 }
 
+// UpdateLocaleRequest 是 PATCH /auth/me/locale 的请求体；locale 取值由 service 校验。
+type UpdateLocaleRequest struct {
+	// Locale 是目标界面语言，例如 en / zh。
+	Locale string `json:"locale" binding:"required"`
+}
+
 // ChangePasswordRequest 是已登录用户修改自己密码的请求体。
 type ChangePasswordRequest struct {
 	// OldPassword 是当前登录密码，只用于本次校验，不写日志。
@@ -342,6 +348,12 @@ type UpdateAppKnowledgeQuotaRequest struct {
 	QuotaBytes int64 `json:"quota_bytes" binding:"required"`
 }
 
+// UpdateAppLocaleRequest 是 PATCH /api/v1/apps/:appId/locale 的请求体。
+type UpdateAppLocaleRequest struct {
+	// Locale 是 hermes bot 对终端用户说话的语言（en/zh）；取值集合由 service 层校验。
+	Locale string `json:"locale" binding:"required"`
+}
+
 // ===== 助手版本 assistant-versions =====
 
 // AssistantVersionRoutingDTO 是智能路由 8 槽位的请求结构；空字符串表示走主模型。
@@ -456,3 +468,13 @@ type UpdateCustomSkillTargetsRequest struct {
 // DeliverCustomSkillRequest 交付定制技能(归档走 multipart file,本体描述目标范围与描述)。
 // 注:交付实际走 multipart/form-data(字段 ticket_id/description/targets(JSON 串)+ file),
 // 不以 JSON struct 绑定;此类型仅作文档占位与字段约定记录,不直接用于请求绑定。
+
+// ===== 公开配置 config =====
+
+// PublicConfigResponse 是 GET /api/v1/config 的响应：登录前可读的平台级前端配置。
+type PublicConfigResponse struct {
+	// DefaultLocale 是平台默认界面语言（en/zh），登录页 localStorage 为空时采用。
+	DefaultLocale string `json:"default_locale"`
+	// SupportedLocales 是平台受支持的界面语言集合，供前端渲染语言选择器。
+	SupportedLocales []string `json:"supported_locales"`
+}

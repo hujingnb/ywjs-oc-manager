@@ -44,6 +44,11 @@ var ErrCaptchaInvalid = errors.New("人机验证失败")
 // ErrCaptchaReplayed 表示该 Altcha 解已被消费（重放），handler 映射为 400。
 var ErrCaptchaReplayed = errors.New("人机验证已被使用")
 
+// 语言 -------------------------------------------------------------
+
+// ErrInvalidLocale 表示请求的语言不在受支持集合内，handler 层映射为 400。
+var ErrInvalidLocale = errors.New("不支持的语言")
+
 // 成员 -------------------------------------------------------------
 // 来源：原 member_service.go
 

@@ -6,6 +6,7 @@ import { computed } from 'vue'
 import type { Ref } from 'vue'
 
 import { apiDownload, apiRequest } from '@/api/client'
+import { i18n } from '@/i18n'
 import { xhrUpload } from '@/api/xhrUpload'
 import type { AppSkill, PlatformSkill, SkillEntry } from '@/api'
 import type { components } from '@/api/generated'
@@ -155,7 +156,7 @@ export function useInstallAppSkill(appId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (input: InstallSkillInput) => {
-      if (!appId.value) throw new Error('缺少实例 ID')
+      if (!appId.value) throw new Error(i18n.global.t('common.errors.missingAppId'))
       // POST body：{ source, source_ref, name, version }，后端直接返回已安装 skill 结果。
       return apiRequest<AppSkill>(`/api/v1/apps/${appId.value}/skills`, {
         method: 'POST',
@@ -175,7 +176,7 @@ export function useUninstallAppSkill(appId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (skillName: string) => {
-      if (!appId.value) throw new Error('缺少实例 ID')
+      if (!appId.value) throw new Error(i18n.global.t('common.errors.missingAppId'))
       // 204 无响应体，apiRequest 在 status=204 时返回 undefined。
       await apiRequest<void>(`/api/v1/apps/${appId.value}/skills/${skillName}`, { method: 'DELETE' })
     },
@@ -191,7 +192,7 @@ export function useUpdateAppSkill(appId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (input: UpdateAppSkillInput & { name: string }) => {
-      if (!appId.value) throw new Error('缺少实例 ID')
+      if (!appId.value) throw new Error(i18n.global.t('common.errors.missingAppId'))
       // POST body：{ version }；skillName 拼在路径里。
       const { name, ...body } = input
       return apiRequest<AppSkill>(`/api/v1/apps/${appId.value}/skills/${name}/update`, {
@@ -212,7 +213,7 @@ export function useReinstallAppSkill(appId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (skillName: string) => {
-      if (!appId.value) throw new Error('缺少实例 ID')
+      if (!appId.value) throw new Error(i18n.global.t('common.errors.missingAppId'))
       // POST 无 body；skillName 拼在路径里。
       return apiRequest<AppSkill>(`/api/v1/apps/${appId.value}/skills/${skillName}/reinstall`, {
         method: 'POST',

@@ -4,29 +4,29 @@
     <template v-else>
       <div class="summary-grid">
         <div class="summary-card">
-          <span>Token 总量</span>
+          <span>{{ t('usage.summary.totalTokens') }}</span>
           <strong>{{ formatNumber(totals.totalTokens, 0) }}</strong>
         </div>
         <div class="summary-card">
-          <span>金额</span>
+          <span>{{ t('usage.summary.totalAmount') }}</span>
           <strong>{{ formatQuotaValue(totals.totalQuota, billingStatus) }}</strong>
         </div>
         <div class="summary-card">
-          <span>使用总量</span>
+          <span>{{ t('usage.summary.totalCount') }}</span>
           <strong>{{ formatNumber(totals.totalCount, 0) }}</strong>
         </div>
         <div class="summary-card">
-          <span>模型数</span>
+          <span>{{ t('usage.summary.modelCount') }}</span>
           <strong>{{ formatNumber(totals.modelCount, 0) }}</strong>
         </div>
       </div>
 
       <div v-if="trendPoints.length" class="chart-panel">
         <div class="chart-header">
-          <strong>用量趋势</strong>
-          <span class="state-text">最近更新：{{ formatTime(view.updated_at) }}</span>
+          <strong>{{ t('usage.chart.heading') }}</strong>
+          <span class="state-text">{{ t('usage.chart.lastUpdated', { time: formatTime(view.updated_at) }) }}</span>
         </div>
-        <svg class="trend-chart" viewBox="0 0 720 180" role="img" aria-label="用量趋势折线图">
+        <svg class="trend-chart" viewBox="0 0 720 180" role="img" :aria-label="t('usage.chart.ariaLabel')">
           <polyline class="trend-grid" points="40,24 680,24 680,140 40,140 40,24" />
           <polyline v-if="tokenPolyline" class="trend-line token-line" :points="tokenPolyline" />
           <polyline v-if="quotaPolyline" class="trend-line quota-line" :points="quotaPolyline" />
@@ -41,7 +41,7 @@
         </svg>
         <div class="chart-legend">
           <span><i class="legend-token" />Token</span>
-          <span><i class="legend-quota" />金额</span>
+          <span><i class="legend-quota" />{{ t('usage.chart.legendAmount') }}</span>
         </div>
       </div>
 
@@ -60,6 +60,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NDataTable, type DataTableColumns } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 import type { AggregatedUsage } from '@/api/hooks/useUsage'
 
@@ -72,6 +73,8 @@ const props = defineProps<{
   emptyText: string
   billingStatus?: BillingStatusDTO | null
 }>()
+
+const { t } = useI18n()
 
 // totals 始终基于当前筛选结果计算，避免筛选切换后总量沿用旧上下文。
 const totals = computed(() => summarizeUsage(props.view))
@@ -93,6 +96,7 @@ function formatTime(iso: string): string {
 }
 
 // tableColumns 明确展示用户关心字段，避免后端透传字段顺序导致 DATE 空白。
+// 使用 computed 确保语言切换时列头文案响应式更新。
 const tableColumns = computed<DataTableColumns<(typeof tableRows.value)[number]>>(() => [
   { title: 'DATE', key: 'date' },
   {
@@ -101,12 +105,12 @@ const tableColumns = computed<DataTableColumns<(typeof tableRows.value)[number]>
     render: (row) => formatNumber(row.tokens, 0),
   },
   {
-    title: '金额',
+    title: t('usage.table.amount'),
     key: 'quota',
     render: (row) => formatQuotaValue(row.quota, props.billingStatus),
   },
   {
-    title: '使用次数',
+    title: t('usage.table.callCount'),
     key: 'count',
     render: (row) => formatNumber(row.count, 0),
   },
