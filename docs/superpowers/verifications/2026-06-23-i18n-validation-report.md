@@ -52,10 +52,20 @@
   非 UI 文案，本就不应翻译。
 - **登录页验证码 Altcha `Verified`**：第三方 widget 文案，不易本地化，记为已知限制。
 
+### L4 补验：三处覆盖缺口闭合（部署真实 org_member 自有实例后复扫）
+首轮自动清扫用的 fixture 实例 owner 是 org_admin 且无运行 pod，导致三处未真正验到内容；
+据正常流程部署「org_member 自有」的真实 hermes 实例（owner=被 onboard 的 org_member，pod 3/3 Running）后补验：
+- **org_member 自有实例详情内容**：以该 org_member 登录扫自有实例 8 个 tab × 中英 = 16 检查点，
+  全部停在自有 URL（无 403）、**0 key 裸露、0 错误态**。（首轮的 org_member 403 经核实为正确权限设计：
+  `CanViewApp` 限 org_member 只看自有实例，fixture 没给它自有实例所致，非 bug。）
+- **#2 kanban / cron 真实态**：在运行中 pod 下，这两个 tab 不再出现 `命令执行失败`，正常渲染。
+- **#3 动态文案**：项目前端无 n-form 校验规则（表单校验走后端），动态前端 i18n 主要在叠加层。
+  以 org_admin 触发删除应用的 `ConfirmActionModal`，验证标题、含 `{name}` 插值的消息、确认/取消
+  按钮在中英下均正确切换（`Confirm instance deletion`↔`确认删除实例` 等），并捕获删除后反馈存在。
+
 ### 已知限制（超出本次前端国际化范围）
 - **后端 apierror 错误文案为中文**：`无权访问该应用`、`命令执行失败`、`无权操作该工单` 等在
   en 界面经 `Load failed: …` 透传显示中文。属后端错误未 i18n，是独立课题，建议后续单独立项。
-  （本次清扫平台管理员访问 e2e 组织实例触发的 403 即此类。）
 
 ## L5 hermes 端到端（真实部署的运行中 pod 上验证）
 

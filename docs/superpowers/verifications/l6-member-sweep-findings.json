@@ -1,0 +1,114 @@
+[
+  {
+    "lang": "en",
+    "tab": "overview",
+    "finalPath": "/apps/3382c1f8-bd66-4004-984e-a0b23889573c/overview",
+    "keyLeaks": [],
+    "errors": []
+  },
+  {
+    "lang": "en",
+    "tab": "kanban",
+    "finalPath": "/apps/3382c1f8-bd66-4004-984e-a0b23889573c/kanban",
+    "keyLeaks": [],
+    "errors": []
+  },
+  {
+    "lang": "en",
+    "tab": "cron",
+    "finalPath": "/apps/3382c1f8-bd66-4004-984e-a0b23889573c/cron",
+    "keyLeaks": [],
+    "errors": []
+  },
+  {
+    "lang": "en",
+    "tab": "channels",
+    "finalPath": "/apps/3382c1f8-bd66-4004-984e-a0b23889573c/channels",
+    "keyLeaks": [],
+    "errors": []
+  },
+  {
+    "lang": "en",
+    "tab": "knowledge",
+    "finalPath": "/apps/3382c1f8-bd66-4004-984e-a0b23889573c/knowledge",
+    "keyLeaks": [],
+    "errors": []
+  },
+  {
+    "lang": "en",
+    "tab": "skills",
+    "finalPath": "/apps/3382c1f8-bd66-4004-984e-a0b23889573c/skills",
+    "keyLeaks": [],
+    "errors": []
+  },
+  {
+    "lang": "en",
+    "tab": "workspace",
+    "finalPath": "/apps/3382c1f8-bd66-4004-984e-a0b23889573c/workspace",
+    "keyLeaks": [],
+    "errors": []
+  },
+  {
+    "lang": "en",
+    "tab": "audit",
+    "finalPath": "/apps/3382c1f8-bd66-4004-984e-a0b23889573c/audit",
+    "keyLeaks": [],
+    "errors": []
+  },
+  {
+    "lang": "zh",
+    "tab": "overview",
+    "finalPath": "/apps/3382c1f8-bd66-4004-984e-a0b23889573c/overview",
+    "keyLeaks": [],
+    "errors": []
+  },
+  {
+    "lang": "zh",
+    "tab": "kanban",
+    "finalPath": "/apps/3382c1f8-bd66-4004-984e-a0b23889573c/kanban",
+    "keyLeaks": [],
+    "errors": []
+  },
+  {
+    "lang": "zh",
+    "tab": "cron",
+    "finalPath": "/apps/3382c1f8-bd66-4004-984e-a0b23889573c/cron",
+    "keyLeaks": [],
+    "errors": []
+  },
+  {
+    "lang": "zh",
+    "tab": "channels",
+    "finalPath": "/apps/3382c1f8-bd66-4004-984e-a0b23889573c/channels",
+    "keyLeaks": [],
+    "errors": []
+  },
+  {
+    "lang": "zh",
+    "tab": "knowledge",
+    "finalPath": "/apps/3382c1f8-bd66-4004-984e-a0b23889573c/knowledge",
+    "keyLeaks": [],
+    "errors": []
+  },
+  {
+    "lang": "zh",
+    "tab": "skills",
+    "finalPath": "/apps/3382c1f8-bd66-4004-984e-a0b23889573c/skills",
+    "keyLeaks": [],
+    "errors": []
+  },
+  {
+    "lang": "zh",
+    "tab": "workspace",
+    "finalPath": "/apps/3382c1f8-bd66-4004-984e-a0b23889573c/workspace",
+    "keyLeaks": [],
+    "errors": []
+  },
+  {
+    "lang": "zh",
+    "tab": "audit",
+    "finalPath": "/apps/3382c1f8-bd66-4004-984e-a0b23889573c/audit",
+    "keyLeaks": [],
+    "errors": []
+  }
+]
