@@ -19,6 +19,7 @@ import (
 	"oc-manager/internal/auth"
 	"oc-manager/internal/config"
 	"oc-manager/internal/integrations/ragflow"
+	"oc-manager/internal/integrations/storage"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -141,6 +142,17 @@ type KnowledgeTxRunner interface {
 	WithKnowledgeTx(ctx context.Context, fn func(KnowledgeStore) error) error
 }
 
+// knowledgeBlobStore 是分片上传依赖的对象存储能力子集（由 storage.S3ObjectStore 实现）。
+// 只在 S3 启用时注入；未注入时分片上传不可用，service 返回 ErrKnowledgeMultipartUnavailable。
+type knowledgeBlobStore interface {
+	CreateMultipartUpload(ctx context.Context, key string) (string, error)
+	UploadPart(ctx context.Context, key, uploadID string, partNumber int32, r io.Reader, size int64) (string, error)
+	CompleteMultipartUpload(ctx context.Context, key, uploadID string, parts []storage.MultipartPart) error
+	AbortMultipartUpload(ctx context.Context, key, uploadID string) error
+	OpenObject(ctx context.Context, key string) (io.ReadCloser, int64, error)
+	DeleteObject(ctx context.Context, key string) error
+}
+
 // KnowledgeService 以 RAGFlow 作为唯一文件主库，对外提供 manager 权限控制后的知识库能力。
 type KnowledgeService struct {
 	store              KnowledgeStore
@@ -151,6 +163,10 @@ type KnowledgeService struct {
 	// embeddingModelFallbacks 保存 RAGFlow 模型列表不可用时的兜底候选，setter 会复制切片避免外部修改污染服务状态。
 	embeddingModelFallbacks []config.RAGFlowEmbeddingModelConfig
 	tx                      KnowledgeTxRunner
+	// blobStore / uploadSessions / uploadPartSize 为分片上传所需依赖，仅 S3 启用时注入。
+	blobStore      knowledgeBlobStore
+	uploadSessions knowledgeUploadSessions
+	uploadPartSize int64
 }
 
 // NewKnowledgeService 创建 RAGFlow-backed 知识库服务。
@@ -160,6 +176,17 @@ func NewKnowledgeService(store KnowledgeStore, client RAGFlowKnowledgeClient) *K
 
 // SetTxRunner 注入知识库本地事务 runner。
 func (s *KnowledgeService) SetTxRunner(tx KnowledgeTxRunner) { s.tx = tx }
+
+// SetMultipartUploader 注入分片上传依赖（对象存储 + 会话存储 + 分片大小）。
+// partSize<=0 时回退默认 knowledgeUploadDefaultPartSize。仅在 S3 启用时调用，否则分片上传不可用。
+func (s *KnowledgeService) SetMultipartUploader(blob knowledgeBlobStore, sessions knowledgeUploadSessions, partSize int64) {
+	s.blobStore = blob
+	s.uploadSessions = sessions
+	if partSize <= 0 {
+		partSize = knowledgeUploadDefaultPartSize
+	}
+	s.uploadPartSize = partSize
+}
 
 // withKnowledgeTx 在事务中执行本地知识库写操作；测试未注入 runner 时退化为直接使用 store。
 func (s *KnowledgeService) withKnowledgeTx(ctx context.Context, fn func(KnowledgeStore) error) error {

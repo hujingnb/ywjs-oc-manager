@@ -26,6 +26,10 @@ export interface UploadSession {
   currentIndex: number
   // 当前 item 已传字节，由 runner 内 ctx.onProgress 回调写入。
   currentLoaded: number
+  // 当前 item 是否进入服务端「合并/收尾」阶段（分片上传 complete 期间）：
+  // 此时字节已传完(100%)但服务端仍在合并并推送 RAGFlow，UI 据此显示「合并中…」而非干卡 100%。
+  // 可选：run() 总会初始化为 false，但部分测试夹具构造 session 时不关心该字段。
+  currentFinalizing?: boolean
   // 会话起始时间戳；v1 不渲染速率，仅留作 log。
   startedAt: number
 }
@@ -36,10 +40,12 @@ export interface RunItem {
   label?: string
 }
 
-// RunnerContext 由 store 注入给 runner：onProgress 用于上报字节进度，signal 用于响应取消。
+// RunnerContext 由 store 注入给 runner：onProgress 上报字节进度，signal 响应取消，
+// onFinalizing 在字节传完、进入服务端合并阶段时调用（仅分片上传用，直传不调）。
 export interface RunnerContext {
   onProgress: (loaded: number, total: number) => void
   signal: AbortSignal
+  onFinalizing: () => void
 }
 
 // Runner 是业务侧上传函数：调用对应 mutation hook 的 mutateAsync 并把 ctx 透传给 hook。
@@ -84,6 +90,7 @@ export const useUploadProgressStore = defineStore('uploadProgress', () => {
       items: initialItems,
       currentIndex: 0,
       currentLoaded: 0,
+      currentFinalizing: false,
       startedAt: Date.now(),
     }
     // 必须通过 session.value.items 拿到响应式代理后的数组；直接复用 initialItems 闭包会绕过 Vue 的响应式
@@ -105,6 +112,7 @@ export const useUploadProgressStore = defineStore('uploadProgress', () => {
         }
         activeSession.currentIndex = i
         activeSession.currentLoaded = 0
+        activeSession.currentFinalizing = false
         item.status = 'uploading'
         currentAbort = new AbortController()
         try {
@@ -114,6 +122,12 @@ export const useUploadProgressStore = defineStore('uploadProgress', () => {
             onProgress: (loaded) => {
               if (session.value && session.value.currentIndex === i) {
                 session.value.currentLoaded = loaded
+              }
+            },
+            // 进入合并阶段：同样加 currentIndex 守卫，避免延迟回调污染下一文件。
+            onFinalizing: () => {
+              if (session.value && session.value.currentIndex === i) {
+                session.value.currentFinalizing = true
               }
             },
             signal: currentAbort.signal,

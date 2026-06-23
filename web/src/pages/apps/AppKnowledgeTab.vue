@@ -222,6 +222,7 @@ async function uploadFiles(files: File[]) {
         file: f,
         onProgress: ctx.onProgress,
         signal: ctx.signal,
+        onFinalizing: ctx.onFinalizing,
       })
     })
   } catch (err) {

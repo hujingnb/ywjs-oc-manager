@@ -22,14 +22,22 @@ import (
 	mlog "oc-manager/internal/log"
 )
 
+// uploadBackstopTimeout 是文件上传专用 HTTP client 的兜底超时。
+// 普通 RAGFlow 调用走 http（默认 30s 短超时），但大文件流式上传可能持续数分钟，
+// 30s 会误杀；这里给上传单独一个宽松上限，真正的时限由调用方传入的 ctx deadline 控制，
+// 本值仅作防止 ctx 缺失时无限阻塞的兜底。manager→RAGFlow 为集群内调用，不受公网代理超时影响。
+const uploadBackstopTimeout = 30 * time.Minute
+
 // Client 是 RAGFlow HTTP API 客户端。
 type Client struct {
 	// baseURL 保存已去掉尾部斜杠的 RAGFlow 服务地址。
 	baseURL string
 	// apiKey 是 manager 后端专用 RAGFlow API key，不下发给 Hermes。
 	apiKey string
-	// http 是带超时的底层 HTTP client。
+	// http 是带超时的底层 HTTP client，用于绝大多数短请求。
 	http *http.Client
+	// uploadHTTP 专用于文件上传，超时放宽到 uploadBackstopTimeout，避免大文件被 30s 短超时误杀。
+	uploadHTTP *http.Client
 }
 
 // CreateDatasetRequest 描述创建 RAGFlow dataset 所需的 manager 输入。
@@ -269,6 +277,11 @@ func NewClient(baseURL, apiKey string, timeout time.Duration) (*Client, error) {
 			Timeout:   timeout,
 			Transport: httplog.New(nil, mlog.LogTypeRAGFlow),
 		},
+		// 上传专用 client：同样带日志 transport，但超时放宽到兜底值，承载大文件流式上传。
+		uploadHTTP: &http.Client{
+			Timeout:   uploadBackstopTimeout,
+			Transport: httplog.New(nil, mlog.LogTypeRAGFlow),
+		},
 	}, nil
 }
 
@@ -352,21 +365,33 @@ func (c *Client) DeleteDatasets(ctx context.Context, ids []string) error {
 }
 
 // UploadDocument 上传单个文件到指定 dataset。
+//
+// 用 io.Pipe 流式构造 multipart body：后台 goroutine 边读 body 边写入 pipe，主协程把 pipe
+// 读端作为请求体直接发出，全程不把整个文件读进内存——避免大文件（最大 1GB）撑爆 manager。
+// 因 body 长度未知，HTTP 走 chunked 传输编码。走 uploadHTTP（宽松超时），实际时限由 ctx 控制。
 func (c *Client) UploadDocument(ctx context.Context, datasetID, filename string, body io.Reader) (Document, error) {
-	var buf bytes.Buffer
-	writer := multipart.NewWriter(&buf)
-	part, err := writer.CreateFormFile("file", filename)
-	if err != nil {
-		return Document{}, fmt.Errorf("构造 RAGFlow 上传字段失败: %w", err)
-	}
-	if _, err := io.Copy(part, body); err != nil {
-		return Document{}, fmt.Errorf("读取上传文件失败: %w", err)
-	}
-	if err := writer.Close(); err != nil {
-		return Document{}, fmt.Errorf("结束 multipart body 失败: %w", err)
-	}
+	pr, pw := io.Pipe()
+	writer := multipart.NewWriter(pw)
+	// 后台流式写：任一步出错都用 CloseWithError 让读端（HTTP 发送）感知并中断。
+	go func() {
+		part, err := writer.CreateFormFile("file", filename)
+		if err != nil {
+			_ = pw.CloseWithError(fmt.Errorf("构造 RAGFlow 上传字段失败: %w", err))
+			return
+		}
+		if _, err := io.Copy(part, body); err != nil {
+			_ = pw.CloseWithError(fmt.Errorf("读取上传文件失败: %w", err))
+			return
+		}
+		if err := writer.Close(); err != nil {
+			_ = pw.CloseWithError(fmt.Errorf("结束 multipart body 失败: %w", err))
+			return
+		}
+		_ = pw.Close()
+	}()
 
-	req, err := c.newRequest(ctx, http.MethodPost, c.apiPath("/api/v1/datasets", datasetID, "documents"), &buf)
+	// FormDataContentType 的 boundary 在 NewWriter 时即固定，可安全在此读取拼到请求头。
+	req, err := c.newRequest(ctx, http.MethodPost, c.apiPath("/api/v1/datasets", datasetID, "documents"), pr)
 	if err != nil {
 		return Document{}, err
 	}
@@ -374,7 +399,7 @@ func (c *Client) UploadDocument(ctx context.Context, datasetID, filename string,
 	req.Header.Set("Accept", "application/json")
 
 	var out uploadDocumentResponse
-	if err := c.do(req, &out); err != nil {
+	if err := c.doWith(c.uploadHTTP, req, &out); err != nil {
 		return Document{}, err
 	}
 	return out.Document, nil
@@ -517,7 +542,13 @@ func (c *Client) doJSON(ctx context.Context, method, pathValue string, query url
 }
 
 func (c *Client) do(req *http.Request, out any) error {
-	resp, err := c.http.Do(req)
+	return c.doWith(c.http, req, out)
+}
+
+// doWith 用指定的 HTTP client 发送请求并解析响应，便于上传走 uploadHTTP（宽松超时）、
+// 其余请求走默认 http（短超时）。
+func (c *Client) doWith(client *http.Client, req *http.Request, out any) error {
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("发送 RAGFlow 请求失败: %w", err)
 	}

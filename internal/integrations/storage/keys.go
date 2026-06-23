@@ -44,6 +44,18 @@ func SkillKey(versionID, skillName string) string {
 	return path.Join("versions", versionID, "skills", skillName+".tar")
 }
 
+// KnowledgeUploadPrefix 返回知识库分片上传暂存前缀 "kb-uploads/<uploadID>/"。
+// 分片合并完成或会话中止后由 service 层清理；末尾保留 "/" 便于前缀删除。
+func KnowledgeUploadPrefix(uploadID string) string {
+	return path.Join("kb-uploads", uploadID) + "/"
+}
+
+// KnowledgeUploadKey 返回知识库分片上传暂存对象 key "kb-uploads/<uploadID>/<filename>"。
+// 合并后的完整对象写在该 key，随后流式推送 RAGFlow 并清理。调用方保证 filename 为合法路径段。
+func KnowledgeUploadKey(uploadID, filename string) string {
+	return path.Join("kb-uploads", uploadID, filename)
+}
+
 // LibrarySkillKey 返回 skill 库共享缓存对象 key：
 // library/<source>/<sourceRef>/<version>.<ext>（如 library/platform/weather/1.0.tar）。
 // 同一 skill 同版本被多个 app 安装时只存一份。调用方保证各段不含路径分隔符。

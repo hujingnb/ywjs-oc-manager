@@ -78,6 +78,24 @@ describe('UploadProgressModal', () => {
     expect(wrapper.text()).not.toContain('关闭')
   })
 
+  // 合并阶段（分片 complete 期间）：字节已 100%，显示「合并中…」而非字节数，且隐藏取消按钮。
+  it('合并阶段渲染「合并中…」并隐藏取消按钮', async () => {
+    const wrapper = mountModal()
+    const store = useUploadProgressStore()
+    store.session = {
+      items: [{ id: '1', label: 'big.pdf', size: 100, status: 'uploading' }],
+      currentIndex: 0,
+      currentLoaded: 100,
+      currentFinalizing: true,
+      startedAt: Date.now(),
+    }
+    await nextTick()
+    expect(wrapper.text()).toContain('合并中…')
+    // 合并阶段不再展示「X / Y」字节文案，也不显示取消按钮
+    expect(wrapper.text()).not.toContain('取消上传')
+    expect(wrapper.find('.progress').attributes('data-pct')).toBe('100')
+  })
+
   // 全部 item 结束：按钮变「关闭」，汇总区显示成功 / 失败 / 取消计数。
   it('会话结束渲染关闭按钮与汇总', async () => {
     const wrapper = mountModal()
