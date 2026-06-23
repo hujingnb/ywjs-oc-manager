@@ -8,8 +8,8 @@ export interface ConversationSession {
   user_id?: string
   title?: string
   model?: string
-  started_at?: string
-  last_active?: string
+  started_at?: number
+  last_active?: number
   message_count?: number
   preview?: string
 }
@@ -18,7 +18,7 @@ export interface ConversationSession {
 export interface ConversationMessage {
   role: string
   content: unknown
-  timestamp?: string
+  timestamp?: unknown
   tool_calls?: unknown
   finish_reason?: string
 }

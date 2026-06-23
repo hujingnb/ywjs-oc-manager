@@ -12500,15 +12500,18 @@ export interface components {
             finish_reason?: string;
             /** @description user / assistant */
             role?: string;
-            /** @description 消息时间戳 */
-            timestamp?: string;
+            /**
+             * @description Timestamp 用 any 承载：api_server 的时间戳为数字（Unix 秒），用 any 避免
+             *     「数字→字符串」解码失败（与 session 时间戳同源问题）；前端不渲染此字段。
+             */
+            timestamp?: unknown;
             /** @description 工具调用（透传，前端可忽略） */
             tool_calls?: unknown;
         };
         "ocops.ConversationSession": {
             id?: string;
-            /** @description 最近活跃时间（列表按此排序） */
-            last_active?: string;
+            /** @description 最近活跃时间（Unix 秒，列表按此排序） */
+            last_active?: number;
             /** @description 消息数（列表展示） */
             message_count?: number;
             /** @description 绑定模型（可空） */
@@ -12517,8 +12520,12 @@ export interface components {
             preview?: string;
             /** @description 渠道来源：weixin / web / api_server 等 */
             source?: string;
-            /** @description 会话开始时间 */
-            started_at?: string;
+            /**
+             * @description StartedAt / LastActive 是 api_server 返回的 Unix 时间戳（秒，float），不是字符串——
+             *     真机验证发现：声明成 string 会导致 json 解码「数字→字符串」失败，整条会话端点
+             *     返回 OUTPUT_INVALID。用 float64 承载（值为 null 时解为 0）。
+             */
+            started_at?: number;
             /** @description 会话标题（可空） */
             title?: string;
             /** @description 会话归属用户标识（渠道侧） */
