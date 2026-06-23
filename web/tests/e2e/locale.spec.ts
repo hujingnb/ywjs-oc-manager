@@ -161,3 +161,62 @@ test('顶栏切换语言后退出重登仍保持（DB 持久化）', async ({ pa
   await page.getByRole('button', { name: '语言' }).click()
   await page.getByRole('option', { name: 'English' }).click()
 })
+
+// ─── org_member 登录后切换语言退出重登仍保持（覆盖非 platform_admin 角色）────────
+
+test('org_member 切换语言后退出重登仍保持（DB 持久化）', async ({ page }) => {
+  // 依赖后端与 seed-e2e fixture；无后端时跳过，避免误报。
+  let fx
+  try {
+    fx = loadE2EFixture()
+  } catch {
+    test.skip(true, '无后端 fixture，跳过 DB 持久化断言')
+    return
+  }
+
+  // 以 org_member 登录，初始语言为平台默认（en）。
+  await loginAs(page, 'org_member', fx)
+
+  // 顶栏语言选择器切到中文。
+  const switcher = page.getByRole('button', { name: /^(Language|语言|English|简体中文)$/ })
+  await switcher.click()
+  await page.getByRole('option', { name: '简体中文' }).click()
+
+  // 持久化后顶栏语言按钮标签变为中文「语言」。
+  await expect(page.getByRole('button', { name: /^语言$/ })).toBeVisible()
+
+  // 清掉 localStorage 模拟新设备，退出重登，验证语言来自 DB user.locale。
+  await page.evaluate(() => localStorage.removeItem('ocm.locale'))
+  await loginAs(page, 'org_member', fx)
+  await expect(page.getByRole('button', { name: /^语言$/ })).toBeVisible()
+})
+
+// ─── app locale API 链路：PATCH 后实例语言更新（端点端到端）────────────────────
+
+test('app locale PATCH 后实例语言更新为 en', async ({ page }) => {
+  // 依赖后端与 fixture（含 app_id）；无后端跳过。
+  let fx
+  try {
+    fx = loadE2EFixture()
+  } catch {
+    test.skip(true, '无后端 fixture，跳过 app locale 端点断言')
+    return
+  }
+
+  // 平台管理员登录，使 page.request 携带认证 cookie。
+  await loginAs(page, 'platform_admin', fx)
+
+  // PATCH 实例语言为 en，断言 2xx，且返回体 app.locale 已更新。
+  const patch = await page.request.patch(`/api/v1/apps/${fx.app_id}/locale`, {
+    data: { locale: 'en' },
+  })
+  expect(patch.ok()).toBeTruthy()
+  const patched = await patch.json()
+  expect(patched.app.locale).toBe('en')
+
+  // 再 GET 实例详情二次确认，locale 持久为 en。
+  const detail = await page.request.get(`/api/v1/apps/${fx.app_id}`)
+  expect(detail.ok()).toBeTruthy()
+  const body = await detail.json()
+  expect(body.app.locale).toBe('en')
+})
