@@ -198,3 +198,21 @@ def test_chat_stream_route(monkeypatch, tmp_path):
         )
     assert r.status_code == 200
     assert "assistant.delta" in r.text and "assistant.completed" in r.text
+
+
+# 流式续聊出错：上游抛 OpsError 时，server 必须把错误规整为「正常 data 帧」
+# {event:error,payload:{code,message}}，而非 SSE 命名事件 `event: error`——否则下游
+# Go scanSSE 会吞掉 data、前端只看到空回复（code review #1）。
+def test_chat_stream_error_emitted_as_data_frame(monkeypatch, tmp_path):
+    def boom(sid, body):
+        raise OpsError("INTERNAL", "上游炸了")
+        yield  # noqa: 使其成为生成器（raise 在 yield 前触发）
+    with mock.patch("ocops.server.conversation.chat_stream", side_effect=boom):
+        r = _client(monkeypatch, tmp_path).post(
+            "/oc/conversations/s1/chat/stream", headers=_auth(), json={"message": "hi"}
+        )
+    assert r.status_code == 200
+    # 错误以 data 帧承载、含 event:error 与错误码，不出现裸 `event: error` 命名事件行。
+    # 注：json.dumps 默认 ensure_ascii，中文 message 被转义为 \uXXXX，故断言用 ASCII 的 code。
+    assert '"event": "error"' in r.text and '"code": "INTERNAL"' in r.text
+    assert "event: error" not in r.text

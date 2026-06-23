@@ -624,10 +624,19 @@ async def conversation_chat_stream(request):
     sid = request.path_params["sid"]
 
     def gen():
+        # 错误统一规整为「正常 data 帧」{event:error,payload:{code,message}}，而非
+        # SSE 命名事件 `event: error`：下游 Go scanSSE 对 `event: error` 帧会直接终止、
+        # 不投递 data，导致前端只看到「空的成功回复」而非错误（见 code review #1）。
+        # 用 data 帧承载 error 事件，可经 scanSSE → Go client → handler → 前端
+        # evt.event==='error' 全链路透出。OpsError 与上游中途抛出的其它异常都覆盖。
         try:
             yield from conversation.chat_stream(sid, body)
         except OpsError as e:
-            yield ("event: error\ndata: " + json.dumps({"code": e.code, "message": e.message}) + "\n\n").encode()
+            frame = {"event": "error", "payload": {"code": e.code, "message": e.message}}
+            yield ("data: " + json.dumps(frame) + "\n\n").encode()
+        except Exception as e:  # 上游中途 socket/解析等非 OpsError 异常，同样规整为 error 帧
+            frame = {"event": "error", "payload": {"code": "INTERNAL", "message": str(e)}}
+            yield ("data: " + json.dumps(frame) + "\n\n").encode()
 
     return StreamingResponse(gen(), media_type="text/event-stream")
 
