@@ -258,9 +258,10 @@ describe('DashboardLayout', () => {
 
     const wrapper = mountLayout()
 
-    // 技能市场功能为组织成员增加了「技能」顶级菜单（/skills），位于「企业知识库」之后。
-    expect(menuLabels(wrapper)).toEqual(['总览', '渠道', '工作目录', '个人知识库', '企业知识库', '技能', '任务', '定时任务', '用量'])
+    // 「对话」置于成员菜单首位（最常用）；「技能」顶级菜单（/skills）位于「企业知识库」之后。
+    expect(menuLabels(wrapper)).toEqual(['对话', '总览', '渠道', '工作目录', '个人知识库', '企业知识库', '技能', '任务', '定时任务', '用量'])
     expect(menuKeys(wrapper)).toEqual([
+      '/apps/app-1/conversations',
       '/apps/app-1/overview',
       '/apps/app-1/channels',
       '/apps/app-1/workspace',
@@ -303,13 +304,14 @@ describe('DashboardLayout', () => {
       .filter(item => item.attributes('data-key')?.startsWith('member-empty-'))
     const appKeys = appItems.map(item => item.attributes('data-key'))
 
-    expect(new Set(appKeys).size).toBe(6)
+    // 成员实例能力入口共 7 个（含「对话」）：conversations/overview/channels/workspace/knowledge/kanban/cron。
+    expect(new Set(appKeys).size).toBe(7)
     expect(wrapper.find('[data-test="menu"]').attributes('data-value')).toBe('member-empty-overview')
 
     for (const item of appItems) {
       await item.trigger('click')
     }
-    expect(routerPush.mock.calls.slice(-6).map(([path]) => path)).toEqual(['/apps/empty', '/apps/empty', '/apps/empty', '/apps/empty', '/apps/empty', '/apps/empty'])
+    expect(routerPush.mock.calls.slice(-7).map(([path]) => path)).toEqual(['/apps/empty', '/apps/empty', '/apps/empty', '/apps/empty', '/apps/empty', '/apps/empty', '/apps/empty'])
   })
 
   // 覆盖非成员菜单文案：组织级知识库统一叫「企业知识库」，但管理员仍保留「实例」入口。
@@ -355,8 +357,9 @@ describe('DashboardLayout', () => {
 
     const wrapper = mountLayout()
 
-    expect(menuLabels(wrapper)).toEqual(['总览', '渠道', '工作目录', '个人知识库', '企业知识库', '技能', '任务', '定时任务', '用量'])
+    expect(menuLabels(wrapper)).toEqual(['对话', '总览', '渠道', '工作目录', '个人知识库', '企业知识库', '技能', '任务', '定时任务', '用量'])
     expect(menuKeys(wrapper)).toEqual([
+      '/apps/admin-app/conversations',
       '/apps/admin-app/overview',
       '/apps/admin-app/channels',
       '/apps/admin-app/workspace',

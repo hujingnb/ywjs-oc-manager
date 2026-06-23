@@ -59,6 +59,8 @@ provide<typeof app>('app', app)
 // allTabs 定义详情页的全部业务分区，path 必须和子路由末段保持一致。
 // 使用 computed 包裹以支持语言切换时 tab 标签响应式更新。
 const allTabs = computed<ReadonlyArray<{ path: string; label: string }>>(() => [
+  // conversations tab：实例 hermes 会话管理，所有角色均可访问，置于首位（最常用）。
+  { path: 'conversations', label: t('apps.detail.tabs.conversations') },
   { path: 'overview', label: t('apps.detail.tabs.overview') },
   { path: 'kanban', label: t('apps.detail.tabs.kanban') },
   { path: 'cron', label: t('apps.detail.tabs.cron') },
@@ -69,8 +71,6 @@ const allTabs = computed<ReadonlyArray<{ path: string; label: string }>>(() => [
   { path: 'skills', label: t('apps.detail.tabs.skills') },
   { path: 'workspace', label: t('apps.detail.tabs.workspace') },
   { path: 'audit', label: t('apps.detail.tabs.audit') },
-  // conversations tab：实例 hermes 会话管理，所有角色均可访问。
-  { path: 'conversations', label: t('apps.detail.tabs.conversations') },
 ])
 
 // 运行时 tab 仅对平台管理员可见，属基础设施层信息不向组织用户暴露。

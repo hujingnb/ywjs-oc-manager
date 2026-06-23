@@ -281,10 +281,10 @@ const memberAppPath = computed(() => memberAppTabPath('overview'))
 const menuOptions = computed<MenuOption[]>(() => {
   if (inOwnInstanceView.value) {
     return [
+      // conversations：实例 hermes 会话对话管理入口，置于成员菜单首位（最常用）。
+      { key: memberAppTabKey('conversations'), label: t('layout.nav.conversations'), icon: () => h(MessageSquare, { size: 18 }) },
       { key: memberAppTabKey('overview'), label: t('layout.nav.overview'), icon: () => h(LayoutDashboard, { size: 18 }) },
       { key: memberAppTabKey('channels'), label: t('layout.nav.channels'), icon: () => h(Radio, { size: 18 }) },
-      // conversations：实例 hermes 会话对话管理入口。
-      { key: memberAppTabKey('conversations'), label: t('layout.nav.conversations'), icon: () => h(MessageSquare, { size: 18 }) },
       { key: memberAppTabKey('workspace'), label: t('layout.nav.workspace'), icon: () => h(FolderOpen, { size: 18 }) },
       { key: memberAppTabKey('knowledge'), label: t('layout.nav.personalKnowledge'), icon: () => h(BookOpen, { size: 18 }) },
       { key: '/knowledge', label: t('layout.nav.orgKnowledge'), icon: () => h(BookOpen, { size: 18 }) },
