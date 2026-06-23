@@ -1,0 +1,491 @@
+[
+  {
+    "role": "platform_admin",
+    "lang": "en",
+    "path": "/skills",
+    "finalPath": "/skills",
+    "keyLeaks": [],
+    "residue": [
+      "Ticket query failed: 无权操作该工单"
+    ]
+  },
+  {
+    "role": "platform_admin",
+    "lang": "en",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/kanban",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/kanban",
+    "keyLeaks": [],
+    "residue": [
+      "kanban 命令执行失败"
+    ]
+  },
+  {
+    "role": "platform_admin",
+    "lang": "en",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/cron",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/cron",
+    "keyLeaks": [],
+    "residue": [
+      "cron 命令执行失败"
+    ]
+  },
+  {
+    "role": "platform_admin",
+    "lang": "zh",
+    "path": "/organizations",
+    "finalPath": "/organizations",
+    "keyLeaks": [],
+    "residue": [
+      "Platform",
+      "e2e-org",
+      "test-org"
+    ]
+  },
+  {
+    "role": "platform_admin",
+    "lang": "zh",
+    "path": "/assistant-versions",
+    "finalPath": "/assistant-versions",
+    "keyLeaks": [],
+    "residue": [
+      "Platform",
+      "e2e-version",
+      "e2e-image:dev",
+      "r1"
+    ]
+  },
+  {
+    "role": "platform_admin",
+    "lang": "zh",
+    "path": "/platform/industry-knowledge",
+    "finalPath": "/platform/industry-knowledge",
+    "keyLeaks": [],
+    "residue": [
+      "Platform"
+    ]
+  },
+  {
+    "role": "platform_admin",
+    "lang": "zh",
+    "path": "/platform/skills",
+    "finalPath": "/platform/skills",
+    "keyLeaks": [],
+    "residue": [
+      "Platform",
+      "name",
+      "description"
+    ]
+  },
+  {
+    "role": "platform_admin",
+    "lang": "zh",
+    "path": "/platform/custom-skills",
+    "finalPath": "/platform/custom-skills",
+    "keyLeaks": [],
+    "residue": [
+      "Platform"
+    ]
+  },
+  {
+    "role": "platform_admin",
+    "lang": "zh",
+    "path": "/members",
+    "finalPath": "/members",
+    "keyLeaks": [],
+    "residue": [
+      "e2e-org",
+      "e2e-app"
+    ]
+  },
+  {
+    "role": "platform_admin",
+    "lang": "zh",
+    "path": "/audit-logs",
+    "finalPath": "/audit-logs",
+    "keyLeaks": [],
+    "residue": [
+      "e2e-org"
+    ]
+  },
+  {
+    "role": "platform_admin",
+    "lang": "zh",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/runtime",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/runtime",
+    "keyLeaks": [],
+    "residue": [
+      "e2e-app",
+      "f8f30098-796e-4b43-8c3e-dfc6786aad92",
+      "Instance · Runtime",
+      "error"
+    ]
+  },
+  {
+    "role": "platform_admin",
+    "lang": "zh",
+    "path": "/platform/organizations/0dd623b9-214a-459a-b7f5-a88e079fd6f2/recharge",
+    "finalPath": "/platform/organizations/0dd623b9-214a-459a-b7f5-a88e079fd6f2/recharge",
+    "keyLeaks": [],
+    "residue": [
+      "Platform · Billing"
+    ]
+  },
+  {
+    "role": "platform_admin",
+    "lang": "zh",
+    "path": "/knowledge",
+    "finalPath": "/knowledge",
+    "keyLeaks": [],
+    "residue": [
+      "e2e-org"
+    ]
+  },
+  {
+    "role": "platform_admin",
+    "lang": "zh",
+    "path": "/usage",
+    "finalPath": "/usage",
+    "keyLeaks": [],
+    "residue": [
+      "DATE"
+    ]
+  },
+  {
+    "role": "platform_admin",
+    "lang": "zh",
+    "path": "/apps",
+    "finalPath": "/apps",
+    "keyLeaks": [],
+    "residue": [
+      "Platform · Instances",
+      "e2e-org",
+      "e2e-app",
+      "active"
+    ]
+  },
+  {
+    "role": "platform_admin",
+    "lang": "zh",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/overview",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/overview",
+    "keyLeaks": [],
+    "residue": [
+      "e2e-app",
+      "f8f30098-796e-4b43-8c3e-dfc6786aad92",
+      "Instance · Overview",
+      "e2e-version",
+      "e2e-org"
+    ]
+  },
+  {
+    "role": "platform_admin",
+    "lang": "zh",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/kanban",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/kanban",
+    "keyLeaks": [],
+    "residue": [
+      "e2e-app",
+      "f8f30098-796e-4b43-8c3e-dfc6786aad92",
+      "default"
+    ]
+  },
+  {
+    "role": "platform_admin",
+    "lang": "zh",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/cron",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/cron",
+    "keyLeaks": [],
+    "residue": [
+      "e2e-app",
+      "f8f30098-796e-4b43-8c3e-dfc6786aad92",
+      "Cron status unknown"
+    ]
+  },
+  {
+    "role": "platform_admin",
+    "lang": "zh",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/channels",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/channels",
+    "keyLeaks": [],
+    "residue": [
+      "e2e-app",
+      "f8f30098-796e-4b43-8c3e-dfc6786aad92",
+      "Instance · Channels",
+      "WhatsApp",
+      "Discord",
+      "Slack",
+      "Line"
+    ]
+  },
+  {
+    "role": "platform_admin",
+    "lang": "zh",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/knowledge",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/knowledge",
+    "keyLeaks": [],
+    "residue": [
+      "e2e-app",
+      "f8f30098-796e-4b43-8c3e-dfc6786aad92",
+      "Instance · Knowledge"
+    ]
+  },
+  {
+    "role": "platform_admin",
+    "lang": "zh",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/skills",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/skills",
+    "keyLeaks": [],
+    "residue": [
+      "e2e-app",
+      "f8f30098-796e-4b43-8c3e-dfc6786aad92"
+    ]
+  },
+  {
+    "role": "platform_admin",
+    "lang": "zh",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/workspace",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/workspace",
+    "keyLeaks": [],
+    "residue": [
+      "e2e-app",
+      "f8f30098-796e-4b43-8c3e-dfc6786aad92",
+      "Instance · Workspace"
+    ]
+  },
+  {
+    "role": "platform_admin",
+    "lang": "zh",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/audit",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/audit",
+    "keyLeaks": [],
+    "residue": [
+      "e2e-app",
+      "f8f30098-796e-4b43-8c3e-dfc6786aad92",
+      "Instance · Audit"
+    ]
+  },
+  {
+    "role": "org_admin",
+    "lang": "en",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/kanban",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/kanban",
+    "keyLeaks": [],
+    "residue": [
+      "kanban 命令执行失败"
+    ]
+  },
+  {
+    "role": "org_admin",
+    "lang": "en",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/cron",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/cron",
+    "keyLeaks": [],
+    "residue": [
+      "cron 命令执行失败"
+    ]
+  },
+  {
+    "role": "org_admin",
+    "lang": "zh",
+    "path": "/members",
+    "finalPath": "/members",
+    "keyLeaks": [],
+    "residue": [
+      "e2e-app"
+    ]
+  },
+  {
+    "role": "org_admin",
+    "lang": "zh",
+    "path": "/members/new",
+    "finalPath": "/members/new",
+    "keyLeaks": [],
+    "residue": [
+      "username"
+    ]
+  },
+  {
+    "role": "org_admin",
+    "lang": "zh",
+    "path": "/apps",
+    "finalPath": "/apps",
+    "keyLeaks": [],
+    "residue": [
+      "e2e-app",
+      "active"
+    ]
+  },
+  {
+    "role": "org_admin",
+    "lang": "zh",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/overview",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/overview",
+    "keyLeaks": [],
+    "residue": [
+      "e2e-app",
+      "Instance · Overview",
+      "e2e-version",
+      "e2e-org"
+    ]
+  },
+  {
+    "role": "org_admin",
+    "lang": "zh",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/kanban",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/kanban",
+    "keyLeaks": [],
+    "residue": [
+      "e2e-app",
+      "default"
+    ]
+  },
+  {
+    "role": "org_admin",
+    "lang": "zh",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/cron",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/cron",
+    "keyLeaks": [],
+    "residue": [
+      "e2e-app",
+      "Cron status unknown"
+    ]
+  },
+  {
+    "role": "org_admin",
+    "lang": "zh",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/channels",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/channels",
+    "keyLeaks": [],
+    "residue": [
+      "e2e-app",
+      "Instance · Channels",
+      "WhatsApp",
+      "Discord",
+      "Slack",
+      "Line"
+    ]
+  },
+  {
+    "role": "org_admin",
+    "lang": "zh",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/knowledge",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/knowledge",
+    "keyLeaks": [],
+    "residue": [
+      "e2e-app",
+      "Instance · Knowledge"
+    ]
+  },
+  {
+    "role": "org_admin",
+    "lang": "zh",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/skills",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/skills",
+    "keyLeaks": [],
+    "residue": [
+      "e2e-app"
+    ]
+  },
+  {
+    "role": "org_admin",
+    "lang": "zh",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/workspace",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/workspace",
+    "keyLeaks": [],
+    "residue": [
+      "e2e-app",
+      "Instance · Workspace"
+    ]
+  },
+  {
+    "role": "org_admin",
+    "lang": "zh",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/audit",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/audit",
+    "keyLeaks": [],
+    "residue": [
+      "e2e-app",
+      "Instance · Audit"
+    ]
+  },
+  {
+    "role": "org_member",
+    "lang": "en",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/overview",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/overview",
+    "keyLeaks": [],
+    "residue": [
+      "Load failed: 无权访问该应用"
+    ]
+  },
+  {
+    "role": "org_member",
+    "lang": "en",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/kanban",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/kanban",
+    "keyLeaks": [],
+    "residue": [
+      "Load failed: 无权访问该应用"
+    ]
+  },
+  {
+    "role": "org_member",
+    "lang": "en",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/cron",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/cron",
+    "keyLeaks": [],
+    "residue": [
+      "Load failed: 无权访问该应用"
+    ]
+  },
+  {
+    "role": "org_member",
+    "lang": "en",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/channels",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/channels",
+    "keyLeaks": [],
+    "residue": [
+      "Load failed: 无权访问该应用"
+    ]
+  },
+  {
+    "role": "org_member",
+    "lang": "en",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/knowledge",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/knowledge",
+    "keyLeaks": [],
+    "residue": [
+      "Load failed: 无权访问该应用"
+    ]
+  },
+  {
+    "role": "org_member",
+    "lang": "en",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/skills",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/skills",
+    "keyLeaks": [],
+    "residue": [
+      "Load failed: 无权访问该应用"
+    ]
+  },
+  {
+    "role": "org_member",
+    "lang": "en",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/workspace",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/workspace",
+    "keyLeaks": [],
+    "residue": [
+      "Load failed: 无权访问该应用"
+    ]
+  },
+  {
+    "role": "org_member",
+    "lang": "en",
+    "path": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/audit",
+    "finalPath": "/apps/f8f30098-796e-4b43-8c3e-dfc6786aad92/audit",
+    "keyLeaks": [],
+    "residue": [
+      "Load failed: 无权访问该应用"
+    ]
+  }
+]
