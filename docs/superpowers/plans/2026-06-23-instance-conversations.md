@@ -46,10 +46,19 @@
 
 **这是非 TDD 的调查任务。** 产出写入计划末尾「Spike 结论」节并据此微调 Task 2/3。
 
-**背景（已静态确认）：**
-- hermes api_server 监听 `127.0.0.1:8642`，`/api/sessions*` 端点要求 `Authorization: Bearer $API_SERVER_KEY`（`gateway/platforms/api_server.py:_check_auth`，hmac 比较）。
-- 仓库 `render_config_yaml.py` **不**渲染 api_server key；api_server 仅当 `Platform.API_SERVER` 在启用平台列表时启动（`run.py:6941`）。
-- 既有 `/oc/skills/reload` 是构建期 patch 注入的**免鉴权** 127.0.0.1 端点（`patches/patch_api_server_reload.py`），实测可用 → 说明 api_server 在生产 pod **确在运行**。
+**背景（已静态确认 —— 关键前提成立，鉴权已解）：**
+- **api_server 在每个真实 app pod 都启用**：manager 渲染 app pod 时给 hermes 容器注入
+  `API_SERVER_ENABLED=true`（`internal/integrations/k8sorch/render.go:107-111`，并有
+  `render_test.go:133` 单测守卫）。据 `gateway/config.py:1508-1518`，
+  `api_server_enabled or api_server_key` 为真即启用 `Platform.API_SERVER`，监听 `127.0.0.1:8642`。
+- **api_server 不鉴权**：仓库**未**注入 `API_SERVER_KEY`，故 `self._api_key=""`，
+  `_check_auth` 命中 `if not self._api_key: return None` 直接放行。**oc-ops 调
+  `/api/sessions` 无需任何 Bearer token**（与 `/oc/skills/reload` 免鉴权同理）。
+- 因此 Spike 的头号问题（api_server 跑不跑 / 怎么鉴权）**静态已定 = 路径 A，无需 patch**。
+  本 Task 在真实 pod 上**复核**该结论，并补齐两项非阻塞细节：真实 JSON 字段、`/chat` 微信投递行为。
+- 注意本地 `-dev` 镜像会被 manager `OcOpsResolverFromStore` 判 `Supported=false` → 对话
+  service 返回「不支持」。本地浏览器验证需临时放开该 gate 或用非 -dev 镜像；Spike 经
+  `kubectl exec` 直连 pod api_server，不受此 gate 影响。
 
 - [ ] **Step 1: 找一个运行中的真实（非 -dev）app pod**
 
@@ -2146,12 +2155,12 @@ git commit -m "docs: 记录实例对话功能三角色浏览器验证"
 > 选定鉴权路径（A 无 patch / B 注入 patch）、`/api/sessions` 与 `/messages` 真实字段、
 > `/chat` 对微信会话是否自动投递。后续 Task 按此结论校准。
 
-- api_server 运行 & 端口：______
-- API_SERVER_KEY 来源：______
-- 鉴权路径：______
-- session JSON 字段：______
-- message JSON 字段：______
-- `/chat` 微信投递行为：______
+- api_server 运行 & 端口：**已静态确认** = 启用（`API_SERVER_ENABLED=true`，render.go:107），监听 127.0.0.1:8642。
+- API_SERVER_KEY 来源：**无**（仓库未注入）→ api_server 不鉴权。
+- 鉴权路径：**A（无 patch、无 token）**——oc-ops 直接调 `/api/sessions`，`_api_server_key()` 返回空、不发 Authorization 头。
+- session JSON 字段：待真实 pod 复核（DTO 暂按源码观测：id/source/title/model/last_active）。
+- message JSON 字段：待真实 pod 复核（暂按 role/content）。
+- `/chat` 微信投递行为：待真实 pod 复核（不投递则 v1 不处理，设计已定）。
 
 ---
 
