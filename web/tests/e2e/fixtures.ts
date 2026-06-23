@@ -41,11 +41,14 @@ export async function loginAs(
     org_member: { u: fx.org_member_login, p: fx.org_member_password },
   }[role]
   await page.goto('/login')
+  // 登录页默认语言为 en（DEFAULT_LOCALE），但本地/CI 平台默认可能配成 zh；
+  // 字段标签随语言变化，故用「中文|英文」双语锚定正则匹配，避免 loginAs 绑死某一语言。
+  // 锚定 ^...$ 防止「密码」误匹配「显示密码」按钮的 aria-label。
   if (role !== 'platform_admin') {
-    await page.getByLabel('组织标识').fill(fx.org_code)
+    await page.getByLabel(/^(企业标识|Organization Code)$/).fill(fx.org_code)
   }
-  await page.getByLabel('账号').fill(credential.u)
-  await page.getByLabel('密码').fill(credential.p)
-  await page.getByRole('button', { name: '登录' }).click()
+  await page.getByLabel(/^(账号|Username)$/).fill(credential.u)
+  await page.getByLabel(/^(密码|Password)$/).fill(credential.p)
+  await page.getByRole('button', { name: /^(登录|Log in)$/ }).click()
   await page.waitForURL((url) => !url.pathname.startsWith('/login'))
 }
