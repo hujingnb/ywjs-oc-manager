@@ -57,8 +57,29 @@
   en 界面经 `Load failed: …` 透传显示中文。属后端错误未 i18n，是独立课题，建议后续单独立项。
   （本次清扫平台管理员访问 e2e 组织实例触发的 403 即此类。）
 
-## L5 hermes 端到端
-_(待执行)_
+## L5 hermes 端到端（真实部署的运行中 pod 上验证）
+
+本地此前从未构建/部署过 hermes，本次从零打通：
+1. `make build-hermes-runtime`（variant hermes-v2026.6.5，内含 203 个 hermes pytest 通过）+ ops 镜像，
+   retag 推 k3d registry（`oc-manager-hermes:v2026.6.5-dev1`、`oc-manager-ops:dev2`）。
+2. 经正常 API 建版本（image_id=v2026.6.5、main_model=deepseek-chat，new-api 实时可用）+ 建组织
+   （provisioning new-api 账户；seed 裸 SQL 的 org 无此账户会致 bootstrap 失败）+ org_admin onboard 成员。
+3. worker 处理 app_initialize → bootstrap（new-api API key=active）→ k8sorch 部署到 oc-apps。
+
+**验证证据（真实运行 pod `app-a196f893-…`，3/3 Running）：**
+
+| 阶段 | app.locale | pod `/opt/oc-input/manifest.yaml` | pod 渲染产物 `/opt/data/config.yaml` |
+|---|---|---|---|
+| 初始部署（owner 快照） | en | `app.language: en` | `language: en` |
+| PATCH locale=zh + pod 重建 | zh | `app.language: zh` | `language: zh` |
+
+证明完整链路：**DB app.locale → manager 下发 manifest app.language → pod 拉取 → oc-entrypoint
+renderer 读取并渲染运行时 config.language**（commit 8bc17a1「语言不再硬编码」在真实 pod 上成立）。
+并验证「创建实例时快照 owner locale」：owner 无 locale → app.locale 快照为平台默认 en。
+
+**环境限制（非功能缺陷）：** hermes bot 对终端用户说话经渠道（wechat 扫码登录），无「测试对话」
+HTTP 端点；自动化环境无法绑定真实 wechat，故未做「人与 bot 逐句对话」。但 bot 语言的决定因素
+（运行时 config.language + SOUL.md 系统提示）已在真实 pod 上确认为 zh，等价于 bot 将以中文应答。
 
 ## 执行记录
 - L3 e2e 最终运行结果：**7 passed**（登录页切换×3、登录后持久化×2 含 org_member、app locale 端点链路×1）。

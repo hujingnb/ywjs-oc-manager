@@ -9,6 +9,11 @@ import { fileURLToPath } from 'node:url'
 //    供单条 spec 通过 fixtures.ts 的 loadE2EFixture() 读取；
 // 3. 找不到合法 JSON 直接抛错，避免 spec 拿到半截脏数据。
 async function globalSetup() {
+  // OCM_E2E_NO_SEED=1 时跳过 seed-e2e（不 truncate 业务表）：用于对现有数据跑一次性运维型 spec，
+  // 避免清掉手工准备的实例。依赖 fixture 的常规用例此时拿不到 OCM_E2E_FIXTURE 会自行 test.skip。
+  if (process.env.OCM_E2E_NO_SEED === '1') {
+    return
+  }
   // 在 ESM 下没有 __dirname；用 import.meta.url 反推当前文件目录，再回到仓库根。
   const here = dirname(fileURLToPath(import.meta.url))
   const repoRoot = resolve(here, '../../..')
