@@ -87,8 +87,14 @@ def session_messages(session_id: str) -> list:
 
 
 def create_session(body: dict) -> dict:
-    """新建会话；body 透传（source/title 等），返回新建会话对象。"""
-    return _json("POST", "/api/sessions", body)
+    """新建会话；body 透传（source/title 等），返回新建会话对象。
+
+    api_server 把新建会话包在 {"object":"hermes.session","session":{...}} 里，
+    解包 session 键，返回扁平的会话对象（与 list 的元素形状一致），否则下游
+    manager 解不出 id。
+    """
+    out = _json("POST", "/api/sessions", body)
+    return out.get("session", out) if isinstance(out, dict) else out
 
 
 def delete_session(session_id: str) -> None:
@@ -104,9 +110,14 @@ def chat(session_id: str, body: dict) -> dict:
 
 
 def update_title(session_id: str, title: str) -> dict:
-    """重命名会话：PATCH /api/sessions/{id}，body {"title": ...}，返回更新后的会话对象。"""
+    """重命名会话：PATCH /api/sessions/{id}，body {"title": ...}，返回更新后的会话对象。
+
+    与 create_session 一样，api_server 把会话包在 {"object",...,"session":{...}} 里，
+    解包 session 键返回扁平会话对象。
+    """
     sid = urllib.parse.quote(session_id, safe="")
-    return _json("PATCH", f"/api/sessions/{sid}", {"title": title})
+    out = _json("PATCH", f"/api/sessions/{sid}", {"title": title})
+    return out.get("session", out) if isinstance(out, dict) else out
 
 
 def chat_stream(session_id: str, body: dict):

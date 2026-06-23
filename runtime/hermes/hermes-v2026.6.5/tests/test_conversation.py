@@ -61,3 +61,24 @@ def test_chat_posts_message():
         out = conversation.chat("s1", {"message": "hi"})
     assert out["message"]["content"] == "ok"
     assert op.call_args[0][0].method == "POST"
+
+
+# 新建会话：api_server 返回 {"object","session":{...}} 包裹形状，create_session 必须
+# 解包 session 键返回扁平会话对象，否则下游 manager 解不出 id（真机验证发现的 bug）。
+def test_create_session_unwraps_session_key():
+    payload = json.dumps({"object": "hermes.session", "session": {"id": "api_1", "source": "api_server"}}).encode()
+    with mock.patch.object(conversation, "_api_server_key", return_value="k"), \
+         mock.patch("urllib.request.urlopen", return_value=_FakeResp(payload)) as op:
+        out = conversation.create_session({"source": "web"})
+    assert out == {"id": "api_1", "source": "api_server"}  # 已解包到扁平对象
+    assert op.call_args[0][0].method == "POST"
+
+
+# 重命名：PATCH 同样返回 {"object","session":{...}}，update_title 必须解包 session 键。
+def test_update_title_unwraps_session_key():
+    payload = json.dumps({"object": "hermes.session", "session": {"id": "api_1", "title": "新名"}}).encode()
+    with mock.patch.object(conversation, "_api_server_key", return_value="k"), \
+         mock.patch("urllib.request.urlopen", return_value=_FakeResp(payload)) as op:
+        out = conversation.update_title("api_1", "新名")
+    assert out == {"id": "api_1", "title": "新名"}  # 已解包
+    assert op.call_args[0][0].method == "PATCH"
