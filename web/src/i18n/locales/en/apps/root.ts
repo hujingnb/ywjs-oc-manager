@@ -154,7 +154,7 @@ export default {
     currentStatus: 'Current status: ',
     noContainer: 'No container created yet',
     latestSnapshot: 'Latest snapshot: ',
-    snapshotError: '| Snapshot error: ',
+    snapshotError: '｜ Snapshot error: ',
     noSnapshot: 'Resource metrics not yet collected (first collection within 30s).',
     recentOp: 'Recent runtime operation',
     // Delete confirm
