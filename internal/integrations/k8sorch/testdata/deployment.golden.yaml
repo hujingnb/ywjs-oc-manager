@@ -25,6 +25,11 @@ spec:
           value: /opt/data
         - name: API_SERVER_ENABLED
           value: "true"
+        - name: API_SERVER_KEY
+          valueFrom:
+            secretKeyRef:
+              key: control-token
+              name: app-a1-token
         image: registry/hermes:v1
         name: hermes
         readinessProbe:
@@ -60,6 +65,11 @@ spec:
         - "8080"
         env:
         - name: OC_OPS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: control-token
+              name: app-a1-token
+        - name: API_SERVER_KEY
           valueFrom:
             secretKeyRef:
               key: control-token

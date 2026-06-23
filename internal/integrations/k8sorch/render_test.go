@@ -133,6 +133,45 @@ func TestRenderDeploymentHermesAPIServer(t *testing.T) {
 	assert.Equal(t, "true", envs["API_SERVER_ENABLED"], "hermes 容器必须置 API_SERVER_ENABLED=true 以启动内置 api_server")
 }
 
+// envByName 在容器 env 中按名查找一条 EnvVar，未找到返回 nil。
+func envByName(c *corev1.Container, name string) *corev1.EnvVar {
+	for i := range c.Env {
+		if c.Env[i].Name == name {
+			return &c.Env[i]
+		}
+	}
+	return nil
+}
+
+// containerByName 在 deployment 中按名定位容器，未找到返回 nil。
+func containerByName(dep *appsv1.Deployment, name string) *corev1.Container {
+	for i := range dep.Spec.Template.Spec.Containers {
+		if dep.Spec.Template.Spec.Containers[i].Name == name {
+			return &dep.Spec.Template.Spec.Containers[i]
+		}
+	}
+	return nil
+}
+
+// TestRenderDeploymentAPIServerKey 断言 hermes 与 oc-ops 两容器都注入了 API_SERVER_KEY，
+// 且来源同为 per-app control-token Secret——这是 api_server 能启动（上游硬性要求 key，
+// 缺失即拒绝启动，含 loopback 绑定）且 oc-ops 能鉴权调 /api/sessions 的前提。
+// 该用例守护真实 pod 验证发现的缺陷：仅设 API_SERVER_ENABLED 而不设 key 会让 api_server
+// 拒绝启动、会话功能整体不可用。
+func TestRenderDeploymentAPIServerKey(t *testing.T) {
+	dep := RenderDeployment(testSpec(), "oc-apps")
+	for _, name := range []string{"hermes", "oc-ops"} {
+		c := containerByName(dep, name)
+		require.NotNil(t, c, "渲染结果必须包含容器 %s", name)
+		ev := envByName(c, "API_SERVER_KEY")
+		require.NotNil(t, ev, "%s 容器必须注入 API_SERVER_KEY，否则 api_server 拒绝启动 / oc-ops 无法鉴权", name)
+		require.NotNil(t, ev.ValueFrom, "%s 的 API_SERVER_KEY 必须来自 Secret 引用", name)
+		require.NotNil(t, ev.ValueFrom.SecretKeyRef, "%s 的 API_SERVER_KEY 必须用 SecretKeyRef", name)
+		assert.Equal(t, "control-token", ev.ValueFrom.SecretKeyRef.Key,
+			"%s 的 API_SERVER_KEY 应复用 per-app control-token", name)
+	}
+}
+
 // TestRenderService 验证 oc-ops Service 渲染（selector + 8080）。
 func TestRenderService(t *testing.T) {
 	assertGolden(t, "service.golden.yaml", RenderService(testSpec(), "oc-apps"))

@@ -105,10 +105,15 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 							Name:  "hermes",
 							Image: spec.HermesImage,
 							// API_SERVER_ENABLED=true：启动 hermes 内置 api_server（127.0.0.1:8642，与 gateway 同进程），
-							// 供 oc-ops 触发 POST /oc/skills/reload 免重启热加载 skill。
+							// 供 oc-ops 触发 POST /oc/skills/reload 免重启热加载 skill 与会话端点转发。
+							// API_SERVER_KEY：上游 api_server 即使 enabled 也**硬性要求**配置 key，否则
+							// 拒绝启动（含 loopback-only 绑定）。复用 per-app control-token 作为 key——
+							// api_server 仅绑 127.0.0.1、只有同 pod 内 oc-ops 可达，per-app 密钥安全足够；
+							// oc-ops 容器注入同一 key（见下）后即可鉴权调用 /api/sessions。
 							Env: append([]corev1.EnvVar{
 								{Name: "HERMES_HOME", Value: "/opt/data"},
 								{Name: "API_SERVER_ENABLED", Value: "true"},
+								{Name: "API_SERVER_KEY", ValueFrom: ctrlTokenEnv.ValueFrom},
 							}, proxyEnv...),
 							VolumeMounts: []corev1.VolumeMount{inputMountRO, dataMount},
 							Resources:    corev1.ResourceRequirements{Requests: reqs, Limits: lims},
@@ -138,8 +143,12 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 							// 但 uvicorn 直接 `python -m uvicorn ocops.server:app` 启动、不经 oc-* shim
 							// 的 sys.path.insert("/usr/local/lib")，故须显式置 PYTHONPATH 让 venv python
 							// 能解析 `import ocops`，否则 sidecar 起不来（ModuleNotFoundError: ocops）。
+							// API_SERVER_KEY 与 hermes 容器同源（control-token），让 oc-ops 调
+							// hermes api_server /api/sessions 时带 Bearer 鉴权（conversation._api_server_key
+							// 优先读此 env）；两容器同 key 才能互通。
 							Env: append([]corev1.EnvVar{
 								{Name: "OC_OPS_TOKEN", ValueFrom: ctrlTokenEnv.ValueFrom},
+								{Name: "API_SERVER_KEY", ValueFrom: ctrlTokenEnv.ValueFrom},
 								{Name: "PYTHONPATH", Value: "/usr/local/lib"},
 							}, proxyEnv...),
 							Ports:        []corev1.ContainerPort{{ContainerPort: 8080}},
