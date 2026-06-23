@@ -43,6 +43,8 @@ export default {
       skills: '技能',
       workspace: '工作目录',
       audit: '审计',
+      // conversations tab：实例 hermes 会话对话管理
+      conversations: '对话',
     },
   },
   // overview：概览 tab（AppOverviewTab）

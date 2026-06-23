@@ -69,6 +69,8 @@ const allTabs = computed<ReadonlyArray<{ path: string; label: string }>>(() => [
   { path: 'skills', label: t('apps.detail.tabs.skills') },
   { path: 'workspace', label: t('apps.detail.tabs.workspace') },
   { path: 'audit', label: t('apps.detail.tabs.audit') },
+  // conversations tab：实例 hermes 会话管理，所有角色均可访问。
+  { path: 'conversations', label: t('apps.detail.tabs.conversations') },
 ])
 
 // 运行时 tab 仅对平台管理员可见，属基础设施层信息不向组织用户暴露。

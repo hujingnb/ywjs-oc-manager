@@ -42,6 +42,8 @@ export default {
     skills: '技能',
     tasks: '任务',
     cron: '定时任务',
+    // conversations：成员侧边栏「对话」入口，指向实例对话管理 tab
+    conversations: '对话',
     usage: '用量',
     console: '控制台',
     organizations: '企业',

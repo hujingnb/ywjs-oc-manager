@@ -114,6 +114,8 @@ export const router = createRouter({
             { path: 'skills', component: AppSkillsTab, props: true },
             { path: 'workspace', component: AppWorkspaceTab, props: true },
             { path: 'audit', component: AppAuditTab, props: true },
+            // conversations tab：实例 hermes 会话管理（流式续聊 + 会话列表）。
+            { path: 'conversations', component: () => import('@/pages/apps/AppConversationsTab.vue'), props: true },
           ],
         },
       ],

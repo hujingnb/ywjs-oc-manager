@@ -171,7 +171,7 @@ import {
 } from 'naive-ui'
 import {
   BarChart3, BookOpen, Bot, Boxes, Building2, CalendarClock, FileSearch,
-  FolderOpen, Gauge, KeyRound, LayoutDashboard, ListChecks, LogOut, Package, Puzzle, Radio, RefreshCw,
+  FolderOpen, Gauge, KeyRound, LayoutDashboard, ListChecks, LogOut, MessageSquare, Package, Puzzle, Radio, RefreshCw,
   ShieldCheck, Users, Wallet, Wrench,
 } from 'lucide-vue-next'
 
@@ -254,10 +254,10 @@ const { perspective, setPerspective, resetPerspective } = useAdminPerspective()
 const inOwnInstanceView = computed(() => isOrgMember.value || (isOrgAdmin.value && perspective.value === 'instance'))
 
 // MemberAppTab 是组织成员左侧菜单可直达的实例业务分区；值必须与 /apps/:appId/:tab 子路由末段一致。
-type MemberAppTab = 'overview' | 'kanban' | 'cron' | 'channels' | 'knowledge' | 'workspace'
+type MemberAppTab = 'overview' | 'kanban' | 'cron' | 'channels' | 'knowledge' | 'workspace' | 'conversations'
 
 // memberAppTabs 用于从当前路由末段反查成员菜单高亮项，避免所有 /apps 路径都落到同一个「实例」入口。
-const memberAppTabs: readonly MemberAppTab[] = ['overview', 'kanban', 'cron', 'channels', 'knowledge', 'workspace']
+const memberAppTabs: readonly MemberAppTab[] = ['overview', 'kanban', 'cron', 'channels', 'knowledge', 'workspace', 'conversations']
 
 // memberAppTabPath 根据成员唯一实例生成现有详情页路由；无实例时统一落到空状态页。
 function memberAppTabPath(tab: MemberAppTab) {
@@ -283,6 +283,8 @@ const menuOptions = computed<MenuOption[]>(() => {
     return [
       { key: memberAppTabKey('overview'), label: t('layout.nav.overview'), icon: () => h(LayoutDashboard, { size: 18 }) },
       { key: memberAppTabKey('channels'), label: t('layout.nav.channels'), icon: () => h(Radio, { size: 18 }) },
+      // conversations：实例 hermes 会话对话管理入口。
+      { key: memberAppTabKey('conversations'), label: t('layout.nav.conversations'), icon: () => h(MessageSquare, { size: 18 }) },
       { key: memberAppTabKey('workspace'), label: t('layout.nav.workspace'), icon: () => h(FolderOpen, { size: 18 }) },
       { key: memberAppTabKey('knowledge'), label: t('layout.nav.personalKnowledge'), icon: () => h(BookOpen, { size: 18 }) },
       { key: '/knowledge', label: t('layout.nav.orgKnowledge'), icon: () => h(BookOpen, { size: 18 }) },

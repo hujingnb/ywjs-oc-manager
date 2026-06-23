@@ -43,6 +43,8 @@ export default {
       skills: 'Skills',
       workspace: 'Workspace',
       audit: 'Audit',
+      // conversations tab: instance hermes conversation management
+      conversations: 'Conversations',
     },
   },
   // overview: Overview tab (AppOverviewTab)

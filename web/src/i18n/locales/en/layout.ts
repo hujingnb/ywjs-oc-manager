@@ -42,6 +42,8 @@ export default {
     skills: 'Skills',
     tasks: 'Tasks',
     cron: 'Scheduled Tasks',
+    // conversations: member sidebar entry for the conversations tab
+    conversations: 'Conversations',
     usage: 'Usage',
     console: 'Console',
     organizations: 'Organizations',
