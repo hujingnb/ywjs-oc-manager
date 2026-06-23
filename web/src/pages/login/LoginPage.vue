@@ -100,8 +100,8 @@
     </button>
 
     <div class="login-security">
-      <span>Secure runtime access</span>
-      <span>AI task control plane</span>
+      <span>{{ t('login.securityNote') }}</span>
+      <span>{{ t('login.controlNote') }}</span>
     </div>
   </form>
 </template>

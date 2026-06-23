@@ -25,4 +25,7 @@ export default {
   submitting: '登录中…',
   // 登录失败兜底提示（后端未返回具体错误时使用）
   loginFailed: '登录失败',
+  // 表单底部两枚装饰性安全标语
+  securityNote: '安全运行接入',
+  controlNote: 'AI 任务控制中枢',
 } as const

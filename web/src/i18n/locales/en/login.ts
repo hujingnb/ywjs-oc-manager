@@ -25,4 +25,7 @@ export default {
   submitting: 'Logging in…',
   // 登录失败兜底提示（后端未返回具体错误时使用）
   loginFailed: 'Login failed',
+  // 表单底部两枚装饰性安全标语
+  securityNote: 'Secure runtime access',
+  controlNote: 'AI task control plane',
 } as const
