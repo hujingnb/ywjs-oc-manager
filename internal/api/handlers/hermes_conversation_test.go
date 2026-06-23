@@ -39,6 +39,17 @@ func (s *stubConversationService) Chat(_ context.Context, _ auth.Principal, _, _
 	s.gotMsg = msg
 	return ocops.ConversationChatResult{Message: ocops.ConversationMessage{Role: "assistant", Content: "ok"}}, s.err
 }
+func (s *stubConversationService) ChatStream(_ context.Context, _ auth.Principal, _, _, msg string) (<-chan ocops.ConversationStreamEvent, error) {
+	s.gotMsg = msg
+	if s.err != nil {
+		return nil, s.err
+	}
+	// 预填一条事件后关闭 channel，模拟流式输出
+	ch := make(chan ocops.ConversationStreamEvent, 1)
+	ch <- ocops.ConversationStreamEvent{Event: "assistant.delta", Payload: []byte(`{"delta":"hi"}`)}
+	close(ch)
+	return ch, nil
+}
 
 func newConvTestRouter(svc conversationHandlerService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
@@ -76,4 +87,17 @@ func TestHandlerForbidden(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps/app-1/hermes/conversations", nil)
 	newConvTestRouter(svc).ServeHTTP(w, req)
 	require.Equal(t, http.StatusForbidden, w.Code)
+}
+
+// 流式续聊：stub 返回预填 channel，handler 写出 SSE 帧，响应体含 assistant.delta 事件。
+func TestHandlerChatStream(t *testing.T) {
+	svc := &stubConversationService{}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/apps/app-1/hermes/conversations/s1/chat/stream",
+		strings.NewReader(`{"message":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	newConvTestRouter(svc).ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	// 响应体应包含事件 JSON 帧（assistant.delta 事件名）
+	assert.Contains(t, w.Body.String(), "assistant.delta")
 }

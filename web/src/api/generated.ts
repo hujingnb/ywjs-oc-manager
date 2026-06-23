@@ -819,6 +819,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/apps/{appId}/hermes/conversations/{sid}/chat/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 流式续聊 */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description 会话 ID */
+                    sid: string;
+                };
+                cookie?: never;
+            };
+            /** @description 续聊请求 */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["handlers.ConversationChatRequest"];
+                };
+            };
+            responses: {
+                /** @description SSE 事件流，每帧 data 为 {event,payload} */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/event-stream": string;
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/apps/{appId}/hermes/conversations/{sid}/messages": {
         parameters: {
             query?: never;

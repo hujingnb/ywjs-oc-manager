@@ -53,3 +53,29 @@ func TestSessionMessagesNotFound(t *testing.T) {
 	_, err := c.SessionMessages(context.Background(), Endpoint{BaseURL: srv.URL, Token: "tk"}, "nope")
 	require.ErrorIs(t, err, ErrNotFound)
 }
+
+// SessionChatStream：POST 携带 body，服务端返回两帧 SSE，channel 按序接收并正确解析。
+func TestSessionChatStream(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 校验路径与方法
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/oc/conversations/s1/chat/stream", r.URL.Path)
+		// 写两条 SSE 帧（命名事件格式，与 oc-ops 输出一致）
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"event\":\"assistant.delta\",\"payload\":{\"delta\":\"he\"}}\n\n"))
+		_, _ = w.Write([]byte("data: {\"event\":\"assistant.completed\",\"payload\":{}}\n\n"))
+	}))
+	defer srv.Close()
+	c := NewClient(srv.Client())
+	ch, err := c.SessionChatStream(context.Background(), Endpoint{BaseURL: srv.URL, Token: "tk"},
+		"s1", ConversationChatReq{Message: "hi"})
+	require.NoError(t, err)
+	// 从 channel 读出两条事件，校验事件名
+	var events []ConversationStreamEvent
+	for ev := range ch {
+		events = append(events, ev)
+	}
+	require.Len(t, events, 2)
+	assert.Equal(t, "assistant.delta", events[0].Event)     // 第一帧事件名
+	assert.Equal(t, "assistant.completed", events[1].Event) // 第二帧事件名
+}

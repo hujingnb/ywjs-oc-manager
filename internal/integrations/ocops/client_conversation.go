@@ -2,7 +2,9 @@
 package ocops
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -50,4 +52,36 @@ func (c *Client) SessionChat(ctx context.Context, ep Endpoint, sid string, req C
 	var out ConversationChatResult
 	err := c.DoJSON(ctx, ep, http.MethodPost, "/oc/conversations/"+url.PathEscape(sid)+"/chat", req, &out)
 	return out, err
+}
+
+// SessionChatStream 流式续聊，返回逐帧事件 channel；流结束/ctx 取消时关闭。
+// POST /oc/conversations/{sid}/chat/stream
+func (c *Client) SessionChatStream(ctx context.Context, ep Endpoint, sid string, req ConversationChatReq) (<-chan ConversationStreamEvent, error) {
+	b, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.openStreamBody(ctx, ep, http.MethodPost,
+		"/oc/conversations/"+url.PathEscape(sid)+"/chat/stream", bytes.NewReader(b), "application/json")
+	if err != nil {
+		return nil, err
+	}
+	ch := make(chan ConversationStreamEvent, sseChanBuffer)
+	go func() {
+		defer close(ch)
+		defer resp.Body.Close()
+		scanSSE(ctx, resp.Body, func(data []byte) bool {
+			var ev ConversationStreamEvent
+			if err := json.Unmarshal(data, &ev); err != nil {
+				return true // 跳过无法解析的帧
+			}
+			select {
+			case ch <- ev:
+				return true
+			case <-ctx.Done():
+				return false
+			}
+		})
+	}()
+	return ch, nil
 }

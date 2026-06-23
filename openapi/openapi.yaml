@@ -2661,6 +2661,42 @@ paths:
       summary: 续聊一轮
       tags:
       - hermes-conversation
+  /apps/{appId}/hermes/conversations/{sid}/chat/stream:
+    post:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 会话 ID
+        in: path
+        name: sid
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/handlers.ConversationChatRequest'
+              description: 续聊请求
+              summary: body
+        description: 续聊请求
+        required: true
+      responses:
+        "200":
+          content:
+            text/event-stream:
+              schema:
+                type: string
+          description: SSE 事件流，每帧 data 为 {event,payload}
+      security:
+      - BearerAuth: []
+      summary: 流式续聊
+      tags:
+      - hermes-conversation
   /apps/{appId}/hermes/conversations/{sid}/messages:
     get:
       parameters:

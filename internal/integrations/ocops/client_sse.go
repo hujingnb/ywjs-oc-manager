@@ -106,17 +106,28 @@ type ChannelLoginEvent struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// openStream 发起一次流式请求并返回 resp（body 由调用方负责关闭）。
+// openStream 发起一次无请求体的流式请求，是 openStreamBody 的薄包装。
+// 保持现有 WatchKanban / ChannelLogin 调用方不变。
+func (c *Client) openStream(ctx context.Context, ep Endpoint, method, path string) (*http.Response, error) {
+	return c.openStreamBody(ctx, ep, method, path, nil, "")
+}
+
+// openStreamBody 发起一次流式请求并返回 resp（body 由调用方负责关闭）。
+// 若 body 非 nil，会设置为请求体；若 contentType 非空，会设置 Content-Type 头。
 // 非 2xx 时读取并关闭 body，按 statusToErr 映射哨兵错误返回（不建流）；
 // 网络级错误归入 ErrCLI。请求会带上 Bearer 鉴权头与 Accept: text/event-stream。
-func (c *Client) openStream(ctx context.Context, ep Endpoint, method, path string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, method, ep.BaseURL+path, nil)
+func (c *Client) openStreamBody(ctx context.Context, ep Endpoint, method, path string, body io.Reader, contentType string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, ep.BaseURL+path, body)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+ep.Token)
 	// 显式声明期望 SSE，便于服务端选择正确的响应内容类型
 	req.Header.Set("Accept", "text/event-stream")
+	// 仅当调用方提供了请求体时才设置 Content-Type，避免污染无 body 的 GET 请求
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
 
 	// 用无 Timeout 的 streamHTTP：普通 httpClient 的 Timeout 会中断流式 Body 读取，
 	// 掐断 kanban watch / 微信扫码长连接；流的截止由 ctx 控制。

@@ -177,3 +177,16 @@ def test_chat_internal_error(monkeypatch, tmp_path):
         )
     assert r.status_code == 500
     assert r.json()["code"] == "INTERNAL"
+
+
+# 流式续聊：server 把 conversation.chat_stream 的逐帧 bytes 透传为 text/event-stream。
+def test_chat_stream_route(monkeypatch, tmp_path):
+    def fake_stream(sid, body):
+        yield b'data: {"event":"assistant.delta","payload":{"delta":"he"}}\n\n'
+        yield b'data: {"event":"assistant.completed","payload":{}}\n\n'
+    with mock.patch("ocops.server.conversation.chat_stream", side_effect=fake_stream):
+        r = _client(monkeypatch, tmp_path).post(
+            "/oc/conversations/s1/chat/stream", headers=_auth(), json={"message": "hi"}
+        )
+    assert r.status_code == 200
+    assert "assistant.delta" in r.text and "assistant.completed" in r.text

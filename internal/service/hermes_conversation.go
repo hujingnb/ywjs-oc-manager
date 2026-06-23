@@ -155,3 +155,23 @@ func (s *HermesConversationService) Chat(ctx context.Context, p auth.Principal, 
 	}
 	return out, nil
 }
+
+// ChatStream 流式续聊，返回事件 channel，由 handler 逐帧转 SSE。
+// message 为空白时直接拒绝；resolve/鉴权逻辑与 Chat 一致，但走流式 oc-ops 接口。
+func (s *HermesConversationService) ChatStream(ctx context.Context, p auth.Principal, appID, sid, message string) (<-chan ocops.ConversationStreamEvent, error) {
+	loc, err := s.resolveManage(ctx, p, appID)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateSessionID(sid); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(message) == "" {
+		return nil, fmt.Errorf("%w: 消息内容不能为空", ErrConversationBadRequest)
+	}
+	ch, err := s.ops.SessionChatStream(ctx, loc.Endpoint, sid, ocops.ConversationChatReq{Message: message})
+	if err != nil {
+		return nil, mapOcOpsConversationErr(err)
+	}
+	return ch, nil
+}

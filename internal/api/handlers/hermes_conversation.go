@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -21,6 +22,7 @@ type conversationHandlerService interface {
 	CreateSession(ctx context.Context, p auth.Principal, appID, title string) (ocops.ConversationSession, error)
 	DeleteSession(ctx context.Context, p auth.Principal, appID, sid string) error
 	Chat(ctx context.Context, p auth.Principal, appID, sid, message string) (ocops.ConversationChatResult, error)
+	ChatStream(ctx context.Context, p auth.Principal, appID, sid, message string) (<-chan ocops.ConversationStreamEvent, error)
 }
 
 // HermesConversationHandler 处理 /api/v1/apps/:appId/hermes/conversations/* 路由。
@@ -40,6 +42,7 @@ func RegisterHermesConversationRoutes(router gin.IRouter, h *HermesConversationH
 	g.POST("", h.Create)
 	g.GET("/:sid/messages", h.Messages)
 	g.POST("/:sid/chat", h.Chat)
+	g.POST("/:sid/chat/stream", h.ChatStream)
 	g.DELETE("/:sid", h.Delete)
 }
 
@@ -169,4 +172,47 @@ func (h *HermesConversationHandler) Chat(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"reply": out})
+}
+
+// ChatStream POST /api/v1/apps/{appId}/hermes/conversations/{sid}/chat/stream —— 流式续聊（SSE）。
+//
+// @Summary      流式续聊
+// @Tags         hermes-conversation
+// @Produce      text/event-stream
+// @Security     BearerAuth
+// @Param        appId  path  string                   true  "应用 ID"
+// @Param        sid    path  string                   true  "会话 ID"
+// @Param        body   body  ConversationChatRequest  true  "续聊请求"
+// @Success      200    {string}  string  "SSE 事件流，每帧 data 为 {event,payload}"
+// @Router       /apps/{appId}/hermes/conversations/{sid}/chat/stream [post]
+func (h *HermesConversationHandler) ChatStream(c *gin.Context) {
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "服务端不支持流式响应"))
+		return
+	}
+	var req ConversationChatRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, apierror.New("CONVERSATION_BAD_REQUEST", "消息内容不能为空"))
+		return
+	}
+	// resolve+鉴权在 ChatStream 内完成，此时尚未写响应头，错误可正常映射状态码。
+	events, err := h.service.ChatStream(c.Request.Context(), principalFromCtx(c), c.Param("appId"), c.Param("sid"), req.Message)
+	if err != nil {
+		writeConversationError(c, err)
+		return
+	}
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	flusher.Flush()
+	for ev := range events {
+		payload, mErr := json.Marshal(ev)
+		if mErr != nil {
+			continue
+		}
+		_, _ = c.Writer.WriteString("data: " + string(payload) + "\n\n")
+		flusher.Flush()
+	}
 }

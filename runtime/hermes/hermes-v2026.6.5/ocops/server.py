@@ -603,6 +603,23 @@ async def conversation_chat(request):
         return _err(e)
 
 
+async def conversation_chat_stream(request):
+    """POST /oc/conversations/{sid}/chat/stream —— 流式续聊，转发 api_server SSE。"""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    sid = request.path_params["sid"]
+
+    def gen():
+        try:
+            yield from conversation.chat_stream(sid, body)
+        except OpsError as e:
+            yield ("event: error\ndata: " + json.dumps({"code": e.code, "message": e.message}) + "\n\n").encode()
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
 # 路由表：按 REST 语义定义 HTTP 方法，无方法限制的路由接受所有方法。
 # kanban / login 路由在 Task 10/11 追加。
 routes = [
@@ -653,6 +670,7 @@ routes = [
     Route("/oc/conversations", conversation_create, methods=["POST"]),
     Route("/oc/conversations/{sid}/messages", conversation_messages, methods=["GET"]),
     Route("/oc/conversations/{sid}/chat", conversation_chat, methods=["POST"]),
+    Route("/oc/conversations/{sid}/chat/stream", conversation_chat_stream, methods=["POST"]),
     Route("/oc/conversations/{sid}", conversation_delete, methods=["DELETE"]),
 ]
 

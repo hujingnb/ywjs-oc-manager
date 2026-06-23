@@ -70,7 +70,7 @@ type channelOps interface {
 	ChannelLogin(ctx context.Context, ep ocops.Endpoint, channel string) (<-chan ocops.ChannelLoginEvent, error)
 }
 
-// conversationOps 抽象 oc-ops 的 5 个会话方法，供 HermesConversationService 注入假实现。
+// conversationOps 抽象 oc-ops 的会话方法，供 HermesConversationService 注入假实现。
 // 方法签名镜像 *ocops.Client；由 *ocops.Client 满足。
 type conversationOps interface {
 	ListSessions(ctx context.Context, ep ocops.Endpoint, source string, limit, offset int) ([]ocops.ConversationSession, error)
@@ -78,6 +78,7 @@ type conversationOps interface {
 	CreateSession(ctx context.Context, ep ocops.Endpoint, req ocops.ConversationCreateReq) (ocops.ConversationSession, error)
 	DeleteSession(ctx context.Context, ep ocops.Endpoint, sid string) error
 	SessionChat(ctx context.Context, ep ocops.Endpoint, sid string, req ocops.ConversationChatReq) (ocops.ConversationChatResult, error)
+	SessionChatStream(ctx context.Context, ep ocops.Endpoint, sid string, req ocops.ConversationChatReq) (<-chan ocops.ConversationStreamEvent, error)
 }
 
 // 编译期断言：生产实现 *ocops.Client 必须同时满足四个窄接口；

@@ -2,6 +2,8 @@
 // 字段名对齐 hermes api_server /api/sessions 响应（经 oc-ops 透传，已读源码确认）。
 package ocops
 
+import "encoding/json"
+
 // ConversationSession 是一条会话（跨渠道；source 标识来源渠道）。
 // 字段名对齐 api_server `_session_response` safe_keys。
 type ConversationSession struct {
@@ -44,4 +46,13 @@ type ConversationChatResult struct {
 type ConversationCreateReq struct {
 	Source string `json:"source,omitempty"` // 默认 web
 	Title  string `json:"title,omitempty"`
+}
+
+// ConversationStreamEvent 是 oc-ops 规整后的流式帧：event 为事件名（assistant.delta 等），
+// payload 为对应 JSON（delta 文本在 payload.delta）。
+// 注意：此类型不出现在任何 swag 注解中（handler 注解用 {string} string），
+// 以规避 swag v2 无法解析 json.RawMessage 的限制。
+type ConversationStreamEvent struct {
+	Event   string          `json:"event"`
+	Payload json.RawMessage `json:"payload"`
 }

@@ -101,3 +101,39 @@ def chat(session_id: str, body: dict) -> dict:
     """单轮续聊（非流式），body 含 message（文字/图片 parts）。返回 assistant 回复对象。"""
     sid = urllib.parse.quote(session_id, safe="")
     return _json("POST", f"/api/sessions/{sid}/chat", body)
+
+
+def chat_stream(session_id: str, body: dict):
+    """流式续聊：读取 api_server /chat/stream 的命名事件 SSE，把每个 `event:`+`data:`
+    规整成单条 `data: {"event","payload"}` 帧（bytes）逐条 yield，供 server 直接转发。
+    上游非 2xx / 网络异常映射为 OpsError（由 server 包成 event: error 帧）。"""
+    sid = urllib.parse.quote(session_id, safe="")
+    url = _API_BASE + f"/api/sessions/{sid}/chat/stream"
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST")
+    key = _api_server_key()
+    if key:
+        req.add_header("Authorization", "Bearer " + key)
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Accept", "text/event-stream")
+    try:
+        resp = urllib.request.urlopen(req, timeout=_TIMEOUT)
+    except urllib.error.HTTPError as e:
+        code = {400: "BAD_REQUEST", 401: "INTERNAL", 404: "NOT_FOUND"}.get(e.code, "INTERNAL")
+        raise OpsError(code, f"api_server {e.code}: {e.reason}")
+    except Exception as e:
+        raise OpsError("INTERNAL", f"调用 api_server 失败: {e}")
+    event_name = ""
+    for raw in resp:  # 逐行读取上游 SSE
+        line = raw.decode("utf-8", "replace").rstrip("\r\n")
+        if line.startswith("event:"):
+            event_name = line[6:].strip()
+        elif line.startswith("data:"):
+            payload = line[5:].strip()
+            try:
+                parsed = json.loads(payload)
+            except Exception:
+                parsed = payload
+            frame = json.dumps({"event": event_name or "message", "payload": parsed})
+            yield ("data: " + frame + "\n\n").encode()
+        elif line == "":
+            event_name = ""  # 帧分隔，重置事件名
