@@ -81,6 +81,25 @@ renderer 读取并渲染运行时 config.language**（commit 8bc17a1「语言不
 HTTP 端点；自动化环境无法绑定真实 wechat，故未做「人与 bot 逐句对话」。但 bot 语言的决定因素
 （运行时 config.language + SOUL.md 系统提示）已在真实 pod 上确认为 zh，等价于 bot 将以中文应答。
 
-## 执行记录
-- L3 e2e 最终运行结果：**7 passed**（登录页切换×3、登录后持久化×2 含 org_member、app locale 端点链路×1）。
-- L4 清扫：3 角色 × 双语全页通过，0 key 裸露。
+## 最终全量回归（全绿）
+- Go 单测 `go test ./...`：31 包 ok，0 FAIL。
+- 前端单测 `npm run test --run`：85 文件 / 573 tests 全 PASS。
+- 前端类型检查 `npm run typecheck`：0 错误。
+- E2E `locale.spec.ts` + `l4-i18n-sweep.spec.ts`：**10 passed**（locale 7 + l4 清扫 3 角色），0 key 裸露。
+
+## 本会话发现并修复的真实问题汇总
+| # | 层 | 问题 | commit |
+|---|---|---|---|
+| 1 | L1 | `apps.runtime.snapshotError` en 半角 `\|` 起首被 vue-i18n 误判复数分隔 → 全角 `｜` | 402c50f |
+| 2 | L3 | e2e harness：globalSetup 取末行解析 JSON 脆、fixtures 中文 label 失配 en 默认、下拉用错 role | 38005d6 |
+| 3 | L3 | seed fixture app 未绑 assistant_version 致实例查询 404 | af7c1b0 |
+| 4 | L4 | 登录页 footer 硬编码英文 span 不切换 | 3aef7eb |
+| 5 | L4 | `<html lang>` 不随语言同步（始终 zh-CN） | 2f63b66 |
+| 6 | L4 | 表格操作列默认标题硬编码「操作」，en 漏译 | 9adc793 |
+
+## 验收结论
+本次国际化改动（Manager UI 中英切换 / 用户语言持久化 / App 语言→hermes 渲染三面）经五层验证
+全部通过：翻译完整性单测、单测集成、E2E、三角色×双语全页清扫（0 key 裸露）、hermes 真实 pod
+端到端语言传导。共发现并修复 6 个真实缺陷（均已重建重部署/重扫复验），关键校验沉淀为入库回归守卫
+（completeness.spec、locale.spec、l4-i18n-sweep.spec）。仅 hermes「人与 bot 逐句对话」受 wechat
+渠道环境限制未做，其语言决定因素已在真实 pod 验证为正确。
