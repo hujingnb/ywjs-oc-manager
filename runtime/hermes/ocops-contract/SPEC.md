@@ -119,6 +119,7 @@ api_server（`/api/sessions/*`）。会话数据不在 oc-ops 落地。
 | `POST` | `/oc/conversations/{sid}/chat` | JSON body（`message`） | 单轮续聊 assistant 回复对象 |
 | `POST` | `/oc/conversations/{sid}/chat/stream` | JSON body（`message`） | SSE 流式续聊，每帧 `data: {"event","payload"}` |
 | `DELETE` | `/oc/conversations/{sid}` | - | `204 No Content` |
+| `PATCH` | `/oc/conversations/{sid}` | JSON body（`title`） | 更新后的会话对象 |
 
 ## Schema Layout
 

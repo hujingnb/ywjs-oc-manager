@@ -504,6 +504,14 @@ components:
         reason:
           type: string
       type: object
+    handlers.RenameConversationRequest:
+      properties:
+        title:
+          description: 新标题，必填
+          type: string
+      required:
+      - title
+      type: object
     handlers.ResetPasswordRequest:
       properties:
         password:
@@ -2601,6 +2609,45 @@ paths:
       security:
       - BearerAuth: []
       summary: 删除会话
+      tags:
+      - hermes-conversation
+    patch:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 会话 ID
+        in: path
+        name: sid
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.RenameConversationRequest'
+                description: 重命名请求
+                summary: body
+        description: 重命名请求
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/ocops.ConversationSession'
+                type: object
+          description: OK
+      security:
+      - BearerAuth: []
+      summary: 重命名会话
       tags:
       - hermes-conversation
   /apps/{appId}/hermes/conversations/{sid}/chat:

@@ -741,7 +741,39 @@ export interface paths {
         };
         options?: never;
         head?: never;
-        patch?: never;
+        /** 重命名会话 */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description 会话 ID */
+                    sid: string;
+                };
+                cookie?: never;
+            };
+            /** @description 重命名请求 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.RenameConversationRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["ocops.ConversationSession"];
+                        };
+                    };
+                };
+            };
+        };
         trace?: never;
     };
     "/apps/{appId}/hermes/conversations/{sid}/chat": {
@@ -12353,6 +12385,10 @@ export interface components {
         };
         "handlers.RejectSkillTicketRequest": {
             reason?: string;
+        };
+        "handlers.RenameConversationRequest": {
+            /** @description 新标题，必填 */
+            title: string;
         };
         "handlers.ResetPasswordRequest": {
             /** @description Password 是新密码，service 层只保存 hash。 */

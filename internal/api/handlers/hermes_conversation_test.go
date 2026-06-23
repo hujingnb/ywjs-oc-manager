@@ -50,6 +50,9 @@ func (s *stubConversationService) ChatStream(_ context.Context, _ auth.Principal
 	close(ch)
 	return ch, nil
 }
+func (s *stubConversationService) Rename(_ context.Context, _ auth.Principal, _, sid, title string) (ocops.ConversationSession, error) {
+	return ocops.ConversationSession{ID: sid, Title: title}, s.err
+}
 
 func newConvTestRouter(svc conversationHandlerService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
@@ -87,6 +90,20 @@ func TestHandlerForbidden(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps/app-1/hermes/conversations", nil)
 	newConvTestRouter(svc).ServeHTTP(w, req)
 	require.Equal(t, http.StatusForbidden, w.Code)
+}
+
+// 重命名会话：PATCH 携带 {"title":"新名"} → 200，响应体含 session.title。
+func TestHandlerRename(t *testing.T) {
+	svc := &stubConversationService{}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/apps/app-1/hermes/conversations/s1",
+		strings.NewReader(`{"title":"新名"}`))
+	req.Header.Set("Content-Type", "application/json")
+	newConvTestRouter(svc).ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	// 响应体应含 session 字段且 title 正确
+	assert.Contains(t, w.Body.String(), "新名")
+	assert.Contains(t, w.Body.String(), "session")
 }
 
 // 流式续聊：stub 返回预填 channel，handler 写出 SSE 帧，响应体含 assistant.delta 事件。

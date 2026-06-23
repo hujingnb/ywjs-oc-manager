@@ -591,6 +591,18 @@ async def conversation_delete(request):
         return _err(e)
 
 
+async def conversation_rename(request):
+    """PATCH /oc/conversations/{sid} —— 重命名会话，body {"title"}。"""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        return _ok(conversation.update_title(request.path_params["sid"], str(body.get("title", ""))))
+    except OpsError as e:
+        return _err(e)
+
+
 async def conversation_chat(request):
     """POST /oc/conversations/{sid}/chat —— 单轮续聊，body 含 message。"""
     try:
@@ -672,6 +684,7 @@ routes = [
     Route("/oc/conversations/{sid}/chat", conversation_chat, methods=["POST"]),
     Route("/oc/conversations/{sid}/chat/stream", conversation_chat_stream, methods=["POST"]),
     Route("/oc/conversations/{sid}", conversation_delete, methods=["DELETE"]),
+    Route("/oc/conversations/{sid}", conversation_rename, methods=["PATCH"]),
 ]
 
 # Starlette app：路由 + AuthMiddleware 中间件栈。

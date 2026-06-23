@@ -179,6 +179,14 @@ def test_chat_internal_error(monkeypatch, tmp_path):
     assert r.json()["code"] == "INTERNAL"
 
 
+# 重命名：PATCH /oc/conversations/{sid} 透传 title 给 conversation.update_title。
+def test_rename_route(monkeypatch, tmp_path):
+    with mock.patch("ocops.server.conversation.update_title", return_value={"id": "s1", "title": "新名"}) as m:
+        r = _client(monkeypatch, tmp_path).patch("/oc/conversations/s1", headers=_auth(), json={"title": "新名"})
+    assert r.status_code == 200 and r.json()["title"] == "新名"
+    assert m.call_args[0] == ("s1", "新名")
+
+
 # 流式续聊：server 把 conversation.chat_stream 的逐帧 bytes 透传为 text/event-stream。
 def test_chat_stream_route(monkeypatch, tmp_path):
     def fake_stream(sid, body):

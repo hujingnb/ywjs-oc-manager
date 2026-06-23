@@ -44,6 +44,10 @@ func (f *fakeConversationOps) SessionChatStream(_ context.Context, _ ocops.Endpo
 	close(ch)
 	return ch, nil
 }
+func (f *fakeConversationOps) UpdateSessionTitle(_ context.Context, _ ocops.Endpoint, sid, title string) (ocops.ConversationSession, error) {
+	f.gotSID = sid
+	return ocops.ConversationSession{ID: sid, Title: title}, nil
+}
 
 // 有权用户可列会话，透传 ops 返回。
 func TestConversationServiceList(t *testing.T) {
@@ -95,6 +99,31 @@ func TestConversationServiceChatStream(t *testing.T) {
 	}
 	require.Len(t, events, 1)
 	assert.Equal(t, "assistant.delta", events[0].Event)
+}
+
+// 重命名会话（授权用户 + 正常路径）：返回含新标题的会话对象。
+func TestConversationServiceRename(t *testing.T) {
+	ops := &fakeConversationOps{}
+	loc := OcOpsAppLocation{OrgID: "o1", OwnerUserID: "u1", Supported: true, Endpoint: ocops.Endpoint{BaseURL: "http://x"}}
+	svc := NewHermesConversationService(ops, &fakeOcOpsResolver{loc: loc})
+	// 实例主（org_member 且为 OwnerUserID），有写权限
+	p := auth.Principal{Role: domain.UserRoleOrgMember, OrgID: "o1", UserID: "u1"}
+	out, err := svc.Rename(context.Background(), p, "app-1", "s1", "新标题")
+	require.NoError(t, err)
+	// ops 应返回含新标题的会话，sid 透传正确
+	assert.Equal(t, "s1", out.ID)
+	assert.Equal(t, "新标题", out.Title)
+}
+
+// 空白标题被 service 校验拦截，返回 ErrConversationBadRequest，不透传上游。
+func TestConversationServiceRenameEmpty(t *testing.T) {
+	ops := &fakeConversationOps{}
+	loc := OcOpsAppLocation{OrgID: "o1", OwnerUserID: "u1", Supported: true, Endpoint: ocops.Endpoint{BaseURL: "http://x"}}
+	svc := NewHermesConversationService(ops, &fakeOcOpsResolver{loc: loc})
+	p := auth.Principal{Role: domain.UserRoleOrgMember, OrgID: "o1", UserID: "u1"}
+	// 空白标题应被 service 层拦截，不透传 oc-ops
+	_, err := svc.Rename(context.Background(), p, "app-1", "s1", "   ")
+	require.ErrorIs(t, err, ErrConversationBadRequest)
 }
 
 // 流式续聊空消息被校验拒绝，返回 ErrConversationBadRequest。

@@ -483,6 +483,11 @@ type ConversationChatRequest struct {
 	Message string `json:"message" binding:"required"`
 }
 
+// RenameConversationRequest 是 PATCH /hermes/conversations/:sid 的请求体。
+type RenameConversationRequest struct {
+	Title string `json:"title" binding:"required"` // 新标题，必填
+}
+
 // ===== 公开配置 config =====
 
 // PublicConfigResponse 是 GET /api/v1/config 的响应：登录前可读的平台级前端配置。

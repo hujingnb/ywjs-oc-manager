@@ -79,6 +79,7 @@ type conversationOps interface {
 	DeleteSession(ctx context.Context, ep ocops.Endpoint, sid string) error
 	SessionChat(ctx context.Context, ep ocops.Endpoint, sid string, req ocops.ConversationChatReq) (ocops.ConversationChatResult, error)
 	SessionChatStream(ctx context.Context, ep ocops.Endpoint, sid string, req ocops.ConversationChatReq) (<-chan ocops.ConversationStreamEvent, error)
+	UpdateSessionTitle(ctx context.Context, ep ocops.Endpoint, sid, title string) (ocops.ConversationSession, error)
 }
 
 // 编译期断言：生产实现 *ocops.Client 必须同时满足四个窄接口；

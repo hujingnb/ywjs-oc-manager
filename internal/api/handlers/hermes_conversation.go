@@ -23,6 +23,7 @@ type conversationHandlerService interface {
 	DeleteSession(ctx context.Context, p auth.Principal, appID, sid string) error
 	Chat(ctx context.Context, p auth.Principal, appID, sid, message string) (ocops.ConversationChatResult, error)
 	ChatStream(ctx context.Context, p auth.Principal, appID, sid, message string) (<-chan ocops.ConversationStreamEvent, error)
+	Rename(ctx context.Context, p auth.Principal, appID, sid, title string) (ocops.ConversationSession, error)
 }
 
 // HermesConversationHandler 处理 /api/v1/apps/:appId/hermes/conversations/* 路由。
@@ -44,6 +45,7 @@ func RegisterHermesConversationRoutes(router gin.IRouter, h *HermesConversationH
 	g.POST("/:sid/chat", h.Chat)
 	g.POST("/:sid/chat/stream", h.ChatStream)
 	g.DELETE("/:sid", h.Delete)
+	g.PATCH("/:sid", h.Rename)
 }
 
 // writeConversationError 把 service 哨兵错误映射为 HTTP 响应。
@@ -172,6 +174,32 @@ func (h *HermesConversationHandler) Chat(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"reply": out})
+}
+
+// Rename PATCH /api/v1/apps/{appId}/hermes/conversations/{sid} —— 重命名会话。
+//
+// @Summary      重命名会话
+// @Tags         hermes-conversation
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId  path  string                      true  "应用 ID"
+// @Param        sid    path  string                      true  "会话 ID"
+// @Param        body   body  RenameConversationRequest   true  "重命名请求"
+// @Success      200    {object}  map[string]ocops.ConversationSession
+// @Router       /apps/{appId}/hermes/conversations/{sid} [patch]
+func (h *HermesConversationHandler) Rename(c *gin.Context) {
+	var req RenameConversationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, apierror.New("CONVERSATION_BAD_REQUEST", "标题不能为空"))
+		return
+	}
+	out, err := h.service.Rename(c.Request.Context(), principalFromCtx(c), c.Param("appId"), c.Param("sid"), req.Title)
+	if err != nil {
+		writeConversationError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"session": out})
 }
 
 // ChatStream POST /api/v1/apps/{appId}/hermes/conversations/{sid}/chat/stream —— 流式续聊（SSE）。

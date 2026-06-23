@@ -136,6 +136,25 @@ func (s *HermesConversationService) DeleteSession(ctx context.Context, p auth.Pr
 	return nil
 }
 
+// Rename 重命名会话；title 不能为空白。
+func (s *HermesConversationService) Rename(ctx context.Context, p auth.Principal, appID, sid, title string) (ocops.ConversationSession, error) {
+	loc, err := s.resolveManage(ctx, p, appID)
+	if err != nil {
+		return ocops.ConversationSession{}, err
+	}
+	if err := validateSessionID(sid); err != nil {
+		return ocops.ConversationSession{}, err
+	}
+	if strings.TrimSpace(title) == "" {
+		return ocops.ConversationSession{}, fmt.Errorf("%w: 标题不能为空", ErrConversationBadRequest)
+	}
+	out, err := s.ops.UpdateSessionTitle(ctx, loc.Endpoint, sid, strings.TrimSpace(title))
+	if err != nil {
+		return ocops.ConversationSession{}, mapOcOpsConversationErr(err)
+	}
+	return out, nil
+}
+
 // Chat 续聊一轮（文字）。message 为空白时直接拒绝，不透传上游。
 func (s *HermesConversationService) Chat(ctx context.Context, p auth.Principal, appID, sid, message string) (ocops.ConversationChatResult, error) {
 	loc, err := s.resolveManage(ctx, p, appID)

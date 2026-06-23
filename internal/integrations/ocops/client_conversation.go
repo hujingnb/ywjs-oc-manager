@@ -54,6 +54,15 @@ func (c *Client) SessionChat(ctx context.Context, ep Endpoint, sid string, req C
 	return out, err
 }
 
+// UpdateSessionTitle 重命名会话。
+// PATCH /oc/conversations/{sid}
+func (c *Client) UpdateSessionTitle(ctx context.Context, ep Endpoint, sid, title string) (ConversationSession, error) {
+	var out ConversationSession
+	err := c.DoJSON(ctx, ep, http.MethodPatch, "/oc/conversations/"+url.PathEscape(sid),
+		map[string]string{"title": title}, &out)
+	return out, err
+}
+
 // SessionChatStream 流式续聊，返回逐帧事件 channel；流结束/ctx 取消时关闭。
 // POST /oc/conversations/{sid}/chat/stream
 func (c *Client) SessionChatStream(ctx context.Context, ep Endpoint, sid string, req ConversationChatReq) (<-chan ConversationStreamEvent, error) {

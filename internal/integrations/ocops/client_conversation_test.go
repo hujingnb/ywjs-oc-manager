@@ -54,6 +54,24 @@ func TestSessionMessagesNotFound(t *testing.T) {
 	require.ErrorIs(t, err, ErrNotFound)
 }
 
+// UpdateSessionTitle：PATCH /oc/conversations/{sid}，校验方法与路径，返回更新后的会话对象。
+func TestUpdateSessionTitle(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 校验请求方法为 PATCH
+		assert.Equal(t, http.MethodPatch, r.Method)
+		// 校验路径（sid 已 URL 编码）
+		assert.Equal(t, "/oc/conversations/s1", r.URL.Path)
+		// 返回更新后的会话对象
+		_, _ = w.Write([]byte(`{"id":"s1","title":"新名"}`))
+	}))
+	defer srv.Close()
+	c := NewClient(srv.Client())
+	out, err := c.UpdateSessionTitle(context.Background(), Endpoint{BaseURL: srv.URL, Token: "tk"}, "s1", "新名")
+	require.NoError(t, err)
+	// 断言解码后标题字段正确
+	assert.Equal(t, "新名", out.Title)
+}
+
 // SessionChatStream：POST 携带 body，服务端返回两帧 SSE，channel 按序接收并正确解析。
 func TestSessionChatStream(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

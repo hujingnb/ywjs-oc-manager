@@ -103,6 +103,12 @@ def chat(session_id: str, body: dict) -> dict:
     return _json("POST", f"/api/sessions/{sid}/chat", body)
 
 
+def update_title(session_id: str, title: str) -> dict:
+    """重命名会话：PATCH /api/sessions/{id}，body {"title": ...}，返回更新后的会话对象。"""
+    sid = urllib.parse.quote(session_id, safe="")
+    return _json("PATCH", f"/api/sessions/{sid}", {"title": title})
+
+
 def chat_stream(session_id: str, body: dict):
     """流式续聊：读取 api_server /chat/stream 的命名事件 SSE，把每个 `event:`+`data:`
     规整成单条 `data: {"event","payload"}` 帧（bytes）逐条 yield，供 server 直接转发。
