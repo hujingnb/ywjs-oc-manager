@@ -67,6 +67,11 @@ ifeq ($(NO_CACHE),1)
 HERMES_BUILD_FLAGS := --no-cache
 endif
 
+# HERMES_VARIANTS_ALL：runtime/hermes/ 下全部 versioned variant 子目录名（hermes-*），
+# 供 prod-deploy-hermes-all 遍历逐个发版。用 wildcard 自动发现，新增 variant 目录即纳入，
+# 无需改 Makefile。secret.yaml 现为多版本 runtime_images 列表，需保留各版本供回退灰度。
+override HERMES_VARIANTS_ALL := $(notdir $(wildcard runtime/hermes/hermes-*))
+
 # ops runtime 镜像仓库（pod initContainer/sidecar 搬运脚本），与其余服务保持一致命名风格。
 # 生产发布用 IMAGE_TAG（时间戳 + commit），本地联调固定 :dev。
 OPS_IMAGE_REPO ?= $(PROD_REGISTRY)/$(PROD_APP_NS)/oc-manager-ops
@@ -404,12 +409,34 @@ prod-deploy-manager: build-api-image build-web-image ## 构建推送 api+web 并
 # 再走 update-config（apply secret + 重启 manager-api）让新镜像在后续渲染的 app pod 生效。
 # 镜像仓库迁到同区移动云后节点拉取快，不再需要预热 DaemonSet。
 .PHONY: prod-deploy-hermes
-prod-deploy-hermes: build-hermes-image ## 构建推送 hermes 镜像→写回 secret.yaml→update-config 生效
+prod-deploy-hermes: .prod-deploy-hermes-one ## 构建推送单个 hermes 镜像(HERMES_VARIANT)→写回 secret.yaml→update-config 生效
+	$(MAKE) update-config
+
+# .prod-deploy-hermes-one：构建推送当前 HERMES_VARIANT 镜像并把对应版本那条 ref 写回 secret.yaml，
+# 但不触发 update-config。拆出此内部 target 是为了让单变体 prod-deploy-hermes 与全量
+# prod-deploy-hermes-all 共用构建+写回逻辑：后者遍历全部 variant 时只在末尾统一 update-config
+# 一次，避免每个 variant 都 apply secret + 重启 manager-api 一遍（重启一次即可让全部新 ref 生效）。
+.PHONY: .prod-deploy-hermes-one
+.prod-deploy-hermes-one: build-hermes-image
 	# 只替换 tag 版本号为本次部署版本（$(HERMES_VERSION)）的那条 ref，保留 runtime_images
 	# 列表中其它版本条目不动；否则多版本列表会被全部覆盖成同一镜像（曾误伤旧版回退条目）。
 	sed -i -E 's#ref: "[^"]*oc-manager-hermes:$(HERMES_VERSION_RE)-[^"]*"#ref: "$(HERMES_IMAGE)"#' deploy/k8s/prod/secret.yaml
 	@echo "✅ secret.yaml 的 hermes 镜像（$(HERMES_VERSION)）已更新为 $(HERMES_IMAGE)"
+
+# prod-deploy-hermes-all：遍历 runtime/hermes/ 下全部 versioned variant（HERMES_VARIANTS_ALL），
+# 逐个构建推送镜像并把各自版本的 ref 写回 secret.yaml，最后只 update-config 一次。
+# 每个 variant 用子 make 递归覆盖 HERMES_VARIANT，使 HERMES_VERSION / HERMES_IMAGE 等派生变量
+# 按该 variant 的 version.txt 重新求值（这些变量在 Makefile 解析期即绑定，必须靠子 make 重算）。
+# 任一 variant 构建失败立即中止（exit 1），不会带着半成品继续 update-config。
+.PHONY: prod-deploy-hermes-all
+prod-deploy-hermes-all: ## 构建推送全部 hermes variant 镜像→写回 secret.yaml→update-config 生效
+	@test -n "$(strip $(HERMES_VARIANTS_ALL))" || { echo "未发现任何 hermes variant（runtime/hermes/hermes-*）" >&2; exit 1; }
+	@for v in $(HERMES_VARIANTS_ALL); do \
+		echo "—— 部署 hermes variant: $$v ——"; \
+		$(MAKE) .prod-deploy-hermes-one HERMES_VARIANT=$$v || exit 1; \
+	done
 	$(MAKE) update-config
+	@echo "✅ 全部 hermes variant 已更新：$(HERMES_VARIANTS_ALL)"
 
 .PHONY: prod-deploy-ops
 prod-deploy-ops: build-ops-runtime ## 构建推送 ops 镜像→写回 secret.yaml→update-config 生效
