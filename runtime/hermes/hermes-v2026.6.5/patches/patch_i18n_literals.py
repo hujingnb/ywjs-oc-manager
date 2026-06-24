@@ -936,6 +936,20 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         '                    "`approvals.destructive_slash_confirm: true` in config.yaml."',
         't("oc.run.destructive_disabled_notice")',
     ),
+    # ====================== 本批：6.5 专属文案 ======================
+    # 长任务心跳（L18689 f-string；{_elapsed_mins} 作 kwarg，
+    # {_status_detail} 为动态明细、保留在调用点用 + 显式拼接）。
+    (
+        'f"⏳ Working — {_elapsed_mins} min{_status_detail}"',
+        't("oc.run.working_heartbeat", elapsed_mins=_elapsed_mins) + f"{_status_detail}"',
+    ),
+    # 忙时 subagent 降级排队提示（L3552-3553 两段 f-string 隐式拼接整条合一；
+    # {status_detail} 嵌于消息中间，作 kwarg）。
+    (
+        'f"⏳ Subagent working{status_detail} — your message is queued for "\n'
+        '                f"when it finishes (use /stop to cancel everything)."',
+        't("oc.run.subagent_working", status_detail=status_detail)',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 

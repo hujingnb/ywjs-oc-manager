@@ -676,4 +676,12 @@ oc:
     gateway_online:
       en: "♻️ Gateway online — Hermes is back and ready."
       zh: "♻️ 网关已上线 —— Hermes 已恢复就绪。"
+    # 长任务心跳（6.5 文案；{elapsed_mins} 已运行分钟数，{status_detail} 动态明细在调用点拼接）。
+    working_heartbeat:
+      en: "⏳ Working — {elapsed_mins} min"
+      zh: "⏳ 处理中 —— {elapsed_mins} 分钟"
+    # 忙时 subagent 降级排队提示（6.5 独有；2 段隐式拼接整条合一，{status_detail} 嵌于消息中）。
+    subagent_working:
+      en: "⏳ Subagent working{status_detail} — your message is queued for when it finishes (use /stop to cancel everything)."
+      zh: "⏳ 子智能体运行中{status_detail} —— 你的消息已排队,将在其完成后处理(用 /stop 取消全部)。"
   base: {}
