@@ -150,14 +150,15 @@ func (h *RechargeHandler) BillingStatus(c *gin.Context) {
 func writeRechargeError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrRechargeDenied), errors.Is(err, service.ErrForbidden):
-		c.JSON(http.StatusForbidden, apierror.New("RECHARGE_FORBIDDEN", "无权执行该操作"))
+		apierror.JSON(c, http.StatusForbidden, "RECHARGE_FORBIDDEN", apierror.MsgRechargeForbidden)
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "企业不存在"))
+		apierror.JSON(c, http.StatusNotFound, "NOT_FOUND", apierror.MsgRechargeOrgNotFound)
 	case errors.Is(err, service.ErrInvalidRechargeAmount):
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_RECHARGE_AMOUNT", "充值金额必须为正"))
+		apierror.JSON(c, http.StatusBadRequest, "INVALID_RECHARGE_AMOUNT", apierror.MsgRechargeInvalidAmount)
 	case errors.Is(err, service.ErrOrgMissingNewAPIUserID):
-		c.JSON(http.StatusConflict, apierror.New("ORG_MISSING_NEWAPI_USER", "企业未关联 new-api 账户"))
+		apierror.JSON(c, http.StatusConflict, "ORG_MISSING_NEWAPI_USER", apierror.MsgRechargeOrgMissingNewAPIUser)
 	default:
+		// 兜底分支文案为运行时动态明细（脱敏后的 service 错误链），保留 apierror.New。
 		c.JSON(http.StatusBadGateway, apierror.New("INTERNAL", redactlog.SafeErrorMessage(err)))
 	}
 }

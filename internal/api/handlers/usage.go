@@ -75,7 +75,7 @@ func (h *UsageHandler) GetMember(c *gin.Context) {
 	principal := principalFromCtx(c)
 	orgID := c.Query("org_id")
 	if orgID == "" {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 org_id"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgUsageMissingOrgID)
 		return
 	}
 	view, err := h.service.GetMemberUsage(c.Request.Context(), principal, orgID, c.Param("userId"), parseLogsQueryOptions(c))
@@ -237,12 +237,12 @@ func parseUsageStatsWindow(c *gin.Context) (int64, int64) {
 func writeUsageError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrForbidden):
-		c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权访问该用量"))
+		apierror.JSON(c, http.StatusForbidden, "FORBIDDEN", apierror.MsgUsageForbidden)
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "资源不存在"))
+		apierror.JSON(c, http.StatusNotFound, "NOT_FOUND", apierror.MsgNotFound)
 	case errors.Is(err, service.ErrUsageUnavailable):
-		c.JSON(http.StatusServiceUnavailable, apierror.New("USAGE_UNAVAILABLE", "用量服务暂不可用"))
+		apierror.JSON(c, http.StatusServiceUnavailable, "USAGE_UNAVAILABLE", apierror.MsgUsageUnavailable)
 	default:
-		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "用量服务异常"))
+		apierror.JSON(c, http.StatusInternalServerError, "INTERNAL", apierror.MsgUsageInternal)
 	}
 }
