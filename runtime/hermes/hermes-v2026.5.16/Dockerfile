@@ -105,20 +105,30 @@ COPY ocops/               /usr/local/lib/ocops/
 # patches/：构建期补丁脚本，给上游 hermes-agent 包注入 oc-manager 扩展端点。
 # 落点 /usr/local/lib/oc-entrypoint/patches 与 tests/ 同级，供构建期自检 import。
 COPY patches/             /usr/local/lib/oc-entrypoint/patches/
+# locales/：oc-manager 自有 i18n overlay（oc.* 文案）。必须与 patches/ 同级落到
+# /usr/local/lib/oc-entrypoint/locales，因为 merge_oc_locales.py 按
+# `__file__.parent.parent/"locales"/"oc_overlay.yaml"`（即 patches 的兄弟目录）解析 overlay。
+COPY locales/             /usr/local/lib/oc-entrypoint/locales/
 
 RUN chmod +x /usr/local/bin/oc-entrypoint /usr/local/bin/oc-kb \
             /usr/local/bin/oc-healthcheck
 
-# 给 hermes api_server 注入 POST /oc/skills/reload 端点（与 gateway 同进程）；
-# 成功后 oc-ops 可 POST http://127.0.0.1:8642/oc/skills/reload 触发免重启 skill 热加载。
-RUN python3 /usr/local/lib/oc-entrypoint/patches/patch_api_server_reload.py
-
-# 把 gateway 里未走 i18n（t()）的用户可见英文裸字符串翻译为中文。
-# 上游 hermes-agent 的 i18n 只覆盖 t() 调用，gateway/run.py 与 gateway/platforms/base.py
-# 仍有一批直接发给对话框的英文字面量（关闭/重启通知、会话过大、斜杠命令回复、错误提示、
-# 配对/技能提示、超时诊断等），display.language=zh 对其无效，需此补丁就地替换；
-# 锚点缺失即 exit 1 让构建失败，避免上游改版后静默漏翻。
-RUN python3 /usr/local/lib/oc-entrypoint/patches/patch_i18n_literals.py
+# 构建期 i18n / 端点补丁按固定顺序执行，任一步骤非零退出即中断 docker build：
+#   1) merge_oc_locales：把 locales/oc_overlay.yaml 的 oc.* 文案合并进上游 en/zh catalog；
+#   2) patch_i18n_literals：把 gateway 里未走 t() 的英文裸字符串就地替换为 t() 调用。
+#      上游 hermes-agent 的 i18n 只覆盖 t() 调用，gateway/run.py 与 gateway/platforms/base.py
+#      仍有一批直接发给对话框的英文字面量（关闭/重启通知、会话过大、斜杠命令回复、错误提示、
+#      配对/技能提示、超时诊断等），display.language=zh 对其无效，需此补丁就地替换；
+#      锚点缺失即 exit 1 让构建失败，避免上游改版后静默漏翻；
+#   3) check_oc_i18n_consistency：一致性守卫，校验 oc.* key 在 en/zh 两侧齐全，非零即失败；
+#   4) patch_api_server_reload：给 hermes api_server 注入 POST /oc/skills/reload 端点
+#      （与 gateway 同进程），成功后 oc-ops 可 POST http://127.0.0.1:8642/oc/skills/reload
+#      触发免重启 skill 热加载。
+RUN set -e; \
+    python3 /usr/local/lib/oc-entrypoint/patches/merge_oc_locales.py; \
+    python3 /usr/local/lib/oc-entrypoint/patches/patch_i18n_literals.py; \
+    python3 /usr/local/lib/oc-entrypoint/patches/check_oc_i18n_consistency.py; \
+    python3 /usr/local/lib/oc-entrypoint/patches/patch_api_server_reload.py
 
 # 镜像身份信息写到固定位置，供 oc-info 读取
 ARG OC_IMAGE_VARIANT
