@@ -78,7 +78,26 @@ def test_config_missing_file_defaults_to_en(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 场景 3：无 token / 错误 token → 401（与其它 /oc/* 端点鉴权行为一致）
+# 场景 3：config.yaml 内容损坏（YAML 语法错误）→ 回落 "en"，不应返回 500
+# ---------------------------------------------------------------------------
+
+def test_config_corrupted_yaml_defaults_to_en(monkeypatch, tmp_path):
+    """异常路径：config.yaml 存在但内容为非法 YAML（语法错误），
+    应回落返回 200 + {"display_language":"en"}，不得返回 500。
+    覆盖 yaml.YAMLError 被 OSError+yaml.YAMLError 捕获的边界场景。"""
+    # 写入无法被 yaml.safe_load 解析的损坏内容（未闭合的 mapping）
+    config_yaml = tmp_path / "config.yaml"
+    config_yaml.write_text("display: {language: zh\n", encoding="utf-8")
+
+    c = _client(monkeypatch, tmp_path)
+    r = c.get("/oc/config", headers={"Authorization": "Bearer t0ken"})
+    # 损坏 YAML 不应触发 500，应安全回落到默认语言 en
+    assert r.status_code == 200
+    assert r.json()["display_language"] == "en"
+
+
+# ---------------------------------------------------------------------------
+# 场景 4：无 token / 错误 token → 401（与其它 /oc/* 端点鉴权行为一致）
 # ---------------------------------------------------------------------------
 
 def test_config_no_token_returns_401(monkeypatch, tmp_path):

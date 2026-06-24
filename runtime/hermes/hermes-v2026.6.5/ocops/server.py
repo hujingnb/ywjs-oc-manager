@@ -122,8 +122,10 @@ async def get_config(request):
             lang = display.get("language")
             if lang:
                 language = str(lang)
-    except FileNotFoundError:
-        # config.yaml 不存在属正常边界（实例刚创建未写入），静默回落 en
+    except (OSError, yaml.YAMLError):
+        # 文件缺失/损坏/读失败均回落 en，保证该诊断端点永不 500：
+        # OSError 覆盖 FileNotFoundError（文件不存在）与权限等读失败；
+        # yaml.YAMLError 覆盖 config.yaml 内容语法损坏无法解析的情况。
         pass
 
     return _ok({"display_language": language})
