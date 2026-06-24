@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/service"
 )
@@ -224,6 +225,7 @@ func TestSkillMarketHandler_Download_Upstream502(t *testing.T) {
 	r.ServeHTTP(rec, withPrincipal(req, auth.Principal{UserID: "u1"}))
 
 	// 上游故障映射为 502 Bad Gateway，文案明确。
+	// 文案改走 msgKey catalog：测试路由无 locale 中间件，LocaleFrom(nil) 回落 en，断言取 catalog en 译文。
 	assert.Equal(t, http.StatusBadGateway, rec.Code)
-	assert.Contains(t, rec.Body.String(), "上游技能市场暂时不可用")
+	assert.Contains(t, rec.Body.String(), apierror.Localize(apierror.MsgSkillMarketUpstreamUnavailable, apierror.LocaleFrom(nil)))
 }
