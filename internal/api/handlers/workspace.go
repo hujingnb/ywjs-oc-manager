@@ -86,7 +86,7 @@ func (h *WorkspaceHandler) Download(c *gin.Context) {
 	principal := principalFromCtx(c)
 	relative := c.Query("path")
 	if relative == "" {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 path 参数"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgWorkspaceMissingPath)
 		return
 	}
 	stream, err := h.service.Download(c.Request.Context(), principal, c.Param("appId"), relative)
@@ -137,14 +137,14 @@ func (h *WorkspaceHandler) Archive(c *gin.Context) {
 func writeWorkspaceError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrWorkspaceForbidden):
-		c.JSON(http.StatusForbidden, apierror.New("WORKSPACE_FORBIDDEN", "无权访问工作目录"))
+		apierror.JSON(c, http.StatusForbidden, "WORKSPACE_FORBIDDEN", apierror.MsgWorkspaceForbidden)
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "应用不存在"))
+		apierror.JSON(c, http.StatusNotFound, "NOT_FOUND", apierror.MsgWorkspaceAppNotFound)
 	case errors.Is(err, service.ErrWorkspaceMissing):
-		c.JSON(http.StatusServiceUnavailable, apierror.New("WORKSPACE_NOT_CONFIGURED", "应用未关联节点或 adapter 未配置"))
+		apierror.JSON(c, http.StatusServiceUnavailable, "WORKSPACE_NOT_CONFIGURED", apierror.MsgWorkspaceNotConfigured)
 	case errors.Is(err, service.ErrWorkspaceBadPath):
-		c.JSON(http.StatusBadRequest, apierror.New("WORKSPACE_INVALID_PATH", "非法工作目录路径"))
+		apierror.JSON(c, http.StatusBadRequest, "WORKSPACE_INVALID_PATH", apierror.MsgWorkspaceInvalidPath)
 	default:
-		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "工作目录暂不可用"))
+		apierror.JSON(c, http.StatusInternalServerError, "INTERNAL", apierror.MsgWorkspaceUnavailable)
 	}
 }
