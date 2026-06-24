@@ -82,6 +82,26 @@
           </n-button>
         </n-space>
       </n-descriptions-item>
+      <!-- 实例语言：实时展示实例当前运行语言；未运行显示提示；当前≠期望时显示需重启徽标与重启入口 -->
+      <n-descriptions-item :label="t('apps.overview.language.label')">
+        <n-space align="center" :size="8">
+          <span>{{ localeLabel }}</span>
+          <!-- 需重启徽标：与版本同步的需重启提示视觉一致（warning tag），插值期望语言名 -->
+          <n-tag v-if="localeNeedsRestart" type="warning" size="small" :bordered="false">
+            {{ t('apps.overview.language.needsRestart', { lang: desiredLocaleLabel }) }}
+          </n-tag>
+          <!-- 重启按钮：仅在有运行时操作权限且需重启时展示，复用 restart 操作 -->
+          <n-button
+            v-if="canRestartForLocale"
+            size="small"
+            type="primary"
+            :disabled="restartMutation.isPending.value"
+            @click="onRestartForLocale"
+          >
+            {{ restartMutation.isPending.value ? t('apps.overview.restartNowPending') : t('apps.overview.language.restart') }}
+          </n-button>
+        </n-space>
+      </n-descriptions-item>
       <n-descriptions-item :label="t('apps.overview.labelOrg')">
         {{ organizationName }}
       </n-descriptions-item>
@@ -141,6 +161,7 @@ import { NButton, NCard, NDescriptions, NDescriptionsItem, NModal, NProgress, NS
 import { useI18n } from 'vue-i18n'
 
 import {
+  useAppLocaleStatusQuery,
   useInitializeAppMutation,
   useJobQuery,
   useSwitchAppVersion,
@@ -159,7 +180,15 @@ import { useAuthStore } from '@/stores/auth'
 
 // AppOverviewTab 展示应用基础信息，并提供初始化重试和 API key 启停入口。
 const props = defineProps<{ appId: string }>()
-const { t } = useI18n()
+const { t, messages } = useI18n()
+
+// localeName 把语言代码（zh/en）映射为该语言的母语自报名（languageName），与 LocaleSwitcher
+// 取名口径一致：母语者总能认出自己的语言；未知代码回退原代码。
+// 这样无需在 en 文案里写中文（会触发 i18n 完整性测试的「en 不得含 CJK」规则）。
+function localeName(code: string): string {
+  const msg = messages.value[code as keyof typeof messages.value] as { common?: { languageName?: string } } | undefined
+  return msg?.common?.languageName ?? code
+}
 const appId = computed<string | undefined>(() => props.appId)
 
 const app = inject<Ref<AppDTO | null>>('app')
@@ -260,6 +289,56 @@ async function onRestartForVersionSync() {
   }
 }
 
+// localeStatusQuery 实时查询实例语言状态：current_language（实例未运行时为 null）、
+// desired_language（apps.locale 期望语言）、needs_restart（当前≠期望，需重启生效）。
+const localeStatusQuery = useAppLocaleStatusQuery(appId)
+const localeStatus = computed(() => localeStatusQuery.data.value ?? null)
+
+// localeLabel 把语言代码（zh/en）映射为母语自报名；实例未运行（current 为空）时显示「实例未运行」。
+const localeLabel = computed(() => {
+  const code = localeStatus.value?.current_language
+  if (!code) return t('apps.overview.language.notRunning')
+  return localeName(code)
+})
+
+// localeNeedsRestart 仅在实例运行（current 有值）且后端判定 needs_restart=true 时为真；
+// current 为空（未运行）时不展示需重启提示与重启按钮，因为此时无运行容器可重启。
+const localeNeedsRestart = computed(() => {
+  const status = localeStatus.value
+  if (!status) return false
+  return Boolean(status.current_language) && status.needs_restart === true
+})
+
+// desiredLocaleLabel 把期望语言代码映射为母语自报名，用于需重启提示插值。
+const desiredLocaleLabel = computed(() => {
+  const code = localeStatus.value?.desired_language
+  return code ? localeName(code) : ''
+})
+
+// canRestartForLocale 控制语言「重启应用」按钮：需有运行时操作权限 + 后端判定需重启。
+const canRestartForLocale = computed(() => {
+  if (!app?.value) return false
+  if (!canTriggerRuntimeOperation(auth.user, app.value)) return false
+  return localeNeedsRestart.value
+})
+
+// onRestartForLocale 复用与版本同步一致的 restart 入口（useTriggerRuntimeOperation），
+// 提交后交给 JobProgressPanel 跟踪进度，并刷新 locale-status 让需重启提示在重启完成后消失。
+async function onRestartForLocale() {
+  restartFeedback.value = ''
+  restartError.value = false
+  try {
+    const result = await restartMutation.mutateAsync('restart')
+    trackingJobId.value = result.job_id
+    trackingJobTitle.value = t('apps.overview.restartJobTitle')
+    restartFeedback.value = `${t('apps.overview.restartSubmitted')}${result.job_id}`
+    void localeStatusQuery.refetch()
+  } catch (err: unknown) {
+    restartError.value = true
+    restartFeedback.value = err instanceof Error ? err.message : t('apps.overview.restartError')
+  }
+}
+
 const initMutation = useInitializeAppMutation(appId)
 // trackingJobId 记录最近一次后台任务，供 JobProgressPanel 轮询展示执行进度。
 const trackingJobId = ref<string | undefined>()
@@ -283,6 +362,8 @@ watch(
   (status, prev) => {
     if (status && terminalJobStatuses.has(status) && prev && !terminalJobStatuses.has(prev)) {
       invalidateAppData()
+      // 任务终态时一并刷新实例语言状态，让重启完成后「需重启」提示无需手动刷新即可消失。
+      void localeStatusQuery.refetch()
     }
   },
 )

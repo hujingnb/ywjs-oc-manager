@@ -48,6 +48,12 @@ const triggerRuntimeMutateAsync = vi.fn()
 // triggerRuntimeIsPending 暴露给用例切换以模拟按钮 loading 文案。
 const triggerRuntimeIsPending = ref(false)
 
+// localeStatusRef 模拟 useAppLocaleStatusQuery 返回的实例语言状态：
+//   current_language 为 null 表示实例未运行；needs_restart=true 表示当前≠期望需重启。
+const localeStatusRef = ref<{ current_language?: string | null; desired_language?: string; needs_restart?: boolean } | null>(null)
+// localeStatusRefetch 作为 spy 供「重启后刷新语言状态」断言（本测试集中未强制断言，保留供扩展）。
+const localeStatusRefetch = vi.fn()
+
 // jobStatusRef 模拟 useJobQuery 轮询返回的 job 详情，用例通过改写它模拟后台任务状态推进。
 const jobStatusRef = ref<{ status: string } | null>(null)
 // invalidateAppDataSpy 断言任务到达终态后概览页是否主动失效实例详情/运行时缓存。
@@ -60,6 +66,12 @@ vi.mock('@/api/hooks/useApps', () => ({
   }),
   useJobQuery: () => ({
     data: jobStatusRef,
+  }),
+  // useAppLocaleStatusQuery 在概览页用于「实例语言」行实时展示当前语言/需重启状态；
+  // mock 暴露可控 data 与 refetch spy，供语言三态用例驱动。
+  useAppLocaleStatusQuery: () => ({
+    data: localeStatusRef,
+    refetch: localeStatusRefetch,
   }),
   useInvalidateAppData: () => invalidateAppDataSpy,
   useToggleAppAPIKey: () => ({
@@ -181,8 +193,10 @@ function mountWithApp(appOverride: Record<string, unknown>) {
 }
 
 // 每次用例前将 i18n 语言设为中文，确保断言中文文案的测试与翻译文件对齐。
+// 同时把 localeStatusRef 复位为 null（实例未运行态），避免上个用例的语言状态污染其他用例。
 beforeEach(() => {
   i18n.global.locale.value = 'zh'
+  localeStatusRef.value = null
 })
 
 describe('AppOverviewTab', () => {
@@ -403,5 +417,54 @@ describe('AppOverviewTab progress', () => {
       last_error_status: 'pulling_runtime_image',
     })
     expect(wrapper.find('.init-failure').text()).toContain('拉取运行时镜像')
+  })
+})
+
+// AppOverviewTab 实例语言覆盖语言行三态：
+// 1) 实例运行且 current_language 有值 → 展示母语自报名（zh→简体中文），不展示需重启与重启按钮;
+// 2) 实例未运行（current_language=null）→ 展示「实例未运行」，不展示重启按钮;
+// 3) 当前≠期望（needs_restart=true 且 current 有值）→ 展示需重启徽标 + 重启按钮，点击以 'restart' 调用 mutation。
+describe('AppOverviewTab 实例语言', () => {
+  // current_language=zh 且 needs_restart=false 时，展示该语言母语自报名「简体中文」，无需重启入口。
+  it('实例运行且当前语言=期望语言时展示语言名且无重启入口', () => {
+    localeStatusRef.value = { current_language: 'zh', desired_language: 'zh', needs_restart: false }
+    const wrapper = mountWithApp({ status: 'running' })
+    // 「实例语言」标签与中文母语自报名「简体中文」均应出现。
+    expect(wrapper.text()).toContain('实例语言')
+    expect(wrapper.text()).toContain('简体中文')
+    // current=desired 时不应出现语言维度的「重启应用」按钮。
+    const restartBtn = wrapper.findAll('button').find(b => b.text() === '重启应用')
+    expect(restartBtn).toBeUndefined()
+  })
+
+  // current_language=null（实例未运行/不可达）时展示「实例未运行」提示，且不展示重启按钮。
+  it('实例未运行时展示未运行提示且无重启按钮', () => {
+    localeStatusRef.value = { current_language: null, desired_language: 'zh', needs_restart: false }
+    const wrapper = mountWithApp({ status: 'running' })
+    expect(wrapper.text()).toContain('实例未运行')
+    const restartBtn = wrapper.findAll('button').find(b => b.text() === '重启应用')
+    expect(restartBtn).toBeUndefined()
+  })
+
+  // current=en、desired=zh、needs_restart=true 时展示需重启徽标（插值期望语言名）+「重启应用」按钮。
+  it('当前语言≠期望语言时展示需重启提示与重启按钮', () => {
+    localeStatusRef.value = { current_language: 'en', desired_language: 'zh', needs_restart: true }
+    const wrapper = mountWithApp({ status: 'running' })
+    // 需重启提示插值期望语言「简体中文」（desired_language=zh）。
+    expect(wrapper.text()).toContain('切换语言后需重启生效为 简体中文')
+    const restartBtn = wrapper.findAll('button').find(b => b.text() === '重启应用')
+    expect(restartBtn).toBeDefined()
+  })
+
+  // 点击语言行「重启应用」按钮应复用 restart 入口，以 'restart' 操作调用 mutation。
+  it('点击重启应用按钮以 restart 操作调用 mutation', async () => {
+    triggerRuntimeMutateAsync.mockResolvedValueOnce({ job_id: 'job-locale-001', operation: 'restart' })
+    localeStatusRef.value = { current_language: 'en', desired_language: 'zh', needs_restart: true }
+    const wrapper = mountWithApp({ status: 'running' })
+    const restartBtn = wrapper.findAll('button').find(b => b.text() === '重启应用')
+    expect(restartBtn).toBeDefined()
+    await restartBtn!.trigger('click')
+    await nextTick()
+    expect(triggerRuntimeMutateAsync).toHaveBeenCalledWith('restart')
   })
 })

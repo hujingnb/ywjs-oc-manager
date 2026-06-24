@@ -91,6 +91,13 @@ export default {
     keyJobTitle: '恢复 API key 任务',
     keyRestoreError: 'restore 失败',
     keyRestoreSubmitted: '已提交 restore 任务：{jobId}',
+    // 实例语言：实时展示实例当前运行语言、未运行态及需重启提示
+    language: {
+      label: '实例语言',
+      notRunning: '实例未运行',
+      needsRestart: '切换语言后需重启生效为 {lang}',
+      restart: '重启应用',
+    },
   },
   // channels：渠道绑定 tab（AppChannelsTab）
   channels: {

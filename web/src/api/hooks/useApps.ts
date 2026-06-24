@@ -6,6 +6,11 @@ import type { Ref } from 'vue'
 import { apiRequest, type ApiError } from '@/api/client'
 import { i18n } from '@/i18n'
 import type { AggregatedUsage } from '@/api/hooks/useUsage'
+import type { components } from '@/api/generated'
+
+// AppLocaleStatus 复用 OpenAPI 生成类型，避免与后端契约漂移。
+// current_language 在实例未运行/不可达时为 null/缺省；needs_restart=true 表示当前语言与期望语言不一致需重启生效。
+export type AppLocaleStatus = components['schemas']['handlers.AppLocaleStatusResponse']
 
 // AppDTO 是应用详情与列表接口共用的前端视图。
 // 字段名保持后端 JSON snake_case，避免在 hook 层做额外映射。
@@ -110,6 +115,7 @@ export interface JobDTO {
 const orgKey = (orgId: string | undefined) => ['apps', 'org', orgId] as const
 const appKey = (appId: string | undefined) => ['app', appId] as const
 const runtimeKey = (appId: string | undefined) => ['app-runtime', appId] as const
+const localeStatusKey = (appId: string | undefined) => ['app-locale-status', appId] as const
 const jobKey = (jobId: string | undefined) => ['job', jobId] as const
 
 // useAppsByOrgQuery 列出组织内的应用。
@@ -169,6 +175,20 @@ export function useAppRuntimeQuery(appId: Ref<string | undefined>) {
       if (!appId.value) return null
       const response = await apiRequest<{ runtime: RuntimeView }>(`/api/v1/apps/${appId.value}/runtime`)
       return response.runtime
+    },
+  })
+}
+
+// useAppLocaleStatusQuery 查询实例实时语言状态（current_language / desired_language / needs_restart）。
+// current_language 取自 oc-ops，实例未运行/不可达时为 null/缺省；needs_restart=true 表示需重启生效。
+// 响应非包裹结构，直接返回 AppLocaleStatus 对象。
+export function useAppLocaleStatusQuery(appId: Ref<string | undefined>) {
+  return useQuery<AppLocaleStatus | null>({
+    queryKey: ['app-locale-status', appId],
+    enabled: () => Boolean(appId.value),
+    queryFn: async () => {
+      if (!appId.value) return null
+      return await apiRequest<AppLocaleStatus>(`/api/v1/apps/${appId.value}/locale-status`)
     },
   })
 }
@@ -340,4 +360,4 @@ export function useUpdateAppKnowledgeQuota(appId: Ref<string | undefined>) {
 }
 
 // 占位导出，避免 tree-shake 时丢失类型。
-export const _appsKeys = { orgKey, appKey, runtimeKey, jobKey }
+export const _appsKeys = { orgKey, appKey, runtimeKey, localeStatusKey, jobKey }

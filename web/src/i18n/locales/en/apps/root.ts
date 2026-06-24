@@ -91,6 +91,13 @@ export default {
     keyJobTitle: 'Restore API key job',
     keyRestoreError: 'Restore failed',
     keyRestoreSubmitted: 'Restore job submitted: {jobId}',
+    // Instance language: live current runtime language, not-running state and restart hint
+    language: {
+      label: 'Instance language',
+      notRunning: 'Instance not running',
+      needsRestart: 'Restart required to apply {lang}',
+      restart: 'Restart to apply',
+    },
   },
   // channels: Channels tab (AppChannelsTab)
   channels: {
