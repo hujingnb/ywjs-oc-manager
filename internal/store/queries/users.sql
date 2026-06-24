@@ -6,9 +6,10 @@ INSERT INTO users (
     password_hash,
     display_name,
     role,
-    status
+    status,
+    locale
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?
 );
 
 -- name: GetUser :one

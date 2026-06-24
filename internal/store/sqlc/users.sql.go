@@ -20,9 +20,10 @@ INSERT INTO users (
     password_hash,
     display_name,
     role,
-    status
+    status,
+    locale
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?
 )
 `
 
@@ -34,6 +35,7 @@ type CreateUserParams struct {
 	DisplayName  string      `db:"display_name" json:"display_name"`
 	Role         string      `db:"role" json:"role"`
 	Status       string      `db:"status" json:"status"`
+	Locale       null.String `db:"locale" json:"locale"`
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
@@ -45,6 +47,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
 		arg.DisplayName,
 		arg.Role,
 		arg.Status,
+		arg.Locale,
 	)
 	return err
 }
