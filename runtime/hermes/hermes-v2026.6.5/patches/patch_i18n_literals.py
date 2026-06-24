@@ -52,6 +52,27 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         '                    "Try again, or use /reset to start fresh."',
         't("oc.run.timeout_increase_limit")',
     ),
+    # --- _gateway_provider_error_reply：模型服务商错误回包（四互斥分支）---
+    # 每个分支是一组相邻字面量隐式拼接，整段逐字符复制自 upstream（缩进须一致）。
+    (
+        '"⚠️ Provider authentication failed. Check the configured credentials; "\n'
+        '            "raw provider details are in the gateway logs."',
+        't("oc.run.provider_auth_failed")',
+    ),
+    (
+        '"⚠️ The model provider rejected the request. I kept the raw provider "\n'
+        '            "error out of chat; check gateway logs for details or try rephrasing."',
+        't("oc.run.provider_rejected")',
+    ),
+    (
+        '"⏱️ The model provider is rate-limiting requests. Please wait a moment and try again."',
+        't("oc.run.provider_rate_limited")',
+    ),
+    (
+        '"⚠️ The model provider failed after retries. I kept raw provider details "\n'
+        '        "out of chat; check gateway logs for diagnostics."',
+        't("oc.run.provider_failed_retries")',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 

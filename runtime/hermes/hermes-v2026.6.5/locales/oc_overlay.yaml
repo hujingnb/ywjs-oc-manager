@@ -12,4 +12,17 @@ oc:
     timeout_increase_limit:
       en: "To increase the limit, set agent.gateway_timeout in config.yaml (value in seconds, 0 = no limit) and restart the gateway.\nTry again, or use /reset to start fresh."
       zh: "如需提高上限,请在 config.yaml 中设置 agent.gateway_timeout (单位为秒,0 = 不限制),然后重启网关。\n请重试,或使用 /reset 开始新会话。"
+    # _gateway_provider_error_reply：模型服务商错误回包（四个互斥分支各一条）。
+    provider_auth_failed:
+      en: "⚠️ Provider authentication failed. Check the configured credentials; raw provider details are in the gateway logs."
+      zh: "⚠️ 模型服务商鉴权失败。请检查所配置的凭证;原始服务商错误详情见 gateway 日志。"
+    provider_rejected:
+      en: "⚠️ The model provider rejected the request. I kept the raw provider error out of chat; check gateway logs for details or try rephrasing."
+      zh: "⚠️ 模型服务商拒绝了本次请求。我没有把原始服务商错误输出到对话中;详情见 gateway 日志,或换一种说法重试。"
+    provider_rate_limited:
+      en: "⏱️ The model provider is rate-limiting requests. Please wait a moment and try again."
+      zh: "⏱️ 模型服务商正在限流。请稍候片刻后重试。"
+    provider_failed_retries:
+      en: "⚠️ The model provider failed after retries. I kept raw provider details out of chat; check gateway logs for diagnostics."
+      zh: "⚠️ 模型服务商在多次重试后仍失败。我没有把原始服务商详情输出到对话中;诊断信息见 gateway 日志。"
   base: {}
