@@ -763,6 +763,44 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         'f"💭 **Reasoning:**\\n```\\n{display_reasoning}\\n```\\n\\n{response}"',
         't("oc.run.reasoning_header") + f"\\n```\\n{display_reasoning}\\n```\\n\\n{response}"',
     ),
+    # --- /model 会话信息（管理员诊断）---
+    (
+        '"default — set model.context_length in config to override"',
+        't("oc.run.model_ctx_source_default")',
+    ),
+    (
+        'f"◆ Model: `{model}`"',
+        't("oc.run.model_info_model", model=model)',
+    ),
+    (
+        'f"◆ Provider: {provider or \'openrouter\'}"',
+        't("oc.run.model_info_provider", provider=provider or \'openrouter\')',
+    ),
+    (
+        'f"◆ Context: {ctx_display} tokens ({ctx_source})"',
+        't("oc.run.model_info_context", ctx_display=ctx_display, ctx_source=ctx_source)',
+    ),
+    (
+        'f"◆ Endpoint: {base_url}"',
+        't("oc.run.model_info_endpoint", base_url=base_url)',
+    ),
+    # --- 非管理员斜杠访问提示 ---
+    # suffix 由显式 + 拼接：前缀 + 动态命令清单 + 省略号 + 后缀。前缀/后缀各自一 key。
+    (
+        '"You can run: "',
+        't("oc.run.nonadmin_you_can_run")',
+    ),
+    (
+        '". Use /whoami for the full list."',
+        't("oc.run.nonadmin_whoami_full_list")',
+    ),
+    # 非管理员无任何斜杠命令可用（3 段隐式拼接合一）。
+    (
+        '"No slash commands are enabled for non-admins on this "\n'
+        '                "platform. Ask an admin to add you to allow_admin_from "\n'
+        '                "or to set user_allowed_commands."',
+        't("oc.run.nonadmin_no_slash")',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 

@@ -540,4 +540,38 @@ oc:
     reasoning_header:
       en: "💭 **Reasoning:**"
       zh: "💭 **推理过程:**"
+    # --- /model 会话信息（管理员诊断）---
+    # 上下文长度来源提示（default 分支说明）。
+    model_ctx_source_default:
+      en: "default — set model.context_length in config to override"
+      zh: "默认 —— 在 config 中设置 model.context_length 可覆盖"
+    # 当前模型（{model} 由调用点传入）。
+    model_info_model:
+      en: "◆ Model: `{model}`"
+      zh: "◆ 模型: `{model}`"
+    # 当前服务商（{provider} 由调用点 provider or 'openrouter' 传入）。
+    model_info_provider:
+      en: "◆ Provider: {provider}"
+      zh: "◆ 服务商: {provider}"
+    # 上下文窗口（{ctx_display}/{ctx_source} 由调用点传入）。
+    model_info_context:
+      en: "◆ Context: {ctx_display} tokens ({ctx_source})"
+      zh: "◆ 上下文: {ctx_display} tokens ({ctx_source})"
+    # 自定义端点（{base_url} 由调用点传入）。
+    model_info_endpoint:
+      en: "◆ Endpoint: {base_url}"
+      zh: "◆ 端点: {base_url}"
+    # --- 非管理员斜杠访问提示 ---
+    # 可运行命令清单前缀（与 /whoami 的 access_slash_you_can_run 文案不同，勿混）。
+    nonadmin_you_can_run:
+      en: "You can run: "
+      zh: "你可以使用: "
+    # 可运行命令清单后缀（提示查看完整列表）。
+    nonadmin_whoami_full_list:
+      en: ". Use /whoami for the full list."
+      zh: "。使用 /whoami 查看完整列表。"
+    # 非管理员无任何斜杠命令可用（3 段隐式拼接合为一条）。
+    nonadmin_no_slash:
+      en: "No slash commands are enabled for non-admins on this platform. Ask an admin to add you to allow_admin_from or to set user_allowed_commands."
+      zh: "本平台未对非管理员启用任何斜杠命令。请联系管理员把你加入 allow_admin_from,或设置 user_allowed_commands。"
   base: {}
