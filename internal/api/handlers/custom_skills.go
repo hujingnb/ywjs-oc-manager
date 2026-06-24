@@ -55,18 +55,18 @@ func (h *CustomSkillsHandler) Deliver(c *gin.Context) {
 	// 获取 multipart file 字段,缺失时直接返回 400
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "缺少 file 字段"))
+		apierror.JSON(c, http.StatusBadRequest, "INVALID_REQUEST", apierror.MsgCustomSkillMissingFileField)
 		return
 	}
 	f, err := fileHeader.Open()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "读取上传文件失败"))
+		apierror.JSON(c, http.StatusBadRequest, "INVALID_REQUEST", apierror.MsgCustomSkillOpenFileFailed)
 		return
 	}
 	defer func() { _ = f.Close() }()
 	data, err := io.ReadAll(f)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "读取上传内容失败"))
+		apierror.JSON(c, http.StatusBadRequest, "INVALID_REQUEST", apierror.MsgCustomSkillReadFileFailed)
 		return
 	}
 	// targets 以 JSON 数组字符串提交,解析为 service 层目标范围;空串时留空切片,由 service 层校验"至少一个目标"。
@@ -74,7 +74,7 @@ func (h *CustomSkillsHandler) Deliver(c *gin.Context) {
 	if raw := c.PostForm("targets"); raw != "" {
 		var dtos []CustomSkillTargetDTO
 		if err := json.Unmarshal([]byte(raw), &dtos); err != nil {
-			c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "targets 不是合法 JSON"))
+			apierror.JSON(c, http.StatusBadRequest, "INVALID_REQUEST", apierror.MsgCustomSkillTargetsInvalidJSON)
 			return
 		}
 		for _, d := range dtos {
@@ -111,7 +111,7 @@ func (h *CustomSkillsHandler) Deliver(c *gin.Context) {
 func (h *CustomSkillsHandler) UpdateTargets(c *gin.Context) {
 	var req UpdateCustomSkillTargetsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "请求体格式错误"))
+		apierror.JSON(c, http.StatusBadRequest, "INVALID_REQUEST", apierror.MsgCustomSkillInvalidRequest)
 		return
 	}
 	targets := make([]service.CustomSkillTargetInput, 0, len(req.Targets))
@@ -129,14 +129,14 @@ func (h *CustomSkillsHandler) UpdateTargets(c *gin.Context) {
 func writeCustomSkillError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrCustomSkillDenied):
-		c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权交付定制技能"))
+		apierror.JSON(c, http.StatusForbidden, "FORBIDDEN", apierror.MsgCustomSkillDenied)
 	case errors.Is(err, service.ErrSkillTicketNotFound):
-		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "工单不存在"))
+		apierror.JSON(c, http.StatusNotFound, "NOT_FOUND", apierror.MsgCustomSkillTicketNotFound)
 	case errors.Is(err, service.ErrCustomSkillNameMismatch):
-		c.JSON(http.StatusConflict, apierror.New("CONFLICT", "迭代交付必须沿用同一技能名"))
+		apierror.JSON(c, http.StatusConflict, "CONFLICT", apierror.MsgCustomSkillNameMismatch)
 	case errors.Is(err, service.ErrCustomSkillInvalid):
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "交付入参非法"))
+		apierror.JSON(c, http.StatusBadRequest, "INVALID_REQUEST", apierror.MsgCustomSkillInvalidInput)
 	default:
-		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "服务器内部错误"))
+		apierror.JSON(c, http.StatusInternalServerError, "INTERNAL", apierror.MsgInternal)
 	}
 }
