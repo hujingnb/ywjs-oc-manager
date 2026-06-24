@@ -434,4 +434,32 @@ oc:
     inactivity_warning:
       en: "⚠️ No activity for {elapsed_warn} min. If the agent does not respond soon, it will be timed out in {remaining_mins} min. You can continue waiting or use /reset."
       zh: "⚠️ 已闲置 {elapsed_warn} 分钟。若仍无响应,超时倒计时 {remaining_mins} 分钟。你可以继续等待,或使用 /reset。"
+    # --- 忙碌状态明细 status_parts（拼进 steer/queue/interrupt 与心跳）---
+    # 已过 N 分钟；{elapsed_min} 为已运行分钟数。
+    status_elapsed_min:
+      en: "{elapsed_min} min elapsed"
+      zh: "已过 {elapsed_min} 分钟"
+    # 迭代进度；{iteration} 为已用迭代,{max_iter} 为最大迭代。
+    status_iteration:
+      en: "iteration {iteration}/{max_iter}"
+      zh: "迭代 {iteration}/{max_iter}"
+    # 正在运行的工具；{current_tool} 为当前工具名。
+    status_running_tool:
+      en: "running: {current_tool}"
+      zh: "运行中: {current_tool}"
+    # 迭代进度（心跳路径，下标取值在调用点）；{api} 为已用迭代,{max} 为最大迭代。
+    status_iteration_api:
+      en: "iteration {api}/{max}"
+      zh: "迭代 {api}/{max}"
+    # --- 忙时 steer / queue / interrupt 确认（源码两段 f-string 隐式拼接，整条合一）---
+    # {status_detail} 为已拼好的忙碌明细尾段（可能为空），由调用点传入。
+    busy_steered:
+      en: "⏩ Steered into current run{status_detail}. Your message arrives after the next tool call."
+      zh: "⏩ 已切入当前运行{status_detail}。你的消息将在下一次工具调用后送达。"
+    busy_queued:
+      en: "⏳ Queued for the next turn{status_detail}. I'll respond once the current task finishes."
+      zh: "⏳ 已加入下一轮队列{status_detail}。当前任务完成后我会回复。"
+    busy_interrupting:
+      en: "⚡ Interrupting current task{status_detail}. I'll respond to your message shortly."
+      zh: "⚡ 正在中断当前任务{status_detail}。我会尽快回复你的消息。"
   base: {}

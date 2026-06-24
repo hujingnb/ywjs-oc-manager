@@ -625,6 +625,46 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         't("oc.run.inactivity_warning", elapsed_warn=_elapsed_warn, '
         'remaining_mins=_remaining_mins)',
     ),
+    # --- 忙碌状态明细 status_parts（拼进 steer/queue/interrupt 与心跳）---
+    # 已过 N 分钟（L3533 f-string）；{elapsed_min} 在调用点传入。
+    (
+        'f"{elapsed_min} min elapsed"',
+        't("oc.run.status_elapsed_min", elapsed_min=elapsed_min)',
+    ),
+    # 迭代进度（L3535 f-string）；{iteration}/{max_iter} 在调用点传入。
+    (
+        'f"iteration {iteration}/{max_iter}"',
+        't("oc.run.status_iteration", iteration=iteration, max_iter=max_iter)',
+    ),
+    # 正在运行的工具（L3537 f-string）；{current_tool} 在调用点传入。
+    (
+        'f"running: {current_tool}"',
+        't("oc.run.status_running_tool", current_tool=current_tool)',
+    ),
+    # 迭代进度（L18680 心跳路径 f-string）；下标 _a['api_call_count']/_a['max_iterations']
+    # 在调用点取值，作 api/max kwarg 传入。
+    (
+        'f"iteration {_a[\'api_call_count\']}/{_a[\'max_iterations\']}"',
+        't("oc.run.status_iteration_api", api=_a[\'api_call_count\'], '
+        'max=_a[\'max_iterations\'])',
+    ),
+    # --- 忙时 steer / queue / interrupt 确认（各两段 f-string 隐式拼接整条合一）---
+    # {status_detail} 在调用点传入（为已拼好的忙碌明细尾段，可能为空）。
+    (
+        'f"⏩ Steered into current run{status_detail}. "\n'
+        '                f"Your message arrives after the next tool call."',
+        't("oc.run.busy_steered", status_detail=status_detail)',
+    ),
+    (
+        'f"⏳ Queued for the next turn{status_detail}. "\n'
+        '                f"I\'ll respond once the current task finishes."',
+        't("oc.run.busy_queued", status_detail=status_detail)',
+    ),
+    (
+        'f"⚡ Interrupting current task{status_detail}. "\n'
+        '                f"I\'ll respond to your message shortly."',
+        't("oc.run.busy_interrupting", status_detail=status_detail)',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 
