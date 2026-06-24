@@ -93,7 +93,7 @@ func (h *AppSkillsHandler) List(c *gin.Context) {
 func (h *AppSkillsHandler) Install(c *gin.Context) {
 	var req InstallAppSkillRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "请求体格式错误"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgAppSkillInvalidRequest)
 		return
 	}
 	result, err := h.service.Install(c.Request.Context(), principalFromCtx(c), c.Param("appId"), service.InstallSkillInput{
@@ -153,7 +153,7 @@ func (h *AppSkillsHandler) Uninstall(c *gin.Context) {
 func (h *AppSkillsHandler) Update(c *gin.Context) {
 	var req UpdateAppSkillRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "请求体格式错误"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgAppSkillInvalidRequest)
 		return
 	}
 	result, err := h.service.Update(c.Request.Context(), principalFromCtx(c), c.Param("appId"), c.Param("skillName"), req.Version)
@@ -193,30 +193,30 @@ func writeAppSkillError(c *gin.Context, err error) {
 	switch {
 	// 无权操作（非 owner 且非同 org 管理员）→ 403
 	case errors.Is(err, service.ErrAppSkillDenied):
-		c.JSON(http.StatusForbidden, apierror.New("APP_SKILL_DENIED", "无权管理该实例的 skill"))
+		apierror.JSON(c, http.StatusForbidden, "APP_SKILL_DENIED", apierror.MsgAppSkillDenied)
 	// skill 不存在 → 404
 	case errors.Is(err, service.ErrAppSkillNotFound):
-		c.JSON(http.StatusNotFound, apierror.New("APP_SKILL_NOT_FOUND", "该实例 skill 不存在"))
+		apierror.JSON(c, http.StatusNotFound, "APP_SKILL_NOT_FOUND", apierror.MsgAppSkillNotFound)
 	// 同名 skill 已安装 → 409
 	case errors.Is(err, service.ErrAppSkillNameConflict):
-		c.JSON(http.StatusConflict, apierror.New("APP_SKILL_NAME_CONFLICT", "已有同名 skill，不允许重复安装"))
+		apierror.JSON(c, http.StatusConflict, "APP_SKILL_NAME_CONFLICT", apierror.MsgAppSkillNameConflict)
 	// 版本内置保护，禁止卸载 → 403
 	case errors.Is(err, service.ErrAppSkillProtected):
-		c.JSON(http.StatusForbidden, apierror.New("APP_SKILL_PROTECTED", "当前助手版本必需的 skill 不可删除"))
+		apierror.JSON(c, http.StatusForbidden, "APP_SKILL_PROTECTED", apierror.MsgAppSkillProtected)
 	// 未知来源类型 → 400
 	case errors.Is(err, service.ErrAppSkillSourceUnknown):
-		c.JSON(http.StatusBadRequest, apierror.New("APP_SKILL_SOURCE_UNKNOWN", "未知的 skill 来源"))
+		apierror.JSON(c, http.StatusBadRequest, "APP_SKILL_SOURCE_UNKNOWN", apierror.MsgAppSkillSourceUnknown)
 	// 归档解压炸弹检测失败 → 400
 	case errors.Is(err, service.ErrAppSkillArchiveTooDangerous):
-		c.JSON(http.StatusBadRequest, apierror.New("APP_SKILL_ARCHIVE_TOO_DANGEROUS", "skill 归档解压校验失败，文件可能存在安全风险"))
+		apierror.JSON(c, http.StatusBadRequest, "APP_SKILL_ARCHIVE_TOO_DANGEROUS", apierror.MsgAppSkillArchiveTooDangerous)
 	// 实例运行的 hermes 版本过旧、不支持 skill 管理（oc-ops 无 /oc/skills 路由）→ 409，提示更新版本
 	case errors.Is(err, service.ErrAppSkillRuntimeUnsupported):
-		c.JSON(http.StatusConflict, apierror.New("APP_SKILL_RUNTIME_UNSUPPORTED", "当前实例运行的 hermes 版本过旧，不支持技能管理，请更新实例的运行时版本后重试"))
+		apierror.JSON(c, http.StatusConflict, "APP_SKILL_RUNTIME_UNSUPPORTED", apierror.MsgAppSkillRuntimeUnsupported)
 	// 上游市场下载失败（缓存未命中无法降级）→ 502，区别于 manager 自身 500
 	case errors.Is(err, service.ErrSkillMarketUpstreamUnavailable):
-		c.JSON(http.StatusBadGateway, apierror.New("APP_SKILL_UPSTREAM_UNAVAILABLE", "上游技能市场暂时不可用，请稍后重试"))
+		apierror.JSON(c, http.StatusBadGateway, "APP_SKILL_UPSTREAM_UNAVAILABLE", apierror.MsgAppSkillUpstreamUnavailable)
 	// 其他未预期错误 → 500
 	default:
-		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL_ERROR", "服务器内部错误"))
+		apierror.JSON(c, http.StatusInternalServerError, "INTERNAL_ERROR", apierror.MsgInternal)
 	}
 }

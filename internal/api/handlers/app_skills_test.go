@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/service"
@@ -336,7 +337,8 @@ func TestAppSkillsHandler_Install_UpstreamUnavailable(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	// 上游故障映射为 502，文案明确，错误码加 APP_SKILL_ 命名前缀。
+	// 文案改走 msgKey catalog：测试路由无 locale 中间件，LocaleFrom(nil) 回落 en，断言取 catalog en 译文。
 	assert.Equal(t, http.StatusBadGateway, w.Code)
-	assert.Contains(t, w.Body.String(), "上游技能市场暂时不可用")
+	assert.Contains(t, w.Body.String(), apierror.Localize(apierror.MsgAppSkillUpstreamUnavailable, apierror.LocaleFrom(nil)))
 	assert.Contains(t, w.Body.String(), "APP_SKILL_UPSTREAM_UNAVAILABLE")
 }
