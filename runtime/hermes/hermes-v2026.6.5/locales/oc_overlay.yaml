@@ -33,4 +33,28 @@ oc:
     request_failed:
       en: "The request failed: {detail}\nTry again or use /reset to start a fresh session."
       zh: "请求失败:{detail}\n请重试,或用 /reset 开始一个新会话。"
+    # 部分处理后中止；{err} 为截断后的错误说明。
+    processing_stopped:
+      en: "⚠️ Processing stopped: {err}. Try again."
+      zh: "⚠️ 处理已中止:{err}。请重试。"
+    # 处理完成但无回复生成（隐式拼接的整条消息合为一条）。
+    no_response_generated:
+      en: "⚠️ Processing completed but no response was generated. This may be a transient error — try sending your message again."
+      zh: "⚠️ 处理已完成,但没有生成任何回复。这可能是临时性错误 —— 请再发送一次你的消息。"
+    # 网关关闭/重启通知：action/hint 各自分支单独成 key，msg 拼装为 gateway_interrupt。
+    action_restarting:
+      en: "restarting"
+      zh: "正在重启"
+    action_shutting_down:
+      en: "shutting down"
+      zh: "正在关闭"
+    task_interrupted_resume:
+      en: "Your current task will be interrupted. Send any message after restart and I'll try to resume where you left off."
+      zh: "你当前的任务将被中断。重启完成后发送任意消息,我会尝试从你上次离开的地方继续。"
+    task_interrupted:
+      en: "Your current task will be interrupted. "
+      zh: "你当前的任务将被中断。"
+    gateway_interrupt:
+      en: "⚠️ Gateway {action} — {hint}"
+      zh: "⚠️ 网关{action} —— {hint}"
   base: {}

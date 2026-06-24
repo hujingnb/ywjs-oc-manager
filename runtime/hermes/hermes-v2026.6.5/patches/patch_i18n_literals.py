@@ -92,6 +92,40 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         '            "Try again or use /reset to start a fresh session."',
         't("oc.run.request_failed", detail=str(error_detail)[:300])',
     ),
+    # --- 部分处理后中止（单行 f-string，{err} 在调用点传入）---
+    (
+        'f"⚠️ Processing stopped: {str(err)[:200]}. Try again."',
+        't("oc.run.processing_stopped", err=str(err)[:200])',
+    ),
+    # --- 处理完成但无回复（隐式拼接整条合为一 key）---
+    (
+        '"⚠️ Processing completed but no response was generated. "\n'
+        '            "This may be a transient error — try sending your message again."',
+        't("oc.run.no_response_generated")',
+    ),
+    # --- 关闭/重启通知 action 三元：两短字面量分支各一 key；整段三元做唯一锚点，
+    #     同时覆盖 _status_action_gerund() return 与 _notify 的 action= 赋值两处。---
+    (
+        '"restarting" if self._restart_requested else "shutting down"',
+        '(t("oc.run.action_restarting") if self._restart_requested '
+        'else t("oc.run.action_shutting_down"))',
+    ),
+    # --- hint 三元 restart 分支（两行隐式拼接整条）---
+    (
+        '"Your current task will be interrupted. "\n'
+        '            "Send any message after restart and I\'ll try to resume where you left off."',
+        't("oc.run.task_interrupted_resume")',
+    ),
+    # --- hint 三元 else 分支：带 `else ` 前缀锚定，避免与 resume 分支首段冲突 ---
+    (
+        'else "Your current task will be interrupted. "',
+        'else t("oc.run.task_interrupted")',
+    ),
+    # --- msg 拼装：{action}/{hint} 已是上面 t() 的结果，作 kwarg 传入 ---
+    (
+        'f"⚠️ Gateway {action} — {hint}"',
+        't("oc.run.gateway_interrupt", action=action, hint=hint)',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 
