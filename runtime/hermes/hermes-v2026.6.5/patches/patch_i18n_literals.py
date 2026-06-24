@@ -230,6 +230,46 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         'f"Command `/{command}` was blocked by a hook."',
         't("oc.run.command_blocked_hook", command=command)',
     ),
+    # --- /new 销毁性确认 detail（源码两段相邻字面量隐式拼接，20 空格缩进）---
+    (
+        '"This starts a fresh session and discards the current "\n'
+        '                    "conversation history."',
+        't("oc.run.destructive_confirm")',
+    ),
+    # --- 销毁性确认被取消：{command} 在调用点传入（🟡 /{command} 前缀保留在 catalog）---
+    (
+        'f"🟡 /{command} cancelled. Conversation unchanged."',
+        't("oc.run.destructive_cancelled", command=command)',
+    ),
+    # --- 自定义快捷命令 exec/alias 文案 ---
+    (
+        '"Command returned no output."',
+        't("oc.run.quick_cmd_no_output")',
+    ),
+    (
+        '"Quick command timed out (30s)."',
+        't("oc.run.quick_cmd_timeout")',
+    ),
+    # exec 异常：{e} 在调用点传入。
+    (
+        'f"Quick command error: {e}"',
+        't("oc.run.quick_cmd_error", err=e)',
+    ),
+    # 缺 command 字段：{command} 在调用点传入。
+    (
+        'f"Quick command \'/{command}\' has no command defined."',
+        't("oc.run.quick_cmd_no_command", command=command)',
+    ),
+    # 缺 target 字段：{command} 在调用点传入。
+    (
+        'f"Quick command \'/{command}\' has no target defined."',
+        't("oc.run.quick_cmd_no_target", command=command)',
+    ),
+    # type 不受支持：{command} 在调用点传入。
+    (
+        'f"Quick command \'/{command}\' has unsupported type (supported: \'exec\', \'alias\')."',
+        't("oc.run.quick_cmd_unsupported_type", command=command)',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 

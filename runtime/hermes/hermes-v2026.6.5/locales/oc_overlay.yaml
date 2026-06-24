@@ -144,4 +144,37 @@ oc:
     command_blocked_hook:
       en: "Command `/{command}` was blocked by a hook."
       zh: "命令 `/{command}` 被某个 hook 拦截。"
+    # --- /new、/reset 销毁性确认与快捷命令 ---
+    # /new 销毁性确认提示文案（源码两段相邻字面量隐式拼接）。
+    destructive_confirm:
+      en: "This starts a fresh session and discards the current conversation history."
+      zh: "这将开始一个全新会话,并丢弃当前的对话历史。"
+    # 销毁性确认被取消；{command} 为命令名（🟡 /{command} 前缀为源码字面量）。
+    destructive_cancelled:
+      en: "🟡 /{command} cancelled. Conversation unchanged."
+      zh: "🟡 /{command} 已取消。对话内容未改变。"
+    # 自定义快捷命令 exec 无输出兜底。
+    quick_cmd_no_output:
+      en: "Command returned no output."
+      zh: "命令没有输出。"
+    # 自定义快捷命令 exec 执行超时（固定 30 秒）。
+    quick_cmd_timeout:
+      en: "Quick command timed out (30s)."
+      zh: "快捷命令超时(30 秒)。"
+    # 自定义快捷命令 exec 异常；{err} 为异常文本。
+    quick_cmd_error:
+      en: "Quick command error: {err}"
+      zh: "快捷命令出错:{err}"
+    # 快捷命令配置缺 command 字段；{command} 为命令名。
+    quick_cmd_no_command:
+      en: "Quick command '/{command}' has no command defined."
+      zh: "快捷命令 '/{command}' 未定义命令。"
+    # 快捷命令 alias 配置缺 target 字段；{command} 为命令名。
+    quick_cmd_no_target:
+      en: "Quick command '/{command}' has no target defined."
+      zh: "快捷命令 '/{command}' 未定义目标。"
+    # 快捷命令 type 不在支持范围；{command} 为命令名。
+    quick_cmd_unsupported_type:
+      en: "Quick command '/{command}' has unsupported type (supported: 'exec', 'alias')."
+      zh: "快捷命令 '/{command}' 类型不受支持(支持:'exec'、'alias')。"
   base: {}
