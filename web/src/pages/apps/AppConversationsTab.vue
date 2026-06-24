@@ -141,6 +141,14 @@ const renameVisible = ref(false)
 const renameTitle = ref('')
 const renameTargetId = ref('')
 
+// roleLabel 把消息 role 映射为本地化标签：user→用户、assistant→客服（AI 应答方），
+// 其余 role（如 system）原样回显兜底，避免漏配时标签空白。
+function roleLabel(role: string): string {
+  if (role === 'user') return t('apps.conversations.roleUser')
+  if (role === 'assistant') return t('apps.conversations.roleAssistant')
+  return role
+}
+
 // ─── 数据加载 ─────────────────────────────────────────────────────────────────
 // loadSessions 拉取当前实例的所有会话列表。
 async function loadSessions() {
@@ -365,24 +373,58 @@ onMounted(loadSessions)
   gap: 12px;
 }
 
+/* 单条消息：纵向「角色标签 + 气泡」，并按角色左右分栏。
+   max-width 限制气泡宽度、留出对侧空白凸显方向；align-self 决定整条靠左/靠右。 */
 .msg-row {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
+  max-width: 78%;
 }
-
-.msg-row.user .role-label {
-  color: var(--color-brand-text, #8a3700);
+/* 用户消息：整条靠右，标签与气泡右对齐 */
+.msg-row.user {
+  align-self: flex-end;
+  align-items: flex-end;
 }
-
-.msg-row.assistant .role-label {
-  color: var(--color-text-secondary, #6b7280);
+/* 客服(assistant)消息：整条靠左 */
+.msg-row.assistant {
+  align-self: flex-start;
+  align-items: flex-start;
 }
 
 .role-label {
   font-size: 11px;
   font-weight: 600;
-  text-transform: uppercase;
+}
+.msg-row.user .role-label {
+  color: var(--color-brand-text, #8a3700);
+}
+.msg-row.assistant .role-label {
+  color: var(--color-text-secondary, #6b7280);
+}
+
+/* 消息气泡：正文容器（ConversationMessageView 的 .message-view）上色与圆角。
+   用户用品牌橙底白字、客服用浅灰底深字，明确区分双方；靠发送侧的上角收小指向角色。 */
+.msg-row :deep(.message-view) {
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.msg-row.user :deep(.message-view) {
+  background: var(--color-brand, #ff6a00);
+  color: #fff;
+  border-top-right-radius: 4px;
+}
+.msg-row.assistant :deep(.message-view) {
+  background: var(--color-bg-hover, #f5f5f5);
+  color: var(--color-text-primary, #1f2329);
+  border-top-left-radius: 4px;
+}
+/* 客服气泡内 markdown 代码块改白底，避免与浅灰气泡同色糊在一起 */
+.msg-row.assistant :deep(.markdown-body code),
+.msg-row.assistant :deep(.markdown-body pre) {
+  background: #fff;
 }
 
 /* 输入区：固定在右侧底部。
