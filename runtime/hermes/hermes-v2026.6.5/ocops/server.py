@@ -122,10 +122,11 @@ async def get_config(request):
             lang = display.get("language")
             if lang:
                 language = str(lang)
-    except (OSError, yaml.YAMLError):
+    except (OSError, yaml.YAMLError, ValueError):
         # 文件缺失/损坏/读失败均回落 en，保证该诊断端点永不 500：
         # OSError 覆盖 FileNotFoundError（文件不存在）与权限等读失败；
-        # yaml.YAMLError 覆盖 config.yaml 内容语法损坏无法解析的情况。
+        # yaml.YAMLError 覆盖 config.yaml 内容语法损坏无法解析的情况；
+        # ValueError 覆盖 UnicodeDecodeError（非 UTF-8 内容）等解码异常。
         pass
 
     return _ok({"display_language": language})
