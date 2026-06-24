@@ -5,10 +5,36 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
 )
+
+// decodeListLenient 把 oc-ops 返回的会话/消息数组逐条解码到 T：先用 RawMessage 承接
+// 顶层数组，再逐条 Unmarshal，单条解码失败只跳过该条并告警，不让整批失败。
+//
+// 动机：会话历史数据可能由不同 Hermes 版本写入（实例可在版本间切换，旧 /opt/data
+// 数据保留），个别历史条目的字段类型可能与当前 struct 不一致。若沿用整批严格 Decode，
+// 一条坏数据就会让整个列表端点返回 OUTPUT_INVALID、整页不可用；逐条容错可最大限度
+// 展示可解析的数据，坏条目以 Warn 日志暴露便于排查。
+func decodeListLenient[T any](ctx context.Context, raw []json.RawMessage, kind string) []T {
+	out := make([]T, 0, len(raw))
+	for _, item := range raw {
+		var v T
+		if err := json.Unmarshal(item, &v); err != nil {
+			// raw 截断避免超长会话内容刷屏；含用户标题/预览，仅 Warn 级用于排障。
+			snippet := string(item)
+			if len(snippet) > 200 {
+				snippet = snippet[:200]
+			}
+			slog.WarnContext(ctx, "跳过解码失败的会话条目", "kind", kind, "err", err, "raw", snippet)
+			continue
+		}
+		out = append(out, v)
+	}
+	return out
+}
 
 // ListSessions 列出实例下会话；source 非空时按渠道过滤。
 // GET /oc/conversations?source=&limit=&offset=
@@ -19,17 +45,23 @@ func (c *Client) ListSessions(ctx context.Context, ep Endpoint, source string, l
 	if source != "" {
 		q.Set("source", source)
 	}
-	var out []ConversationSession
-	err := c.DoJSON(ctx, ep, http.MethodGet, "/oc/conversations?"+q.Encode(), nil, &out)
-	return out, err
+	// 顶层用 RawMessage 承接后逐条容错解码：单条会话字段异常不影响整列表。
+	var raw []json.RawMessage
+	if err := c.DoJSON(ctx, ep, http.MethodGet, "/oc/conversations?"+q.Encode(), nil, &raw); err != nil {
+		return nil, err
+	}
+	return decodeListLenient[ConversationSession](ctx, raw, "session"), nil
 }
 
 // SessionMessages 读某会话历史消息。
 // GET /oc/conversations/{sid}/messages
 func (c *Client) SessionMessages(ctx context.Context, ep Endpoint, sid string) ([]ConversationMessage, error) {
-	var out []ConversationMessage
-	err := c.DoJSON(ctx, ep, http.MethodGet, "/oc/conversations/"+url.PathEscape(sid)+"/messages", nil, &out)
-	return out, err
+	// 同 ListSessions：逐条容错，单条历史消息解码失败不影响整段历史展示。
+	var raw []json.RawMessage
+	if err := c.DoJSON(ctx, ep, http.MethodGet, "/oc/conversations/"+url.PathEscape(sid)+"/messages", nil, &raw); err != nil {
+		return nil, err
+	}
+	return decodeListLenient[ConversationMessage](ctx, raw, "message"), nil
 }
 
 // CreateSession 新建会话（默认 web 来源），返回新建会话对象。

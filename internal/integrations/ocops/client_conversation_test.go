@@ -97,3 +97,34 @@ func TestSessionChatStream(t *testing.T) {
 	assert.Equal(t, "assistant.delta", events[0].Event)     // 第一帧事件名
 	assert.Equal(t, "assistant.completed", events[1].Event) // 第二帧事件名
 }
+
+// 加固回归：列表中单条会话字段类型异常（跨 Hermes 版本旧会话常见，如 started_at
+// 本应是数字却为字符串）时，应跳过坏条、保留可解析的会话，而不是让整个会话列表
+// 端点返回 OUTPUT_INVALID。复现线上「切版本后对话页整页报错」的根因场景。
+func TestListSessionsLenientSkipsBadEntry(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 中间一条 started_at 为字符串，与 ConversationSession.StartedAt(float64) 不匹配，
+		// 严格整批解码会因这一条整体失败；逐条容错应只跳过它。
+		_, _ = w.Write([]byte(`[{"id":"s1","source":"weixin"},{"id":"s2","started_at":"bad"},{"id":"s3","source":"web"}]`))
+	}))
+	defer srv.Close()
+	c := NewClient(srv.Client())
+	out, err := c.ListSessions(context.Background(), Endpoint{BaseURL: srv.URL, Token: "tk"}, "", 50, 0)
+	require.NoError(t, err)          // 坏条不再让整批失败
+	require.Len(t, out, 2)           // 仅保留两条可解析会话
+	assert.Equal(t, "s1", out[0].ID) // 第一条好数据保留
+	assert.Equal(t, "s3", out[1].ID) // 坏条 s2 被跳过，s3 仍保留
+}
+
+// 加固边界：顶层不是 JSON 数组（如上游异常返回对象/错误信封却带 2xx）时，仍应
+// 返回 ErrOutputInvalid，而非静默吞掉——逐条容错只放宽「单条坏」，不放宽「整体结构错」。
+func TestListSessionsTopLevelNotArray(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 顶层是对象而非数组，承接的 []json.RawMessage 解码会失败
+		_, _ = w.Write([]byte(`{"unexpected":"shape"}`))
+	}))
+	defer srv.Close()
+	c := NewClient(srv.Client())
+	_, err := c.ListSessions(context.Background(), Endpoint{BaseURL: srv.URL, Token: "tk"}, "", 50, 0)
+	require.ErrorIs(t, err, ErrOutputInvalid) // 整体结构错仍按 OUTPUT_INVALID 处理
+}
