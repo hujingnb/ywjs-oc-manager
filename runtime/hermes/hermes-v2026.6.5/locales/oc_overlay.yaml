@@ -574,4 +574,65 @@ oc:
     nonadmin_no_slash:
       en: "No slash commands are enabled for non-admins on this platform. Ask an admin to add you to allow_admin_from or to set user_allowed_commands."
       zh: "本平台未对非管理员启用任何斜杠命令。请联系管理员把你加入 allow_admin_from,或设置 user_allowed_commands。"
+    # --- /platform 平台管理命令（list / pause / resume）---
+    # 网关平台列表标题。
+    platform_list_header:
+      en: "**Gateway platforms**"
+      zh: "**网关平台**"
+    # 已连接平台（空）。
+    platform_connected_none:
+      en: "Connected: (none)"
+      zh: "已连接: (无)"
+    # 已连接平台前缀（{connected} 列表由调用点拼接）。
+    platform_connected_prefix:
+      en: "Connected: "
+      zh: "已连接: "
+    # 失败/暂停平台（空）。
+    platform_failed_none:
+      en: "Failed/paused: (none)"
+      zh: "失败/暂停: (无)"
+    # 列表项：某平台已暂停（{platform} 为 p.value；{reason} 暂停原因）。
+    platform_list_paused:
+      en: "  · {platform} — PAUSED ({reason}). Resume with `/platform resume {platform}`."
+      zh: "  · {platform} —— 已暂停({reason})。用 `/platform resume {platform}` 恢复。"
+    # 列表项：某平台重试中（{platform} 为 p.value；{attempts} 已尝试次数）。
+    platform_list_retrying:
+      en: "  · {platform} — retrying (attempt {attempts})"
+      zh: "  · {platform} —— 重试中(第 {attempts} 次)"
+    # 用法提示（pause/resume 缺少 name；{action} 当前子命令）。
+    platform_usage_action:
+      en: "Usage: /platform {action} <name>"
+      zh: "用法:/platform {action} <name>"
+    # 未知平台名（{target} 用户输入）。
+    platform_unknown:
+      en: "Unknown platform: {target}"
+      zh: "未知平台:{target}"
+    # pause：平台不在重试队列（2 段隐式拼接；{platform} 为 platform.value）。
+    platform_pause_not_in_queue:
+      en: "{platform} is not in the retry queue (it's either connected or not enabled)."
+      zh: "{platform} 不在重试队列中(它要么已连接,要么未启用)。"
+    # pause：平台已处于暂停（{platform} 为 platform.value）。
+    platform_already_paused:
+      en: "{platform} is already paused."
+      zh: "{platform} 已处于暂停状态。"
+    # pause：成功暂停（3 段隐式拼接；{platform} 为 platform.value）。
+    platform_paused_ok:
+      en: "✓ {platform} paused. Resume with `/platform resume {platform}` or `hermes gateway restart` to reset."
+      zh: "✓ {platform} 已暂停。用 `/platform resume {platform}` 或 `hermes gateway restart` 重置以恢复。"
+    # resume：平台不在重试队列、无可恢复（2 段隐式拼接；{platform} 为 platform.value）。
+    platform_resume_not_in_queue:
+      en: "{platform} is not in the retry queue — nothing to resume."
+      zh: "{platform} 不在重试队列中 —— 无可恢复项。"
+    # resume：平台已在重试、无需恢复（2 段隐式拼接；{platform} 为 platform.value）。
+    platform_already_retrying:
+      en: "{platform} is already retrying — no resume needed."
+      zh: "{platform} 已在重试中 —— 无需恢复。"
+    # resume：成功恢复（{platform} 为 platform.value）。
+    platform_resumed_ok:
+      en: "✓ {platform} resumed — retrying on next watcher tick."
+      zh: "✓ {platform} 已恢复 —— 将在下次巡检时重试。"
+    # /platform 总用法帮助（4 段隐式拼接，含字面 \n）。
+    platform_usage_help:
+      en: "Usage: /platform <list|pause|resume> [name]\n  /platform list — show platform status\n  /platform pause <name> — stop retrying a failing platform\n  /platform resume <name> — re-queue a paused platform"
+      zh: "用法:/platform <list|pause|resume> [name]\n  /platform list —— 显示平台状态\n  /platform pause <name> —— 停止重试某个故障平台\n  /platform resume <name> —— 重新排队某个已暂停平台"
   base: {}

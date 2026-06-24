@@ -801,6 +801,85 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         '                "or to set user_allowed_commands."',
         't("oc.run.nonadmin_no_slash")',
     ),
+    # --- /platform 平台管理命令（list / pause / resume）---
+    # 子串顺序：长串排其子串之前，避免短串先命中长串内部切出病句。
+    (
+        '"**Gateway platforms**"',
+        't("oc.run.platform_list_header")',
+    ),
+    # "Connected: (none)" 必须排在前缀 "Connected: " 之前。
+    (
+        '"Connected: (none)"',
+        't("oc.run.platform_connected_none")',
+    ),
+    (
+        '"Connected: "',
+        't("oc.run.platform_connected_prefix")',
+    ),
+    (
+        '"Failed/paused: (none)"',
+        't("oc.run.platform_failed_none")',
+    ),
+    # 列表项 paused（2 段 f-string 隐式拼接；{p.value} 作 kwarg）。
+    (
+        'f"  · {p.value} — PAUSED ({reason}). "\n'
+        '                            f"Resume with `/platform resume {p.value}`."',
+        't("oc.run.platform_list_paused", platform=p.value, reason=reason)',
+    ),
+    # 列表项 retrying（{p.value}/{attempts} 作 kwarg）。
+    (
+        'f"  · {p.value} — retrying (attempt {attempts})"',
+        't("oc.run.platform_list_retrying", platform=p.value, attempts=attempts)',
+    ),
+    (
+        'f"Usage: /platform {action} <name>"',
+        't("oc.run.platform_usage_action", action=action)',
+    ),
+    (
+        'f"Unknown platform: {target}"',
+        't("oc.run.platform_unknown", target=target)',
+    ),
+    # pause：不在重试队列（2 段 f-string 隐式拼接；{platform.value} 作 kwarg）。
+    (
+        'f"{platform.value} is not in the retry queue "\n'
+        '                        f"(it\'s either connected or not enabled)."',
+        't("oc.run.platform_pause_not_in_queue", platform=platform.value)',
+    ),
+    (
+        'f"{platform.value} is already paused."',
+        't("oc.run.platform_already_paused", platform=platform.value)',
+    ),
+    # pause：成功暂停（3 段 f-string 隐式拼接；{platform.value} 作 kwarg）。
+    (
+        'f"✓ {platform.value} paused. "\n'
+        '                    f"Resume with `/platform resume {platform.value}` or "\n'
+        '                    f"`hermes gateway restart` to reset."',
+        't("oc.run.platform_paused_ok", platform=platform.value)',
+    ),
+    # resume：不在重试队列、无可恢复（2 段 f-string 隐式拼接；{platform.value} 作 kwarg）。
+    (
+        'f"{platform.value} is not in the retry queue — "\n'
+        '                    f"nothing to resume."',
+        't("oc.run.platform_resume_not_in_queue", platform=platform.value)',
+    ),
+    # resume：已在重试、无需恢复（2 段 f-string 隐式拼接；{platform.value} 作 kwarg）。
+    (
+        'f"{platform.value} is already retrying — "\n'
+        '                    f"no resume needed."',
+        't("oc.run.platform_already_retrying", platform=platform.value)',
+    ),
+    (
+        'f"✓ {platform.value} resumed — retrying on next watcher tick."',
+        't("oc.run.platform_resumed_ok", platform=platform.value)',
+    ),
+    # /platform 总用法帮助（4 段隐式拼接，含字面 \n）。
+    (
+        '"Usage: /platform <list|pause|resume> [name]\\n"\n'
+        '            "  /platform list — show platform status\\n"\n'
+        '            "  /platform pause <name> — stop retrying a failing platform\\n"\n'
+        '            "  /platform resume <name> — re-queue a paused platform"',
+        't("oc.run.platform_usage_help")',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 
