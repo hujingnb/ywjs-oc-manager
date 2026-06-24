@@ -429,4 +429,9 @@ oc:
     clarify_no_response:
       en: "[user did not respond within "
       zh: "[用户未在 "
+    # --- 无活动超时提醒（源码四段 f-string 隐式拼接，整条合一）---
+    # {elapsed_warn} 为已闲置分钟数，{remaining_mins} 为超时倒计时分钟数。
+    inactivity_warning:
+      en: "⚠️ No activity for {elapsed_warn} min. If the agent does not respond soon, it will be timed out in {remaining_mins} min. You can continue waiting or use /reset."
+      zh: "⚠️ 已闲置 {elapsed_warn} 分钟。若仍无响应,超时倒计时 {remaining_mins} 分钟。你可以继续等待,或使用 /reset。"
   base: {}

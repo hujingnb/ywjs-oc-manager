@@ -615,6 +615,16 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         'f"[user did not respond within {int(timeout / 60)}m]"',
         't("oc.run.clarify_no_response") + f"{int(timeout / 60)}m]"',
     ),
+    # --- 无活动超时提醒（L18802-18805 四段 f-string 隐式拼接，整条合一）---
+    # {_elapsed_warn}/{_remaining_mins} 作 elapsed_warn/remaining_mins kwarg 传入。
+    (
+        'f"⚠️ No activity for {_elapsed_warn} min. "\n'
+        '                                    f"If the agent does not respond soon, it will "\n'
+        '                                    f"be timed out in {_remaining_mins} min. "\n'
+        '                                    f"You can continue waiting or use /reset."',
+        't("oc.run.inactivity_warning", elapsed_warn=_elapsed_warn, '
+        'remaining_mins=_remaining_mins)',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 
