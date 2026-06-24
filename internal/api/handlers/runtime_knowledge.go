@@ -52,7 +52,7 @@ func RegisterRuntimeKnowledgeRoutes(router gin.IRouter, handler *RuntimeKnowledg
 func (h *RuntimeKnowledgeHandler) Search(c *gin.Context) {
 	token := c.GetHeader(runtimeKnowledgeTokenHeader)
 	if token == "" {
-		c.JSON(http.StatusUnauthorized, apierror.New("INVALID_APP_TOKEN", "缺少 runtime token"))
+		apierror.JSON(c, http.StatusUnauthorized, "INVALID_APP_TOKEN", apierror.MsgKnowledgeMissingRuntimeToken)
 		return
 	}
 	var body RuntimeKnowledgeSearchRequest
@@ -86,28 +86,30 @@ func (h *RuntimeKnowledgeHandler) Search(c *gin.Context) {
 func (h *RuntimeKnowledgeHandler) AddFile(c *gin.Context) {
 	token := c.GetHeader(runtimeKnowledgeTokenHeader)
 	if token == "" {
-		c.JSON(http.StatusUnauthorized, apierror.New("INVALID_APP_TOKEN", "缺少 runtime token"))
+		apierror.JSON(c, http.StatusUnauthorized, "INVALID_APP_TOKEN", apierror.MsgKnowledgeMissingRuntimeToken)
 		return
 	}
 	maxBodyBytes := maxKnowledgeUploadBytes + maxKnowledgeMultipartOverheadBytes
 	// multipart 会在解析后提供 file.Size；请求总大小未知时仍可依赖后续文件大小校验。
 	if size, ok := requestContentLength(c); ok && size > maxBodyBytes {
+		// maxKnowledgeUploadMessage 由上限按 MB 运行时换算，属动态文案，保留原样不入 catalog。
 		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", maxKnowledgeUploadMessage))
 		return
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
 	file, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 file 字段"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgKnowledgeMissingFileField)
 		return
 	}
 	if file.Size > maxKnowledgeUploadBytes {
+		// 同上，运行时 MB 换算的动态文案保留原样。
 		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", maxKnowledgeUploadMessage))
 		return
 	}
 	stream, err := file.Open()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "读取上传文件失败"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgKnowledgeOpenFileFailed)
 		return
 	}
 	defer stream.Close()

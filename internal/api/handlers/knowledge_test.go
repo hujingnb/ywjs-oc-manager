@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/service"
@@ -469,7 +470,8 @@ func TestKnowledgePatchAppEmbeddingModelRejectsMissingName(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), `"code":"BAD_REQUEST"`)
-	assert.Contains(t, w.Body.String(), "模型名称不能为空")
+	// 测试路由无 locale 中间件，message 回落 en；按 catalog en 文案断言。
+	assert.Contains(t, w.Body.String(), apierror.Localize(apierror.MsgKnowledgeModelNameRequired, apierror.LocaleFrom(nil)))
 	assert.Empty(t, stub.updateEmbeddingModelTargetID)
 }
 

@@ -264,7 +264,7 @@ func (h *KnowledgeHandler) ListOrg(c *gin.Context) {
 func (h *KnowledgeHandler) SaveOrg(c *gin.Context) {
 	filename := c.Query("filename")
 	if filename == "" {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 filename 参数"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgKnowledgeMissingFilename)
 		return
 	}
 	size, ok := prepareKnowledgeOctetStreamUpload(c)
@@ -419,7 +419,7 @@ func (h *KnowledgeHandler) ListApp(c *gin.Context) {
 func (h *KnowledgeHandler) SaveApp(c *gin.Context) {
 	filename := c.Query("filename")
 	if filename == "" {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 filename 参数"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgKnowledgeMissingFilename)
 		return
 	}
 	size, ok := prepareKnowledgeOctetStreamUpload(c)
@@ -541,10 +541,11 @@ func prepareKnowledgeOctetStreamUpload(c *gin.Context) (int64, bool) {
 	// 知识库上传必须在进入 RAGFlow 前知道文件大小，否则无法做累计容量预校验。
 	size, ok := requestContentLength(c)
 	if !ok {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少有效的文件大小信息"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgKnowledgeMissingFileSize)
 		return 0, false
 	}
 	if size > maxKnowledgeUploadBytes {
+		// maxKnowledgeUploadMessage 由上限按 MB 运行时换算，属动态文案，保留原样不入 catalog。
 		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", maxKnowledgeUploadMessage))
 		return size, false
 	}
@@ -566,7 +567,7 @@ func writeRAGFlowDatasetInfo(c *gin.Context, svc knowledgeRAGFlowDatasetService,
 func updateRAGFlowDatasetEmbeddingModel(c *gin.Context, svc knowledgeRAGFlowDatasetService, scope, targetID string, writeErr func(*gin.Context, error)) {
 	var req UpdateKnowledgeEmbeddingModelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "模型名称不能为空"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgKnowledgeModelNameRequired)
 		return
 	}
 	input := service.KnowledgeEmbeddingModelInput{
@@ -574,7 +575,7 @@ func updateRAGFlowDatasetEmbeddingModel(c *gin.Context, svc knowledgeRAGFlowData
 		Provider: strings.TrimSpace(req.Provider),
 	}
 	if input.Name == "" {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "模型名称不能为空"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgKnowledgeModelNameRequired)
 		return
 	}
 	result, err := svc.UpdateKnowledgeEmbeddingModel(c.Request.Context(), principalFromCtx(c), scope, targetID, input)
@@ -600,24 +601,26 @@ func requestContentLength(c *gin.Context) (int64, bool) {
 func writeKnowledgeError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrKnowledgeForbidden):
-		c.JSON(http.StatusForbidden, apierror.New("KNOWLEDGE_FORBIDDEN", "无权访问该知识库"))
+		apierror.JSON(c, http.StatusForbidden, "KNOWLEDGE_FORBIDDEN", apierror.MsgKnowledgeForbidden)
 	case errors.Is(err, service.ErrInvalidToken):
-		c.JSON(http.StatusUnauthorized, apierror.New("INVALID_APP_TOKEN", "runtime token 无效"))
+		apierror.JSON(c, http.StatusUnauthorized, "INVALID_APP_TOKEN", apierror.MsgKnowledgeRuntimeTokenInvalid)
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "资源不存在"))
+		apierror.JSON(c, http.StatusNotFound, "NOT_FOUND", apierror.MsgNotFound)
 	case errors.Is(err, service.ErrKnowledgeDatasetCreating):
-		c.JSON(http.StatusServiceUnavailable, apierror.New("KNOWLEDGE_DATASET_CREATING", "知识库正在初始化，请稍后重试"))
+		apierror.JSON(c, http.StatusServiceUnavailable, "KNOWLEDGE_DATASET_CREATING", apierror.MsgKnowledgeDatasetCreating)
 	case errors.Is(err, service.ErrKnowledgeMissing):
-		c.JSON(http.StatusServiceUnavailable, apierror.New("KNOWLEDGE_NOT_CONFIGURED", "知识库未配置"))
+		apierror.JSON(c, http.StatusServiceUnavailable, "KNOWLEDGE_NOT_CONFIGURED", apierror.MsgKnowledgeNotConfigured)
 	case errors.Is(err, service.ErrKnowledgeQuotaExceeded):
+		// 配额明细由 service 错误链运行时拼接，属动态文案，保留原样不入 catalog。
 		c.JSON(http.StatusConflict, apierror.New("KNOWLEDGE_QUOTA_EXCEEDED", validationServiceMessage(err, service.ErrKnowledgeQuotaExceeded)))
 	case errors.Is(err, service.ErrKnowledgeMultipartUnavailable):
 		// 未启用对象存储，分片上传不可用；前端据此回退到直传。
-		c.JSON(http.StatusServiceUnavailable, apierror.New("KNOWLEDGE_MULTIPART_UNAVAILABLE", "分片上传不可用"))
+		apierror.JSON(c, http.StatusServiceUnavailable, "KNOWLEDGE_MULTIPART_UNAVAILABLE", apierror.MsgKnowledgeMultipartUnavailable)
 	case errors.Is(err, service.ErrKnowledgeUploadSessionNotFound):
 		// 会话不存在 / 已过期 / 归属不符，统一按 404 处理。
-		c.JSON(http.StatusNotFound, apierror.New("KNOWLEDGE_UPLOAD_SESSION_NOT_FOUND", "上传会话不存在或已过期"))
+		apierror.JSON(c, http.StatusNotFound, "KNOWLEDGE_UPLOAD_SESSION_NOT_FOUND", apierror.MsgKnowledgeUploadSessionNotFound)
 	default:
+		// SafeErrorMessage 返回脱敏后的运行时错误明细，属动态文案，保留原样不入 catalog。
 		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", redactlog.SafeErrorMessage(err)))
 	}
 }

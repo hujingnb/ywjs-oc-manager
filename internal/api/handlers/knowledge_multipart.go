@@ -17,7 +17,7 @@ func parsePartNumber(c *gin.Context) (int32, bool) {
 	raw := c.Param("partNumber")
 	n, err := strconv.ParseInt(raw, 10, 32)
 	if err != nil || n < 1 {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "分片序号非法"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgKnowledgePartNumberInvalid)
 		return 0, false
 	}
 	return int32(n), true
@@ -27,11 +27,11 @@ func parsePartNumber(c *gin.Context) (int32, bool) {
 func preparePartUpload(c *gin.Context) (int64, bool) {
 	size, ok := requestContentLength(c)
 	if !ok {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少有效的分片大小信息"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgKnowledgeMissingPartSize)
 		return 0, false
 	}
 	if size > maxKnowledgePartBytes {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "分片大小超过上限"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgKnowledgePartTooLarge)
 		return size, false
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxKnowledgePartBytes)
@@ -57,7 +57,7 @@ func preparePartUpload(c *gin.Context) (int64, bool) {
 func (h *KnowledgeHandler) InitOrgUpload(c *gin.Context) {
 	var req InitKnowledgeUploadRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "请求参数非法"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgKnowledgeInvalidRequest)
 		return
 	}
 	result, err := h.service.InitOrgUpload(c.Request.Context(), principalFromCtx(c), c.Param("orgId"), req.Filename, req.Size)
@@ -163,7 +163,7 @@ func (h *KnowledgeHandler) AbortOrgUpload(c *gin.Context) {
 func (h *KnowledgeHandler) InitAppUpload(c *gin.Context) {
 	var req InitKnowledgeUploadRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "请求参数非法"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgKnowledgeInvalidRequest)
 		return
 	}
 	result, err := h.service.InitAppUpload(c.Request.Context(), principalFromCtx(c), c.Param("appId"), req.Filename, req.Size)
