@@ -114,7 +114,7 @@ func (h *AppsHandler) Get(c *gin.Context) {
 func (h *AppsHandler) SwitchVersion(c *gin.Context) {
 	var req SwitchAppVersionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "请求体格式错误"))
+		apierror.JSON(c, http.StatusBadRequest, "INVALID_REQUEST", apierror.MsgAppInvalidRequest)
 		return
 	}
 	principal := principalFromCtx(c)
@@ -146,7 +146,7 @@ func (h *AppsHandler) SwitchVersion(c *gin.Context) {
 func (h *AppsHandler) UpdateKnowledgeQuota(c *gin.Context) {
 	var req UpdateAppKnowledgeQuotaRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "请求体格式错误"))
+		apierror.JSON(c, http.StatusBadRequest, "INVALID_REQUEST", apierror.MsgAppInvalidRequest)
 		return
 	}
 	principal := principalFromCtx(c)
@@ -178,7 +178,7 @@ func (h *AppsHandler) UpdateKnowledgeQuota(c *gin.Context) {
 func (h *AppsHandler) UpdateLocale(c *gin.Context) {
 	var req UpdateAppLocaleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "请求体格式错误"))
+		apierror.JSON(c, http.StatusBadRequest, "INVALID_REQUEST", apierror.MsgAppInvalidRequest)
 		return
 	}
 	principal := principalFromCtx(c)
@@ -195,16 +195,17 @@ func (h *AppsHandler) UpdateLocale(c *gin.Context) {
 func writeAppsError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrForbidden):
-		c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权访问该应用"))
+		apierror.JSON(c, http.StatusForbidden, "FORBIDDEN", apierror.MsgAppForbidden)
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "应用不存在"))
+		apierror.JSON(c, http.StatusNotFound, "NOT_FOUND", apierror.MsgAppNotFound)
 	case errors.Is(err, service.ErrMemberCreateInvalid):
+		// 成员创建校验失败的字段级原因运行期生成，保留动态文案，不进 catalog。
 		c.JSON(http.StatusBadRequest, apierror.New("MEMBER_INVALID", validationServiceMessage(err, service.ErrMemberCreateInvalid)))
 	case errors.Is(err, service.ErrVersionNotInAllowlist):
-		c.JSON(http.StatusBadRequest, apierror.New("VERSION_NOT_ALLOWED", "助手版本不在企业允许列表内"))
+		apierror.JSON(c, http.StatusBadRequest, "VERSION_NOT_ALLOWED", apierror.MsgAppVersionNotAllowed)
 	case errors.Is(err, service.ErrInvalidLocale):
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_LOCALE", "不支持的语言，请使用 en 或 zh"))
+		apierror.JSON(c, http.StatusBadRequest, "INVALID_LOCALE", apierror.MsgAppInvalidLocale)
 	default:
-		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "服务暂时不可用"))
+		apierror.JSON(c, http.StatusInternalServerError, "INTERNAL", apierror.MsgAppServiceUnavailable)
 	}
 }

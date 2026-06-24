@@ -213,12 +213,12 @@ func (h *AppRuntimeHandler) trigger(c *gin.Context, op service.RuntimeOperation)
 func writeAppRuntimeError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrRuntimeOperationDenied), errors.Is(err, service.ErrForbidden):
-		c.JSON(http.StatusForbidden, apierror.New("RUNTIME_OP_FORBIDDEN", "无权执行该运行操作"))
+		apierror.JSON(c, http.StatusForbidden, "RUNTIME_OP_FORBIDDEN", apierror.MsgAppRuntimeOpForbidden)
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "应用不存在"))
+		apierror.JSON(c, http.StatusNotFound, "NOT_FOUND", apierror.MsgAppNotFound)
 	case errors.Is(err, service.ErrAppNotReinitializable):
-		c.JSON(http.StatusConflict, apierror.New("APP_NOT_REINIT", "应用当前状态不允许重新初始化"))
+		apierror.JSON(c, http.StatusConflict, "APP_NOT_REINIT", apierror.MsgAppNotReinitializable)
 	default:
-		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "运行操作暂不可用"))
+		apierror.JSON(c, http.StatusInternalServerError, "INTERNAL", apierror.MsgAppRuntimeOpUnavailable)
 	}
 }
