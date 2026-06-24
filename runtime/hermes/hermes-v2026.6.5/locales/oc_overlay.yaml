@@ -257,6 +257,10 @@ oc:
     subgoal_added:
       en: "✓ Added subgoal {idx}: {text}"
       zh: "✓ 已添加子目标 {idx}: {text}"
+    # 命令仅管理员可用的拒绝提示；{canonical_cmd} 为命令名，{suffix} 为可运行命令/提示的动态尾段。
+    access_admin_only:
+      en: "⛔ /{canonical_cmd} is admin-only here. {suffix}"
+      zh: "⛔ /{canonical_cmd} 在此仅管理员可用。{suffix}"
     # --- 权限层级信息（/whoami；源码为多段 f-string 隐式拼接，整块经 + 显式拼接）---
     # 用户身份首行；{platform} 为平台，{scope} 为 DM/群组范围（行尾换行由调用点 + 拼接保留）。
     access_you:

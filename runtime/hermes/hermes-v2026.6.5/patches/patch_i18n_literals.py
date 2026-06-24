@@ -386,6 +386,11 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         'f"✓ Added subgoal {idx}: {text}"',
         't("oc.run.subgoal_added", idx=idx, text=text)',
     ),
+    # 命令仅管理员可用的拒绝提示（单行 f-string，{suffix} 为动态尾段透传）。
+    (
+        'f"⛔ /{canonical_cmd} is admin-only here. {suffix}"',
+        't("oc.run.access_admin_only", canonical_cmd=canonical_cmd, suffix=suffix)',
+    ),
     # --- /whoami 权限层级信息（三互斥分支，各为多段 f-string 隐式拼接）---
     # 整块逐字符复制自 upstream（16/12 空格缩进须一致）；隐式拼接改 + 显式拼接，
     # 每段译入 catalog，行尾 \n 在调用点用 + "\n" 保留，动态占位作 kwarg。
