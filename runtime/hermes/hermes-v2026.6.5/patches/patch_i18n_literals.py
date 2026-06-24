@@ -270,6 +270,14 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         'f"Quick command \'/{command}\' has unsupported type (supported: \'exec\', \'alias\')."',
         't("oc.run.quick_cmd_unsupported_type", command=command)',
     ),
+    # --- 未知斜杠命令提示（源码四段 f-string 隐式拼接整条合一）；{command} 在调用点传入 ---
+    (
+        'f"Unknown command `/{command}`. "\n'
+        '                            f"Type /commands to see what\'s available, "\n'
+        '                            f"or resend without the leading slash to send "\n'
+        '                            f"as a regular message."',
+        't("oc.run.unknown_command", command=command)',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 

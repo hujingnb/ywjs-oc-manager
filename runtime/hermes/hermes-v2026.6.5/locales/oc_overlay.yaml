@@ -177,4 +177,8 @@ oc:
     quick_cmd_unsupported_type:
       en: "Quick command '/{command}' has unsupported type (supported: 'exec', 'alias')."
       zh: "快捷命令 '/{command}' 类型不受支持(支持:'exec'、'alias')。"
+    # --- 未知斜杠命令提示（源码四段相邻 f-string 隐式拼接，整条合一）；{command} 为命令名。---
+    unknown_command:
+      en: "Unknown command `/{command}`. Type /commands to see what's available, or resend without the leading slash to send as a regular message."
+      zh: "未知命令 `/{command}`。输入 /commands 查看可用命令,或去掉开头的斜杠重新发送,即可作为普通消息处理。"
   base: {}
