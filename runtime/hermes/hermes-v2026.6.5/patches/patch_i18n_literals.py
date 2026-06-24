@@ -880,6 +880,62 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         '            "  /platform resume <name> — re-queue a paused platform"',
         't("oc.run.platform_usage_help")',
     ),
+    # ====================== 本批：杂项命令 / 确认 / 销毁性提示 ======================
+    # /subgoal 添加失败错误前缀（L11728；{exc} 作 kwarg）。
+    (
+        'f"/subgoal: {exc}"',
+        't("oc.run.subgoal_error", exc=exc)',
+    ),
+    # /subgoal clear 成功（L11722；{prev} 与复数尾缀 {plural_s} 作 kwarg，
+    # zh 无复数概念故 catalog 中 zh 省略 {plural_s}，复数逻辑在调用点求值）。
+    (
+        'f"✓ Cleared {prev} subgoal{\'s\' if prev != 1 else \'\'}."',
+        't("oc.run.subgoal_cleared", prev=prev, plural_s=(\'s\' if prev != 1 else \'\'))',
+    ),
+    # /undo 销毁性确认说明（单轮，L8249 单行字面量）。
+    (
+        '"This removes the last user/assistant exchange from history."',
+        't("oc.run.undo_confirm")',
+    ),
+    # /undo 销毁性确认说明（多轮，L8251 f-string；{_undo_n} 作 kwarg）。
+    (
+        'f"This removes the last {_undo_n} user turns from history."',
+        't("oc.run.undo_confirm_multi", undo_n=_undo_n)',
+    ),
+    # 销毁性 slash 确认提示框「请选择」行（前批已把整块改为 + 拼接、此字面量留待本批；
+    # L14629 原文 "Choose:\n"，在改写后表达式中仍以同一字面量存在）。
+    (
+        '"Choose:\\n"',
+        't("oc.run.confirm_choose")',
+    ),
+    # 销毁性 slash 确认提示框纯文本回退行（同上，L14633 字面量留待本批）。
+    (
+        '"_Text fallback: reply `/approve`, `/always`, or `/cancel`._"',
+        't("oc.run.confirm_text_fallback")',
+    ),
+    # 危险命令审批原因标签（前批已把整块改为 + 拼接、此 f-string 留待本批；
+    # L18164 原文 f"Reason: {desc}\n\n"，{desc} 作 kwarg）。
+    (
+        'f"Reason: {desc}\\n\\n"',
+        't("oc.run.confirm_reason", desc=desc)',
+    ),
+    # 后台任务结果错误前缀（L12692；result['error'] 下标取值留调用点、作 error kwarg）。
+    (
+        'f"Error: {result[\'error\']}"',
+        't("oc.run.bgtask_result_error", error=result[\'error\'])',
+    ),
+    # 网关上线广播（L15552 单行字面量）。
+    (
+        '"♻️ Gateway online — Hermes is back and ready."',
+        't("oc.run.gateway_online")',
+    ),
+    # 关闭销毁性确认后的一次性提示（L14614-14616 三段隐式拼接整条合一，前导 \n\n 在 catalog）。
+    (
+        '"\\n\\nℹ️ Future /clear, /new, /reset, and /undo will run "\n'
+        '                    "without confirmation. Re-enable via "\n'
+        '                    "`approvals.destructive_slash_confirm: true` in config.yaml."',
+        't("oc.run.destructive_disabled_notice")',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 

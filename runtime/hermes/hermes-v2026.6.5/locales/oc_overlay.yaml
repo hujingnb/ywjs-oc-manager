@@ -636,4 +636,44 @@ oc:
     platform_usage_help:
       en: "Usage: /platform <list|pause|resume> [name]\n  /platform list — show platform status\n  /platform pause <name> — stop retrying a failing platform\n  /platform resume <name> — re-queue a paused platform"
       zh: "用法:/platform <list|pause|resume> [name]\n  /platform list —— 显示平台状态\n  /platform pause <name> —— 停止重试某个故障平台\n  /platform resume <name> —— 重新排队某个已暂停平台"
+    # /subgoal 添加失败时的错误前缀（{exc} 为捕获的异常）。
+    subgoal_error:
+      en: "/subgoal: {exc}"
+      zh: "/subgoal:{exc}"
+    # /subgoal clear 清除成功；{prev} 个数，{plural_s} 复数尾缀（en 用占位，zh 无复数省略）。
+    subgoal_cleared:
+      en: "✓ Cleared {prev} subgoal{plural_s}."
+      zh: "✓ 已清除 {prev} 个子目标。"
+    # /undo 销毁性确认说明（单轮：移除最近一轮对话）。
+    undo_confirm:
+      en: "This removes the last user/assistant exchange from history."
+      zh: "这将从历史中移除最近一轮用户/助手对话。"
+    # /undo 销毁性确认说明（多轮：移除最近 {undo_n} 轮用户对话）。
+    undo_confirm_multi:
+      en: "This removes the last {undo_n} user turns from history."
+      zh: "这将从历史中移除最近 {undo_n} 轮用户对话。"
+    # 销毁性 slash 确认提示框中的「请选择」行（含尾部换行）。
+    confirm_choose:
+      en: "Choose:\n"
+      zh: "请选择:\n"
+    # 销毁性 slash 确认提示框的纯文本回退说明行。
+    confirm_text_fallback:
+      en: "_Text fallback: reply `/approve`, `/always`, or `/cancel`._"
+      zh: "_纯文本回退:回复 `/approve`、`/always` 或 `/cancel`。_"
+    # 危险命令审批的原因标签（{desc} 为原因描述，尾部双换行）。
+    confirm_reason:
+      en: "Reason: {desc}\n\n"
+      zh: "原因: {desc}\n\n"
+    # 关闭销毁性确认后追加的一次性提示（3 段隐式拼接整条合一，前导双换行）。
+    destructive_disabled_notice:
+      en: "\n\nℹ️ Future /clear, /new, /reset, and /undo will run without confirmation. Re-enable via `approvals.destructive_slash_confirm: true` in config.yaml."
+      zh: "\n\nℹ️ 今后 /clear、/new、/reset 和 /undo 将直接执行,无需确认。如需重新启用,请用 config.yaml 中的 `approvals.destructive_slash_confirm: true`。"
+    # 后台任务结果错误前缀（{error} 取自 result['error']）。
+    bgtask_result_error:
+      en: "Error: {error}"
+      zh: "出错: {error}"
+    # 网关恢复就绪后的上线广播。
+    gateway_online:
+      en: "♻️ Gateway online — Hermes is back and ready."
+      zh: "♻️ 网关已上线 —— Hermes 已恢复就绪。"
   base: {}
