@@ -100,6 +100,15 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	// RequestID 保证每个请求都携带 trace_id，供 slog ctx-aware 日志输出 trace_id 字段。
 	router.Use(middleware.RequestID())
+	// Locale 解析 Accept-Language 并归一到受支持语言，写入上下文供 apierror 按语言翻译错误消息。
+	// defaultLocale 来自 config i18n.default_locale；deps 为空时回落 "en"。
+	{
+		defaultLocale := "en"
+		if len(deps) > 0 && deps[0].DefaultLocale != "" {
+			defaultLocale = deps[0].DefaultLocale
+		}
+		router.Use(middleware.Locale(defaultLocale))
+	}
 	// access log 挂在 RequestID 之后、鉴权/CSRF 之前：覆盖全部请求（含登录失败、CSRF
 	// 拒绝、公共路由与未匹配 404），未鉴权导致的 4xx 也能记到；user_id 在 c.Next() 返回后
 	// 从 c.Request.Context() 读取，此时 RequireUserAuth 已注入 principal，故仍能拿到。
