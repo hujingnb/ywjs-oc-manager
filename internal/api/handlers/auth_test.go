@@ -15,6 +15,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/auth/pow"
 	"oc-manager/internal/service"
@@ -73,8 +74,9 @@ func TestAuthLoginInvalidCredentialsMentionsOrgCode(t *testing.T) {
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusUnauthorized, recorder.Code)
-	require.Contains(t, recorder.Body.String(), "用户名或密码错误")
-	require.Contains(t, recorder.Body.String(), "组织标识")
+	// 文案迁移 catalog 后无 locale 中间件回落 en，断言稳定 code 与 en 译文（含组织标识提示语义），不再硬编码中文。
+	require.Contains(t, recorder.Body.String(), "INVALID_CREDENTIALS")
+	require.Contains(t, recorder.Body.String(), apierror.Localize(apierror.MsgAuthInvalidCredentials, apierror.LocaleFrom(nil)))
 }
 
 // TestAuthMeReturnsCurrentUser 验证认证当前用户接口返回当前用户的成功路径场景。
@@ -134,7 +136,9 @@ func TestAuthChangePasswordMapsWrongPasswordToUnauthorized(t *testing.T) {
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusUnauthorized, recorder.Code)
-	require.Contains(t, recorder.Body.String(), "用户名或密码错误")
+	// 旧密码错误沿用认证失败响应；同上断言 code 与 en 译文，避免依赖具体中文文案。
+	require.Contains(t, recorder.Body.String(), "INVALID_CREDENTIALS")
+	require.Contains(t, recorder.Body.String(), apierror.Localize(apierror.MsgAuthInvalidCredentials, apierror.LocaleFrom(nil)))
 }
 
 // TestAuthChangePasswordMapsInvalidNewPasswordToBadRequest 验证新密码业务校验错误返回 400。

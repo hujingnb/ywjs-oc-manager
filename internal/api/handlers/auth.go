@@ -234,7 +234,8 @@ func (h *AuthHandler) UpdateLocale(c *gin.Context) {
 	principal := principalFromCtx(c)
 	if err := h.service.UpdateLocale(c.Request.Context(), principal.UserID, req.Locale); err != nil {
 		if errors.Is(err, service.ErrInvalidLocale) {
-			c.AbortWithStatusJSON(http.StatusBadRequest, apierror.New("INVALID_LOCALE", "不支持的语言"))
+			apierror.JSON(c, http.StatusBadRequest, "INVALID_LOCALE", apierror.MsgAuthInvalidLocale)
+			c.Abort()
 			return
 		}
 		writeAuthError(c, err)
@@ -248,25 +249,27 @@ func (h *AuthHandler) UpdateLocale(c *gin.Context) {
 func writeAuthError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrInvalidCredentials):
-		c.JSON(http.StatusUnauthorized, apierror.New("INVALID_CREDENTIALS", "用户名或密码错误，也可能是未填写组织标识"))
+		apierror.JSON(c, http.StatusUnauthorized, "INVALID_CREDENTIALS", apierror.MsgAuthInvalidCredentials)
 	case errors.Is(err, service.ErrInvalidToken):
-		c.JSON(http.StatusUnauthorized, apierror.New("INVALID_TOKEN", "登录凭证无效"))
+		apierror.JSON(c, http.StatusUnauthorized, "INVALID_TOKEN", apierror.MsgAuthInvalidToken)
 	case errors.Is(err, service.ErrUserDisabled), errors.Is(err, service.ErrOrgDisabled):
 		code := "USER_DISABLED"
 		if errors.Is(err, service.ErrOrgDisabled) {
 			code = "ORG_DISABLED"
 		}
+		// 禁用用户/组织的具体原因由 service 脱敏后透出，保留运行期动态文案，不进 catalog。
 		c.JSON(http.StatusForbidden, apierror.New(code, redactlog.SafeErrorMessage(err)))
 	case errors.Is(err, service.ErrMemberCreateInvalid):
+		// 成员创建校验失败的字段级原因运行期生成，保留动态文案，不进 catalog。
 		c.JSON(http.StatusBadRequest, apierror.New("MEMBER_INVALID", validationServiceMessage(err, service.ErrMemberCreateInvalid)))
 	case errors.Is(err, service.ErrCaptchaRequired):
-		c.JSON(http.StatusBadRequest, apierror.New("CAPTCHA_REQUIRED", "请先完成人机验证"))
+		apierror.JSON(c, http.StatusBadRequest, "CAPTCHA_REQUIRED", apierror.MsgAuthCaptchaRequired)
 	case errors.Is(err, service.ErrCaptchaInvalid):
-		c.JSON(http.StatusBadRequest, apierror.New("CAPTCHA_INVALID", "人机验证已失效，请重试"))
+		apierror.JSON(c, http.StatusBadRequest, "CAPTCHA_INVALID", apierror.MsgAuthCaptchaExpired)
 	case errors.Is(err, service.ErrCaptchaReplayed):
-		c.JSON(http.StatusBadRequest, apierror.New("CAPTCHA_REPLAYED", "人机验证已失效，请重试"))
+		apierror.JSON(c, http.StatusBadRequest, "CAPTCHA_REPLAYED", apierror.MsgAuthCaptchaExpired)
 	default:
-		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "认证服务暂时不可用"))
+		apierror.JSON(c, http.StatusInternalServerError, "INTERNAL", apierror.MsgAuthServiceUnavailable)
 	}
 }
 
@@ -289,7 +292,7 @@ func (h *AuthHandler) AltchaChallenge(c *gin.Context) {
 	}
 	challenge, err := h.captcha.Challenge()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, apierror.New("CAPTCHA_CHALLENGE_FAILED", "生成人机验证失败"))
+		apierror.JSON(c, http.StatusInternalServerError, "CAPTCHA_CHALLENGE_FAILED", apierror.MsgAuthCaptchaChallengeFailed)
 		return
 	}
 	c.JSON(http.StatusOK, challenge)
