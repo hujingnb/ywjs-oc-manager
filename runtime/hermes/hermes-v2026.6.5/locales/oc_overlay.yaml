@@ -484,4 +484,29 @@ oc:
     kanban_timed_out:
       en: "⏱ {tag}Kanban {task_id} timed out (max_runtime={limit}s); will retry"
       zh: "⏱ {tag}看板 {task_id} 超时 (max_runtime={limit}s);将重试"
+    # --- 语音消息无法转写（STT 未配置）---
+    # 收到语音但无法转写（其后接 STT 未配置说明）。
+    stt_received:
+      en: "🎤 I received your voice message but can't transcribe it — "
+      zh: "🎤 收到了你的语音消息,但无法转写 —— "
+    # 未配置 STT 服务（换行为字面 \n）。
+    stt_no_provider:
+      en: "no speech-to-text provider is configured.\n\n"
+      zh: "未配置语音转文字(STT)服务。\n\n"
+    # 启用语音的安装提示前缀（其后 faster-whisper 安装命令变体由调用点保留原文）。
+    stt_enable_install:
+      en: "To enable voice: install faster-whisper "
+      zh: "启用语音功能:安装 faster-whisper "
+    # 设置 stt.enabled 提示（紧随安装命令变体之后）。
+    stt_set_enabled:
+      en: "and set `stt.enabled: true` in config.yaml, "
+      zh: "并在 config.yaml 中设置 `stt.enabled: true`,"
+    # 提示用 /restart 重启网关。
+    stt_then_restart:
+      en: "then /restart the gateway."
+      zh: "然后用 /restart 重启网关。"
+    # 完整配置说明指引（独立 += 追加，换行为字面 \n）。
+    stt_setup_skill:
+      en: "\n\nFor full setup instructions, type: `/skill hermes-agent-setup`"
+      zh: "\n\n完整配置说明请输入:`/skill hermes-agent-setup`"
   base: {}

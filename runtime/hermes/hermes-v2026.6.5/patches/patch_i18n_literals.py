@@ -697,6 +697,29 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         '                                f"(max_runtime={limit}s); will retry"',
         't("oc.run.kanban_timed_out", tag=tag, task_id=sub[\'task_id\'], limit=limit)',
     ),
+    # --- 语音消息无法转写（STT 未配置）---
+    # _stt_msg 整块（L8669-8675 六段字面量隐式拼接）：通用段译入 catalog，
+    # 中间 faster-whisper 安装命令变体（L8672-8673）保留原文，用 + 显式拼接。
+    (
+        '"🎤 I received your voice message but can\'t transcribe it — "\n'
+        '                                "no speech-to-text provider is configured.\\n\\n"\n'
+        '                                "To enable voice: install faster-whisper "\n'
+        '                                "(`uv pip install faster-whisper` in the Hermes venv; "\n'
+        '                                "`pip install faster-whisper` also works if pip is on PATH) "\n'
+        '                                "and set `stt.enabled: true` in config.yaml, "\n'
+        '                                "then /restart the gateway."',
+        't("oc.run.stt_received") + t("oc.run.stt_no_provider")\n'
+        '                                + t("oc.run.stt_enable_install")\n'
+        '                                + "(`uv pip install faster-whisper` in the Hermes venv; "\n'
+        '                                + "`pip install faster-whisper` also works if pip is on PATH) "\n'
+        '                                + t("oc.run.stt_set_enabled")\n'
+        '                                + t("oc.run.stt_then_restart")',
+    ),
+    # 完整配置说明指引（L8678 独立 += 追加单行字面量）。
+    (
+        '"\\n\\nFor full setup instructions, type: `/skill hermes-agent-setup`"',
+        't("oc.run.stt_setup_skill")',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 
