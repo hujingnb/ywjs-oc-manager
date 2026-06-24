@@ -286,4 +286,38 @@ oc:
     access_slash_you_can_run:
       en: "Slash commands you can run: {runnable_str}"
       zh: "你可运行的斜杠命令:{runnable_str}"
+    # --- 技能 bundles（/bundles）---
+    # Bundles 子系统不可用；{exc} 为异常文本。
+    bundles_unavailable:
+      en: "Bundles subsystem unavailable: {exc}"
+      zh: "Bundles 子系统不可用:{exc}"
+    # 尚未安装任何技能 bundle（多段隐式拼接的首段，换行为字面 \n）。
+    bundles_none:
+      en: "No skill bundles installed.\n"
+      zh: "尚未安装任何技能 bundle。\n"
+    # 创建 bundle 的引导（紧跟其后的命令行由调用点保留原文）。
+    bundles_create_hint:
+      en: "Create one on the host with:\n"
+      zh: "请在宿主机用以下命令创建:\n"
+    # bundle 目录前缀（其后 `{dir}` 由调用点保留）。
+    bundles_directory:
+      en: "Directory: `"
+      zh: "目录:`"
+    # --- 后台任务（background task）回包---
+    # 后台任务因缺凭证失败；{task_id} 为任务标识。
+    bgtask_failed_no_creds:
+      en: "❌ Background task {task_id} failed: no provider credentials configured."
+      zh: "❌ 后台任务 {task_id} 失败:未配置任何模型服务商凭证。"
+    # 后台任务异常失败；{task_id} 为任务标识，{err} 为异常文本。
+    bgtask_failed_err:
+      en: "❌ Background task {task_id} failed: {err}"
+      zh: "❌ 后台任务 {task_id} 失败:{err}"
+    # 后台任务完成标题（其后 Prompt 行 / 输出由调用点保留原文）。
+    bgtask_complete:
+      en: "✅ Background task complete"
+      zh: "✅ 后台任务完成"
+    # 后台任务无回复生成（与 no_response_generated 文案不同）。
+    bgtask_no_response:
+      en: "(No response generated)"
+      zh: "(未生成任何回复)"
   base: {}

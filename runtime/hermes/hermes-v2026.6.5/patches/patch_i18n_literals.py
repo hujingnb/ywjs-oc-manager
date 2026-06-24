@@ -422,6 +422,53 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         '            + t("oc.run.access_tier_user") + "\\n"\n'
         '            + t("oc.run.access_slash_you_can_run", runnable_str=runnable_str)',
     ),
+    # --- 技能 bundles（/bundles）---
+    # Bundles 子系统不可用；{exc} 在调用点传入。
+    (
+        'f"Bundles subsystem unavailable: {exc}"',
+        't("oc.run.bundles_unavailable", exc=exc)',
+    ),
+    # 无 bundle 安装提示（源码四段相邻字面量隐式拼接，16 空格缩进）。
+    # 首两段与目录前缀译入 catalog，中间命令行 / 目录值保留原文，用 + 显式拼接。
+    (
+        '"No skill bundles installed.\\n"\n'
+        '                "Create one on the host with:\\n"\n'
+        '                "  `hermes bundles create <name> --skill <s1> --skill <s2>`\\n"\n'
+        '                f"Directory: `{_bundles_dir()}`"',
+        't("oc.run.bundles_none") + t("oc.run.bundles_create_hint")\n'
+        '                + "  `hermes bundles create <name> --skill <s1> --skill <s2>`\\n"\n'
+        '                + t("oc.run.bundles_directory") + f"{_bundles_dir()}`"',
+    ),
+    # --- 后台任务回包 ---
+    # 缺凭证失败；{task_id} 在调用点传入。
+    (
+        'f"❌ Background task {task_id} failed: no provider credentials configured."',
+        't("oc.run.bgtask_failed_no_creds", task_id=task_id)',
+    ),
+    # 异常失败；{task_id}/{e} 在调用点传入。
+    (
+        'f"❌ Background task {task_id} failed: {e}"',
+        't("oc.run.bgtask_failed_err", task_id=task_id, err=e)',
+    ),
+    # 完成标题 + 输出（L12770 整条 f-string）：标题与「无回复」译入 catalog，
+    # 中间 Prompt 行保留原文，用 + 显式拼接；{preview} 在调用点传入。
+    # 注意：本条（更长）须排在仅标题 header（其子串）之前。
+    (
+        'f\'✅ Background task complete\\nPrompt: "{preview}"\\n\\n(No response generated)\'',
+        't("oc.run.bgtask_complete") + f\'\\nPrompt: "{preview}"\\n\\n\' '
+        '+ t("oc.run.bgtask_no_response")',
+    ),
+    # 完成标题（L12702 header f-string，仅标题段）：标题译入 catalog，
+    # Prompt 行保留原文用 + 显式拼接；{preview} 在调用点传入。
+    (
+        'f\'✅ Background task complete\\nPrompt: "{preview}"\\n\\n\'',
+        't("oc.run.bgtask_complete") + f\'\\nPrompt: "{preview}"\\n\\n\'',
+    ),
+    # header 拼接「无回复」（L12713 header + 字面量）。
+    (
+        'header + "(No response generated)"',
+        'header + t("oc.run.bgtask_no_response")',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 
