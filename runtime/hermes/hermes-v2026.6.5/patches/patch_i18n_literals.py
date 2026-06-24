@@ -186,6 +186,31 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         '"No active agent — /steer queued for the next turn."',
         't("oc.run.steer_no_agent")',
     ),
+    # --- 智能体运行中、命令受限 ---
+    (
+        '"Agent is running — wait or /stop first, then switch models."',
+        't("oc.run.agent_running_switch_model")',
+    ),
+    # /codex-runtime 受限：源码两段相邻字面量隐式拼接（24 空格续行缩进）。
+    (
+        '("Agent is running — wait or /stop first, then "\n'
+        '                        "change runtime.")',
+        '(t("oc.run.agent_running_change_runtime"))',
+    ),
+    (
+        '"Agent is running — use /goal status / pause / clear mid-run, or /stop before setting a new goal."',
+        't("oc.run.agent_running_goal")',
+    ),
+    # 回合进行中受限：两段 f-string 隐式拼接，{name} 在调用点传入。
+    (
+        'f"⏳ Agent is running — `/{_cmd_def_inner.name}` can\'t run "\n'
+        '                    f"mid-turn. Wait for the current response or `/stop` first."',
+        't("oc.run.agent_running_midturn", name=_cmd_def_inner.name)',
+    ),
+    (
+        '"⚡ Force-stopped. The agent was still starting — session unlocked."',
+        't("oc.run.force_stopped")',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 
