@@ -77,7 +77,7 @@ oc:
     # /queue 排队成功且队列深度 >1，附带 N 条排队计数。
     queue_queued_depth:
       en: "Queued for the next turn. ({depth} queued)"
-      zh: "已加入队列,将在下一轮处理。(还有 {depth} 条排队)"
+      zh: "已加入队列,将在下一轮处理。 ({depth} 条排队)"
     # /steer 用法提示（参数为空，且智能体正在运行）。
     steer_usage:
       en: "Usage: /steer <prompt>"
