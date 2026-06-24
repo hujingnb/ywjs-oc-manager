@@ -57,4 +57,12 @@ oc:
     gateway_interrupt:
       en: "⚠️ Gateway {action} — {hint}"
       zh: "⚠️ 网关{action} —— {hint}"
+    # 工具结果后模型无回复：源码三段相邻字面量隐式拼接，合为一条消息一个 key。
+    no_response_after_tool:
+      en: "⚠️ The model returned no response after processing tool results. This can happen with some models — try again or rephrase your question."
+      zh: "⚠️ 模型在处理工具结果后没有返回任何回复。某些模型会出现这种情况 —— 请重试,或换一种方式提问。"
+    # 会话自动重置：源码以 "\n\n" 前缀拼三段；前导换行保留在 en/zh 译文里。
+    session_auto_reset:
+      en: "\n\n🔄 Session auto-reset — the conversation exceeded the maximum context size and could not be compressed further. Your next message will start a fresh session."
+      zh: "\n\n🔄 会话已自动重置 —— 对话超过了最大上下文上限,且已无法继续压缩。你的下一条消息将开始一个新会话。"
   base: {}

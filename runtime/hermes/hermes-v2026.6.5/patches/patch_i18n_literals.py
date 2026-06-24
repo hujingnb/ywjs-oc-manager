@@ -126,6 +126,20 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         'f"⚠️ Gateway {action} — {hint}"',
         't("oc.run.gateway_interrupt", action=action, hint=hint)',
     ),
+    # --- 工具结果后模型无回复（三段相邻字面量隐式拼接，整段合一 key）---
+    (
+        '"⚠️ The model returned no response after processing tool "\n'
+        '                    "results. This can happen with some models — try again or "\n'
+        '                    "rephrase your question."',
+        't("oc.run.no_response_after_tool")',
+    ),
+    # --- 会话自动重置（"\n\n" 前缀 + 三段拼接；源码 \n 为字面量转义）---
+    (
+        '"\\n\\n🔄 Session auto-reset — the conversation exceeded the "\n'
+        '                    "maximum context size and could not be compressed further. "\n'
+        '                    "Your next message will start a fresh session."',
+        't("oc.run.session_auto_reset")',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 
