@@ -720,6 +720,28 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         '"\\n\\nFor full setup instructions, type: `/skill hermes-agent-setup`"',
         't("oc.run.stt_setup_skill")',
     ),
+    # --- 会话自动重置通知 ---
+    # reason_text 三分支：suspended（普通字面量）/ daily / inactive（f-string）。
+    (
+        '"previous session was stopped or interrupted"',
+        't("oc.run.reset_reason_suspended")',
+    ),
+    (
+        'f"daily schedule at {policy.at_hour}:00"',
+        't("oc.run.reset_reason_daily", at_hour=policy.at_hour)',
+    ),
+    (
+        'f"inactive for {duration}"',
+        't("oc.run.reset_reason_inactive", duration=duration)',
+    ),
+    # 整段通知（4 段 f-string 隐式拼接；{reason_text} 由上方原因变量传入）。
+    (
+        'f"◐ Session automatically reset ({reason_text}). "\n'
+        '                            f"Conversation history cleared.\\n"\n'
+        '                            f"Use /resume to browse and restore a previous session.\\n"\n'
+        '                            f"Adjust reset timing in config.yaml under session_reset."',
+        't("oc.run.session_auto_reset", reason_text=reason_text)',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 

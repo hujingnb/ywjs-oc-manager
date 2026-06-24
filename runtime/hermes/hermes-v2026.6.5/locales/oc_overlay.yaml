@@ -509,4 +509,21 @@ oc:
     stt_setup_skill:
       en: "\n\nFor full setup instructions, type: `/skill hermes-agent-setup`"
       zh: "\n\n完整配置说明请输入:`/skill hermes-agent-setup`"
+    # --- 会话自动重置通知（reset_reason 三分支文案 + 整段通知）---
+    # 自动重置原因（suspended 分支，普通字面量）。
+    reset_reason_suspended:
+      en: "previous session was stopped or interrupted"
+      zh: "上一会话已被停止或中断"
+    # 自动重置原因（daily 分支；{at_hour} 由调用点 policy.at_hour 传入）。
+    reset_reason_daily:
+      en: "daily schedule at {at_hour}:00"
+      zh: "每日定时 {at_hour}:00"
+    # 自动重置原因（idle 分支；{duration} 由调用点拼装传入）。
+    reset_reason_inactive:
+      en: "inactive for {duration}"
+      zh: "已闲置 {duration}"
+    # 会话自动重置整段通知（4 段隐式拼接合为一条；{reason_text} 为上方原因文案）。
+    session_auto_reset:
+      en: "◐ Session automatically reset ({reason_text}). Conversation history cleared.\nUse /resume to browse and restore a previous session.\nAdjust reset timing in config.yaml under session_reset."
+      zh: "◐ 会话已自动重置({reason_text})。对话历史已清空。\n使用 /resume 浏览并恢复此前的会话。\n可在 config.yaml 的 session_reset 下调整重置时机。"
   base: {}
