@@ -684,4 +684,32 @@ oc:
     subagent_working:
       en: "⏳ Subagent working{status_detail} — your message is queued for when it finishes (use /stop to cancel everything)."
       zh: "⏳ 子智能体运行中{status_detail} —— 你的消息已排队,将在其完成后处理(用 /stop 取消全部)。"
+    # 语音 STT 安装命令（6.5 文案，uv pip 变体；与 venv 命令同段、嵌于安装说明块中）。
+    stt_install_uv:
+      en: "(`uv pip install faster-whisper` in the Hermes venv; "
+      zh: "(在 Hermes venv 中执行 `uv pip install faster-whisper`;"
+    # 语音 STT 安装命令（6.5 文案，pip 备注变体）。
+    stt_install_pip:
+      en: "`pip install faster-whisper` also works if pip is on PATH) "
+      zh: "若 pip 在 PATH 上,`pip install faster-whisper` 亦可) "
+    # /bundles 列表标题（6.5 独有；{count} 已安装 bundle 数）。
+    bundles_list_header:
+      en: "**Skill Bundles** ({count} installed):"
+      zh: "**技能 Bundle**(已安装 {count} 个):"
+    # /bundles 列表项默认描述（6.5 独有；{skill_count} 技能数）。
+    bundle_load_skills:
+      en: "Load {skill_count} skills"
+      zh: "加载 {skill_count} 个技能"
+    # /bundles 列表项的技能数尾缀（6.5 独有；前置 {skill_count} 与 slug/desc 为动态，仅尾缀入 catalog）。
+    bundle_skills_suffix:
+      en: " skills)_"
+      zh: " 个技能)_"
+    # /bundles 列表尾部的调用提示（6.5 独有）。
+    bundles_invoke_hint:
+      en: "Invoke a bundle with `/<slug>` to load all its skills."
+      zh: "用 `/<slug>` 调用某个 bundle 即可加载其全部技能。"
+    # 配置的辅助压缩模型失败、已回退主模型（6.5；4 段隐式拼接整条合一，{aux_model}/{aux_err} 作 kwarg）。
+    compression_fallback:
+      en: "ℹ️ Configured compression model `{aux_model}` failed ({aux_err}). Recovered using your main model — context is intact — but you may want to check `auxiliary.compression.model` in config.yaml."
+      zh: "ℹ️ 所配置的压缩模型 `{aux_model}` 失败({aux_err})。已回退使用你的主模型(上下文完好),但你可能需要检查 config.yaml 中的 `auxiliary.compression.model`。"
   base: {}

@@ -950,6 +950,47 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         '                f"when it finishes (use /stop to cancel everything)."',
         't("oc.run.subagent_working", status_detail=status_detail)',
     ),
+    # 语音 STT 安装命令 uv 变体（前批已把 STT 整块改为 + 拼接、此两条命令字面量留待本批；
+    # L8672 字面量在改写后表达式中仍存在）。
+    (
+        '"(`uv pip install faster-whisper` in the Hermes venv; "',
+        't("oc.run.stt_install_uv")',
+    ),
+    # 语音 STT 安装命令 pip 变体（同上，L8673 字面量留待本批）。
+    (
+        '"`pip install faster-whisper` also works if pip is on PATH) "',
+        't("oc.run.stt_install_pip")',
+    ),
+    # /bundles 列表标题（L14527 f-string；len(bundles) 调用留调用点、作 count kwarg）。
+    (
+        'f"**Skill Bundles** ({len(bundles)} installed):"',
+        't("oc.run.bundles_list_header", count=len(bundles))',
+    ),
+    # /bundles 列表项默认描述（L14530 f-string；{skill_count} 作 kwarg）。
+    (
+        'f"Load {skill_count} skills"',
+        't("oc.run.bundle_load_skills", skill_count=skill_count)',
+    ),
+    # /bundles 列表项整行（L14532 f-string）：slug/desc/skill_count 为动态保留在 f-string，
+    # 仅尾缀 " skills)_" 译入 catalog 用 + 显式拼接（沿用旧补丁仅译尾缀的取舍）。
+    (
+        'f"• `/{info[\'slug\']}` — {desc} _({skill_count} skills)_"',
+        'f"• `/{info[\'slug\']}` — {desc} _({skill_count}" + t("oc.run.bundle_skills_suffix")',
+    ),
+    # /bundles 列表尾部调用提示（L14537 单行字面量）。
+    (
+        '"Invoke a bundle with `/<slug>` to load all its skills."',
+        't("oc.run.bundles_invoke_hint")',
+    ),
+    # 配置的辅助压缩模型失败、已回退主模型（L9365-9368 四段隐式拼接整条合一；
+    # {_aux_model}/{_aux_err} 作 kwarg，反引号代码标识保留原文在 catalog）。
+    (
+        'f"ℹ️ Configured compression model `{_aux_model}` "\n'
+        '                                            f"failed ({_aux_err}). Recovered using your main "\n'
+        '                                            "model — context is intact — but you may want to "\n'
+        '                                            "check `auxiliary.compression.model` in config.yaml."',
+        't("oc.run.compression_fallback", aux_model=_aux_model, aux_err=_aux_err)',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 
