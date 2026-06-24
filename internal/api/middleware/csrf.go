@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
+	"oc-manager/internal/api/apierror"
 )
 
 // CSRFCookieName 是双 submit cookie 的名字。前端通过 document.cookie 读它写到
@@ -51,7 +53,10 @@ func RequireCSRF(skipPaths ...string) gin.HandlerFunc {
 		}
 		header := c.GetHeader(CSRFHeaderName)
 		if header == "" || header != cookie.Value {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "CSRF token 校验失败"})
+			// 保持历史 {"error": ...} 响应体形状不变（前端按该字段读取），仅把文案
+			// 走 apierror catalog 按请求 locale 翻译；Locale 中间件已在 CSRF 之前注入 locale。
+			c.AbortWithStatusJSON(http.StatusForbidden,
+				gin.H{"error": apierror.Localize(apierror.MsgAuthCSRFInvalid, apierror.LocaleFrom(c))})
 			return
 		}
 		c.Next()

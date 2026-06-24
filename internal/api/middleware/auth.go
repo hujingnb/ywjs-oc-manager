@@ -30,12 +30,12 @@ func RequireUserAuth(tokens *auth.TokenManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token, ok := parseBearer(c.GetHeader("Authorization"))
 		if !ok {
-			abortUnauthenticated(c, "缺少访问令牌")
+			abortUnauthenticated(c, apierror.MsgAuthMissingToken)
 			return
 		}
 		principal, err := tokens.VerifyAccessToken(token)
 		if err != nil {
-			abortUnauthenticated(c, "访问令牌无效")
+			abortUnauthenticated(c, apierror.MsgAuthAccessTokenInvalid)
 			return
 		}
 		ctx := auth.WithPrincipal(c.Request.Context(), principal)
@@ -54,7 +54,9 @@ func parseBearer(header string) (string, bool) {
 
 // abortUnauthenticated 用统一的 401 ErrorResponse 终止请求；
 // 所有未认证失败都用同一个 code，避免暴露失败细节给探测者。
-func abortUnauthenticated(c *gin.Context, msg string) {
+// key 走 apierror catalog 按请求 locale 翻译文案（Locale 中间件已在 auth 之前
+// 注入 locale，故此处能拿到正确语言；缺失回落 en）。
+func abortUnauthenticated(c *gin.Context, key apierror.MsgKey) {
 	c.AbortWithStatusJSON(http.StatusUnauthorized,
-		apierror.New("UNAUTHENTICATED", msg))
+		apierror.New("UNAUTHENTICATED", apierror.Localize(key, apierror.LocaleFrom(c))))
 }

@@ -22,7 +22,8 @@ import (
 )
 
 // TestRequireUserAuth_MissingHeader 覆盖完全缺失 Authorization header 的场景：
-// 应短路返回 401 + UNAUTHENTICATED + 中文文案"缺少访问令牌"，下游 handler
+// 应短路返回 401 + UNAUTHENTICATED + 文案"缺少访问令牌"（经 apierror catalog 翻译，
+// 测试 engine 未挂 Locale 中间件故回落 en "Missing access token"），下游 handler
 // 不执行。这是浏览器未带凭证调接口最常见的入口路径。
 func TestRequireUserAuth_MissingHeader(t *testing.T) {
 	r, downstream := newTestEngine(t)
@@ -32,7 +33,7 @@ func TestRequireUserAuth_MissingHeader(t *testing.T) {
 	r.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
-	assertErrorBody(t, rec.Body.Bytes(), "UNAUTHENTICATED", "缺少访问令牌")
+	assertErrorBody(t, rec.Body.Bytes(), "UNAUTHENTICATED", "Missing access token")
 	assert.False(t, downstream.invoked, "下游 handler 不应被执行")
 }
 
@@ -48,7 +49,7 @@ func TestRequireUserAuth_NonBearerScheme(t *testing.T) {
 	r.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
-	assertErrorBody(t, rec.Body.Bytes(), "UNAUTHENTICATED", "缺少访问令牌")
+	assertErrorBody(t, rec.Body.Bytes(), "UNAUTHENTICATED", "Missing access token")
 	assert.False(t, downstream.invoked)
 }
 
@@ -64,12 +65,12 @@ func TestRequireUserAuth_EmptyBearerToken(t *testing.T) {
 	r.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
-	assertErrorBody(t, rec.Body.Bytes(), "UNAUTHENTICATED", "缺少访问令牌")
+	assertErrorBody(t, rec.Body.Bytes(), "UNAUTHENTICATED", "Missing access token")
 	assert.False(t, downstream.invoked)
 }
 
 // TestRequireUserAuth_InvalidSignature 覆盖签名被篡改的场景：
-// VerifyAccessToken 会返回错误，中间件统一映射为 401 + "访问令牌无效"，
+// VerifyAccessToken 会返回错误，中间件统一映射为 401 + "访问令牌无效"（回落 en），
 // 不暴露"签名错"这种具体原因（防探测）。
 func TestRequireUserAuth_InvalidSignature(t *testing.T) {
 	manager := newTestTokenManager(t, time.Minute)
@@ -86,13 +87,13 @@ func TestRequireUserAuth_InvalidSignature(t *testing.T) {
 	r.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
-	assertErrorBody(t, rec.Body.Bytes(), "UNAUTHENTICATED", "访问令牌无效")
+	assertErrorBody(t, rec.Body.Bytes(), "UNAUTHENTICATED", "Invalid access token")
 	assert.False(t, downstream.invoked)
 }
 
 // TestRequireUserAuth_ExpiredToken 覆盖 token 过期场景：
 // 用极短 TTL 签发，sleep 后再调用，VerifyAccessToken 应判定过期；
-// 中间件同样映射为 401 + "访问令牌无效"，与"签名错"返回同一 code，
+// 中间件同样映射为 401 + "访问令牌无效"（回落 en），与"签名错"返回同一 code，
 // 让前端用统一刷新逻辑处理（拿到 401 后尝试 refresh）。
 func TestRequireUserAuth_ExpiredToken(t *testing.T) {
 	manager := newTestTokenManager(t, time.Millisecond)
@@ -109,7 +110,7 @@ func TestRequireUserAuth_ExpiredToken(t *testing.T) {
 	r.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
-	assertErrorBody(t, rec.Body.Bytes(), "UNAUTHENTICATED", "访问令牌无效")
+	assertErrorBody(t, rec.Body.Bytes(), "UNAUTHENTICATED", "Invalid access token")
 	assert.False(t, downstream.invoked)
 }
 

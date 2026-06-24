@@ -24,6 +24,12 @@ const (
 	MsgAuthServiceUnavailable MsgKey = "err.auth.service_unavailable"
 	// MsgAuthCaptchaChallengeFailed 生成人机验证失败。
 	MsgAuthCaptchaChallengeFailed MsgKey = "err.auth.captcha_challenge_failed"
+	// MsgAuthMissingToken 缺少访问令牌（RequireUserAuth 中间件：Authorization header 缺失/非 Bearer/空 token）。
+	MsgAuthMissingToken MsgKey = "err.auth.missing_token"
+	// MsgAuthAccessTokenInvalid 访问令牌无效（RequireUserAuth 中间件：签名错/过期等统一兜底，不暴露具体原因）。
+	MsgAuthAccessTokenInvalid MsgKey = "err.auth.access_token_invalid"
+	// MsgAuthCSRFInvalid CSRF token 校验失败（RequireCSRF 中间件：double-submit cookie 与 header 不一致）。
+	MsgAuthCSRFInvalid MsgKey = "err.auth.csrf_invalid"
 )
 
 // init 把认证/鉴权 domain 错误译文并入中心 catalog。
@@ -36,5 +42,8 @@ func init() {
 		MsgAuthCaptchaExpired:         {"zh": "人机验证已失效，请重试", "en": "Human verification has expired. Please try again"},
 		MsgAuthServiceUnavailable:     {"zh": "认证服务暂时不可用", "en": "The authentication service is temporarily unavailable"},
 		MsgAuthCaptchaChallengeFailed: {"zh": "生成人机验证失败", "en": "Failed to generate human verification"},
+		MsgAuthMissingToken:           {"zh": "缺少访问令牌", "en": "Missing access token"},
+		MsgAuthAccessTokenInvalid:     {"zh": "访问令牌无效", "en": "Invalid access token"},
+		MsgAuthCSRFInvalid:            {"zh": "CSRF token 校验失败", "en": "CSRF token validation failed"},
 	})
 }
