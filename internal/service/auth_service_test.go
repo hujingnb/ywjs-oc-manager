@@ -629,8 +629,18 @@ func (s *authStoreStub) RevokeRefreshTokensByUser(_ context.Context, userID stri
 	return nil
 }
 
-// UpdateUserLocale 是 AuthStore 接口新增方法的测试桩实现；既有测试不调用此方法，故为空操作。
+// UpdateUserLocale 是 AuthStore 接口测试桩实现；既有测试不调用此方法，故为空操作。
 func (s *authStoreStub) UpdateUserLocale(_ context.Context, _ sqlc.UpdateUserLocaleParams) error {
+	return nil
+}
+
+// GetActiveAppByOwner 是 AuthStore 接口测试桩实现；既有测试不调用此方法，返回 sql.ErrNoRows。
+func (s *authStoreStub) GetActiveAppByOwner(_ context.Context, _ string) (sqlc.App, error) {
+	return sqlc.App{}, sql.ErrNoRows
+}
+
+// UpdateAppLocale 是 AuthStore 接口测试桩实现；既有测试不调用此方法，故为空操作。
+func (s *authStoreStub) UpdateAppLocale(_ context.Context, _ sqlc.UpdateAppLocaleParams) error {
 	return nil
 }
 
@@ -671,24 +681,44 @@ func TestAuthServiceLoginPassesWithGoodCaptcha(t *testing.T) {
 	require.Equal(t, "admin", result.User.Username)
 }
 
-// fakeLocaleStore 仅实现 UpdateLocale 测试所需的存储方法，记录最后一次写入参数。
+// fakeLocaleStore 实现 UpdateLocale 及实例语言传播测试所需的存储方法。
 // 嵌入 AuthStore 接口（nil 实现），以满足 AuthStore 的完整方法集；
-// 只覆盖 UpdateUserLocale，其余方法若被调用会 panic，测试中不会触发。
+// 未覆盖的方法若被调用会 panic，测试中不会触发。
 type fakeLocaleStore struct {
 	AuthStore
+	// UpdateUserLocale 记录字段
 	gotID, gotLocale string
-	err              error
+	userLocaleErr    error
+	// GetActiveAppByOwner 预置返回值
+	activeApp    sqlc.App
+	activeAppErr error
+	// UpdateAppLocale 捕获入参与调用次数
+	appLocaleParams     sqlc.UpdateAppLocaleParams
+	updateAppLocaleCalls int
+	updateAppLocaleErr  error
 }
 
 func (f *fakeLocaleStore) UpdateUserLocale(_ context.Context, arg sqlc.UpdateUserLocaleParams) error {
 	f.gotID, f.gotLocale = arg.ID, arg.Locale.String
-	return f.err
+	return f.userLocaleErr
+}
+
+// GetActiveAppByOwner 返回预置的活跃实例或错误（如 sql.ErrNoRows）。
+func (f *fakeLocaleStore) GetActiveAppByOwner(_ context.Context, _ string) (sqlc.App, error) {
+	return f.activeApp, f.activeAppErr
+}
+
+// UpdateAppLocale 捕获入参并累计调用次数，用于断言传播行为。
+func (f *fakeLocaleStore) UpdateAppLocale(_ context.Context, arg sqlc.UpdateAppLocaleParams) error {
+	f.updateAppLocaleCalls++
+	f.appLocaleParams = arg
+	return f.updateAppLocaleErr
 }
 
 // TestAuthService_UpdateLocale 覆盖语言持久化：合法 locale 写库、非法 locale 被拒。
 func TestAuthService_UpdateLocale(t *testing.T) {
-	// 合法 zh：应写入对应用户行
-	store := &fakeLocaleStore{}
+	// 合法 zh：应写入对应用户行（传播到活跃实例）
+	store := &fakeLocaleStore{activeApp: sqlc.App{ID: "app1"}}
 	svc := &AuthService{store: store}
 	require.NoError(t, svc.UpdateLocale(context.Background(), "u1", "zh"))
 	assert.Equal(t, "u1", store.gotID)
@@ -699,6 +729,49 @@ func TestAuthService_UpdateLocale(t *testing.T) {
 	svc2 := &AuthService{store: store2}
 	require.ErrorIs(t, svc2.UpdateLocale(context.Background(), "u1", "fr"), ErrInvalidLocale)
 	assert.Equal(t, "", store2.gotID)
+}
+
+// TestUpdateLocalePropagatesToOwnerApp 验证改界面语言后 owner 活跃实例 apps.locale 同步更新，且不触发重启。
+func TestUpdateLocalePropagatesToOwnerApp(t *testing.T) {
+	// fake store：UpdateUserLocale 记录入参；GetActiveAppByOwner 返回 app1；UpdateAppLocale 捕获入参
+	store := &fakeLocaleStore{
+		activeApp: sqlc.App{ID: "app1"},
+	}
+	svc := &AuthService{store: store}
+
+	// 调用 UpdateLocale，语言 "en"
+	err := svc.UpdateLocale(context.Background(), "user1", "en")
+	require.NoError(t, err)
+
+	// UpdateAppLocale 应被调用一次，入参 ID=app1、Locale=en
+	assert.Equal(t, 1, store.updateAppLocaleCalls, "UpdateAppLocale 应被精确调用一次")
+	assert.Equal(t, "app1", store.appLocaleParams.ID)
+	assert.Equal(t, null.StringFrom("en"), store.appLocaleParams.Locale)
+}
+
+// TestUpdateLocaleNoAppIsOK 验证用户无活跃实例时 UpdateLocale 不报错、仅更新 users.locale。
+func TestUpdateLocaleNoAppIsOK(t *testing.T) {
+	// GetActiveAppByOwner 返回 sql.ErrNoRows，模拟用户尚无实例
+	store := &fakeLocaleStore{
+		activeAppErr: sql.ErrNoRows,
+	}
+	svc := &AuthService{store: store}
+
+	// 应 NoError，不调 UpdateAppLocale
+	err := svc.UpdateLocale(context.Background(), "user1", "zh")
+	require.NoError(t, err)
+	assert.Equal(t, 0, store.updateAppLocaleCalls, "无实例时不应调用 UpdateAppLocale")
+}
+
+// TestUpdateLocaleRejectsInvalidStillWorks 回归验证非法 locale 仍按原样被拒，不触发任何 store 写入。
+func TestUpdateLocaleRejectsInvalidStillWorks(t *testing.T) {
+	// "fr" 不在 SupportedLocales，应立即返回 ErrInvalidLocale，不调任何 store 方法
+	store := &fakeLocaleStore{}
+	svc := &AuthService{store: store}
+	err := svc.UpdateLocale(context.Background(), "user1", "fr")
+	require.ErrorIs(t, err, ErrInvalidLocale)
+	assert.Equal(t, "", store.gotID, "非法 locale 不应调用 UpdateUserLocale")
+	assert.Equal(t, 0, store.updateAppLocaleCalls, "非法 locale 不应调用 UpdateAppLocale")
 }
 
 // mustUUID 返回字符串 UUID（MySQL 侧 CHAR(36)，无需解析）。

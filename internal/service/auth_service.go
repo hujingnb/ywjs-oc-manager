@@ -31,6 +31,10 @@ type AuthStore interface {
 	RevokeRefreshTokensByUser(ctx context.Context, userID string) error
 	// UpdateUserLocale 持久化用户界面语言偏好到 users.locale 字段。
 	UpdateUserLocale(ctx context.Context, arg sqlc.UpdateUserLocaleParams) error
+	// GetActiveAppByOwner 按 owner 用户 ID 查询其活跃实例；无实例时返回 sql.ErrNoRows。
+	GetActiveAppByOwner(ctx context.Context, ownerUserID string) (sqlc.App, error)
+	// UpdateAppLocale 仅更新 apps.locale 字段，不入队重启 job。
+	UpdateAppLocale(ctx context.Context, arg sqlc.UpdateAppLocaleParams) error
 }
 
 // AuthService 处理登录、刷新和注销等认证业务。
@@ -346,6 +350,8 @@ func isSupportedLocale(locale string) bool {
 }
 
 // UpdateLocale 持久化用户界面语言偏好。locale 必须属于 SupportedLocales，否则返回 ErrInvalidLocale。
+// 更新 users.locale 成功后，若该用户持有活跃实例，则同步写入 apps.locale；
+// 不入队重启 job，重启生效由实例详情页手动触发。
 func (s *AuthService) UpdateLocale(ctx context.Context, userID, locale string) error {
 	if !isSupportedLocale(locale) {
 		return ErrInvalidLocale
@@ -355,6 +361,19 @@ func (s *AuthService) UpdateLocale(ctx context.Context, userID, locale string) e
 		Locale: null.StringFrom(locale),
 	}); err != nil {
 		return fmt.Errorf("更新用户语言失败: %w", err)
+	}
+	// 传播：把该用户拥有的活跃实例 apps.locale 同步为新语言（不重启；详情页提供手动重启入口）。
+	// ErrNoRows 表示该用户尚无实例，静默跳过；其他错误则向上传播。
+	app, err := s.store.GetActiveAppByOwner(ctx, userID)
+	if err == nil {
+		if err := s.store.UpdateAppLocale(ctx, sqlc.UpdateAppLocaleParams{
+			ID:     app.ID,
+			Locale: null.StringFrom(locale),
+		}); err != nil {
+			return fmt.Errorf("传播实例语言失败: %w", err)
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("查询用户实例失败: %w", err)
 	}
 	return nil
 }
