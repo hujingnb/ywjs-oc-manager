@@ -32,6 +32,10 @@ def detect_duplicate_keys(text: str) -> list:
     yaml.safe_load 对重复键静默「后者覆盖前者」，会让两条不同消息撞同一 key 却
     不被一致性集合比对发现（集合去重）。本函数直接扫原文，返回重复 key 列表，
     供构建期 fail-loud——这是历史上 session_auto_reset 撞键漏检的根因防护。
+
+    结构假设：overlay 固定为 oc.run / oc.base 两层，所有叶子 key 恰好缩进 4 空格，
+    故按短名查重即可（当前 oc.run 与 oc.base 短名零重叠）。若未来新增第三层嵌套
+    或跨 run/base 复用同短名的合法 key，应改为按父块限定的 YAML 感知查重。
     """
     seen: dict[str, int] = {}
     for line in text.splitlines():
