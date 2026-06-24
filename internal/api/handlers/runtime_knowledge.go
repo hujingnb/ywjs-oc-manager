@@ -92,8 +92,8 @@ func (h *RuntimeKnowledgeHandler) AddFile(c *gin.Context) {
 	maxBodyBytes := maxKnowledgeUploadBytes + maxKnowledgeMultipartOverheadBytes
 	// multipart 会在解析后提供 file.Size；请求总大小未知时仍可依赖后续文件大小校验。
 	if size, ok := requestContentLength(c); ok && size > maxBodyBytes {
-		// maxKnowledgeUploadMessage 由上限按 MB 运行时换算，属动态文案，保留原样不入 catalog。
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", maxKnowledgeUploadMessage))
+		// 请求体声明大小已超限，用 i18n catalog key 传 MB 数值，支持双语本地化。
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgKnowledgeFileTooLarge, maxKnowledgeUploadMB)
 		return
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
@@ -103,8 +103,8 @@ func (h *RuntimeKnowledgeHandler) AddFile(c *gin.Context) {
 		return
 	}
 	if file.Size > maxKnowledgeUploadBytes {
-		// 同上，运行时 MB 换算的动态文案保留原样。
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", maxKnowledgeUploadMessage))
+		// multipart 解析后实际文件大小超限，同样走 i18n 本地化。
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgKnowledgeFileTooLarge, maxKnowledgeUploadMB)
 		return
 	}
 	stream, err := file.Open()

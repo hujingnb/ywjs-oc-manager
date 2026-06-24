@@ -10,11 +10,15 @@ package apierror
 // （如「缺少 filename 参数」「模型名称不能为空」「请求参数非法」「缺少 runtime token」各
 // 出现两处）。通用语义（资源不存在 → MsgNotFound）复用 messages_common.go 已有 key，不在
 // 本文件重复。
-// 注意：handler 中以运行时 MB 计算拼接的 maxKnowledgeUploadMessage、配额明细
-// validationServiceMessage、SafeErrorMessage(err) 等纯动态文案不入 catalog，保留原样。
+// 注意：配额明细 validationServiceMessage、SafeErrorMessage(err) 等纯动态文案不入 catalog，保留原样。
+// maxKnowledgeUploadMessage 已替换为 MsgKnowledgeFileTooLarge（带 %d MB 占位符），文件超限提示
+// 在调用点传入换算后的 MB 数值作为 arg，支持双语本地化。
 
 // 知识库 domain 静态错误 MsgKey 常量。
 const (
+	// MsgKnowledgeFileTooLarge 单文件超过上传上限；调用时传入 MB 数值作为 %d 参数。
+	// zh 逐字与原 maxKnowledgeUploadMessage 模板一致，en 为忠实英译。
+	MsgKnowledgeFileTooLarge MsgKey = "err.knowledge.file_too_large"
 	// MsgKnowledgeMissingFilename 缺少 filename 参数；SaveOrg/SaveApp 两处复用。
 	MsgKnowledgeMissingFilename MsgKey = "err.knowledge.missing_filename"
 	// MsgKnowledgeMissingFileSize 缺少有效的文件大小信息（无法做累计容量预校验）。
@@ -52,6 +56,7 @@ const (
 // init 把知识库 domain 错误译文并入中心 catalog。
 func init() {
 	Register(map[MsgKey]map[string]string{
+		MsgKnowledgeFileTooLarge:          {"zh": "单文件最大支持 %dMB", "en": "Maximum file size is %dMB"},
 		MsgKnowledgeMissingFilename:       {"zh": "缺少 filename 参数", "en": "Missing filename parameter"},
 		MsgKnowledgeMissingFileSize:       {"zh": "缺少有效的文件大小信息", "en": "Missing valid file size information"},
 		MsgKnowledgeModelNameRequired:     {"zh": "模型名称不能为空", "en": "The model name must not be empty"},

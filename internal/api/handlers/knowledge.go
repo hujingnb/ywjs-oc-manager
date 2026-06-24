@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -66,11 +65,10 @@ const (
 	// maxKnowledgePartBytes 是单个分片请求体的硬上限：前端按 8MB 切片，留足余量到 64MB，
 	// 既防御异常超大分片，又不至于卡正常分片。
 	maxKnowledgePartBytes int64 = 64 * 1024 * 1024
+	// maxKnowledgeUploadMB 是 maxKnowledgeUploadBytes 换算为 MB 后的整数值，用于 i18n 错误消息的 %d 占位符；
+	// 与 maxKnowledgeUploadBytes 保持同步，修改上限时两者同步调整。
+	maxKnowledgeUploadMB int64 = maxKnowledgeUploadBytes / (1024 * 1024)
 )
-
-// maxKnowledgeUploadMessage 是超出上限时返回给客户端的统一提示，以 MB 为单位由
-// maxKnowledgeUploadBytes 直接换算，避免修改上限后文案与实际限制漂移。
-var maxKnowledgeUploadMessage = fmt.Sprintf("单文件最大支持 %dMB", maxKnowledgeUploadBytes/(1024*1024))
 
 // NewKnowledgeHandler 创建 handler；limits 保持可选以兼容未配置限速的历史调用路径。
 func NewKnowledgeHandler(svc knowledgeService, limits ...TransferLimitConfig) *KnowledgeHandler {
@@ -545,8 +543,8 @@ func prepareKnowledgeOctetStreamUpload(c *gin.Context) (int64, bool) {
 		return 0, false
 	}
 	if size > maxKnowledgeUploadBytes {
-		// maxKnowledgeUploadMessage 由上限按 MB 运行时换算，属动态文案，保留原样不入 catalog。
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", maxKnowledgeUploadMessage))
+		// 文件超限：用 i18n catalog key 传 MB 数值，支持双语本地化。
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgKnowledgeFileTooLarge, maxKnowledgeUploadMB)
 		return size, false
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxKnowledgeUploadBytes)

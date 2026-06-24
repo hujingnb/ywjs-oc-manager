@@ -128,6 +128,7 @@ func TestRuntimeKnowledgeAddRejectsOversizedUpload(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), maxKnowledgeUploadMessage)
+	// 超限提示已接入 i18n catalog（MsgKnowledgeFileTooLarge），响应中应含 MB 数值。
+	assert.Contains(t, w.Body.String(), strconv.FormatInt(maxKnowledgeUploadMB, 10))
 	assert.Equal(t, 0, stub.addCalls)
 }

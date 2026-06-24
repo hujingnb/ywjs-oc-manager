@@ -3,6 +3,7 @@ package apierror
 import (
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -35,6 +36,17 @@ func TestCatalogEveryEntryHasBothLangs(t *testing.T) {
 	for key, langs := range catalog {
 		require.NotEmpty(t, langs["zh"], "key %s 缺 zh", key)
 		require.NotEmpty(t, langs["en"], "key %s 缺 en", key)
+	}
+}
+
+func TestCatalogPlaceholderParity(t *testing.T) {
+	// 每条 zh 与 en 的 fmt 占位符数量必须一致，防单边漏写 %s/%d 导致渲染错位。
+	// 使用 %[^%] 匹配 %s/%d 等（排除 %% 转义），count 不一致即说明译文占位符数量偏差。
+	re := regexp.MustCompile(`%[^%]`) // 简单计数 %s/%d 等(忽略 %% 转义)
+	for key, langs := range catalog {
+		zhN := len(re.FindAllString(langs["zh"], -1))
+		enN := len(re.FindAllString(langs["en"], -1))
+		assert.Equal(t, zhN, enN, "key %s 占位符数 zh=%d en=%d 不一致", key, zhN, enN)
 	}
 }
 

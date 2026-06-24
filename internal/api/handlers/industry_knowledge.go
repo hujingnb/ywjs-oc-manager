@@ -118,7 +118,7 @@ func (h *IndustryKnowledgeHandler) ExternalUpload(c *gin.Context) {
 	maxBodyBytes := maxKnowledgeUploadBytes + maxKnowledgeMultipartOverheadBytes
 	// 外部 multipart 有固定协议开销，先按客户端声明体积做快速拒绝，避免超大请求进入 multipart 解析。
 	if size, ok := requestContentLength(c); ok && size > maxBodyBytes {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", maxKnowledgeUploadMessage))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgKnowledgeFileTooLarge, maxKnowledgeUploadMB)
 		return
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
@@ -126,7 +126,8 @@ func (h *IndustryKnowledgeHandler) ExternalUpload(c *gin.Context) {
 	if err := c.Request.ParseMultipartForm(maxKnowledgeMultipartOverheadBytes); err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", maxKnowledgeUploadMessage))
+			// 读取 multipart 时触发 MaxBytesReader 截断，说明实际传输量超过上限。
+			apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgKnowledgeFileTooLarge, maxKnowledgeUploadMB)
 			return
 		}
 		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgIndustryKnowledgeUploadFormatInvalid)
@@ -152,7 +153,8 @@ func (h *IndustryKnowledgeHandler) ExternalUpload(c *gin.Context) {
 		return
 	}
 	if fileHeader.Size > maxKnowledgeUploadBytes {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", maxKnowledgeUploadMessage))
+		// multipart 解析后文件头大小超限，走 i18n 本地化。
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgKnowledgeFileTooLarge, maxKnowledgeUploadMB)
 		return
 	}
 

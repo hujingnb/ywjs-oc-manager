@@ -397,7 +397,8 @@ func TestExternalIndustryUploadRejectsOversizedContentLength(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), maxKnowledgeUploadMessage)
+	// 超限提示已接入 i18n catalog（MsgKnowledgeFileTooLarge），响应中应含 MB 数值。
+	assert.Contains(t, w.Body.String(), fmt.Sprintf("%d", maxKnowledgeUploadMB))
 	assert.Equal(t, 0, stub.externalUploadCalls)
 }
 
