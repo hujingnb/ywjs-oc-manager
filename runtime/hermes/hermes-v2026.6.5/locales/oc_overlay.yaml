@@ -65,4 +65,45 @@ oc:
     session_auto_reset:
       en: "\n\n🔄 Session auto-reset — the conversation exceeded the maximum context size and could not be compressed further. Your next message will start a fresh session."
       zh: "\n\n🔄 会话已自动重置 —— 对话超过了最大上下文上限,且已无法继续压缩。你的下一条消息将开始一个新会话。"
+    # --- Steer / queue 命令文案 ---
+    # /queue 用法提示（参数为空）。
+    queue_usage:
+      en: "Usage: /queue <prompt>"
+      zh: "用法:/queue <prompt>"
+    # /queue 排队成功（队列深度 <=1，无计数）。复用此 key 不与带计数的版本混用。
+    queue_queued:
+      en: "Queued for the next turn."
+      zh: "已加入队列,将在下一轮处理。"
+    # /queue 排队成功且队列深度 >1，附带 N 条排队计数。
+    queue_queued_depth:
+      en: "Queued for the next turn. ({depth} queued)"
+      zh: "已加入队列,将在下一轮处理。(还有 {depth} 条排队)"
+    # /steer 用法提示（参数为空，且智能体正在运行）。
+    steer_usage:
+      en: "Usage: /steer <prompt>"
+      zh: "用法:/steer <prompt>"
+    # /steer 用法提示（无智能体运行，将作普通消息发送）。
+    steer_usage_no_agent:
+      en: "Usage: /steer <prompt>  (no agent is running; sending as a normal message)"
+      zh: "用法:/steer <prompt>(当前没有正在运行的智能体;将作为普通消息发送)"
+    # 智能体仍在启动，/steer 退化为下一轮排队。
+    steer_starting:
+      en: "Agent still starting — /steer queued for the next turn."
+      zh: "智能体仍在启动 —— /steer 已加入下一轮队列。"
+    # steer() 调用抛异常的失败提示，{exc} 为异常文本。
+    steer_failed:
+      en: "⚠️ Steer failed: {exc}"
+      zh: "⚠️ Steer 失败:{exc}"
+    # steer 已接受并排队，{preview} 为截断后的内容预览。
+    steer_queued:
+      en: "⏩ Steer queued — arrives after the next tool call: '{preview}'"
+      zh: "⏩ Steer 已排队 —— 将在下一次工具调用后送达:'{preview}'"
+    # steer 内容为空被拒绝。
+    steer_rejected_empty:
+      en: "Steer rejected (empty payload)."
+      zh: "Steer 被拒绝(内容为空)。"
+    # 无活动智能体，/steer 退化为下一轮排队。
+    steer_no_agent:
+      en: "No active agent — /steer queued for the next turn."
+      zh: "没有活动的智能体 —— /steer 已加入下一轮队列。"
   base: {}

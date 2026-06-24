@@ -140,6 +140,52 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         '                    "Your next message will start a fresh session."',
         't("oc.run.session_auto_reset")',
     ),
+    # --- /queue 命令文案 ---
+    (
+        '"Usage: /queue <prompt>"',
+        't("oc.run.queue_usage")',
+    ),
+    (
+        '"Queued for the next turn."',
+        't("oc.run.queue_queued")',
+    ),
+    # 带计数版本：{depth} 在调用点传入；以整段 f-string 锚定避免与无计数版冲突。
+    (
+        'f"Queued for the next turn. ({depth} queued)"',
+        't("oc.run.queue_queued_depth", depth=depth)',
+    ),
+    # --- /steer 命令文案 ---
+    # 用法（带说明的版本排在纯用法之前，否则纯用法是其子串会误伤）。
+    (
+        '"Usage: /steer <prompt>  (no agent is running; sending as a normal message)"',
+        't("oc.run.steer_usage_no_agent")',
+    ),
+    (
+        '"Usage: /steer <prompt>"',
+        't("oc.run.steer_usage")',
+    ),
+    (
+        '"Agent still starting — /steer queued for the next turn."',
+        't("oc.run.steer_starting")',
+    ),
+    # steer 失败：{exc} 在调用点传入。
+    (
+        'f"⚠️ Steer failed: {exc}"',
+        't("oc.run.steer_failed", exc=exc)',
+    ),
+    # steer 已排队：{preview} 在调用点传入（单引号包裹保留在 catalog）。
+    (
+        'f"⏩ Steer queued — arrives after the next tool call: \'{preview}\'"',
+        't("oc.run.steer_queued", preview=preview)',
+    ),
+    (
+        '"Steer rejected (empty payload)."',
+        't("oc.run.steer_rejected_empty")',
+    ),
+    (
+        '"No active agent — /steer queued for the next turn."',
+        't("oc.run.steer_no_agent")',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 
