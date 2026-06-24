@@ -111,7 +111,7 @@ func RegisterIndustryKnowledgeRoutes(router gin.IRouter, handler *IndustryKnowle
 // @Router       /external/industry-knowledge/files [post]
 func (h *IndustryKnowledgeHandler) ExternalUpload(c *gin.Context) {
 	if h.uploadToken == "" || c.GetHeader(industryKnowledgeTokenHeader) != h.uploadToken {
-		c.JSON(http.StatusUnauthorized, apierror.New("INDUSTRY_KNOWLEDGE_TOKEN_INVALID", "行业知识库上传鉴权失败"))
+		apierror.JSON(c, http.StatusUnauthorized, "INDUSTRY_KNOWLEDGE_TOKEN_INVALID", apierror.MsgIndustryKnowledgeTokenInvalid)
 		return
 	}
 
@@ -129,7 +129,7 @@ func (h *IndustryKnowledgeHandler) ExternalUpload(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", maxKnowledgeUploadMessage))
 			return
 		}
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "上传文件格式不合法"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgIndustryKnowledgeUploadFormatInvalid)
 		return
 	}
 	if c.Request.MultipartForm != nil {
@@ -138,17 +138,17 @@ func (h *IndustryKnowledgeHandler) ExternalUpload(c *gin.Context) {
 
 	industryName := strings.TrimSpace(c.Request.FormValue("industry_name"))
 	if industryName == "" {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 industry_name 参数"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgIndustryKnowledgeMissingIndustryName)
 		return
 	}
 	file, fileHeader, err := c.Request.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 file 文件"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgIndustryKnowledgeMissingFile)
 		return
 	}
 	defer file.Close()
 	if strings.TrimSpace(fileHeader.Filename) == "" {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 file 文件名"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgIndustryKnowledgeMissingFilename)
 		return
 	}
 	if fileHeader.Size > maxKnowledgeUploadBytes {
@@ -177,7 +177,7 @@ func (h *IndustryKnowledgeHandler) ExternalUpload(c *gin.Context) {
 // @Router       /industry-knowledge-bases/upload-token [get]
 func (h *IndustryKnowledgeHandler) GetUploadToken(c *gin.Context) {
 	if !auth.CanManageIndustryKnowledge(principalFromCtx(c)) {
-		c.JSON(http.StatusForbidden, apierror.New("KNOWLEDGE_FORBIDDEN", "无权访问该知识库"))
+		apierror.JSON(c, http.StatusForbidden, "KNOWLEDGE_FORBIDDEN", apierror.MsgIndustryKnowledgeForbidden)
 		return
 	}
 	c.JSON(http.StatusOK, service.IndustryKnowledgeUploadTokenResult{UploadToken: h.uploadToken})
@@ -232,7 +232,7 @@ func (h *IndustryKnowledgeHandler) CreateBase(c *gin.Context) {
 		return
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 name 参数"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgIndustryKnowledgeMissingName)
 		return
 	}
 	result, err := h.service.CreateIndustryKnowledgeBase(c.Request.Context(), principalFromCtx(c), req.Name)
@@ -269,7 +269,7 @@ func (h *IndustryKnowledgeHandler) RenameBase(c *gin.Context) {
 		return
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 name 参数"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgIndustryKnowledgeMissingName)
 		return
 	}
 	result, err := h.service.RenameIndustryKnowledgeBase(c.Request.Context(), principalFromCtx(c), c.Param("industryId"), req.Name)
@@ -396,7 +396,7 @@ func queryIndustryKnowledgeCreatedDateRange(c *gin.Context) (time.Time, time.Tim
 		createdBefore = createdTo.AddDate(0, 0, 1)
 	}
 	if !createdFrom.IsZero() && !createdBefore.IsZero() && !createdFrom.Before(createdBefore) {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "created_from 不能晚于 created_to"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgIndustryKnowledgeCreatedRangeInvalid)
 		return time.Time{}, time.Time{}, false
 	}
 	return createdFrom, createdBefore, true
@@ -410,7 +410,7 @@ func queryIndustryKnowledgeDate(c *gin.Context, key string) (time.Time, bool) {
 	}
 	parsed, err := time.Parse("2006-01-02", raw)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", key+" 必须使用 YYYY-MM-DD 格式"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgIndustryKnowledgeDateFormatInvalid, key)
 		return time.Time{}, false
 	}
 	return parsed, true
@@ -438,7 +438,7 @@ func queryIndustryKnowledgeDate(c *gin.Context, key string) (time.Time, bool) {
 func (h *IndustryKnowledgeHandler) SaveFile(c *gin.Context) {
 	filename := c.Query("filename")
 	if strings.TrimSpace(filename) == "" {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 filename 参数"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgIndustryKnowledgeMissingUploadFilename)
 		return
 	}
 	size, ok := prepareKnowledgeOctetStreamUpload(c)
@@ -555,24 +555,25 @@ func (h *IndustryKnowledgeHandler) ReparseFile(c *gin.Context) {
 func writeIndustryKnowledgeError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrKnowledgeForbidden):
-		c.JSON(http.StatusForbidden, apierror.New("KNOWLEDGE_FORBIDDEN", "无权访问该知识库"))
+		apierror.JSON(c, http.StatusForbidden, "KNOWLEDGE_FORBIDDEN", apierror.MsgIndustryKnowledgeForbidden)
 	case errors.Is(err, service.ErrIndustryKnowledgeNotFound):
-		c.JSON(http.StatusNotFound, apierror.New("INDUSTRY_KNOWLEDGE_NOT_FOUND", "行业知识库不存在"))
+		apierror.JSON(c, http.StatusNotFound, "INDUSTRY_KNOWLEDGE_NOT_FOUND", apierror.MsgIndustryKnowledgeNotFound)
 	case errors.Is(err, service.ErrIndustryKnowledgeNameTaken):
-		c.JSON(http.StatusConflict, apierror.New("INDUSTRY_KNOWLEDGE_NAME_TAKEN", "行业知识库名称已存在"))
+		apierror.JSON(c, http.StatusConflict, "INDUSTRY_KNOWLEDGE_NAME_TAKEN", apierror.MsgIndustryKnowledgeNameTaken)
 	case errors.Is(err, service.ErrIndustryKnowledgeInUse):
-		c.JSON(http.StatusConflict, apierror.New("INDUSTRY_KNOWLEDGE_IN_USE", "行业知识库正在被助手版本引用，不可删除"))
+		apierror.JSON(c, http.StatusConflict, "INDUSTRY_KNOWLEDGE_IN_USE", apierror.MsgIndustryKnowledgeInUse)
 	case errors.Is(err, service.ErrIndustryKnowledgeUploadTokenInvalid):
-		c.JSON(http.StatusUnauthorized, apierror.New("INDUSTRY_KNOWLEDGE_TOKEN_INVALID", "行业知识库上传鉴权失败"))
+		apierror.JSON(c, http.StatusUnauthorized, "INDUSTRY_KNOWLEDGE_TOKEN_INVALID", apierror.MsgIndustryKnowledgeTokenInvalid)
 	case errors.Is(err, service.ErrKnowledgeDatasetCreating):
-		c.JSON(http.StatusServiceUnavailable, apierror.New("KNOWLEDGE_DATASET_CREATING", "知识库正在初始化，请稍后重试"))
+		apierror.JSON(c, http.StatusServiceUnavailable, "KNOWLEDGE_DATASET_CREATING", apierror.MsgIndustryKnowledgeDatasetCreating)
 	case errors.Is(err, service.ErrKnowledgeMissing):
-		c.JSON(http.StatusServiceUnavailable, apierror.New("KNOWLEDGE_NOT_CONFIGURED", "知识库未配置"))
+		apierror.JSON(c, http.StatusServiceUnavailable, "KNOWLEDGE_NOT_CONFIGURED", apierror.MsgIndustryKnowledgeNotConfigured)
 	case errors.Is(err, service.ErrConflict):
+		// 该分支文案来自 service 校验链动态原因（validationServiceMessage），无静态可译部分，保留原样。
 		c.JSON(http.StatusConflict, apierror.New("CONFLICT", validationServiceMessage(err, service.ErrConflict)))
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "资源不存在"))
+		apierror.JSON(c, http.StatusNotFound, "NOT_FOUND", apierror.MsgNotFound)
 	default:
-		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "行业知识库操作失败"))
+		apierror.JSON(c, http.StatusInternalServerError, "INTERNAL", apierror.MsgIndustryKnowledgeInternal)
 	}
 }
