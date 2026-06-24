@@ -320,4 +320,29 @@ oc:
     bgtask_no_response:
       en: "(No response generated)"
       zh: "(未生成任何回复)"
+    # --- 危险命令审批（/confirm；本部署 approvals=off 通常不触发，仍翻译兜底）---
+    # 确认提示首段前缀（其后 `{command}**\n\n` 由调用点保留）。
+    confirm_header:
+      en: "⚠️ **Confirm /"
+      zh: "⚠️ **确认 /"
+    # 审批选项：仅本次放行。
+    confirm_approve_once:
+      en: "• **Approve Once** — proceed this time only"
+      zh: "• **本次批准** —— 仅本次放行"
+    # 审批选项：始终批准并永久静默提示。
+    confirm_always:
+      en: "• **Always Approve** — proceed and silence this prompt permanently"
+      zh: "• **始终批准** —— 放行并永久不再提示"
+    # 审批选项：取消、保持当前对话。
+    confirm_cancel:
+      en: "• **Cancel** — keep current conversation"
+      zh: "• **取消** —— 保持当前对话不变"
+    # 危险命令需要审批标题（其后命令预览代码块、Reason 行由调用点保留）。
+    confirm_dangerous_header:
+      en: "⚠️ **Dangerous command requires approval:**"
+      zh: "⚠️ **危险命令需要审批:**"
+    # 文本审批回复提示（源码两段 f-string 隐式拼接，整条合一）。
+    confirm_reply_hint:
+      en: "Reply `/approve` to execute, `/approve session` to approve this pattern for the session, `/approve always` to approve permanently, or `/deny` to cancel."
+      zh: "回复 `/approve` 执行,`/approve session` 对本会话内该模式放行,`/approve always` 永久放行,或 `/deny` 取消。"
   base: {}

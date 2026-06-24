@@ -469,6 +469,39 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         'header + "(No response generated)"',
         'header + t("oc.run.bgtask_no_response")',
     ),
+    # --- 危险命令审批 ---
+    # /confirm 提示整块（源码多段 f-string 隐式拼接，12 空格缩进）。
+    # 标题前缀与三个审批选项译入 catalog；{command}**、{detail}、Choose:、
+    # 文本兜底行保留原文，用 + 显式拼接，行尾 \n 在调用点保留。
+    (
+        'f"⚠️ **Confirm /{command}**\\n\\n"\n'
+        '            f"{detail}\\n\\n"\n'
+        '            "Choose:\\n"\n'
+        '            "• **Approve Once** — proceed this time only\\n"\n'
+        '            "• **Always Approve** — proceed and silence this prompt permanently\\n"\n'
+        '            "• **Cancel** — keep current conversation\\n\\n"\n'
+        '            "_Text fallback: reply `/approve`, `/always`, or `/cancel`._"',
+        't("oc.run.confirm_header") + f"{command}**\\n\\n"\n'
+        '            + f"{detail}\\n\\n"\n'
+        '            + "Choose:\\n"\n'
+        '            + t("oc.run.confirm_approve_once") + "\\n"\n'
+        '            + t("oc.run.confirm_always") + "\\n"\n'
+        '            + t("oc.run.confirm_cancel") + "\\n\\n"\n'
+        '            + "_Text fallback: reply `/approve`, `/always`, or `/cancel`._"',
+    ),
+    # 危险命令文本审批整块（源码四段 f-string 隐式拼接，20 空格缩进）。
+    # 标题与回复提示译入 catalog；命令预览代码块、Reason 行保留原文，用 + 显式拼接。
+    (
+        'f"⚠️ **Dangerous command requires approval:**\\n"\n'
+        '                    f"```\\n{cmd_preview}\\n```\\n"\n'
+        '                    f"Reason: {desc}\\n\\n"\n'
+        '                    f"Reply `/approve` to execute, `/approve session` to approve this pattern "\n'
+        '                    f"for the session, `/approve always` to approve permanently, or `/deny` to cancel."',
+        't("oc.run.confirm_dangerous_header") + "\\n"\n'
+        '                    + f"```\\n{cmd_preview}\\n```\\n"\n'
+        '                    + f"Reason: {desc}\\n\\n"\n'
+        '                    + t("oc.run.confirm_reply_hint")',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 
