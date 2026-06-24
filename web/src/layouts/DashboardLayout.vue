@@ -481,6 +481,12 @@ function reload() {
 .dashboard-page-frame {
   display: flex;
   min-width: 0;
+  /* min-height: 0 让本帧作为 n-layout-content(flex column) 的子项可收缩到分配高度以下，
+     而非被内部内容(如对话页)撑大。缺它时对话页 .app-detail-root--fill 的 minmax(0,1fr) 行会
+     退化为 max-content，使消息区+输入栏整体溢出、触发内容区整页滚动并把输入栏顶出视口；
+     补上后剩余高度精确传导，msg-list 自身滚动、composer 钉在视口底部。
+     普通(非对话)页内容仍 overflow:visible 溢出、照常由 n-layout-content 外层滚动，行为不变。 */
+  min-height: 0;
   flex: 1;
   flex-direction: column;
 }
