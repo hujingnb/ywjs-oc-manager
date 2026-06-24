@@ -224,4 +224,37 @@ oc:
     compression_aborted:
       en: "⚠️ Context compression aborted ({err}). No messages were dropped — conversation is unchanged. Run /compress to retry, /reset for a clean session, or check your auxiliary.compression model configuration."
       zh: "⚠️ 上下文压缩已中止({err})。没有丢弃任何消息 —— 对话内容未改变。请运行 /compress 重试,或用 /reset 开始干净会话,或检查你的 auxiliary.compression 模型配置。"
+    # --- 目标 / 子目标命令（/goal、/subgoal）---
+    # 当前没有活动目标，提示用 /goal 设置。
+    goal_none:
+      en: "No active goal. Set one with /goal <text>."
+      zh: "当前没有活动目标。用 /goal <text> 设置一个。"
+    # /subgoal remove 用法（缺参数）。
+    subgoal_usage_remove:
+      en: "Usage: /subgoal remove <n>"
+      zh: "用法:/subgoal remove <n>"
+    # /subgoal remove 序号非整数。
+    subgoal_remove_not_int:
+      en: "/subgoal remove: <n> must be an integer (1-based index)."
+      zh: "/subgoal remove:<n> 必须是整数(从 1 开始计)。"
+    # /subgoal remove 执行异常；{exc} 为异常文本。
+    subgoal_remove_error:
+      en: "/subgoal remove: {exc}"
+      zh: "/subgoal remove:{exc}"
+    # /subgoal remove 成功；{idx} 为序号，{removed} 为被移除子目标文本。
+    subgoal_removed:
+      en: "✓ Removed subgoal {idx}: {removed}"
+      zh: "✓ 已移除子目标 {idx}: {removed}"
+    # /subgoal clear 执行异常；{exc} 为异常文本。
+    subgoal_clear_error:
+      en: "/subgoal clear: {exc}"
+      zh: "/subgoal clear:{exc}"
+    # /subgoal clear 时没有可清除的子目标。
+    subgoal_none_to_clear:
+      en: "No subgoals to clear."
+      zh: "没有可清除的子目标。"
+    # /subgoal 添加成功；{idx} 为序号，{text} 为子目标文本。
+    subgoal_added:
+      en: "✓ Added subgoal {idx}: {text}"
+      zh: "✓ 已添加子目标 {idx}: {text}"
   base: {}

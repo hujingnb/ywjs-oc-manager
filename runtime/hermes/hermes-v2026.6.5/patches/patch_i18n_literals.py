@@ -345,6 +345,47 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         '                                            "configuration."',
         't("oc.run.compression_aborted", err=_err)',
     ),
+    # --- 目标 / 子目标命令（/goal、/subgoal）---
+    # 没有活动目标（单行字面量）。
+    (
+        '"No active goal. Set one with /goal <text>."',
+        't("oc.run.goal_none")',
+    ),
+    # /subgoal remove 用法（缺参数，单行字面量）。
+    (
+        '"Usage: /subgoal remove <n>"',
+        't("oc.run.subgoal_usage_remove")',
+    ),
+    # /subgoal remove 序号非整数（单行字面量）。
+    (
+        '"/subgoal remove: <n> must be an integer (1-based index)."',
+        't("oc.run.subgoal_remove_not_int")',
+    ),
+    # /subgoal remove 异常；{exc} 在调用点传入。
+    (
+        'f"/subgoal remove: {exc}"',
+        't("oc.run.subgoal_remove_error", exc=exc)',
+    ),
+    # /subgoal remove 成功；{idx}/{removed} 在调用点传入。
+    (
+        'f"✓ Removed subgoal {idx}: {removed}"',
+        't("oc.run.subgoal_removed", idx=idx, removed=removed)',
+    ),
+    # /subgoal clear 异常；{exc} 在调用点传入。
+    (
+        'f"/subgoal clear: {exc}"',
+        't("oc.run.subgoal_clear_error", exc=exc)',
+    ),
+    # /subgoal clear 无可清除子目标（单行字面量）。
+    (
+        '"No subgoals to clear."',
+        't("oc.run.subgoal_none_to_clear")',
+    ),
+    # /subgoal 添加成功；{idx}/{text} 在调用点传入。
+    (
+        'f"✓ Added subgoal {idx}: {text}"',
+        't("oc.run.subgoal_added", idx=idx, text=text)',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 
