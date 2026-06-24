@@ -665,6 +665,38 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         '                f"I\'ll respond to your message shortly."',
         't("oc.run.busy_interrupting", status_detail=status_detail)',
     ),
+    # --- Kanban 子任务通知（adapter.send，平台无关）---
+    # {tag} 作 tag kwarg；下标 sub['task_id'] 在调用点取值作 task_id kwarg。
+    # 完成（L5437-5438 两段 f-string 隐式拼接整条合一）；{title}/{handoff} 作 kwarg。
+    (
+        'f"✔ {tag}Kanban {sub[\'task_id\']} done"\n'
+        '                                f" — {title}{handoff}"',
+        't("oc.run.kanban_done", tag=tag, task_id=sub[\'task_id\'], '
+        'title=title, handoff=handoff)',
+    ),
+    # 受阻（L5444 单行 f-string）；{reason} 作 kwarg。
+    (
+        'f"⏸ {tag}Kanban {sub[\'task_id\']} blocked{reason}"',
+        't("oc.run.kanban_blocked", tag=tag, task_id=sub[\'task_id\'], reason=reason)',
+    ),
+    # 放弃（L5450-5451 两段 f-string 隐式拼接整条合一）；{err} 作 kwarg。
+    (
+        'f"✖ {tag}Kanban {sub[\'task_id\']} gave up "\n'
+        '                                f"after repeated spawn failures{err}"',
+        't("oc.run.kanban_gave_up", tag=tag, task_id=sub[\'task_id\'], err=err)',
+    ),
+    # worker 崩溃（L5455-5456 两段 f-string 隐式拼接整条合一）。
+    (
+        'f"✖ {tag}Kanban {sub[\'task_id\']} worker crashed "\n'
+        '                                f"(pid gone); dispatcher will retry"',
+        't("oc.run.kanban_crashed", tag=tag, task_id=sub[\'task_id\'])',
+    ),
+    # 超时（L5463-5464 两段 f-string 隐式拼接整条合一）；{limit} 作 kwarg。
+    (
+        'f"⏱ {tag}Kanban {sub[\'task_id\']} timed out "\n'
+        '                                f"(max_runtime={limit}s); will retry"',
+        't("oc.run.kanban_timed_out", tag=tag, task_id=sub[\'task_id\'], limit=limit)',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 

@@ -462,4 +462,26 @@ oc:
     busy_interrupting:
       en: "⚡ Interrupting current task{status_detail}. I'll respond to your message shortly."
       zh: "⚡ 正在中断当前任务{status_detail}。我会尽快回复你的消息。"
+    # --- Kanban 子任务通知（adapter.send，平台无关）---
+    # {tag} 为前缀标签,{task_id} 为子任务标识（源码下标 sub['task_id'] 在调用点取值）。
+    # 完成通知（源码两段 f-string 隐式拼接整条合一）；{title} 子任务标题,{handoff} 交接摘要。
+    kanban_done:
+      en: "✔ {tag}Kanban {task_id} done — {title}{handoff}"
+      zh: "✔ {tag}看板 {task_id} 已完成 —— {title}{handoff}"
+    # 受阻通知；{reason} 为受阻原因尾段。
+    kanban_blocked:
+      en: "⏸ {tag}Kanban {task_id} blocked{reason}"
+      zh: "⏸ {tag}看板 {task_id} 受阻{reason}"
+    # 放弃通知（源码两段 f-string 隐式拼接整条合一）；{err} 为错误尾段。
+    kanban_gave_up:
+      en: "✖ {tag}Kanban {task_id} gave up after repeated spawn failures{err}"
+      zh: "✖ {tag}看板 {task_id} 已放弃(多次启动失败){err}"
+    # worker 崩溃通知（源码两段 f-string 隐式拼接整条合一）。
+    kanban_crashed:
+      en: "✖ {tag}Kanban {task_id} worker crashed (pid gone); dispatcher will retry"
+      zh: "✖ {tag}看板 {task_id} worker 崩溃 (进程已消失);调度器将重试"
+    # 超时通知（源码两段 f-string 隐式拼接整条合一）；{limit} 为 max_runtime 秒数。
+    kanban_timed_out:
+      en: "⏱ {tag}Kanban {task_id} timed out (max_runtime={limit}s); will retry"
+      zh: "⏱ {tag}看板 {task_id} 超时 (max_runtime={limit}s);将重试"
   base: {}
