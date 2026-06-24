@@ -385,13 +385,16 @@ onMounted(loadSessions)
   text-transform: uppercase;
 }
 
-/* 输入区：固定在右侧底部 */
+/* 输入区：固定在右侧底部。
+   flex-shrink: 0 保证 composer 永不被压缩——上方 .msg-list(flex:1) 吸收所有剩余空间并自身滚动，
+   composer 始终以完整高度钉在 .messages-col 底部，即使视口变矮或输入框 autosize 撑高也不下沉/不被挤出。 */
 .composer {
   display: flex;
   gap: 8px;
   align-items: flex-end;
   padding: 10px 12px;
   border-top: 1px solid var(--color-border, #e5e7eb);
+  flex-shrink: 0;
 }
 
 .composer :deep(.n-input) {
