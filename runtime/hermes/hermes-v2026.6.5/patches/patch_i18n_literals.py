@@ -73,6 +73,25 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         '        "out of chat; check gateway logs for diagnostics."',
         't("oc.run.provider_failed_retries")',
     ),
+    # --- 会话过大兜底：源码两处文案相同、缩进不同，两条 old 映射同一 key ---
+    (
+        '"⚠️ Session too large for the model\'s context window.\\n"\n'
+        '                "Use /compact to compress the conversation, or "\n'
+        '                "/reset to start fresh."',
+        't("oc.run.session_too_large")',
+    ),
+    (
+        '"⚠️ Session too large for the model\'s context window.\\n"\n'
+        '                        "Use /compact to compress the conversation, or "\n'
+        '                        "/reset to start fresh."',
+        't("oc.run.session_too_large")',
+    ),
+    # --- 通用请求失败兜底：f-string 占位符 {detail} 在调用点传入 ---
+    (
+        'f"The request failed: {str(error_detail)[:300]}\\n"\n'
+        '            "Try again or use /reset to start a fresh session."',
+        't("oc.run.request_failed", detail=str(error_detail)[:300])',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 

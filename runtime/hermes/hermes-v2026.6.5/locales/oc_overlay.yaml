@@ -25,4 +25,12 @@ oc:
     provider_failed_retries:
       en: "⚠️ The model provider failed after retries. I kept raw provider details out of chat; check gateway logs for diagnostics."
       zh: "⚠️ 模型服务商在多次重试后仍失败。我没有把原始服务商详情输出到对话中;诊断信息见 gateway 日志。"
+    # 会话过大兜底（context overflow）；源码两处文案相同、缩进不同，复用同一 key。
+    session_too_large:
+      en: "⚠️ Session too large for the model's context window.\nUse /compact to compress the conversation, or /reset to start fresh."
+      zh: "⚠️ 会话过大,超出了模型的上下文窗口。\n请用 /compact 压缩对话,或用 /reset 开始新会话。"
+    # 通用请求失败兜底；{detail} 为截断后的原始错误文本。
+    request_failed:
+      en: "The request failed: {detail}\nTry again or use /reset to start a fresh session."
+      zh: "请求失败:{detail}\n请重试,或用 /reset 开始一个新会话。"
   base: {}
