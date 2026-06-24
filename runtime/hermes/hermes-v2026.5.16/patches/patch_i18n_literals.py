@@ -906,7 +906,55 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         't("oc.run.compression_fallback", aux_model=_aux_model, aux_err=_aux_err)',
     ),
 ]
-REPLACEMENTS_BASE: list[tuple[str, str]] = []
+REPLACEMENTS_BASE: list[tuple[str, str]] = [
+    # 回复重试均失败后改发纯文本时的前缀（L3375 整条 f-string）：前缀译入 catalog，
+    # {content[:3500]} 正文保留原文用 + 显式拼接。
+    (
+        'f"(Response formatting failed, plain text:)\\n\\n{content[:3500]}"',
+        't("oc.base.format_failed_plaintext") + f"{content[:3500]}"',
+    ),
+    # 通用错误兜底（L4441-4443 三段相邻 f-string 隐式拼接，base 自有副本）：
+    # 首段前缀与末段重试提示译入 catalog（用 oc.base.* 独立 key，不复用 oc.run.*），
+    # 中间 {error_type}).\n{error_detail}\n 动态段保留原文用 + 显式拼接。
+    (
+        'f"Sorry, I encountered an error ({error_type}).\\n"\n'
+        '                        f"{error_detail}\\n"\n'
+        '                        "Try again or use /reset to start a fresh session."',
+        't("oc.base.generic_error") + f"{error_type}).\\n"\n'
+        '                        + f"{error_detail}\\n"\n'
+        '                        + t("oc.base.try_again_fresh_base")',
+    ),
+    # 澄清提问数字选项回退提示（L2465 单行字面量）。
+    (
+        '"Reply with the number, the option text, or your own answer."',
+        't("oc.base.clarify_number_hint")',
+    ),
+    # 原生媒体发送未被子类覆写时的纯文本回退标签（各一条单行 f-string，路径作 kwarg）。
+    (
+        'f"🔊 Audio: {audio_path}"',
+        't("oc.base.media_audio", audio_path=audio_path)',
+    ),
+    (
+        'f"🎬 Video: {video_path}"',
+        't("oc.base.media_video", video_path=video_path)',
+    ),
+    (
+        'f"📎 File: {file_path}"',
+        't("oc.base.media_file", file_path=file_path)',
+    ),
+    (
+        'f"🖼️ Image: {image_path}"',
+        't("oc.base.media_image", image_path=image_path)',
+    ),
+    # 多次重试后仍投递失败（L3362-3363 两段相邻字面量隐式拼接，emoji/破折号为 \\u 转义）：
+    # 两段各译入 catalog（en 还原为真实 ⚠️ / — 字符），整块隐式拼接改 + 显式拼接。
+    (
+        '"\\u26a0\\ufe0f Message delivery failed after multiple attempts. "\n'
+        '                    "Please try again \\u2014 your request was processed but the response could not be sent."',
+        't("oc.base.delivery_failed")\n'
+        '                    + t("oc.base.delivery_failed_retry")',
+    ),
+]
 
 TARGETS: list[tuple[pathlib.Path, list[tuple[str, str]], bool]] = [
     (RUN, REPLACEMENTS_RUN, False),   # run.py 已有 import
