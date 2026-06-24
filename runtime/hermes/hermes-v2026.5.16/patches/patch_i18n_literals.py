@@ -103,9 +103,9 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         '"Your current task will be interrupted. "\n            "Send any message after restart and I\'ll try to resume where you left off."',
         't("oc.run.task_interrupted_resume")',
     ),
-    # --- hint 三元 else 分支：5.16 带尾随空格；`else ` 前缀锚定避免与 resume 分支首段冲突 ---
+    # --- hint 三元 else 分支：真实上游无尾随空格；`else ` 前缀锚定避免与 resume 分支首段冲突 ---
     (
-        'else "Your current task will be interrupted. "',
+        'else "Your current task will be interrupted."',
         'else t("oc.run.task_interrupted")',
     ),
     # --- msg 拼装：{action}/{hint} 已是上面 t() 的结果，作 kwarg 传入 ---
@@ -187,9 +187,9 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         't("oc.run.force_stopped")',
     ),
     # --- 网关 draining 排队/拒绝（{gerund} = 已翻译的 _status_action_gerund()）；
-    #     5.16 三处均为 "Gateway is"（6.5 在 queued 句去掉了 "is"，5.16 保留）。---
+    #     真实上游 queued 句无 "is"（与 6.5 同），not_accepting 两句带 "is"。---
     (
-        'f"⏳ Gateway is {self._status_action_gerund()} — queued for the next turn after it comes back."',
+        'f"⏳ Gateway {self._status_action_gerund()} — queued for the next turn after it comes back."',
         't("oc.run.gateway_draining_queued", gerund=self._status_action_gerund())',
     ),
     (
