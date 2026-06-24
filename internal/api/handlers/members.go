@@ -267,7 +267,7 @@ func (h *MembersHandler) setStatus(c *gin.Context, status string) {
 // @Router       /organizations/{orgId}/members/onboard [post]
 func (h *MembersHandler) Onboard(c *gin.Context) {
 	if h.onboarding == nil {
-		c.JSON(http.StatusServiceUnavailable, apierror.New("INTERNAL", "成员联动应用流程暂未启用"))
+		apierror.JSON(c, http.StatusServiceUnavailable, "INTERNAL", apierror.MsgMemberOnboardDisabled)
 		return
 	}
 	principal := principalFromCtx(c)
@@ -313,7 +313,7 @@ func (h *MembersHandler) Onboard(c *gin.Context) {
 // @Router       /organizations/{orgId}/members/{userId}/apps [post]
 func (h *MembersHandler) CreateAppForMember(c *gin.Context) {
 	if h.onboarding == nil {
-		c.JSON(http.StatusServiceUnavailable, apierror.New("INTERNAL", "成员实例创建流程暂未启用"))
+		apierror.JSON(c, http.StatusServiceUnavailable, "INTERNAL", apierror.MsgMemberCreateAppDisabled)
 		return
 	}
 	principal := principalFromCtx(c)
@@ -391,9 +391,9 @@ func (h *MembersHandler) Delete(c *gin.Context) {
 func writeMemberError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrForbidden):
-		c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权执行该操作"))
+		apierror.JSON(c, http.StatusForbidden, "FORBIDDEN", apierror.MsgMemberForbidden)
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "资源不存在"))
+		apierror.JSON(c, http.StatusNotFound, "NOT_FOUND", apierror.MsgNotFound)
 	case errors.Is(err, service.ErrInstanceLimitReached):
 		c.JSON(http.StatusConflict, apierror.New("INSTANCE_LIMIT_REACHED", validationServiceMessage(err, service.ErrInstanceLimitReached)))
 	case errors.Is(err, service.ErrMemberCreateInvalid):
@@ -401,6 +401,6 @@ func writeMemberError(c *gin.Context, err error) {
 	default:
 		// 未知错误冒泡到日志，便于运维定位；响应仍保持脱敏。
 		slog.ErrorContext(c.Request.Context(), "member handler 未识别错误", "error", err)
-		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "服务暂时不可用"))
+		apierror.JSON(c, http.StatusInternalServerError, "INTERNAL", apierror.MsgMemberServiceUnavailable)
 	}
 }

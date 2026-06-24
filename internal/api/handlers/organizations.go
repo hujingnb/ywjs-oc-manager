@@ -261,9 +261,9 @@ func queryInt32(c *gin.Context, key string, fallback int32) int32 {
 func writeServiceError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrForbidden):
-		c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权执行该操作"))
+		apierror.JSON(c, http.StatusForbidden, "FORBIDDEN", apierror.MsgMemberForbidden)
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "资源不存在"))
+		apierror.JSON(c, http.StatusNotFound, "NOT_FOUND", apierror.MsgNotFound)
 	case errors.Is(err, service.ErrConflict):
 		// 透出 service 层用 "%w: 具体原因" 包装的冲突原因（如「企业标识已被占用」），
 		// 裸 ErrConflict 时回落为 sentinel 自身文案「资源冲突」。
@@ -271,6 +271,6 @@ func writeServiceError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrMemberCreateInvalid):
 		c.JSON(http.StatusBadRequest, apierror.New("MEMBER_INVALID", validationServiceMessage(err, service.ErrMemberCreateInvalid)))
 	default:
-		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "服务暂时不可用"))
+		apierror.JSON(c, http.StatusInternalServerError, "INTERNAL", apierror.MsgMemberServiceUnavailable)
 	}
 }
