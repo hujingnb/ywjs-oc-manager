@@ -59,20 +59,20 @@ func (h *BootstrapHandler) Bootstrap(c *gin.Context) {
 	// 取 Bearer token；bearerToken 辅助函数定义于本文件。
 	token, ok := bearerToken(c.GetHeader("Authorization"))
 	if !ok {
-		c.JSON(http.StatusUnauthorized, apierror.New("UNAUTHORIZED", "缺少 control token"))
+		apierror.JSON(c, http.StatusUnauthorized, "UNAUTHORIZED", apierror.MsgBootstrapMissingToken)
 		return
 	}
 
 	// 按 token hash 反查 app；token 无效或查无此 app 一律 401，不泄露 app 是否存在。
 	app, err := h.service.ResolveByControlToken(c.Request.Context(), service.HashAppRuntimeToken(token))
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, apierror.New("UNAUTHORIZED", "control token 无效"))
+		apierror.JSON(c, http.StatusUnauthorized, "UNAUTHORIZED", apierror.MsgBootstrapInvalidToken)
 		return
 	}
 
 	// 校验 path id 与 token 归属 app 一致，防止持 A 的 token 拉取 B 的配置（横向越权）。
 	if app.ID != c.Param("id") {
-		c.JSON(http.StatusUnauthorized, apierror.New("UNAUTHORIZED", "control token 与目标 app 不匹配"))
+		apierror.JSON(c, http.StatusUnauthorized, "UNAUTHORIZED", apierror.MsgBootstrapTokenMismatch)
 		return
 	}
 
@@ -81,13 +81,13 @@ func (h *BootstrapHandler) Bootstrap(c *gin.Context) {
 	if err != nil {
 		if errors.Is(err, service.ErrAppNotReady) {
 			// app 缺少 api_key / control token 或尚无发布版本，pod 应稍后重试。
-			c.JSON(http.StatusConflict, apierror.New("APP_NOT_READY", "app 未就绪"))
+			apierror.JSON(c, http.StatusConflict, "APP_NOT_READY", apierror.MsgBootstrapAppNotReady)
 			return
 		}
 		// 记录具体内部错误便于运维定位（如 S3 endpoint 缺 scheme、依赖不可达）：对外仍只回
 		// 泛化 message 不泄露细节，但日志带上 app id 与底层 err，免去再复现 bootstrap 的麻烦。
 		slog.ErrorContext(c.Request.Context(), "bootstrap 组装失败", "app_id", app.ID, "error", err)
-		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "bootstrap 组装失败"))
+		apierror.JSON(c, http.StatusInternalServerError, "INTERNAL", apierror.MsgBootstrapAssembleFailed)
 		return
 	}
 	c.JSON(http.StatusOK, res)
