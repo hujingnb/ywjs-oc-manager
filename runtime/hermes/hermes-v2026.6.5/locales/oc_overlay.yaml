@@ -526,4 +526,18 @@ oc:
     session_auto_reset:
       en: "◐ Session automatically reset ({reason_text}). Conversation history cleared.\nUse /resume to browse and restore a previous session.\nAdjust reset timing in config.yaml under session_reset."
       zh: "◐ 会话已自动重置({reason_text})。对话历史已清空。\n使用 /resume 浏览并恢复此前的会话。\n可在 config.yaml 的 session_reset 下调整重置时机。"
+    # --- 未设置 home channel 一次性提示（5 段隐式拼接合为一条）---
+    # {platform_name} 由调用点 platform_name.title() 传入；{sethome_cmd} 由调用点传入。
+    no_home_channel:
+      en: "📬 No home channel is set for {platform_name}. A home channel is where Hermes delivers cron job results and cross-platform messages.\n\nType {sethome_cmd} to make this chat your home channel, or ignore to skip."
+      zh: "📬 尚未为 {platform_name} 设置主频道。主频道是 Hermes 投递定时任务结果和跨平台消息的地方。\n\n输入 {sethome_cmd} 即可将本聊天设为主频道,或忽略以跳过。"
+    # --- 推理过程展示 ---
+    # 推理折叠省略行（{more} 由调用点 len(lines) - 15 传入）。
+    reasoning_more_lines:
+      en: "({more} more lines)_"
+      zh: "(还有 {more} 行)_"
+    # 推理过程标题。
+    reasoning_header:
+      en: "💭 **Reasoning:**"
+      zh: "💭 **推理过程:**"
   base: {}

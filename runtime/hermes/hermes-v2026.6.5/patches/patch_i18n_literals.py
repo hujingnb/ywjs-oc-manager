@@ -742,6 +742,27 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         '                            f"Adjust reset timing in config.yaml under session_reset."',
         't("oc.run.session_auto_reset", reason_text=reason_text)',
     ),
+    # --- 未设置 home channel 一次性提示（5 段隐式拼接合为一条）---
+    # {platform_name} 由 platform_name.title() 传入；{sethome_cmd} 由调用点传入。
+    (
+        'f"📬 No home channel is set for {platform_name.title()}. "\n'
+        '                    f"A home channel is where Hermes delivers cron job results "\n'
+        '                    f"and cross-platform messages.\\n\\n"\n'
+        '                    f"Type {sethome_cmd} to make this chat your home channel, "\n'
+        '                    f"or ignore to skip."',
+        't("oc.run.no_home_channel", platform_name=platform_name.title(), sethome_cmd=sethome_cmd)',
+    ),
+    # --- 推理过程展示 ---
+    # 折叠省略行（{more} 由 len(lines) - 15 传入）。
+    (
+        'f"\\n_... ({len(lines) - 15} more lines)_"',
+        '"\\n_... " + t("oc.run.reasoning_more_lines", more=len(lines) - 15)',
+    ),
+    # 推理标题前缀（整段 f-string 含 {display_reasoning}/{response} 动态段，显式 + 拼接保留）。
+    (
+        'f"💭 **Reasoning:**\\n```\\n{display_reasoning}\\n```\\n\\n{response}"',
+        't("oc.run.reasoning_header") + f"\\n```\\n{display_reasoning}\\n```\\n\\n{response}"',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 
