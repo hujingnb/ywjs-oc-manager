@@ -589,6 +589,15 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         'f"Sorry, I encountered an error ({error_type}).\\n"',
         't("oc.run.encountered_error") + f"{error_type}).\\n"',
     ),
+    # 同块末尾静态行（隐式拼接在 f"{status_hint}" 之后）：旧补丁全局 replace 曾覆盖此处，
+    # 新方案按整段表达式锚定只命中了 request_failed 块的同句，此处需单独转 + t()。
+    # 锚点含 f"{status_hint}" 前缀 + 16 空格缩进，与 request_failed 块(12 空格)不冲突。
+    (
+        'f"{status_hint}"\n'
+        '                "Try again or use /reset to start a fresh session."',
+        'f"{status_hint}"\n'
+        '                + t("oc.run.try_again_fresh")',
+    ),
     # 请求被 API 拒绝（L9918 status_hint 赋值，整条单行字面量，保留前导空格）。
     (
         '" The request was rejected by the API."',

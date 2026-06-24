@@ -408,6 +408,10 @@ oc:
     encountered_error:
       en: "Sorry, I encountered an error ("
       zh: "抱歉,我遇到了错误("
+    # encountered_error 块末尾的重试提示静态行（隐式拼接在 f-string 后，单独成 key）。
+    try_again_fresh:
+      en: "Try again or use /reset to start a fresh session."
+      zh: "请重试,或用 /reset 开始一个新会话。"
     # 请求被 API 拒绝（status_code==400 时追加，保留前导空格）。
     request_rejected_api:
       en: " The request was rejected by the API."
