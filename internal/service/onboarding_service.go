@@ -151,6 +151,12 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 		if err := ensureInstanceQuota(ctx, store, org); err != nil {
 			return err
 		}
+		// 新成员语言随创建者：读操作者（创建该成员的管理员）的 locale，缺省回落平台默认。
+		// 若 GetUser 查询失败或 locale 未设置，则安全回落到 s.defaultLocale，不阻断流程。
+		memberLocale := s.defaultLocale
+		if creator, err := store.GetUser(ctx, principal.UserID); err == nil && creator.Locale.Valid && creator.Locale.String != "" {
+			memberLocale = creator.Locale.String
+		}
 		// CreateUser 为 :exec；事务内直接使用预生成 ID，事务外读回。
 		if err := store.CreateUser(ctx, sqlc.CreateUserParams{
 			ID:           userID,
@@ -160,11 +166,12 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 			DisplayName:  input.DisplayName,
 			Role:         role,
 			Status:       domain.StatusActive,
+			Locale:       null.StringFrom(memberLocale),
 		}); err != nil {
 			return fmt.Errorf("创建成员失败: %w", err)
 		}
 		// CreateApp 为 :exec；k8s 模型下不写 runtime_node_id，由调度器决定落点。
-		// locale 快照：新成员尚无语言偏好，直接使用平台默认语言作为初始 locale。
+		// locale：新成员与实例语言随创建者，缺省平台默认。
 		if err := store.CreateApp(ctx, sqlc.CreateAppParams{
 			ID:           appID,
 			OrgID:        org.ID,
@@ -174,7 +181,7 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 			Status:       domain.AppStatusDraft,
 			ApiKeyStatus: domain.APIKeyStatusPending,
 			VersionID:    null.StringFrom(input.VersionID),
-			Locale:       null.StringFrom(s.defaultLocale),
+			Locale:       null.StringFrom(memberLocale),
 		}); err != nil {
 			return fmt.Errorf("创建应用失败: %w", err)
 		}

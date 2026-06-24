@@ -277,26 +277,30 @@ func (r *txRunnerStub) WithTx(ctx context.Context, fn func(OnboardingStore) erro
 }
 
 type onboardingStub struct {
-	t                *testing.T
-	org              sqlc.Organization
-	user             sqlc.User
-	activeApp        *sqlc.App
-	activeAppCount   int64 // 模拟 CountActiveAppsByOrg 返回的企业未删除实例数。
-	users            int
-	apps             int
-	bindings         int
-	audits           int
-	auditLogs        []sqlc.CreateAuditLogParams
-	jobs             int
-	staged           counters
-	stagedAudits     []sqlc.CreateAuditLogParams
-	stagedJobs       []sqlc.CreateJobParams // 暂存 job 参数，事务提交后可检查 payload。
-	committedJobs    []sqlc.CreateJobParams // 已提交的 job，供测试断言 payload 内容。
-	appErr           error
-	jobErr           error
-	lastAppOwnerID   string
-	lastAppVersionID string     // 记录最近一次 CreateApp 使用的 VersionID，供断言校验。
-	lastAppLocale    null.String // 记录最近一次 CreateApp 使用的 Locale，供断言校验。
+	t                    *testing.T
+	org                  sqlc.Organization
+	user                 sqlc.User
+	// creatorUser 是操作者（创建者 principal）的用户记录，用于模拟 GetUser(principal.UserID)。
+	// 设置后 GetUser 会同时匹配 user.ID 和 creatorUser.ID。
+	creatorUser          *sqlc.User
+	activeApp            *sqlc.App
+	activeAppCount       int64 // 模拟 CountActiveAppsByOrg 返回的企业未删除实例数。
+	users                int
+	apps                 int
+	bindings             int
+	audits               int
+	auditLogs            []sqlc.CreateAuditLogParams
+	jobs                 int
+	staged               counters
+	stagedAudits         []sqlc.CreateAuditLogParams
+	stagedJobs           []sqlc.CreateJobParams // 暂存 job 参数，事务提交后可检查 payload。
+	committedJobs        []sqlc.CreateJobParams // 已提交的 job，供测试断言 payload 内容。
+	appErr               error
+	jobErr               error
+	lastAppOwnerID       string
+	lastAppVersionID     string      // 记录最近一次 CreateApp 使用的 VersionID，供断言校验。
+	lastAppLocale        null.String // 记录最近一次 CreateApp 使用的 Locale，供断言校验。
+	lastCreateUserParams sqlc.CreateUserParams // 记录最近一次 CreateUser 的完整入参，供断言校验。
 }
 
 type counters struct{ users, apps, bindings, audits, jobs int }
@@ -351,6 +355,10 @@ func (s *onboardingStub) GetOrganization(_ context.Context, id string) (sqlc.Org
 }
 
 func (s *onboardingStub) GetUser(_ context.Context, id string) (sqlc.User, error) {
+	// 优先匹配操作者（创建者）记录，再匹配被创建成员记录。
+	if s.creatorUser != nil && id == s.creatorUser.ID {
+		return *s.creatorUser, nil
+	}
 	if id != s.user.ID {
 		return sqlc.User{}, sql.ErrNoRows
 	}
@@ -369,9 +377,11 @@ func (s *onboardingStub) CountActiveAppsByOrg(_ context.Context, _ string) (int6
 	return s.activeAppCount, nil
 }
 
-// CreateUser 为 :exec；stub 计数后服务用自生成 ID 继续处理，不需要读回。
-func (s *onboardingStub) CreateUser(_ context.Context, _ sqlc.CreateUserParams) error {
+// CreateUser 为 :exec；stub 计数并捕获入参，服务用自生成 ID 继续处理，不需要读回。
+// lastCreateUserParams 供测试断言 Locale 等字段是否被正确赋值。
+func (s *onboardingStub) CreateUser(_ context.Context, arg sqlc.CreateUserParams) error {
 	s.staged.users++
+	s.lastCreateUserParams = arg
 	return nil
 }
 
@@ -656,4 +666,66 @@ func TestCreateAppForMember_LocaleSnapshotFallsBackToDefaultWhenOwnerLocaleEmpty
 	// owner locale 未设置，app.locale 应回退平台默认 "en"。
 	require.True(t, store.lastAppLocale.Valid, "locale 应被写入（非 NULL）")
 	assert.Equal(t, "en", store.lastAppLocale.String, "owner locale 未设置时应回退平台默认")
+}
+
+// TestOnboardMemberInheritsCreatorLocale 验证 OnboardMember 时，
+// 创建者（操作 principal）的 users.locale 被传播到新成员 Locale 与新实例 apps.locale。
+// 场景：创建者 locale=zh → 新成员 users.locale 与新实例 apps.locale 均为 zh。
+func TestOnboardMemberInheritsCreatorLocale(t *testing.T) {
+	store := newOnboardingStub(t)
+	// 设置操作者（创建者）的 locale 为 "zh"；creatorUser.ID 对应 orgOnboardingAdmin().UserID。
+	creatorID := "00000000-0000-0000-0000-0000000000aa"
+	store.creatorUser = &sqlc.User{
+		ID:     creatorID,
+		Locale: null.StringFrom("zh"),
+	}
+	tx := &txRunnerStub{store: store}
+	// 平台默认 "en"，但创建者已设置 "zh"，应优先使用创建者语言。
+	svc := NewMemberOnboardingService(tx, fakeHash, "en")
+
+	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
+		Username: "dave", DisplayName: "Dave", Password: "pwd-abc",
+		AppName: "dave-bot", VersionID: testVersionID,
+	})
+	require.NoError(t, err)
+	require.True(t, tx.committed)
+
+	// 新成员 CreateUser 应使用创建者 locale "zh"。
+	assert.Equal(t, null.StringFrom("zh"), store.lastCreateUserParams.Locale,
+		"新成员 users.locale 应等于创建者 locale")
+	// 新实例 CreateApp 应使用同一 locale "zh"。
+	require.True(t, store.lastAppLocale.Valid, "apps.locale 应被写入（非 NULL）")
+	assert.Equal(t, "zh", store.lastAppLocale.String,
+		"新实例 apps.locale 应等于创建者 locale")
+}
+
+// TestOnboardMemberFallsBackToDefaultLocale 验证 OnboardMember 时，
+// 创建者 locale 为空，新成员与新实例应回落平台默认语言。
+// 场景：创建者 locale 为空 → 新成员与新实例 locale 均回落平台默认 "en"。
+func TestOnboardMemberFallsBackToDefaultLocale(t *testing.T) {
+	store := newOnboardingStub(t)
+	// 设置创建者，但 Locale 为空（未设置语言偏好）。
+	creatorID := "00000000-0000-0000-0000-0000000000aa"
+	store.creatorUser = &sqlc.User{
+		ID:     creatorID,
+		Locale: null.String{}, // locale 无效（NULL）
+	}
+	tx := &txRunnerStub{store: store}
+	// 平台默认 "en"；创建者无语言设置，应回落此默认。
+	svc := NewMemberOnboardingService(tx, fakeHash, "en")
+
+	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
+		Username: "eve", DisplayName: "Eve", Password: "pwd-xyz",
+		AppName: "eve-bot", VersionID: testVersionID,
+	})
+	require.NoError(t, err)
+	require.True(t, tx.committed)
+
+	// 新成员 CreateUser 应回落平台默认 "en"。
+	assert.Equal(t, null.StringFrom("en"), store.lastCreateUserParams.Locale,
+		"创建者 locale 为空时新成员 users.locale 应回落平台默认")
+	// 新实例 CreateApp 应同样回落平台默认 "en"。
+	require.True(t, store.lastAppLocale.Valid, "apps.locale 应被写入（非 NULL）")
+	assert.Equal(t, "en", store.lastAppLocale.String,
+		"创建者 locale 为空时新实例 apps.locale 应回落平台默认")
 }
