@@ -20,6 +20,18 @@ components:
       - source_ref
       - version
       type: object
+    handlers.AppLocaleStatusResponse:
+      properties:
+        current_language:
+          description: CurrentLanguage 是实例实时语言（取自 oc-ops，不读 DB 快照）；实例未运行 / 不可达时为 null。
+          type: string
+        desired_language:
+          description: DesiredLanguage 是期望语言（apps.locale 配置值）。
+          type: string
+        needs_restart:
+          description: NeedsRestart 表示运行中实例当前语言≠期望，需重启生效。
+          type: boolean
+      type: object
     handlers.AssistantVersionRoutingDTO:
       properties:
         approval:
@@ -5023,6 +5035,52 @@ paths:
       security:
       - BearerAuth: []
       summary: 更新实例语言
+      tags:
+      - apps
+  /apps/{appId}/locale-status:
+    get:
+      description: 返回实例实时语言（取自 oc-ops，实例未运行/不可达时为 null）、期望语言（apps.locale）及是否需重启生效
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.AppLocaleStatusResponse'
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 实例语言状态
       tags:
       - apps
   /apps/{appId}/runtime:

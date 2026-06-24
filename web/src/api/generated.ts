@@ -4142,6 +4142,84 @@ export interface paths {
         };
         trace?: never;
     };
+    "/apps/{appId}/locale-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 实例语言状态
+         * @description 返回实例实时语言（取自 oc-ops，实例未运行/不可达时为 null）、期望语言（apps.locale）及是否需重启生效
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.AppLocaleStatusResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/apps/{appId}/runtime": {
         parameters: {
             query?: never;
@@ -12116,6 +12194,14 @@ export interface components {
             source_ref: string;
             /** @description Version 是要配进版本的 skill 版本号。 */
             version: string;
+        };
+        "handlers.AppLocaleStatusResponse": {
+            /** @description CurrentLanguage 是实例实时语言（取自 oc-ops，不读 DB 快照）；实例未运行 / 不可达时为 null。 */
+            current_language?: string;
+            /** @description DesiredLanguage 是期望语言（apps.locale 配置值）。 */
+            desired_language?: string;
+            /** @description NeedsRestart 表示运行中实例当前语言≠期望，需重启生效。 */
+            needs_restart?: boolean;
         };
         "handlers.AssistantVersionRoutingDTO": {
             approval?: string;

@@ -13,6 +13,7 @@ import (
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
+	"oc-manager/internal/integrations/ocops"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -43,6 +44,15 @@ type AppImageResolver interface {
 	ResolveRuntimeImage(id string) (ref string, ok bool)
 }
 
+// configOps 抽象 oc-ops 的实例运行配置查询，供 AppLocaleStatus 实时读取实例当前语言。
+// 方法签名镜像 *ocops.Client.Config；由 *ocops.Client 满足（见编译期断言）。
+type configOps interface {
+	Config(ctx context.Context, ep ocops.Endpoint) (ocops.OcConfig, error)
+}
+
+// 编译期断言：生产实现 *ocops.Client 必须满足 configOps 窄接口，方法签名漂移即编译失败。
+var _ configOps = (*ocops.Client)(nil)
+
 // AppService 维护应用的查询、状态读取和轻量配置更新。
 // 创建应用必须经过 onboarding 事务，因为应用的初始化需要联动 channel binding、audit、job。
 type AppService struct {
@@ -51,6 +61,12 @@ type AppService struct {
 	// imageResolver 把版本 image_id 解析成镜像 ref，供 computeVersionSynced 比对镜像维度。
 	// nil 时降级为仅比较修订号（镜像维度跳过）。
 	imageResolver AppImageResolver
+	// configOps 是 oc-ops 实例配置查询客户端，AppLocaleStatus 用它实时读取实例当前语言。
+	// nil 时无法实时查询，current_language 一律返回 nil（不阻断详情渲染）。
+	configOps configOps
+	// ocResolver 把 appID 解析为 oc-ops 调用坐标（基址 + per-app token）。
+	// 复用与 cron/kanban/conversation 一致的 endpoint 构造路径，避免自造寻址逻辑。
+	ocResolver OcOpsResolver
 }
 
 // NewAppService 创建 app 服务。
@@ -63,6 +79,13 @@ func (s *AppService) SetJobNotifier(notifier JobNotifier) {
 
 // SetImageResolver 注入版本镜像解析能力；nil 时 version_synced 降级为仅比较修订。
 func (s *AppService) SetImageResolver(resolver AppImageResolver) { s.imageResolver = resolver }
+
+// SetOcOps 注入实时查询实例运行配置所需的 oc-ops 客户端与坐标解析器，供 AppLocaleStatus 使用。
+// 两者任一为 nil 时，AppLocaleStatus 跳过实时查询、current_language 返回 nil（不阻断详情渲染）。
+func (s *AppService) SetOcOps(ops configOps, resolver OcOpsResolver) {
+	s.configOps = ops
+	s.ocResolver = resolver
+}
 
 // AppResult 是对外的应用视图。
 // spec-A2b：runtime_node_id / container_id / container_name 已从 schema 删除，本结构体亦不再携带。
@@ -377,5 +400,72 @@ func (s *AppService) UpdateAppLocale(ctx context.Context, principal auth.Princip
 	}
 	result := toAppResult(newRow.App)
 	result.VersionSynced = computeVersionSynced(newRow.App, newRow.VersionRevision, newRow.VersionImageID, s.imageResolver)
+	return result, nil
+}
+
+// appLocaleStatusTimeout 是实时查询实例当前语言的最长等待时间。
+// 实例未运行 / 不可达时，oc-ops 调用应在此时限内失败返回，避免详情页因实例宕机而长时间卡顿。
+const appLocaleStatusTimeout = 3 * time.Second
+
+// AppLocaleStatusResult 是实例语言状态查询结果。
+//
+// 设计铁律：current_language 必须实时取自实例侧（oc-ops），不读 manager DB 快照；
+// desired_language 才是配置/期望值（apps.locale）。两者口径不同，不能互相替代。
+type AppLocaleStatusResult struct {
+	// CurrentLanguage 是实例当前真实运行的语言；实例未运行 / 不可达 / 超时时为 nil。
+	CurrentLanguage *string
+	// DesiredLanguage 是期望语言（apps.locale 配置值），合法读自 manager DB。
+	DesiredLanguage string
+	// NeedsRestart 表示运行中实例当前语言与期望不一致、需重启生效；
+	// 仅当 CurrentLanguage 非 nil 且与 DesiredLanguage 不等时为 true。
+	NeedsRestart bool
+}
+
+// AppLocaleStatus 返回实例语言状态：实时实例语言、期望语言与是否需重启。
+//
+// 流程：
+//  1. 读 app（含绑定版本联查）取 desired = apps.locale，并按 Get 一致的 ErrNotFound 映射；
+//  2. 用 CanViewApp 校验访问权限（与详情页同一谓词）；
+//  3. 经 ocResolver 解析 oc-ops 坐标（复用 per-app token + Service DNS 构造），
+//     用短超时 ctx 实时查 oc-ops Config，取 current = display.language。
+//
+// 实例未运行 / 不可达 / 超时 / 解析失败时，current 保持 nil 且不报错，确保详情页可正常渲染。
+func (s *AppService) AppLocaleStatus(ctx context.Context, principal auth.Principal, appID string) (AppLocaleStatusResult, error) {
+	// 读取 app（沿用 Get 的 GetAppWithVersion + ErrNoRows→ErrNotFound 映射）。
+	row, err := s.store.GetAppWithVersion(ctx, appID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return AppLocaleStatusResult{}, ErrNotFound
+	}
+	if err != nil {
+		return AppLocaleStatusResult{}, fmt.Errorf("查询应用失败: %w", err)
+	}
+	// 访问权限：与详情页一致用 CanViewApp（平台管理员 / 本组织 org_admin / 实例 owner）。
+	if !auth.CanViewApp(principal, row.App.OrgID, row.App.OwnerUserID) {
+		return AppLocaleStatusResult{}, ErrForbidden
+	}
+	// desired 合法读 DB：Locale 为 NULL（历史数据 / 未设置）时为空字符串，由前端按平台默认处理。
+	result := AppLocaleStatusResult{DesiredLanguage: strOrEmpty(row.App.Locale)}
+	// 未注入 oc-ops 能力（如 dev / 测试未配）时跳过实时查询，current 保持 nil。
+	if s.configOps == nil || s.ocResolver == nil {
+		return result, nil
+	}
+	// 解析 oc-ops 坐标：失败（实例不存在 / token 解密失败等）时不阻断详情渲染，current 仍为 nil。
+	loc, err := s.ocResolver.Resolve(ctx, appID)
+	if err != nil {
+		return result, nil
+	}
+	// dev stub 实例不含真实 hermes，或基址未就绪（实例尚未运行）时无从实时查询，current 保持 nil。
+	if !loc.Supported || loc.Endpoint.BaseURL == "" {
+		return result, nil
+	}
+	// 实时查 oc-ops：短超时避免实例宕机时详情页长时间卡顿；任何错误均降级为 current=nil。
+	queryCtx, cancel := context.WithTimeout(ctx, appLocaleStatusTimeout)
+	defer cancel()
+	cfg, err := s.configOps.Config(queryCtx, loc.Endpoint)
+	if err == nil && cfg.DisplayLanguage != "" {
+		cur := cfg.DisplayLanguage
+		result.CurrentLanguage = &cur
+		result.NeedsRestart = cur != result.DesiredLanguage
+	}
 	return result, nil
 }

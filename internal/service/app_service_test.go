@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	null "github.com/guregu/null/v5"
@@ -12,6 +13,7 @@ import (
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
+	"oc-manager/internal/integrations/ocops"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -375,6 +377,94 @@ func TestGetVersionSynced(t *testing.T) {
 	result2, err := svc.Get(context.Background(), platformAdmin(), testAppServiceAppID)
 	require.NoError(t, err)
 	assert.False(t, result2.VersionSynced, "实例 revision 落后于版本，version_synced 应为 false")
+}
+
+// fakeConfigOps 是 configOps 的测试桩：返回预设的 OcConfig，或预设错误（模拟实例不可达）。
+type fakeConfigOps struct {
+	cfg ocops.OcConfig // Config 成功时返回的配置
+	err error          // 非 nil 时模拟 oc-ops 调用失败（实例未运行 / 不可达 / 超时）
+}
+
+// Config 按预设返回，模拟实时查询实例 display.language。
+func (f *fakeConfigOps) Config(_ context.Context, _ ocops.Endpoint) (ocops.OcConfig, error) {
+	if f.err != nil {
+		return ocops.OcConfig{}, f.err
+	}
+	return f.cfg, nil
+}
+
+// fakeOcResolver 是 OcOpsResolver 的测试桩：返回固定坐标（默认 Supported + 非空基址），
+// 让 AppLocaleStatus 进入实时查询分支。
+type fakeOcResolver struct {
+	loc OcOpsAppLocation
+	err error
+}
+
+// Resolve 按预设返回坐标或错误。
+func (f *fakeOcResolver) Resolve(_ context.Context, _ string) (OcOpsAppLocation, error) {
+	if f.err != nil {
+		return OcOpsAppLocation{}, f.err
+	}
+	return f.loc, nil
+}
+
+// readyResolver 返回一个已就绪的坐标桩：Supported=true 且基址非空，保证进入实时查询分支。
+func readyResolver() *fakeOcResolver {
+	return &fakeOcResolver{loc: OcOpsAppLocation{
+		Supported: true,
+		Endpoint:  ocops.Endpoint{BaseURL: "http://app-x-ocops.oc-apps.svc:8080"},
+	}}
+}
+
+// TestAppLocaleStatusNeedsRestart 覆盖：实例运行中、oc-ops 实时 current=zh 与 apps.locale=en
+// 不一致 → current="zh"、desired="en"、needs_restart=true（运行中实例语言漂移需重启生效）。
+func TestAppLocaleStatusNeedsRestart(t *testing.T) {
+	svc, store := newAppServiceWithStore(t)
+	app := store.mustSeedApp(t)
+	app.Locale = null.StringFrom("en") // 期望语言 en
+	store.app = app
+	// oc-ops 实时返回 zh，与期望 en 不一致。
+	svc.SetOcOps(&fakeConfigOps{cfg: ocops.OcConfig{DisplayLanguage: "zh"}}, readyResolver())
+
+	res, err := svc.AppLocaleStatus(context.Background(), platformAdmin(), testAppServiceAppID)
+	require.NoError(t, err)
+	require.NotNil(t, res.CurrentLanguage, "实例可达时 current 不应为 nil")
+	assert.Equal(t, "zh", *res.CurrentLanguage)
+	assert.Equal(t, "en", res.DesiredLanguage)
+	assert.True(t, res.NeedsRestart, "current≠desired 时应需重启")
+}
+
+// TestAppLocaleStatusInstanceUnreachable 覆盖：oc-ops 调用失败（实例未运行 / 不可达）→
+// current=nil、needs_restart=false，但 desired 仍正常返回（保证详情页可渲染）。
+func TestAppLocaleStatusInstanceUnreachable(t *testing.T) {
+	svc, store := newAppServiceWithStore(t)
+	app := store.mustSeedApp(t)
+	app.Locale = null.StringFrom("en")
+	store.app = app
+	// oc-ops 返回错误，模拟实例不可达。
+	svc.SetOcOps(&fakeConfigOps{err: errors.New("connection refused")}, readyResolver())
+
+	res, err := svc.AppLocaleStatus(context.Background(), platformAdmin(), testAppServiceAppID)
+	require.NoError(t, err, "实例不可达不应报错，详情页要能渲染")
+	assert.Nil(t, res.CurrentLanguage, "实例不可达时 current 应为 nil")
+	assert.False(t, res.NeedsRestart, "current 为 nil 时不应判定需重启")
+	assert.Equal(t, "en", res.DesiredLanguage, "desired 仍应正常返回")
+}
+
+// TestAppLocaleStatusForbidden 覆盖：无权访问该实例的成员调用 → ErrForbidden
+// （CanViewApp 拒绝非本人非本组织管理员）。
+func TestAppLocaleStatusForbidden(t *testing.T) {
+	svc, store := newAppServiceWithStore(t)
+	store.mustSeedApp(t)
+	svc.SetOcOps(&fakeConfigOps{cfg: ocops.OcConfig{DisplayLanguage: "zh"}}, readyResolver())
+
+	// 非实例 owner、非本组织管理员的成员（owner 为 testMemUID，这里用其它 UID）。
+	_, err := svc.AppLocaleStatus(context.Background(), auth.Principal{
+		Role:   domain.UserRoleOrgMember,
+		OrgID:  store.organization.ID,
+		UserID: testAdminUID, // 与 owner（testMemUID）不同
+	}, testAppServiceAppID)
+	require.ErrorIs(t, err, ErrForbidden)
 }
 
 // mustOrgWithAllowlist 构造一个包含给定版本 id allowlist 的 Organization sqlc 记录。

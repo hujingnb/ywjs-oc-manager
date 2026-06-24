@@ -244,6 +244,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	}
 	ocopsBaseURLTpl := fmt.Sprintf("http://app-%%s-ocops.%s.svc:8080", ocopsNamespace)
 	ocopsResolver := service.NewOcOpsResolverFromStore(dbStore.Queries, cipher, ocopsBaseURLTpl)
+	// AppLocaleStatus 需实时查 oc-ops 实例当前语言：注入 oc-ops 客户端与坐标解析器。
+	// 二者在此处才装配完成（appService 早于此构造），故用 setter 补注入。
+	appService.SetOcOps(ocopsClient, ocopsResolver)
 
 	channelRegistry := channel.NewRegistry()
 	channelService := service.NewChannelService(dbStore.Queries, channelRegistry, redisQueue)

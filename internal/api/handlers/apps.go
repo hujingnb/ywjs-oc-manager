@@ -25,6 +25,7 @@ type appService interface {
 	SwitchAppVersion(ctx context.Context, principal auth.Principal, appID, versionID string) (service.AppResult, error)
 	UpdateAppKnowledgeQuota(ctx context.Context, principal auth.Principal, appID string, quotaBytes int64) (service.AppResult, error)
 	UpdateAppLocale(ctx context.Context, principal auth.Principal, appID, locale string) (service.AppResult, error)
+	AppLocaleStatus(ctx context.Context, principal auth.Principal, appID string) (service.AppLocaleStatusResult, error)
 }
 
 // NewAppsHandler 创建 handler。
@@ -37,6 +38,7 @@ func NewAppsHandler(svc appService) *AppsHandler {
 func RegisterAppRoutes(router gin.IRouter, handler *AppsHandler) {
 	router.GET("/api/v1/organizations/:orgId/apps", handler.List)
 	router.GET("/api/v1/apps/:appId", handler.Get)
+	router.GET("/api/v1/apps/:appId/locale-status", handler.LocaleStatus)
 	router.POST("/api/v1/apps/:appId/version", handler.SwitchVersion)
 	router.PATCH("/api/v1/apps/:appId/knowledge/quota", handler.UpdateKnowledgeQuota)
 	router.PATCH("/api/v1/apps/:appId/locale", handler.UpdateLocale)
@@ -92,6 +94,34 @@ func (h *AppsHandler) Get(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"app": result})
+}
+
+// LocaleStatus 查询实例语言状态。
+//
+// @Summary      实例语言状态
+// @Description  返回实例实时语言（取自 oc-ops，实例未运行/不可达时为 null）、期望语言（apps.locale）及是否需重启生效
+// @Tags         apps
+// @Produce      json
+// @Security     BearerAuth
+// @Param        appId  path      string  true  "应用 ID"
+// @Success      200    {object}  AppLocaleStatusResponse
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /apps/{appId}/locale-status [get]
+func (h *AppsHandler) LocaleStatus(c *gin.Context) {
+	principal := principalFromCtx(c)
+	result, err := h.service.AppLocaleStatus(c.Request.Context(), principal, c.Param("appId"))
+	if err != nil {
+		writeAppsError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, AppLocaleStatusResponse{
+		CurrentLanguage: result.CurrentLanguage,
+		DesiredLanguage: result.DesiredLanguage,
+		NeedsRestart:    result.NeedsRestart,
+	})
 }
 
 // SwitchVersion 切换实例绑定的助手版本。

@@ -354,6 +354,16 @@ type UpdateAppLocaleRequest struct {
 	Locale string `json:"locale" binding:"required"`
 }
 
+// AppLocaleStatusResponse 是 GET /api/v1/apps/:appId/locale-status 的响应。
+type AppLocaleStatusResponse struct {
+	// CurrentLanguage 是实例实时语言（取自 oc-ops，不读 DB 快照）；实例未运行 / 不可达时为 null。
+	CurrentLanguage *string `json:"current_language"`
+	// DesiredLanguage 是期望语言（apps.locale 配置值）。
+	DesiredLanguage string `json:"desired_language"`
+	// NeedsRestart 表示运行中实例当前语言≠期望，需重启生效。
+	NeedsRestart bool `json:"needs_restart"`
+}
+
 // ===== 助手版本 assistant-versions =====
 
 // AssistantVersionRoutingDTO 是智能路由 8 槽位的请求结构；空字符串表示走主模型。

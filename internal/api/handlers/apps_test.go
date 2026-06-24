@@ -30,6 +30,8 @@ type appsStub struct {
 	updateLocaleResult         service.AppResult
 	updateLocaleErr            error
 	lastLocale                 string
+	localeStatusResult         service.AppLocaleStatusResult
+	localeStatusErr            error
 }
 
 func (s *appsStub) Get(_ context.Context, _ auth.Principal, _ string) (service.AppResult, error) {
@@ -61,6 +63,11 @@ func (s *appsStub) UpdateAppLocale(_ context.Context, _ auth.Principal, _ string
 		return service.AppResult{}, s.updateLocaleErr
 	}
 	return s.updateLocaleResult, nil
+}
+
+// AppLocaleStatus 实现 appService 接口的语言状态查询方法，返回预设结果。
+func (s *appsStub) AppLocaleStatus(_ context.Context, _ auth.Principal, _ string) (service.AppLocaleStatusResult, error) {
+	return s.localeStatusResult, s.localeStatusErr
 }
 
 // newAppsTestRouter 构建用于测试的 gin router。
@@ -250,6 +257,62 @@ func TestUpdateLocaleInvalidLocale(t *testing.T) {
 	// 不支持的语言映射为 400，错误码为 INVALID_LOCALE。
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "INVALID_LOCALE")
+}
+
+// TestLocaleStatusHappy 验证 GET /apps/:appId/locale-status 成功路径：
+// 实例可达时 current_language 实时返回，且 needs_restart 透传 service 结果。
+func TestLocaleStatusHappy(t *testing.T) {
+	// stub 返回 current=zh、desired=en、needs_restart=true（运行中实例语言漂移）。
+	cur := "zh"
+	stub := &appsStub{localeStatusResult: service.AppLocaleStatusResult{
+		CurrentLanguage: &cur,
+		DesiredLanguage: "en",
+		NeedsRestart:    true,
+	}}
+	router := newAppsTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps/app-1/locale-status", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"current_language":"zh"`)
+	assert.Contains(t, w.Body.String(), `"desired_language":"en"`)
+	assert.Contains(t, w.Body.String(), `"needs_restart":true`)
+}
+
+// TestLocaleStatusUnreachable 验证实例不可达时 current_language 序列化为 null（非省略）。
+func TestLocaleStatusUnreachable(t *testing.T) {
+	// stub 返回 current=nil（实例不可达），desired 仍存在。
+	stub := &appsStub{localeStatusResult: service.AppLocaleStatusResult{
+		CurrentLanguage: nil,
+		DesiredLanguage: "en",
+		NeedsRestart:    false,
+	}}
+	router := newAppsTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps/app-1/locale-status", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	// current_language 必须显式为 null，前端据此判断实例未运行。
+	assert.Contains(t, w.Body.String(), `"current_language":null`)
+}
+
+// TestLocaleStatusForbidden 验证无权访问时返回 403。
+func TestLocaleStatusForbidden(t *testing.T) {
+	stub := &appsStub{localeStatusErr: service.ErrForbidden}
+	router := newAppsTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/apps/app-1/locale-status", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgMember, OrgID: "org-1"})
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
 // TestUpdateLocaleBadRequest 验证请求体缺少 locale 字段时返回 400。
