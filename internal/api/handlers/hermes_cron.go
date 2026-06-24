@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/ocops"
@@ -64,7 +65,7 @@ func RegisterHermesCronRoutes(router gin.IRouter, h *HermesCronHandler) {
 // writeCronError 把 service sentinel error 映射为 HTTP 响应。
 // 映射规则见 request_errors.go 的 mappedServiceErrorRules（cron 节）。
 func writeCronError(c *gin.Context, err error) {
-	writeMappedServiceError(c, err, http.StatusInternalServerError, "定时任务服务暂不可用")
+	writeMappedServiceError(c, err, http.StatusInternalServerError, apierror.MsgInternal)
 }
 
 // stripCronAdvancedFields 根据 principal.Role 过滤平台管理员专属字段。

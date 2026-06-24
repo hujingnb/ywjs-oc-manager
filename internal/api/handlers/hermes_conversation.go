@@ -51,7 +51,7 @@ func RegisterHermesConversationRoutes(router gin.IRouter, h *HermesConversationH
 // writeConversationError 把 service 哨兵错误映射为 HTTP 响应。
 // 映射规则见 request_errors.go 的 mappedServiceErrorRules（conversation 节）。
 func writeConversationError(c *gin.Context, err error) {
-	writeMappedServiceError(c, err, http.StatusInternalServerError, "会话服务暂不可用")
+	writeMappedServiceError(c, err, http.StatusInternalServerError, apierror.MsgInternal)
 }
 
 // List GET /api/v1/apps/{appId}/hermes/conversations

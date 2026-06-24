@@ -44,43 +44,46 @@ var mappedServiceErrorRules = []serviceErrorRule{
 	validationErrorRule(service.ErrEnrollInputInvalid, http.StatusBadRequest, "ENROLL_INVALID"),
 	validationErrorRule(service.ErrMemberCreateInvalid, http.StatusBadRequest, "MEMBER_INVALID"),
 	// 通用资源不存在，映射为 404。
-	{target: service.ErrNotFound, statusCode: http.StatusNotFound, code: "NOT_FOUND", message: "资源不存在"},
+	{target: service.ErrNotFound, statusCode: http.StatusNotFound, code: "NOT_FOUND", msgKey: apierror.MsgNotFound},
 	// 任务看板相关 sentinel error 映射。
-	{target: service.ErrKanbanForbidden, statusCode: http.StatusForbidden, code: "KANBAN_FORBIDDEN", message: "无权访问该实例任务看板"},
-	{target: service.ErrKanbanRuntimeUnavailable, statusCode: http.StatusServiceUnavailable, code: "RUNTIME_NOT_AVAILABLE", message: "实例容器未运行，请先在运行时 tab 启动"},
-	{target: service.ErrKanbanNotSupported, statusCode: http.StatusServiceUnavailable, code: "KANBAN_NOT_SUPPORTED_ON_STUB", message: "该实例运行的是 dev 镜像，任务看板不可用"},
+	{target: service.ErrKanbanForbidden, statusCode: http.StatusForbidden, code: "KANBAN_FORBIDDEN", msgKey: apierror.MsgKanbanForbidden},
+	{target: service.ErrKanbanRuntimeUnavailable, statusCode: http.StatusServiceUnavailable, code: "RUNTIME_NOT_AVAILABLE", msgKey: apierror.MsgRuntimeNotAvailable},
+	{target: service.ErrKanbanNotSupported, statusCode: http.StatusServiceUnavailable, code: "KANBAN_NOT_SUPPORTED_ON_STUB", msgKey: apierror.MsgKanbanNotSupported},
 	// 用 validationErrorRule：剥离 sentinel 前缀后把具体字段原因（如「assignee 只能由
 	// 小写字母…」）回给调用方，避免一律返回笼统的「任务看板请求参数非法」让用户无法定位。
 	validationErrorRule(service.ErrKanbanBadRequest, http.StatusBadRequest, "KANBAN_BAD_REQUEST"),
-	{target: service.ErrKanbanCLI, statusCode: http.StatusBadGateway, code: "KANBAN_CLI_ERROR", message: "任务看板命令执行失败", safe: true},
-	{target: service.ErrKanbanOutputInvalid, statusCode: http.StatusBadGateway, code: "KANBAN_OUTPUT_INVALID", message: "Hermes 版本可能不兼容，请联系平台管理员"},
+	{target: service.ErrKanbanCLI, statusCode: http.StatusBadGateway, code: "KANBAN_CLI_ERROR", safe: true},
+	{target: service.ErrKanbanOutputInvalid, statusCode: http.StatusBadGateway, code: "KANBAN_OUTPUT_INVALID", msgKey: apierror.MsgHermesIncompatible},
 	// Hermes Cron 相关 sentinel error 映射。
-	{target: service.ErrCronForbidden, statusCode: http.StatusForbidden, code: "CRON_FORBIDDEN", message: "无权访问该实例定时任务"},
-	{target: service.ErrCronRuntimeUnavailable, statusCode: http.StatusServiceUnavailable, code: "RUNTIME_NOT_AVAILABLE", message: "实例容器未运行，请先在运行时 tab 启动"},
-	{target: service.ErrCronNotSupported, statusCode: http.StatusServiceUnavailable, code: "CRON_NOT_SUPPORTED_ON_STUB", message: "该实例运行的是 dev 镜像，定时任务不可用"},
-	{target: service.ErrCronBadRequest, statusCode: http.StatusBadRequest, code: "CRON_BAD_REQUEST", message: "定时任务请求参数非法"},
-	{target: service.ErrCronCLI, statusCode: http.StatusBadGateway, code: "CRON_CLI_ERROR", message: "定时任务命令执行失败", safe: true},
-	{target: service.ErrCronOutputInvalid, statusCode: http.StatusBadGateway, code: "CRON_OUTPUT_INVALID", message: "Hermes Cron 版本可能不兼容，请联系平台管理员"},
+	{target: service.ErrCronForbidden, statusCode: http.StatusForbidden, code: "CRON_FORBIDDEN", msgKey: apierror.MsgCronForbidden},
+	{target: service.ErrCronRuntimeUnavailable, statusCode: http.StatusServiceUnavailable, code: "RUNTIME_NOT_AVAILABLE", msgKey: apierror.MsgRuntimeNotAvailable},
+	{target: service.ErrCronNotSupported, statusCode: http.StatusServiceUnavailable, code: "CRON_NOT_SUPPORTED_ON_STUB", msgKey: apierror.MsgCronNotSupported},
+	{target: service.ErrCronBadRequest, statusCode: http.StatusBadRequest, code: "CRON_BAD_REQUEST", msgKey: apierror.MsgCronBadRequest},
+	{target: service.ErrCronCLI, statusCode: http.StatusBadGateway, code: "CRON_CLI_ERROR", safe: true},
+	{target: service.ErrCronOutputInvalid, statusCode: http.StatusBadGateway, code: "CRON_OUTPUT_INVALID", msgKey: apierror.MsgCronOutputInvalid},
 	// 实例会话 sentinel error 映射（语义与 kanban/cron 同模式）。
-	{target: service.ErrConversationForbidden, statusCode: http.StatusForbidden, code: "CONVERSATION_FORBIDDEN", message: "无权访问该实例会话"},
-	{target: service.ErrConversationRuntimeUnavailable, statusCode: http.StatusServiceUnavailable, code: "RUNTIME_NOT_AVAILABLE", message: "实例容器未运行，请先在运行时 tab 启动"},
-	{target: service.ErrConversationNotSupported, statusCode: http.StatusServiceUnavailable, code: "CONVERSATION_NOT_SUPPORTED_ON_STUB", message: "该实例运行的是 dev 镜像，会话不可用"},
+	{target: service.ErrConversationForbidden, statusCode: http.StatusForbidden, code: "CONVERSATION_FORBIDDEN", msgKey: apierror.MsgConversationForbidden},
+	{target: service.ErrConversationRuntimeUnavailable, statusCode: http.StatusServiceUnavailable, code: "RUNTIME_NOT_AVAILABLE", msgKey: apierror.MsgRuntimeNotAvailable},
+	{target: service.ErrConversationNotSupported, statusCode: http.StatusServiceUnavailable, code: "CONVERSATION_NOT_SUPPORTED_ON_STUB", msgKey: apierror.MsgConversationNotSupported},
 	validationErrorRule(service.ErrConversationBadRequest, http.StatusBadRequest, "CONVERSATION_BAD_REQUEST"),
-	{target: service.ErrConversationCLI, statusCode: http.StatusBadGateway, code: "CONVERSATION_CLI_ERROR", message: "会话命令执行失败", safe: true},
-	{target: service.ErrConversationOutputInvalid, statusCode: http.StatusBadGateway, code: "CONVERSATION_OUTPUT_INVALID", message: "Hermes 版本可能不兼容，请联系平台管理员"},
+	{target: service.ErrConversationCLI, statusCode: http.StatusBadGateway, code: "CONVERSATION_CLI_ERROR", safe: true},
+	{target: service.ErrConversationOutputInvalid, statusCode: http.StatusBadGateway, code: "CONVERSATION_OUTPUT_INVALID", msgKey: apierror.MsgHermesIncompatible},
 }
 
 // writeBindError 将 Gin 的 JSON 绑定错误转成面向调用方的 400 文案。
 // 该函数只暴露请求体层面的字段名、类型和 JSON 格式问题，不返回 Go 结构体名或底层解析细节。
+// 文案走 catalog 按请求 locale 输出；带占位符的模板（类型错误 / 缺失字段）以 args 携带动态字段名。
 func writeBindError(c *gin.Context, err error) {
-	c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", bindErrorMessage(err)))
+	key, args := bindErrorMessage(err)
+	apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", key, args...)
 }
 
 type serviceErrorRule struct {
 	target     error
 	statusCode int
 	code       string
-	message    string
+	// msgKey 指向 catalog 中的静态文案；safe / validation 规则运行期动态生成原因，故留空。
+	msgKey     apierror.MsgKey
 	safe       bool
 	validation bool
 }
@@ -96,36 +99,38 @@ func validationErrorRule(target error, statusCode int, code string) serviceError
 }
 
 // writeMappedServiceError 按顺序匹配 service sentinel error，并写入对应 HTTP 响应。
-// 未命中公共规则时，使用调用方传入的兜底状态码和文案，保留接口自身的默认错误语义。
-func writeMappedServiceError(c *gin.Context, err error, fallbackStatus int, fallbackMessage string) {
+// 静态规则按请求 locale 输出 catalog 文案；safe / validation 规则保留运行期动态原因（脱敏 /
+// 剥离 sentinel 前缀）。未命中任何规则时，用调用方传入的兜底状态码与 fallbackKey 兜底。
+func writeMappedServiceError(c *gin.Context, err error, fallbackStatus int, fallbackKey apierror.MsgKey) {
 	for _, rule := range mappedServiceErrorRules {
 		if !errors.Is(err, rule.target) {
 			continue
 		}
-		message := rule.message
-		if rule.safe {
-			message = redactlog.SafeErrorMessage(err)
+		switch {
+		case rule.safe:
+			c.JSON(rule.statusCode, apierror.New(rule.code, redactlog.SafeErrorMessage(err)))
+		case rule.validation:
+			c.JSON(rule.statusCode, apierror.New(rule.code, validationServiceMessage(err, rule.target)))
+		default:
+			apierror.JSON(c, rule.statusCode, rule.code, rule.msgKey)
 		}
-		if rule.validation {
-			message = validationServiceMessage(err, rule.target)
-		}
-		c.JSON(rule.statusCode, apierror.New(rule.code, message))
 		return
 	}
-	c.JSON(fallbackStatus, apierror.New("INTERNAL", fallbackMessage))
+	apierror.JSON(c, fallbackStatus, "INTERNAL", fallbackKey)
 }
 
 // bindErrorMessage 归一化请求体绑定错误，避免所有接口都返回含糊的“请求参数不完整”。
-func bindErrorMessage(err error) string {
+// 返回 catalog MsgKey 与格式化所需 args（无占位符的模板 args 为 nil），由调用方按 locale 输出。
+func bindErrorMessage(err error) (apierror.MsgKey, []any) {
 	if err == nil {
-		return "请求参数格式错误"
+		return apierror.MsgBadRequestGeneric, nil
 	}
 	if errors.Is(err, io.EOF) {
-		return "请求体不能为空"
+		return apierror.MsgEmptyBody, nil
 	}
 	var syntaxErr *json.SyntaxError
 	if errors.As(err, &syntaxErr) {
-		return "请求体不是合法 JSON"
+		return apierror.MsgInvalidJSON, nil
 	}
 	var typeErr *json.UnmarshalTypeError
 	if errors.As(err, &typeErr) {
@@ -133,18 +138,19 @@ func bindErrorMessage(err error) string {
 		if field == "" {
 			field = typeErr.Value
 		}
-		return "请求参数类型错误: " + field
+		return apierror.MsgInvalidType, []any{field}
 	}
 	var validationErrs validator.ValidationErrors
 	if errors.As(err, &validationErrs) {
 		return validationErrorMessage(validationErrs)
 	}
-	return "请求参数格式错误"
+	return apierror.MsgBadRequestGeneric, nil
 }
 
 // validationErrorMessage 汇总 validator 返回的字段级错误。
-// 当前 DTO 主要使用 required tag，因此优先给出缺失字段列表；其它 tag 保留字段名提示。
-func validationErrorMessage(validationErrs validator.ValidationErrors) string {
+// 当前 DTO 主要使用 required tag，因此优先给出缺失字段列表（MsgMissingRequiredFields）；
+// 其它 tag 走 MsgValidationFailed。字段名列表以 args 形式作为模板占位符填充。
+func validationErrorMessage(validationErrs validator.ValidationErrors) (apierror.MsgKey, []any) {
 	missing := make([]string, 0, len(validationErrs))
 	invalid := make([]string, 0, len(validationErrs))
 	for _, fieldErr := range validationErrs {
@@ -156,9 +162,9 @@ func validationErrorMessage(validationErrs validator.ValidationErrors) string {
 		invalid = append(invalid, name)
 	}
 	if len(missing) > 0 {
-		return "缺少必填参数: " + strings.Join(missing, ", ")
+		return apierror.MsgMissingRequiredFields, []any{strings.Join(missing, ", ")}
 	}
-	return "请求参数校验失败: " + strings.Join(invalid, ", ")
+	return apierror.MsgValidationFailed, []any{strings.Join(invalid, ", ")}
 }
 
 // jsonFieldName 将 validator 的 Go 字段名映射为对外契约中的 json tag 名。

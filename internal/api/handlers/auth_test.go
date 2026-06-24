@@ -56,7 +56,9 @@ func TestAuthLoginRejectsInvalidBody(t *testing.T) {
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
-	require.Contains(t, recorder.Body.String(), "缺少必填参数")
+	// 绑定错误统一返回 BAD_REQUEST code，文案随 locale 走 catalog（测试路由无 locale 中间件，
+	// 回落 en），故断言稳定 code 与缺失字段名而非具体中文文案。
+	require.Contains(t, recorder.Body.String(), "BAD_REQUEST")
 	require.Contains(t, recorder.Body.String(), "username")
 	require.Contains(t, recorder.Body.String(), "password")
 }

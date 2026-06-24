@@ -78,7 +78,7 @@ func RegisterHermesKanbanRoutes(router gin.IRouter, h *HermesKanbanHandler) {
 // writeKanbanError 把 service sentinel error 映射为 HTTP 响应。
 // 映射规则见 request_errors.go 的 mappedServiceErrorRules（kanban 节）。
 func writeKanbanError(c *gin.Context, err error) {
-	writeMappedServiceError(c, err, http.StatusInternalServerError, "任务看板服务暂不可用")
+	writeMappedServiceError(c, err, http.StatusInternalServerError, apierror.MsgInternal)
 }
 
 // bindOptionalJSON 绑定可选的 JSON 请求体：空 body 视为成功，req 保持零值。
