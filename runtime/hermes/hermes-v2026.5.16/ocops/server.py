@@ -99,6 +99,39 @@ async def get_doctor(request):
     return _ok(doctor.collect_doctor())
 
 
+async def get_config(request):
+    """GET /oc/config：返回实例当前运行的 display.language，供 manager 实时查询。
+
+    不依赖 DB 快照，直接读容器内 /opt/data/config.yaml（由 OC_DATA_DIR 指定根目录）
+    的 display.language 字段。
+    - 文件缺失或不含 display.language 键时，回落返回默认值 "en"，不报错。
+    - 鉴权同其它 /oc/* 端点（Bearer OC_OPS_TOKEN），由 AuthMiddleware 统一校验。
+
+    响应：{"display_language": "zh"|"en"（或任意 config 中配置的语言代码）}
+    """
+    import yaml  # PyYAML 在 hermes 镜像中已可用；延迟 import 与其它端点保持一致风格
+
+    config_path = _data_root() / "config.yaml"
+    language = "en"  # 默认回落值：文件缺失或无 display.language 键均返回 en
+    try:
+        text = config_path.read_text(encoding="utf-8")
+        cfg = yaml.safe_load(text) or {}
+        # 取 display.language，若 display 键缺失或不是 dict 则安全跳过，保持默认 en
+        display = cfg.get("display") if isinstance(cfg, dict) else None
+        if isinstance(display, dict):
+            lang = display.get("language")
+            if lang:
+                language = str(lang)
+    except (OSError, yaml.YAMLError, ValueError):
+        # 文件缺失/损坏/读失败均回落 en，保证该诊断端点永不 500：
+        # OSError 覆盖 FileNotFoundError（文件不存在）与权限等读失败；
+        # yaml.YAMLError 覆盖 config.yaml 内容语法损坏无法解析的情况；
+        # ValueError 覆盖 UnicodeDecodeError（非 UTF-8 内容）等解码异常。
+        pass
+
+    return _ok({"display_language": language})
+
+
 async def channel_status(request):
     """GET /oc/channels/{channel}/status：查询渠道绑定态。
     未知 channel 或其他业务错误 → 对应 HTTP 状态码 + {code,message}。"""
@@ -549,6 +582,7 @@ routes = [
     Route("/healthz", healthz),
     Route("/oc/info", get_info),
     Route("/oc/doctor", get_doctor),
+    Route("/oc/config", get_config),
     Route("/oc/channels/{channel}/status", channel_status),
     Route("/oc/channels/{channel}/unbind", channel_unbind, methods=["POST"]),
     # cron 端点（Task 9）
