@@ -45,9 +45,10 @@ def render(m: Manifest, data_root: Path) -> str:
         # 缺省回落 "en"。让 hermes 自带 i18n（agent/i18n.py + locales/）把所有走 t() 的
         # 用户可见文案（审批提示、/status、/agents、reset/restart 通知、/goal、/resume、
         # kanban 等）输出为对应语言。
-        # 注意：run.py / base.py 里未走 t() 的裸字符串由构建期补丁
-        # patches/patch_i18n_literals.py 强制翻译为中文，该补丁暂未按语言条件化——
-        # 对 language=en 的应用仍会产生中文裸字符串，属已知局限，需另行改造该补丁。
+        # run.py / base.py 里原本未走 t() 的裸字符串，已由构建期补丁
+        # patches/patch_i18n_literals.py 接入 oc.* catalog（locales/oc_overlay.yaml，
+        # 构建期合并进 upstream en/zh.yaml），随 display.language 输出对应中/英文，
+        # 不再有中英混杂的已知局限。
         "display": {"language": (m.app_language or "en")},
         "model": {
             "default": m.app_model, "provider": "custom",
