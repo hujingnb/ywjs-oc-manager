@@ -6,6 +6,8 @@
 // 内分叉。
 package apierror
 
+import "github.com/gin-gonic/gin"
+
 // ErrorResponse 是所有 HTTP 错误响应的统一结构。
 //
 // Code 是机器可读的稳定标识，采用 SCREAMING_SNAKE_CASE，前端用来做 i18n、
@@ -25,4 +27,10 @@ type ErrorResponse struct {
 // 写回响应。message 必须是已脱敏的对外文案，不要直接传入 service 错误链原文。
 func New(code, message string) ErrorResponse {
 	return ErrorResponse{Code: code, Message: message}
+}
+
+// JSON 按请求 locale 解析 key→message，写回 {code, message}。新代码统一用本函数，
+// 取代 c.JSON(status, New(code, "中文"))。args 用于动态占位符消息。
+func JSON(c *gin.Context, status int, code string, key MsgKey, args ...any) {
+	c.JSON(status, ErrorResponse{Code: code, Message: Localize(key, LocaleFrom(c), args...)})
 }

@@ -1,8 +1,11 @@
 package apierror
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -33,4 +36,19 @@ func TestCatalogEveryEntryHasBothLangs(t *testing.T) {
 		require.NotEmpty(t, langs["zh"], "key %s 缺 zh", key)
 		require.NotEmpty(t, langs["en"], "key %s 缺 en", key)
 	}
+}
+
+func TestJSONWritesLocalizedBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	Register(map[MsgKey]map[string]string{
+		"err.test.json": {"zh": "无权", "en": "Forbidden"},
+	})
+	// en 上下文 → message 取 en；code 原样
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+	SetLocale(c, "en")
+	JSON(c, http.StatusForbidden, "FORBIDDEN", "err.test.json")
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.JSONEq(t, `{"code":"FORBIDDEN","message":"Forbidden"}`, w.Body.String())
 }
