@@ -193,4 +193,482 @@ oc:
     pairing_too_many:
       en: "Too many pairing requests right now~ Please try again later!"
       zh: "当前配对请求过多~ 请稍后再试!"
+    # ====================== 批次 2：run.py 后半 ======================
+    # --- 更新进程交互（/approve 转发给更新子进程）---
+    # 回复发送给更新进程失败；{err} 为异常文本。
+    update_send_failed:
+      en: "✗ Failed to send response to update process: {err}"
+      zh: "✗ 发送回复到更新进程失败:{err}"
+    # 回复已发送给更新进程；{label} 为回复内容预览。
+    update_sent:
+      en: "✓ Sent `{label}` to the update process."
+      zh: "✓ 已发送 `{label}` 到更新进程。"
+    # 更新进程需要用户输入（标题段，换行为字面 \n）。
+    update_needs_input:
+      en: "⚕ **Update needs your input:**\n\n"
+      zh: "⚕ **更新需要你的输入:**\n\n"
+    # 更新进程输入提示（源码两段相邻 f-string 隐式拼接，中间动态内容由调用点保留）。
+    update_reply_hint:
+      en: "Reply `/approve` (yes) or `/deny` (no), or type your answer directly."
+      zh: "回复 `/approve`(同意)或 `/deny`(拒绝),或直接输入你的回答。"
+    # --- 目标 / 子目标命令（/goal、/subgoal）---
+    # 当前没有活动目标，提示用 /goal 设置。
+    goal_none:
+      en: "No active goal. Set one with /goal <text>."
+      zh: "当前没有活动目标。用 /goal <text> 设置一个。"
+    # /subgoal remove 用法（缺参数）。
+    subgoal_usage_remove:
+      en: "Usage: /subgoal remove <n>"
+      zh: "用法:/subgoal remove <n>"
+    # /subgoal remove 序号非整数。
+    subgoal_remove_not_int:
+      en: "/subgoal remove: <n> must be an integer (1-based index)."
+      zh: "/subgoal remove:<n> 必须是整数(从 1 开始计)。"
+    # /subgoal remove 执行异常；{exc} 为异常文本。
+    subgoal_remove_error:
+      en: "/subgoal remove: {exc}"
+      zh: "/subgoal remove:{exc}"
+    # /subgoal remove 成功；{idx} 为序号，{removed} 为被移除子目标文本。
+    subgoal_removed:
+      en: "✓ Removed subgoal {idx}: {removed}"
+      zh: "✓ 已移除子目标 {idx}: {removed}"
+    # /subgoal clear 执行异常；{exc} 为异常文本。
+    subgoal_clear_error:
+      en: "/subgoal clear: {exc}"
+      zh: "/subgoal clear:{exc}"
+    # /subgoal clear 时没有可清除的子目标。
+    subgoal_none_to_clear:
+      en: "No subgoals to clear."
+      zh: "没有可清除的子目标。"
+    # /subgoal 添加成功；{idx} 为序号，{text} 为子目标文本。
+    subgoal_added:
+      en: "✓ Added subgoal {idx}: {text}"
+      zh: "✓ 已添加子目标 {idx}: {text}"
+    # 命令仅管理员可用的拒绝提示；{canonical_cmd} 为命令名，{suffix} 为可运行命令/提示的动态尾段。
+    access_admin_only:
+      en: "⛔ /{canonical_cmd} is admin-only here. {suffix}"
+      zh: "⛔ /{canonical_cmd} 在此仅管理员可用。{suffix}"
+    # --- 权限层级信息（/whoami；源码为多段 f-string 隐式拼接，整块经 + 显式拼接）---
+    # 用户身份首行；{platform} 为平台，{scope} 为 DM/群组范围（行尾换行由调用点 + 拼接保留）。
+    access_you:
+      en: "**You** — {platform} ({scope})"
+      zh: "**你** —— {platform} ({scope})"
+    # 用户 ID 行（行尾换行由调用点保留）；{user_id} 为用户标识。
+    access_user_id:
+      en: "User ID: `{user_id}`"
+      zh: "用户 ID:`{user_id}`"
+    # 权限层级：不受限（此范围未配置管理员名单）。
+    access_tier_unrestricted:
+      en: "Tier: unrestricted (no admin list configured for this scope)"
+      zh: "权限层级:不受限(此范围未配置管理员名单)"
+    # 权限层级：管理员。
+    access_tier_admin:
+      en: "Tier: **admin**"
+      zh: "权限层级:**管理员**"
+    # 权限层级：普通用户。
+    access_tier_user:
+      en: "Tier: user"
+      zh: "权限层级:普通用户"
+    # 全部斜杠命令可用（管理员 / 不受限）。
+    access_slash_all:
+      en: "Slash commands: all available"
+      zh: "可用斜杠命令:全部"
+    # 普通用户可运行的斜杠命令清单前缀；{runnable_str} 为命令列表（行尾换行由调用点保留）。
+    access_slash_you_can_run:
+      en: "Slash commands you can run: {runnable_str}"
+      zh: "你可运行的斜杠命令:{runnable_str}"
+    # --- 后台任务（background task）回包---
+    # 后台任务因缺凭证失败；{task_id} 为任务标识。
+    bgtask_failed_no_creds:
+      en: "❌ Background task {task_id} failed: no provider credentials configured."
+      zh: "❌ 后台任务 {task_id} 失败:未配置任何模型服务商凭证。"
+    # 后台任务异常失败；{task_id} 为任务标识，{err} 为异常文本。
+    bgtask_failed_err:
+      en: "❌ Background task {task_id} failed: {err}"
+      zh: "❌ 后台任务 {task_id} 失败:{err}"
+    # 后台任务完成标题（其后 Prompt 行 / 输出由调用点保留原文）。
+    bgtask_complete:
+      en: "✅ Background task complete"
+      zh: "✅ 后台任务完成"
+    # 后台任务无回复生成（与 no_response_generated 文案不同）。
+    bgtask_no_response:
+      en: "(No response generated)"
+      zh: "(未生成任何回复)"
+    # --- 危险命令审批（/confirm；本部署 approvals=off 通常不触发，仍翻译兜底）---
+    # 确认提示首段前缀（其后 `{command}**\n\n` 由调用点保留）。
+    confirm_header:
+      en: "⚠️ **Confirm /"
+      zh: "⚠️ **确认 /"
+    # 审批选项：仅本次放行。
+    confirm_approve_once:
+      en: "• **Approve Once** — proceed this time only"
+      zh: "• **本次批准** —— 仅本次放行"
+    # 审批选项：始终批准并永久静默提示。
+    confirm_always:
+      en: "• **Always Approve** — proceed and silence this prompt permanently"
+      zh: "• **始终批准** —— 放行并永久不再提示"
+    # 审批选项：取消、保持当前对话。
+    confirm_cancel:
+      en: "• **Cancel** — keep current conversation"
+      zh: "• **取消** —— 保持当前对话不变"
+    # 危险命令需要审批标题（其后命令预览代码块、Reason 行由调用点保留）。
+    confirm_dangerous_header:
+      en: "⚠️ **Dangerous command requires approval:**"
+      zh: "⚠️ **危险命令需要审批:**"
+    # 文本审批回复提示（源码两段 f-string 隐式拼接，整条合一）。
+    confirm_reply_hint:
+      en: "Reply `/approve` to execute, `/approve session` to approve this pattern for the session, `/approve always` to approve permanently, or `/deny` to cancel."
+      zh: "回复 `/approve` 执行,`/approve session` 对本会话内该模式放行,`/approve always` 永久放行,或 `/deny` 取消。"
+    # --- Hermes 自更新通知 ---
+    # 更新完成（L15250 整条；L15442 作 f-string 前缀，输出代码块由调用点保留）。
+    update_finished:
+      en: "✅ Hermes update finished."
+      zh: "✅ Hermes 更新已完成。"
+    # 更新失败（带退出码）；{exit_code} 为进程退出码。
+    update_failed_exit:
+      en: "❌ Hermes update failed (exit code {exit_code})."
+      zh: "❌ Hermes 更新失败(退出码 {exit_code})。"
+    # 更新超过 30 分钟超时。
+    update_timed_out:
+      en: "❌ Hermes update timed out after 30 minutes."
+      zh: "❌ Hermes 更新超过 30 分钟超时。"
+    # 更新失败前缀（其后输出代码块由调用点保留，换行为字面 \n）。
+    update_failed_output:
+      en: "❌ Hermes update failed.\n\n"
+      zh: "❌ Hermes 更新失败。\n\n"
+    # 更新成功完成（无输出代码块时）。
+    update_finished_ok:
+      en: "✅ Hermes update finished successfully."
+      zh: "✅ Hermes 更新成功完成。"
+    # 更新失败、提示查日志或手动重试。
+    update_failed_logs:
+      en: "❌ Hermes update failed. Check the gateway logs or run `hermes update` manually for details."
+      zh: "❌ Hermes 更新失败。详情见 gateway 日志,或手动运行 `hermes update` 查看。"
+    # 网关重启成功、会话继续。
+    gateway_restarted:
+      en: "♻ Gateway restarted successfully. Your session continues."
+      zh: "♻ 网关已成功重启,你的会话将继续。"
+    # --- 代理模式（proxy mode）错误 ---
+    # 代理模式缺 aiohttp 依赖。
+    proxy_needs_aiohttp:
+      en: "⚠️ Proxy mode requires aiohttp. Install with: pip install aiohttp"
+      zh: "⚠️ 代理模式需要 aiohttp。请用 pip install aiohttp 安装。"
+    # 未配置代理地址。
+    proxy_url_missing:
+      en: "⚠️ Proxy URL not configured (GATEWAY_PROXY_URL or gateway.proxy_url)"
+      zh: "⚠️ 未配置代理地址(GATEWAY_PROXY_URL 或 gateway.proxy_url)"
+    # 代理返回非 200 错误前缀（其后 `{status}): {error_text}` 由调用点保留）。
+    proxy_error:
+      en: "⚠️ Proxy error ("
+      zh: "⚠️ 代理错误("
+    # 代理连接错误前缀（其后 `{e}` 由调用点保留，保留行尾空格）。
+    proxy_conn_error:
+      en: "⚠️ Proxy connection error: "
+      zh: "⚠️ 代理连接错误:"
+    # 远端智能体无响应（proxy 兜底回包）。
+    proxy_no_response:
+      en: "(No response from remote agent)"
+      zh: "(远端智能体无响应)"
+    # --- run_agent 鉴权失败 / 通用错误（final_response 回包）---
+    # 模型服务商鉴权失败前缀（其后 `{exc}` 异常文本由调用点保留）。
+    provider_auth_failed_exc:
+      en: "⚠️ Provider authentication failed: "
+      zh: "⚠️ 模型服务商鉴权失败:"
+    # 通用错误前缀（其后 `{error_type})` 由调用点保留，保留行尾左括号）。
+    encountered_error:
+      en: "Sorry, I encountered an error ("
+      zh: "抱歉,我遇到了错误("
+    # encountered_error 块末尾的重试提示静态行（隐式拼接在 f-string 后，单独成 key）。
+    try_again_fresh:
+      en: "Try again or use /reset to start a fresh session."
+      zh: "请重试,或用 /reset 开始一个新会话。"
+    # 请求被 API 拒绝（status_code==400 时追加，保留前导空格）。
+    request_rejected_api:
+      en: " The request was rejected by the API."
+      zh: " 该请求被 API 拒绝。"
+    # 无法加载配置前缀（其后 `{exc}` 异常文本由调用点保留）。
+    config_load_failed:
+      en: "❌ Could not load config: "
+      zh: "❌ 无法加载配置:"
+    # 上下文注入被拒绝（_ctx_result.warnings 为空时的兜底）。
+    context_injection_refused:
+      en: "Context injection refused."
+      zh: "上下文注入被拒绝。"
+    # --- 澄清提问送达失败 / 用户未响应 ---
+    # 澄清提问无法送达（adapter 发送失败兜底哨兵）。
+    clarify_not_delivered:
+      en: "[clarify prompt could not be delivered]"
+      zh: "[澄清提问无法送达]"
+    # 用户未在超时时间内响应前缀（其后 `{int(timeout/60)}m]` 由调用点保留）。
+    clarify_no_response:
+      en: "[user did not respond within "
+      zh: "[用户未在 "
+    # --- 无活动超时提醒（源码四段 f-string 隐式拼接，整条合一）---
+    # {elapsed_warn} 为已闲置分钟数，{remaining_mins} 为超时倒计时分钟数。
+    inactivity_warning:
+      en: "⚠️ No activity for {elapsed_warn} min. If the agent does not respond soon, it will be timed out in {remaining_mins} min. You can continue waiting or use /reset."
+      zh: "⚠️ 已闲置 {elapsed_warn} 分钟。若仍无响应,超时倒计时 {remaining_mins} 分钟。你可以继续等待,或使用 /reset。"
+    # --- 忙碌状态明细 status_parts（拼进 steer/queue/interrupt 与心跳）---
+    # 已过 N 分钟；{elapsed_min} 为已运行分钟数。
+    status_elapsed_min:
+      en: "{elapsed_min} min elapsed"
+      zh: "已过 {elapsed_min} 分钟"
+    # 迭代进度；{iteration} 为已用迭代,{max_iter} 为最大迭代。
+    status_iteration:
+      en: "iteration {iteration}/{max_iter}"
+      zh: "迭代 {iteration}/{max_iter}"
+    # 正在运行的工具；{current_tool} 为当前工具名。
+    status_running_tool:
+      en: "running: {current_tool}"
+      zh: "运行中: {current_tool}"
+    # 迭代进度（心跳路径，下标取值在调用点）；{api} 为已用迭代,{max} 为最大迭代。
+    status_iteration_api:
+      en: "iteration {api}/{max}"
+      zh: "迭代 {api}/{max}"
+    # 心跳路径正在运行的工具（5.16 专属：心跳用下标 _a['current_tool']，与 status_running_tool
+    # 文案同但调用点取值不同，分别锚定故单独成 key）；{current_tool} 为当前工具名。
+    status_running_tool_heartbeat:
+      en: "running: {current_tool}"
+      zh: "运行中: {current_tool}"
+    # 长任务心跳（5.16 专属文案「Still working...」；6.5 为「Working — N min」，措辞不同
+    # 单独成 key）；{elapsed_mins} 已运行分钟数，闭合右括号与 {_status_detail} 在调用点拼接。
+    working_heartbeat_516:
+      en: "⏳ Still working... ({elapsed_mins} min elapsed"
+      zh: "⏳ 仍在处理... (已过 {elapsed_mins} 分钟"
+    # --- 忙时 steer / queue / interrupt 确认（源码两段 f-string 隐式拼接，整条合一）---
+    # {status_detail} 为已拼好的忙碌明细尾段（可能为空），由调用点传入。
+    busy_steered:
+      en: "⏩ Steered into current run{status_detail}. Your message arrives after the next tool call."
+      zh: "⏩ 已切入当前运行{status_detail}。你的消息将在下一次工具调用后送达。"
+    busy_queued:
+      en: "⏳ Queued for the next turn{status_detail}. I'll respond once the current task finishes."
+      zh: "⏳ 已加入下一轮队列{status_detail}。当前任务完成后我会回复。"
+    busy_interrupting:
+      en: "⚡ Interrupting current task{status_detail}. I'll respond to your message shortly."
+      zh: "⚡ 正在中断当前任务{status_detail}。我会尽快回复你的消息。"
+    # --- Kanban 子任务通知（adapter.send，平台无关）---
+    # {tag} 为前缀标签,{task_id} 为子任务标识（源码下标 sub['task_id'] 在调用点取值）。
+    # 完成通知（源码两段 f-string 隐式拼接整条合一）；{title} 子任务标题,{handoff} 交接摘要。
+    kanban_done:
+      en: "✔ {tag}Kanban {task_id} done — {title}{handoff}"
+      zh: "✔ {tag}看板 {task_id} 已完成 —— {title}{handoff}"
+    # 受阻通知；{reason} 为受阻原因尾段。
+    kanban_blocked:
+      en: "⏸ {tag}Kanban {task_id} blocked{reason}"
+      zh: "⏸ {tag}看板 {task_id} 受阻{reason}"
+    # 放弃通知（源码两段 f-string 隐式拼接整条合一）；{err} 为错误尾段。
+    kanban_gave_up:
+      en: "✖ {tag}Kanban {task_id} gave up after repeated spawn failures{err}"
+      zh: "✖ {tag}看板 {task_id} 已放弃(多次启动失败){err}"
+    # worker 崩溃通知（源码两段 f-string 隐式拼接整条合一）。
+    kanban_crashed:
+      en: "✖ {tag}Kanban {task_id} worker crashed (pid gone); dispatcher will retry"
+      zh: "✖ {tag}看板 {task_id} worker 崩溃 (进程已消失);调度器将重试"
+    # 超时通知（源码两段 f-string 隐式拼接整条合一）；{limit} 为 max_runtime 秒数。
+    kanban_timed_out:
+      en: "⏱ {tag}Kanban {task_id} timed out (max_runtime={limit}s); will retry"
+      zh: "⏱ {tag}看板 {task_id} 超时 (max_runtime={limit}s);将重试"
+    # --- 语音消息无法转写（STT 未配置）---
+    # 收到语音但无法转写（其后接 STT 未配置说明）。
+    stt_received:
+      en: "🎤 I received your voice message but can't transcribe it — "
+      zh: "🎤 收到了你的语音消息,但无法转写 —— "
+    # 未配置 STT 服务（换行为字面 \n）。
+    stt_no_provider:
+      en: "no speech-to-text provider is configured.\n\n"
+      zh: "未配置语音转文字(STT)服务。\n\n"
+    # 启用语音的安装提示前缀（其后 faster-whisper 安装命令变体由调用点保留原文）。
+    stt_enable_install:
+      en: "To enable voice: install faster-whisper "
+      zh: "启用语音功能:安装 faster-whisper "
+    # faster-whisper 安装命令（5.16 专属：仅 pip-venv 单一变体；6.5 拆成 uv/pip 两段）。
+    stt_install_pip_venv:
+      en: "(`pip install faster-whisper` in the Hermes venv) "
+      zh: "(在 Hermes venv 中执行 `pip install faster-whisper`) "
+    # 设置 stt.enabled 提示（紧随安装命令变体之后）。
+    stt_set_enabled:
+      en: "and set `stt.enabled: true` in config.yaml, "
+      zh: "并在 config.yaml 中设置 `stt.enabled: true`,"
+    # 提示用 /restart 重启网关。
+    stt_then_restart:
+      en: "then /restart the gateway."
+      zh: "然后用 /restart 重启网关。"
+    # 完整配置说明指引（独立 += 追加，换行为字面 \n）。
+    stt_setup_skill:
+      en: "\n\nFor full setup instructions, type: `/skill hermes-agent-setup`"
+      zh: "\n\n完整配置说明请输入:`/skill hermes-agent-setup`"
+    # --- 会话自动重置通知（reset_reason 三分支文案 + 整段通知）---
+    # 自动重置原因（suspended 分支，普通字面量）。
+    reset_reason_suspended:
+      en: "previous session was stopped or interrupted"
+      zh: "上一会话已被停止或中断"
+    # 自动重置原因（daily 分支；{at_hour} 由调用点 policy.at_hour 传入）。
+    reset_reason_daily:
+      en: "daily schedule at {at_hour}:00"
+      zh: "每日定时 {at_hour}:00"
+    # 自动重置原因（idle 分支；{duration} 由调用点拼装传入）。
+    reset_reason_inactive:
+      en: "inactive for {duration}"
+      zh: "已闲置 {duration}"
+    # 会话自动重置整段通知（4 段隐式拼接合为一条；{reason_text} 为上方原因文案）。
+    # 注意与上方 session_auto_reset（🔄 上下文溢出自动重置）是两条不同消息，键名须区分。
+    session_reset_notice:
+      en: "◐ Session automatically reset ({reason_text}). Conversation history cleared.\nUse /resume to browse and restore a previous session.\nAdjust reset timing in config.yaml under session_reset."
+      zh: "◐ 会话已自动重置({reason_text})。对话历史已清空。\n使用 /resume 浏览并恢复此前的会话。\n可在 config.yaml 的 session_reset 下调整重置时机。"
+    # --- 未设置 home channel 一次性提示（5 段隐式拼接合为一条）---
+    # {platform_name} 由调用点 platform_name.title() 传入；{sethome_cmd} 由调用点传入。
+    no_home_channel:
+      en: "📬 No home channel is set for {platform_name}. A home channel is where Hermes delivers cron job results and cross-platform messages.\n\nType {sethome_cmd} to make this chat your home channel, or ignore to skip."
+      zh: "📬 尚未为 {platform_name} 设置主频道。主频道是 Hermes 投递定时任务结果和跨平台消息的地方。\n\n输入 {sethome_cmd} 即可将本聊天设为主频道,或忽略以跳过。"
+    # --- 推理过程展示 ---
+    # 推理折叠省略行（{more} 由调用点 len(lines) - 15 传入）。
+    reasoning_more_lines:
+      en: "({more} more lines)_"
+      zh: "(还有 {more} 行)_"
+    # 推理过程标题。
+    reasoning_header:
+      en: "💭 **Reasoning:**"
+      zh: "💭 **推理过程:**"
+    # --- /model 会话信息（管理员诊断）---
+    # 上下文长度来源提示（default 分支说明）。
+    model_ctx_source_default:
+      en: "default — set model.context_length in config to override"
+      zh: "默认 —— 在 config 中设置 model.context_length 可覆盖"
+    # 当前模型（{model} 由调用点传入）。
+    model_info_model:
+      en: "◆ Model: `{model}`"
+      zh: "◆ 模型: `{model}`"
+    # 当前服务商（{provider} 由调用点 provider or 'openrouter' 传入）。
+    model_info_provider:
+      en: "◆ Provider: {provider}"
+      zh: "◆ 服务商: {provider}"
+    # 上下文窗口（{ctx_display}/{ctx_source} 由调用点传入）。
+    model_info_context:
+      en: "◆ Context: {ctx_display} tokens ({ctx_source})"
+      zh: "◆ 上下文: {ctx_display} tokens ({ctx_source})"
+    # 自定义端点（{base_url} 由调用点传入）。
+    model_info_endpoint:
+      en: "◆ Endpoint: {base_url}"
+      zh: "◆ 端点: {base_url}"
+    # --- 非管理员斜杠访问提示 ---
+    # 可运行命令清单前缀（与 /whoami 的 access_slash_you_can_run 文案不同，勿混）。
+    nonadmin_you_can_run:
+      en: "You can run: "
+      zh: "你可以使用: "
+    # 可运行命令清单后缀（提示查看完整列表）。
+    nonadmin_whoami_full_list:
+      en: ". Use /whoami for the full list."
+      zh: "。使用 /whoami 查看完整列表。"
+    # 非管理员无任何斜杠命令可用（3 段隐式拼接合为一条）。
+    nonadmin_no_slash:
+      en: "No slash commands are enabled for non-admins on this platform. Ask an admin to add you to allow_admin_from or to set user_allowed_commands."
+      zh: "本平台未对非管理员启用任何斜杠命令。请联系管理员把你加入 allow_admin_from,或设置 user_allowed_commands。"
+    # --- /platform 平台管理命令（list / pause / resume）---
+    # 网关平台列表标题。
+    platform_list_header:
+      en: "**Gateway platforms**"
+      zh: "**网关平台**"
+    # 已连接平台（空）。
+    platform_connected_none:
+      en: "Connected: (none)"
+      zh: "已连接: (无)"
+    # 已连接平台前缀（{connected} 列表由调用点拼接）。
+    platform_connected_prefix:
+      en: "Connected: "
+      zh: "已连接: "
+    # 失败/暂停平台（空）。
+    platform_failed_none:
+      en: "Failed/paused: (none)"
+      zh: "失败/暂停: (无)"
+    # 列表项：某平台已暂停（{platform} 为 p.value；{reason} 暂停原因）。
+    platform_list_paused:
+      en: "  · {platform} — PAUSED ({reason}). Resume with `/platform resume {platform}`."
+      zh: "  · {platform} —— 已暂停({reason})。用 `/platform resume {platform}` 恢复。"
+    # 列表项：某平台重试中（{platform} 为 p.value；{attempts} 已尝试次数）。
+    platform_list_retrying:
+      en: "  · {platform} — retrying (attempt {attempts})"
+      zh: "  · {platform} —— 重试中(第 {attempts} 次)"
+    # 用法提示（pause/resume 缺少 name；{action} 当前子命令）。
+    platform_usage_action:
+      en: "Usage: /platform {action} <name>"
+      zh: "用法:/platform {action} <name>"
+    # 未知平台名（{target} 用户输入）。
+    platform_unknown:
+      en: "Unknown platform: {target}"
+      zh: "未知平台:{target}"
+    # pause：平台不在重试队列（2 段隐式拼接；{platform} 为 platform.value）。
+    platform_pause_not_in_queue:
+      en: "{platform} is not in the retry queue (it's either connected or not enabled)."
+      zh: "{platform} 不在重试队列中(它要么已连接,要么未启用)。"
+    # pause：平台已处于暂停（{platform} 为 platform.value）。
+    platform_already_paused:
+      en: "{platform} is already paused."
+      zh: "{platform} 已处于暂停状态。"
+    # pause：成功暂停（3 段隐式拼接；{platform} 为 platform.value）。
+    platform_paused_ok:
+      en: "✓ {platform} paused. Resume with `/platform resume {platform}` or `hermes gateway restart` to reset."
+      zh: "✓ {platform} 已暂停。用 `/platform resume {platform}` 或 `hermes gateway restart` 重置以恢复。"
+    # resume：平台不在重试队列、无可恢复（2 段隐式拼接；{platform} 为 platform.value）。
+    platform_resume_not_in_queue:
+      en: "{platform} is not in the retry queue — nothing to resume."
+      zh: "{platform} 不在重试队列中 —— 无可恢复项。"
+    # resume：平台已在重试、无需恢复（2 段隐式拼接；{platform} 为 platform.value）。
+    platform_already_retrying:
+      en: "{platform} is already retrying — no resume needed."
+      zh: "{platform} 已在重试中 —— 无需恢复。"
+    # resume：成功恢复（{platform} 为 platform.value）。
+    platform_resumed_ok:
+      en: "✓ {platform} resumed — retrying on next watcher tick."
+      zh: "✓ {platform} 已恢复 —— 将在下次巡检时重试。"
+    # /platform 总用法帮助（4 段隐式拼接，含字面 \n）。
+    platform_usage_help:
+      en: "Usage: /platform <list|pause|resume> [name]\n  /platform list — show platform status\n  /platform pause <name> — stop retrying a failing platform\n  /platform resume <name> — re-queue a paused platform"
+      zh: "用法:/platform <list|pause|resume> [name]\n  /platform list —— 显示平台状态\n  /platform pause <name> —— 停止重试某个故障平台\n  /platform resume <name> —— 重新排队某个已暂停平台"
+    # /subgoal 添加失败时的错误前缀（{exc} 为捕获的异常）。
+    subgoal_error:
+      en: "/subgoal: {exc}"
+      zh: "/subgoal:{exc}"
+    # /subgoal clear 清除成功；{prev} 个数，{plural_s} 复数尾缀（en 用占位，zh 无复数省略）。
+    subgoal_cleared:
+      en: "✓ Cleared {prev} subgoal{plural_s}."
+      zh: "✓ 已清除 {prev} 个子目标。"
+    # /undo 销毁性确认说明（单轮：移除最近一轮对话）。
+    undo_confirm:
+      en: "This removes the last user/assistant exchange from history."
+      zh: "这将从历史中移除最近一轮用户/助手对话。"
+    # 销毁性 slash 确认提示框中的「请选择」行（含尾部换行）。
+    confirm_choose:
+      en: "Choose:\n"
+      zh: "请选择:\n"
+    # 销毁性 slash 确认提示框的纯文本回退说明行。
+    confirm_text_fallback:
+      en: "_Text fallback: reply `/approve`, `/always`, or `/cancel`._"
+      zh: "_纯文本回退:回复 `/approve`、`/always` 或 `/cancel`。_"
+    # 危险命令审批的原因标签（{desc} 为原因描述，尾部双换行）。
+    confirm_reason:
+      en: "Reason: {desc}\n\n"
+      zh: "原因: {desc}\n\n"
+    # 关闭销毁性确认后追加的一次性提示（3 段隐式拼接整条合一，前导双换行）。
+    destructive_disabled_notice:
+      en: "\n\nℹ️ Future /clear, /new, /reset, and /undo will run without confirmation. Re-enable via `approvals.destructive_slash_confirm: true` in config.yaml."
+      zh: "\n\nℹ️ 今后 /clear、/new、/reset 和 /undo 将直接执行,无需确认。如需重新启用,请用 config.yaml 中的 `approvals.destructive_slash_confirm: true`。"
+    # 后台任务结果错误前缀（{error} 取自 result['error']）。
+    bgtask_result_error:
+      en: "Error: {error}"
+      zh: "出错: {error}"
+    # 网关恢复就绪后的上线广播。
+    gateway_online:
+      en: "♻️ Gateway online — Hermes is back and ready."
+      zh: "♻️ 网关已上线 —— Hermes 已恢复就绪。"
+    # 上下文压缩摘要失败（5.16 专属：丢弃的历史轮次不可恢复；6.5 改写为「aborted、
+    # 无消息丢弃」措辞，两者语义不同故单独成 key）。源码六段隐式拼接整条合一；
+    # {err} 为压缩错误原因，{dropped} 为被移除并替换为占位符的历史消息数。
+    compression_summary_failed:
+      en: "⚠️ Context compression summary failed ({err}). {dropped} historical message(s) were removed and replaced with a placeholder. Earlier context is no longer recoverable. Consider /reset for a clean session, or check your auxiliary.compression model configuration."
+      zh: "⚠️ 上下文压缩摘要失败 ({err})。{dropped} 条历史消息已被移除并替换为占位符。更早的上下文已无法恢复。建议用 /reset 开始干净会话,或检查你的 auxiliary.compression 模型配置。"
+    # 配置的辅助压缩模型失败、已回退主模型（5.16 与 6.5 文案一致，复用 6.5 文案；
+    # 4 段隐式拼接整条合一，{aux_model}/{aux_err} 作 kwarg）。
+    compression_fallback:
+      en: "ℹ️ Configured compression model `{aux_model}` failed ({aux_err}). Recovered using your main model — context is intact — but you may want to check `auxiliary.compression.model` in config.yaml."
+      zh: "ℹ️ 所配置的压缩模型 `{aux_model}` 失败({aux_err})。已回退使用你的主模型(上下文完好),但你可能需要检查 config.yaml 中的 `auxiliary.compression.model`。"
   base: {}
