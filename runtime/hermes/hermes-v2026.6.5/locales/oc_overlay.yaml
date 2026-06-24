@@ -716,4 +716,51 @@ oc:
     compression_fallback:
       en: "ℹ️ Configured compression model `{aux_model}` failed ({aux_err}). Recovered using your main model — context is intact — but you may want to check `auxiliary.compression.model` in config.yaml."
       zh: "ℹ️ 所配置的压缩模型 `{aux_model}` 失败({aux_err})。已回退使用你的主模型(上下文完好),但你可能需要检查 config.yaml 中的 `auxiliary.compression.model`。"
-  base: {}
+  base:
+    # gateway/platforms/base.py：所有适配器（含微信）共用基类的用户可见兜底文案。
+    # 与 run.py 同文案的两条（generic_error / try_again_fresh）是 base.py 自己的副本，
+    # 故用独立的 oc.base.* key，不与 oc.run.* 复用。
+    # --- 回复发送重试/格式化失败兜底 ---
+    # 重试均失败后改发纯文本时的前缀（其后 `{content[:3500]}` 正文由调用点保留）。
+    format_failed_plaintext:
+      en: "(Response formatting failed, plain text:)\n\n"
+      zh: "(回复格式化失败,以纯文本显示:)\n\n"
+    # 通用错误兜底首段前缀（base 副本；其后 `{error_type}).\n{error_detail}\n` 动态段由调用点保留）。
+    generic_error:
+      en: "Sorry, I encountered an error ("
+      zh: "抱歉,我遇到了错误("
+    # 通用错误兜底末尾的重试提示静态行（base 副本，隐式拼接在动态段之后，单独成 key）。
+    # 文案与 oc.run.try_again_fresh 相同，但叶子名须全局唯一（守卫按扁平名查重），故加 _base 后缀。
+    try_again_fresh_base:
+      en: "Try again or use /reset to start a fresh session."
+      zh: "请重试,或用 /reset 开始一个新会话。"
+    # --- 澄清提问（ask_clarify）数字选项回退提示 ---
+    clarify_number_hint:
+      en: "Reply with the number, the option text, or your own answer."
+      zh: "请回复序号、选项文字,或你自己的答案。"
+    # --- 原生媒体发送未被子类覆写时的纯文本回退标签（路径占位原样保留）---
+    # 音频回退标签；{audio_path} 为音频文件路径。
+    media_audio:
+      en: "🔊 Audio: {audio_path}"
+      zh: "🔊 音频: {audio_path}"
+    # 视频回退标签；{video_path} 为视频文件路径。
+    media_video:
+      en: "🎬 Video: {video_path}"
+      zh: "🎬 视频: {video_path}"
+    # 文件回退标签；{file_path} 为文件路径。
+    media_file:
+      en: "📎 File: {file_path}"
+      zh: "📎 文件: {file_path}"
+    # 图片回退标签；{image_path} 为本地图片文件路径。
+    media_image:
+      en: "🖼️ Image: {image_path}"
+      zh: "🖼️ 图片: {image_path}"
+    # --- 多次重试后仍投递失败（源码两段相邻字面量隐式拼接，emoji/破折号为 \u 转义）---
+    # 首段：投递失败提示（源码 ⚠️ ⚠️ 前缀保留在译文中）。
+    delivery_failed:
+      en: "⚠️ Message delivery failed after multiple attempts. "
+      zh: "⚠️ 多次尝试后仍未能送达消息。"
+    # 次段：请重试提示（源码 — — 破折号保留在译文中）。
+    delivery_failed_retry:
+      en: "Please try again — your request was processed but the response could not be sent."
+      zh: "请重试,你的请求已处理,但回复未能发送。"
