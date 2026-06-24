@@ -118,7 +118,7 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
     ),
     # --- hint 三元 else 分支：带 `else ` 前缀锚定，避免与 resume 分支首段冲突 ---
     (
-        'else "Your current task will be interrupted. "',
+        'else "Your current task will be interrupted."',
         'else t("oc.run.task_interrupted")',
     ),
     # --- msg 拼装：{action}/{hint} 已是上面 t() 的结果，作 kwarg 传入 ---
@@ -214,7 +214,7 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
     # --- 网关 draining 排队/拒绝：{gerund} = 已翻译的 _status_action_gerund() 结果 ---
     # 三条 f-string 各自唯一，replace 会覆盖文件内全部相同出现处。
     (
-        'f"⏳ Gateway is {self._status_action_gerund()} — queued for the next turn after it comes back."',
+        'f"⏳ Gateway {self._status_action_gerund()} — queued for the next turn after it comes back."',
         't("oc.run.gateway_draining_queued", gerund=self._status_action_gerund())',
     ),
     (

@@ -52,7 +52,7 @@ oc:
       en: "Your current task will be interrupted. Send any message after restart and I'll try to resume where you left off."
       zh: "你当前的任务将被中断。重启完成后发送任意消息,我会尝试从你上次离开的地方继续。"
     task_interrupted:
-      en: "Your current task will be interrupted. "
+      en: "Your current task will be interrupted."
       zh: "你当前的任务将被中断。"
     gateway_interrupt:
       en: "⚠️ Gateway {action} — {hint}"
@@ -130,7 +130,7 @@ oc:
     # --- 网关 draining 排队/拒绝（{gerund} 为已翻译的状态动作，由 _status_action_gerund() 给出）---
     # draining 中、排队待恢复。
     gateway_draining_queued:
-      en: "⏳ Gateway is {gerund} — queued for the next turn after it comes back."
+      en: "⏳ Gateway {gerund} — queued for the next turn after it comes back."
       zh: "⏳ 网关{gerund} —— 已加入队列,待其恢复后于下一轮处理。"
     # draining 中、暂不接受新回合。
     gateway_not_accepting_turn:
