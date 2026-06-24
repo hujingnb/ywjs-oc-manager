@@ -262,7 +262,7 @@ func (h *HermesKanbanHandler) StreamEvents(c *gin.Context) {
 	// 检查 ResponseWriter 是否支持 Flusher；不支持时无法做流式推送。
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "服务端不支持流式响应"))
+		apierror.JSON(c, http.StatusInternalServerError, "INTERNAL", apierror.MsgConversationNoStreaming)
 		return
 	}
 

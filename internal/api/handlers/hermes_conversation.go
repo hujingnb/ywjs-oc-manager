@@ -165,7 +165,7 @@ func (h *HermesConversationHandler) Chat(c *gin.Context) {
 	var req ConversationChatRequest
 	// message 为必填字段，ShouldBindJSON 遇 required 校验失败返回 400。
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("CONVERSATION_BAD_REQUEST", "消息内容不能为空"))
+		apierror.JSON(c, http.StatusBadRequest, "CONVERSATION_BAD_REQUEST", apierror.MsgConversationEmptyMessage)
 		return
 	}
 	out, err := h.service.Chat(c.Request.Context(), principalFromCtx(c), c.Param("appId"), c.Param("sid"), req.Message)
@@ -191,7 +191,7 @@ func (h *HermesConversationHandler) Chat(c *gin.Context) {
 func (h *HermesConversationHandler) Rename(c *gin.Context) {
 	var req RenameConversationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("CONVERSATION_BAD_REQUEST", "标题不能为空"))
+		apierror.JSON(c, http.StatusBadRequest, "CONVERSATION_BAD_REQUEST", apierror.MsgConversationEmptyTitle)
 		return
 	}
 	out, err := h.service.Rename(c.Request.Context(), principalFromCtx(c), c.Param("appId"), c.Param("sid"), req.Title)
@@ -216,12 +216,12 @@ func (h *HermesConversationHandler) Rename(c *gin.Context) {
 func (h *HermesConversationHandler) ChatStream(c *gin.Context) {
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "服务端不支持流式响应"))
+		apierror.JSON(c, http.StatusInternalServerError, "INTERNAL", apierror.MsgConversationNoStreaming)
 		return
 	}
 	var req ConversationChatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("CONVERSATION_BAD_REQUEST", "消息内容不能为空"))
+		apierror.JSON(c, http.StatusBadRequest, "CONVERSATION_BAD_REQUEST", apierror.MsgConversationEmptyMessage)
 		return
 	}
 	// resolve+鉴权在 ChatStream 内完成，此时尚未写响应头，错误可正常映射状态码。
