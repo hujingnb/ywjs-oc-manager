@@ -1,3 +1,196 @@
 oc:
-  run: {}
+  run:
+    # ====================== 批次 1：run.py 前半 ======================
+    # 5.16 文案多数与 6.5 相同，键名与 en/zh 直接复用 6.5 oc_overlay；
+    # 个别 5.16 专属差异（provider 错误的 status_hint 内联结构、gateway draining
+    # 带 "is"、task_interrupted 尾随空格）按 5.16 源码与旧补丁译文单独成键。
+    # --- 闲置 / 网关超时诊断 _diag_lines 块（相邻字面量隐式拼接）---
+    timeout_inactive:
+      en: "⏱️ Agent inactive for {timeout_mins} min — no tool calls or API responses."
+      zh: "⏱️ 智能体已闲置 {timeout_mins} 分钟 —— 无工具调用也无 API 响应。"
+    timeout_stuck_tool:
+      en: "The agent appears stuck on tool `{cur_tool}` ({secs_ago:.0f}s since last activity, iteration {iter_n}/{iter_max})."
+      zh: "智能体疑似卡在工具 `{cur_tool}` (距上次活动 {secs_ago:.0f} 秒, 迭代 {iter_n}/{iter_max})。"
+    timeout_last_activity:
+      en: "Last activity: {last_desc} ({secs_ago:.0f}s ago, iteration {iter_n}/{iter_max}). The agent may have been waiting on an API response."
+      zh: "最近活动:{last_desc}(距今 {secs_ago:.0f} 秒, 迭代 {iter_n}/{iter_max})。 智能体可能正在等待 API 响应。"
+    timeout_increase_limit:
+      en: "To increase the limit, set agent.gateway_timeout in config.yaml (value in seconds, 0 = no limit) and restart the gateway.\nTry again, or use /reset to start fresh."
+      zh: "如需提高上限,请在 config.yaml 中设置 agent.gateway_timeout (单位为秒,0 = 不限制),然后重启网关。\n请重试,或使用 /reset 开始新会话。"
+    # --- run_agent 异常回包的 status_hint（5.16 专属：按 status_code 内联赋值，
+    #     再拼进 encountered_error 消息。6.5 重构成 _gateway_provider_error_reply
+    #     四分支，5.16 无对应；故按 5.16 旧补丁译文单独成键，保留前导空格。）---
+    # 401：API key / OAuth 凭证问题。
+    status_hint_auth:
+      en: " Check your API key or run `claude /login` to refresh OAuth credentials."
+      zh: " 请检查你的 API key,或运行 `claude /login` 刷新 OAuth 凭证。"
+    # 402：余额/配额用尽。
+    status_hint_quota:
+      en: " Your API balance or quota is exhausted. Check your provider dashboard."
+      zh: " 你的 API 余额或配额已用尽。请检查服务商控制台。"
+    # 429 plan limit：套餐用量上限，已知重置时间（{hours} 小时后重置）。
+    status_hint_plan_resets:
+      en: " Your plan's usage limit has been reached. It resets in ~{hours}h."
+      zh: " 你的套餐用量上限已达到。约 {hours} 小时后重置。"
+    # 429 plan limit：套餐用量上限，未知重置时间。
+    status_hint_plan_wait:
+      en: " Your plan's usage limit has been reached. Please wait until it resets."
+      zh: " 你的套餐用量上限已达到。请等待其重置。"
+    # 429 transient：临时限流。
+    status_hint_rate_limited:
+      en: " You are being rate-limited. Please wait a moment and try again."
+      zh: " 你正在被限流。请稍候片刻后重试。"
+    # 529：API 过载。
+    status_hint_overloaded:
+      en: " The API is temporarily overloaded. Please try again shortly."
+      zh: " API 暂时过载。请稍后重试。"
+    # --- 会话过大兜底（context overflow）；源码两处文案相同、缩进不同，复用同一 key ---
+    session_too_large:
+      en: "⚠️ Session too large for the model's context window.\nUse /compact to compress the conversation, or /reset to start fresh."
+      zh: "⚠️ 会话过大,超出了模型的上下文窗口。\n请用 /compact 压缩对话,或用 /reset 开始新会话。"
+    # 通用请求失败兜底；{detail} 为截断后的原始错误文本。
+    request_failed:
+      en: "The request failed: {detail}\nTry again or use /reset to start a fresh session."
+      zh: "请求失败:{detail}\n请重试,或用 /reset 开始一个新会话。"
+    # 部分处理后中止；{err} 为截断后的错误说明。
+    processing_stopped:
+      en: "⚠️ Processing stopped: {err}. Try again."
+      zh: "⚠️ 处理已中止:{err}。请重试。"
+    # 处理完成但无回复生成（隐式拼接的整条消息合为一条）。
+    no_response_generated:
+      en: "⚠️ Processing completed but no response was generated. This may be a transient error — try sending your message again."
+      zh: "⚠️ 处理已完成,但没有生成任何回复。这可能是临时性错误 —— 请再发送一次你的消息。"
+    # --- 网关关闭/重启通知：action/hint 各分支单独成 key，msg 拼装为 gateway_interrupt ---
+    action_restarting:
+      en: "restarting"
+      zh: "正在重启"
+    action_shutting_down:
+      en: "shutting down"
+      zh: "正在关闭"
+    task_interrupted_resume:
+      en: "Your current task will be interrupted. Send any message after restart and I'll try to resume where you left off."
+      zh: "你当前的任务将被中断。重启完成后发送任意消息,我会尝试从你上次离开的地方继续。"
+    # 5.16 else 分支带尾随空格（源码 "Your current task will be interrupted. "）。
+    task_interrupted:
+      en: "Your current task will be interrupted. "
+      zh: "你当前的任务将被中断。"
+    gateway_interrupt:
+      en: "⚠️ Gateway {action} — {hint}"
+      zh: "⚠️ 网关{action} —— {hint}"
+    # 工具结果后模型无回复：源码三段相邻字面量隐式拼接，合为一条消息一个 key。
+    no_response_after_tool:
+      en: "⚠️ The model returned no response after processing tool results. This can happen with some models — try again or rephrase your question."
+      zh: "⚠️ 模型在处理工具结果后没有返回任何回复。某些模型会出现这种情况 —— 请重试,或换一种方式提问。"
+    # 会话自动重置：源码以 "\n\n" 前缀拼三段；前导换行保留在 en/zh 译文里。
+    session_auto_reset:
+      en: "\n\n🔄 Session auto-reset — the conversation exceeded the maximum context size and could not be compressed further. Your next message will start a fresh session."
+      zh: "\n\n🔄 会话已自动重置 —— 对话超过了最大上下文上限,且已无法继续压缩。你的下一条消息将开始一个新会话。"
+    # --- Steer / queue 命令文案 ---
+    queue_usage:
+      en: "Usage: /queue <prompt>"
+      zh: "用法:/queue <prompt>"
+    queue_queued:
+      en: "Queued for the next turn."
+      zh: "已加入队列,将在下一轮处理。"
+    queue_queued_depth:
+      en: "Queued for the next turn. ({depth} queued)"
+      zh: "已加入队列,将在下一轮处理。 ({depth} 条排队)"
+    steer_usage:
+      en: "Usage: /steer <prompt>"
+      zh: "用法:/steer <prompt>"
+    steer_usage_no_agent:
+      en: "Usage: /steer <prompt>  (no agent is running; sending as a normal message)"
+      zh: "用法:/steer <prompt>(当前没有正在运行的智能体;将作为普通消息发送)"
+    steer_starting:
+      en: "Agent still starting — /steer queued for the next turn."
+      zh: "智能体仍在启动 —— /steer 已加入下一轮队列。"
+    steer_failed:
+      en: "⚠️ Steer failed: {exc}"
+      zh: "⚠️ Steer 失败:{exc}"
+    steer_queued:
+      en: "⏩ Steer queued — arrives after the next tool call: '{preview}'"
+      zh: "⏩ Steer 已排队 —— 将在下一次工具调用后送达:'{preview}'"
+    steer_rejected_empty:
+      en: "Steer rejected (empty payload)."
+      zh: "Steer 被拒绝(内容为空)。"
+    steer_no_agent:
+      en: "No active agent — /steer queued for the next turn."
+      zh: "没有活动的智能体 —— /steer 已加入下一轮队列。"
+    # --- 智能体运行中、命令受限 ---
+    agent_running_switch_model:
+      en: "Agent is running — wait or /stop first, then switch models."
+      zh: "智能体正在运行 —— 请先等待或 /stop,再切换模型。"
+    agent_running_change_runtime:
+      en: "Agent is running — wait or /stop first, then change runtime."
+      zh: "智能体正在运行 —— 请先等待或 /stop,再切换运行时。"
+    agent_running_goal:
+      en: "Agent is running — use /goal status / pause / clear mid-run, or /stop before setting a new goal."
+      zh: "智能体正在运行 —— 运行中可用 /goal status / pause / clear,或先 /stop 再设置新目标。"
+    agent_running_midturn:
+      en: "⏳ Agent is running — `/{name}` can't run mid-turn. Wait for the current response or `/stop` first."
+      zh: "⏳ 智能体正在运行 —— `/{name}` 现在不能运行(回合进行中)。请等待当前回复结束,或先 `/stop`。"
+    force_stopped:
+      en: "⚡ Force-stopped. The agent was still starting — session unlocked."
+      zh: "⚡ 已强制停止。智能体仍在启动中 —— 会话已解锁。"
+    # --- 网关 draining 排队/拒绝（{gerund} 为已翻译的状态动作）---
+    # 5.16 三处均为 "Gateway is {gerund}"（6.5 在 queued 句去掉了 "is"，5.16 保留）。
+    gateway_draining_queued:
+      en: "⏳ Gateway is {gerund} — queued for the next turn after it comes back."
+      zh: "⏳ 网关{gerund} —— 已加入队列,待其恢复后于下一轮处理。"
+    gateway_not_accepting_turn:
+      en: "⏳ Gateway is {gerund} and is not accepting another turn right now."
+      zh: "⏳ 网关{gerund},当前暂不接受新的回合。"
+    gateway_not_accepting_work:
+      en: "⏳ Gateway is {gerund} and is not accepting new work right now."
+      zh: "⏳ 网关{gerund},当前暂不接受新任务。"
+    # 命令被 hook 拦截（deny 决策无自定义消息时的兜底），{command} 为命令名。
+    command_blocked_hook:
+      en: "Command `/{command}` was blocked by a hook."
+      zh: "命令 `/{command}` 被某个 hook 拦截。"
+    # --- /new 销毁性确认与自定义快捷命令 ---
+    destructive_confirm:
+      en: "This starts a fresh session and discards the current conversation history."
+      zh: "这将开始一个全新会话,并丢弃当前的对话历史。"
+    destructive_cancelled:
+      en: "🟡 /{command} cancelled. Conversation unchanged."
+      zh: "🟡 /{command} 已取消。对话内容未改变。"
+    quick_cmd_no_output:
+      en: "Command returned no output."
+      zh: "命令没有输出。"
+    quick_cmd_timeout:
+      en: "Quick command timed out (30s)."
+      zh: "快捷命令超时(30 秒)。"
+    quick_cmd_error:
+      en: "Quick command error: {err}"
+      zh: "快捷命令出错:{err}"
+    quick_cmd_no_command:
+      en: "Quick command '/{command}' has no command defined."
+      zh: "快捷命令 '/{command}' 未定义命令。"
+    quick_cmd_no_target:
+      en: "Quick command '/{command}' has no target defined."
+      zh: "快捷命令 '/{command}' 未定义目标。"
+    quick_cmd_unsupported_type:
+      en: "Quick command '/{command}' has unsupported type (supported: 'exec', 'alias')."
+      zh: "快捷命令 '/{command}' 类型不受支持(支持:'exec'、'alias')。"
+    # --- 未知斜杠命令提示（源码四段相邻 f-string 隐式拼接，整条合一）；{command} 为命令名。---
+    unknown_command:
+      en: "Unknown command `/{command}`. Type /commands to see what's available, or resend without the leading slash to send as a regular message."
+      zh: "未知命令 `/{command}`。输入 /commands 查看可用命令,或去掉开头的斜杠重新发送,即可作为普通消息处理。"
+    # --- 技能未安装/被禁用提示（源码两段 f-string 隐式拼接，换行为字面 \n）---
+    skill_disabled:
+      en: "The **{name}** skill is installed but disabled.\nEnable it with: `hermes skills config`"
+      zh: "技能 **{name}** 已安装但被禁用。\n用 `hermes skills config` 启用"
+    skill_not_installed:
+      en: "The **{name}** skill is available but not installed.\nInstall it with: `hermes skills install {install_path}`"
+      zh: "技能 **{name}** 可用但尚未安装。\n用 `hermes skills install {install_path}`"
+    skill_disabled_platform:
+      en: "The **{name}** skill is disabled for {platform}.\nEnable it with: `hermes skills config`"
+      zh: "技能 **{name}** 已在以下平台被禁用:{platform}。\n用 `hermes skills config` 启用"
+    # --- 配对流程（未识别用户首次私聊）---
+    pairing_intro:
+      en: "Hi~ I don't recognize you yet!\n\nHere's your pairing code: `{code}`\n\nAsk the bot owner to run:\n"
+      zh: "你好~ 我还不认识你!\n\n这是你的配对码:`{code}`\n\n请让机器人管理员运行:\n"
+    pairing_too_many:
+      en: "Too many pairing requests right now~ Please try again later!"
+      zh: "当前配对请求过多~ 请稍后再试!"
   base: {}
