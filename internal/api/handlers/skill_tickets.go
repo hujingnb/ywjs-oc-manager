@@ -76,7 +76,7 @@ func RegisterSkillTicketRoutes(router gin.IRouter, h *SkillTicketsHandler) {
 func (h *SkillTicketsHandler) Submit(c *gin.Context) {
 	var req SubmitSkillTicketRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "请求体格式错误"))
+		apierror.JSON(c, http.StatusBadRequest, "INVALID_REQUEST", apierror.MsgSkillTicketInvalidRequest)
 		return
 	}
 	out, err := h.service.Submit(c.Request.Context(), principalFromCtx(c), service.SubmitSkillTicketInput{
@@ -156,7 +156,7 @@ func (h *SkillTicketsHandler) Get(c *gin.Context) {
 func (h *SkillTicketsHandler) SendMessage(c *gin.Context) {
 	var req SendSkillTicketMessageRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "请求体格式错误"))
+		apierror.JSON(c, http.StatusBadRequest, "INVALID_REQUEST", apierror.MsgSkillTicketInvalidRequest)
 		return
 	}
 	out, err := h.messages.SendText(c.Request.Context(), principalFromCtx(c), c.Param("id"), req.Text)
@@ -181,18 +181,18 @@ func (h *SkillTicketsHandler) SendMessage(c *gin.Context) {
 func (h *SkillTicketsHandler) UploadMessage(c *gin.Context) {
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "缺少 file 字段"))
+		apierror.JSON(c, http.StatusBadRequest, "INVALID_REQUEST", apierror.MsgSkillTicketMissingFileField)
 		return
 	}
 	f, err := fileHeader.Open()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "读取上传文件失败"))
+		apierror.JSON(c, http.StatusBadRequest, "INVALID_REQUEST", apierror.MsgSkillTicketOpenFileFailed)
 		return
 	}
 	defer func() { _ = f.Close() }()
 	data, err := io.ReadAll(f)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "读取上传内容失败"))
+		apierror.JSON(c, http.StatusBadRequest, "INVALID_REQUEST", apierror.MsgSkillTicketReadFileFailed)
 		return
 	}
 	out, err := h.messages.SendFile(
@@ -280,7 +280,7 @@ func (h *SkillTicketsHandler) ReopenRejected(c *gin.Context) {
 func (h *SkillTicketsHandler) SetQuote(c *gin.Context) {
 	var req SetSkillTicketQuoteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "请求体格式错误"))
+		apierror.JSON(c, http.StatusBadRequest, "INVALID_REQUEST", apierror.MsgSkillTicketInvalidRequest)
 		return
 	}
 	if err := h.service.SetQuote(c.Request.Context(), principalFromCtx(c), c.Param("id"), req.QuoteAmountCents); err != nil {
@@ -304,7 +304,7 @@ func (h *SkillTicketsHandler) SetQuote(c *gin.Context) {
 func (h *SkillTicketsHandler) Reject(c *gin.Context) {
 	var req RejectSkillTicketRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "请求体格式错误"))
+		apierror.JSON(c, http.StatusBadRequest, "INVALID_REQUEST", apierror.MsgSkillTicketInvalidRequest)
 		return
 	}
 	if err := h.service.Reject(c.Request.Context(), principalFromCtx(c), c.Param("id"), req.Reason); err != nil {
@@ -335,12 +335,12 @@ func (h *SkillTicketsHandler) Badge(c *gin.Context) {
 func writeSkillTicketError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrSkillTicketDenied):
-		c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权操作该工单"))
+		apierror.JSON(c, http.StatusForbidden, "FORBIDDEN", apierror.MsgSkillTicketForbidden)
 	case errors.Is(err, service.ErrSkillTicketNotFound):
-		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "工单不存在"))
+		apierror.JSON(c, http.StatusNotFound, "NOT_FOUND", apierror.MsgSkillTicketNotFound)
 	case errors.Is(err, service.ErrSkillTicketInvalid):
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "工单入参非法"))
+		apierror.JSON(c, http.StatusBadRequest, "INVALID_REQUEST", apierror.MsgSkillTicketInvalidInput)
 	default:
-		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "服务器内部错误"))
+		apierror.JSON(c, http.StatusInternalServerError, "INTERNAL", apierror.MsgInternal)
 	}
 }
