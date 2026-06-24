@@ -257,4 +257,33 @@ oc:
     subgoal_added:
       en: "✓ Added subgoal {idx}: {text}"
       zh: "✓ 已添加子目标 {idx}: {text}"
+    # --- 权限层级信息（/whoami；源码为多段 f-string 隐式拼接，整块经 + 显式拼接）---
+    # 用户身份首行；{platform} 为平台，{scope} 为 DM/群组范围（行尾换行由调用点 + 拼接保留）。
+    access_you:
+      en: "**You** — {platform} ({scope})"
+      zh: "**你** —— {platform} ({scope})"
+    # 用户 ID 行（行尾换行由调用点保留）；{user_id} 为用户标识。
+    access_user_id:
+      en: "User ID: `{user_id}`"
+      zh: "用户 ID:`{user_id}`"
+    # 权限层级：不受限（此范围未配置管理员名单）。
+    access_tier_unrestricted:
+      en: "Tier: unrestricted (no admin list configured for this scope)"
+      zh: "权限层级:不受限(此范围未配置管理员名单)"
+    # 权限层级：管理员。
+    access_tier_admin:
+      en: "Tier: **admin**"
+      zh: "权限层级:**管理员**"
+    # 权限层级：普通用户。
+    access_tier_user:
+      en: "Tier: user"
+      zh: "权限层级:普通用户"
+    # 全部斜杠命令可用（管理员 / 不受限）。
+    access_slash_all:
+      en: "Slash commands: all available"
+      zh: "可用斜杠命令:全部"
+    # 普通用户可运行的斜杠命令清单前缀；{runnable_str} 为命令列表（行尾换行由调用点保留）。
+    access_slash_you_can_run:
+      en: "Slash commands you can run: {runnable_str}"
+      zh: "你可运行的斜杠命令:{runnable_str}"
   base: {}

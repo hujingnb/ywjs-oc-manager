@@ -386,6 +386,42 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         'f"✓ Added subgoal {idx}: {text}"',
         't("oc.run.subgoal_added", idx=idx, text=text)',
     ),
+    # --- /whoami 权限层级信息（三互斥分支，各为多段 f-string 隐式拼接）---
+    # 整块逐字符复制自 upstream（16/12 空格缩进须一致）；隐式拼接改 + 显式拼接，
+    # 每段译入 catalog，行尾 \n 在调用点用 + "\n" 保留，动态占位作 kwarg。
+    # 分支一：unrestricted（无管理员名单）。
+    (
+        'f"**You** — {platform} ({scope})\\n"\n'
+        '                f"User ID: `{user_id}`\\n"\n'
+        '                f"Tier: unrestricted (no admin list configured for this scope)\\n"\n'
+        '                f"Slash commands: all available"',
+        't("oc.run.access_you", platform=platform, scope=scope) + "\\n"\n'
+        '                + t("oc.run.access_user_id", user_id=user_id) + "\\n"\n'
+        '                + t("oc.run.access_tier_unrestricted") + "\\n"\n'
+        '                + t("oc.run.access_slash_all")',
+    ),
+    # 分支二：admin。
+    (
+        'f"**You** — {platform} ({scope})\\n"\n'
+        '                f"User ID: `{user_id}`\\n"\n'
+        '                f"Tier: **admin**\\n"\n'
+        '                f"Slash commands: all available"',
+        't("oc.run.access_you", platform=platform, scope=scope) + "\\n"\n'
+        '                + t("oc.run.access_user_id", user_id=user_id) + "\\n"\n'
+        '                + t("oc.run.access_tier_admin") + "\\n"\n'
+        '                + t("oc.run.access_slash_all")',
+    ),
+    # 分支三：普通 user（12 空格缩进；{runnable_str} 在调用点传入）。
+    (
+        'f"**You** — {platform} ({scope})\\n"\n'
+        '            f"User ID: `{user_id}`\\n"\n'
+        '            f"Tier: user\\n"\n'
+        '            f"Slash commands you can run: {runnable_str}"',
+        't("oc.run.access_you", platform=platform, scope=scope) + "\\n"\n'
+        '            + t("oc.run.access_user_id", user_id=user_id) + "\\n"\n'
+        '            + t("oc.run.access_tier_user") + "\\n"\n'
+        '            + t("oc.run.access_slash_you_can_run", runnable_str=runnable_str)',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 
