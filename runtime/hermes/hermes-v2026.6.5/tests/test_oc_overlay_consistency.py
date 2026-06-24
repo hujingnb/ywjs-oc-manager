@@ -7,7 +7,25 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "patches"))
 from check_oc_i18n_consistency import (
     extract_patch_keys, extract_overlay_keys, check_consistency, ConsistencyError,
+    detect_duplicate_keys,
 )
+
+
+def test_detect_duplicate_keys_finds_collision():
+    # 场景：同层两个同名叶子 key（yaml.safe_load 会静默后者覆盖前者）→ 必须被检出
+    text = (
+        "oc:\n  run:\n"
+        "    foo:\n      en: \"A\"\n      zh: \"甲\"\n"
+        "    foo:\n      en: \"B\"\n      zh: \"乙\"\n"
+        "    bar:\n      en: \"C\"\n      zh: \"丙\"\n"
+    )
+    assert detect_duplicate_keys(text) == ["foo"]
+
+
+def test_detect_duplicate_keys_none_when_unique():
+    # 场景：无重复叶子 key → 返回空列表
+    text = "oc:\n  run:\n    foo:\n      en: \"A\"\n      zh: \"甲\"\n"
+    assert detect_duplicate_keys(text) == []
 
 
 def test_extract_patch_keys_from_replacement_strings():

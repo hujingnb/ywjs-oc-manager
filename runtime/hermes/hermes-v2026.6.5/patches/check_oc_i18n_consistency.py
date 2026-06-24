@@ -26,6 +26,21 @@ def extract_patch_keys(replacements) -> set:
     return keys
 
 
+def detect_duplicate_keys(text: str) -> list:
+    """检测 overlay 同层重复叶子 key（缩进 4 空格的 `name:` 行）。
+
+    yaml.safe_load 对重复键静默「后者覆盖前者」，会让两条不同消息撞同一 key 却
+    不被一致性集合比对发现（集合去重）。本函数直接扫原文，返回重复 key 列表，
+    供构建期 fail-loud——这是历史上 session_auto_reset 撞键漏检的根因防护。
+    """
+    seen: dict[str, int] = {}
+    for line in text.splitlines():
+        m = re.match(r"^    ([A-Za-z0-9_]+):\s*$", line)
+        if m:
+            seen[m.group(1)] = seen.get(m.group(1), 0) + 1
+    return sorted(k for k, c in seen.items() if c > 1)
+
+
 def _flatten(node, prefix, out):
     """递归展开 overlay 嵌套字典为扁平 key 集合。
 
@@ -74,7 +89,13 @@ def main() -> int:
     """
     from patch_i18n_literals import REPLACEMENTS_RUN, REPLACEMENTS_BASE
     patch_keys = extract_patch_keys(REPLACEMENTS_RUN + REPLACEMENTS_BASE)
-    overlay = yaml.safe_load(OVERLAY.read_text(encoding="utf-8")) or {}
+    overlay_text = OVERLAY.read_text(encoding="utf-8")
+    dups = detect_duplicate_keys(overlay_text)
+    if dups:
+        print(f"[check_oc_i18n_consistency] overlay 存在重复叶子 key（后者会覆盖前者）: {dups}",
+              file=sys.stderr)
+        return 1
+    overlay = yaml.safe_load(overlay_text) or {}
     overlay_keys = extract_overlay_keys(overlay)
     try:
         check_consistency(patch_keys, overlay_keys)

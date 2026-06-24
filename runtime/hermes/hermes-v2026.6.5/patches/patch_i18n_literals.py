@@ -740,7 +740,7 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         '                            f"Conversation history cleared.\\n"\n'
         '                            f"Use /resume to browse and restore a previous session.\\n"\n'
         '                            f"Adjust reset timing in config.yaml under session_reset."',
-        't("oc.run.session_auto_reset", reason_text=reason_text)',
+        't("oc.run.session_reset_notice", reason_text=reason_text)',
     ),
     # --- 未设置 home channel 一次性提示（5 段隐式拼接合为一条）---
     # {platform_name} 由 platform_name.title() 传入；{sethome_cmd} 由调用点传入。
