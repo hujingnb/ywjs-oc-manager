@@ -262,8 +262,11 @@ onMounted(loadSessions)
   display: grid;
   grid-template-columns: 260px 1fr;
   gap: 12px;
-  height: calc(100vh - 160px);
-  min-height: 400px;
+  /* 填满父级详情页为本 tab 分配的 1fr 行（见 AppDetailPage 的 .app-detail-root--fill），
+     不再用 100vh 魔法数字。min-height: 0 允许本容器收缩到内容高度以下，
+     从而让右侧 .msg-list 自身滚动，避免把溢出顶到外层 layout 产生整页滚动条。 */
+  height: 100%;
+  min-height: 0;
 }
 
 /* 小屏折叠为单列 */

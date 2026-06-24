@@ -1,5 +1,5 @@
 <template>
-  <div style="display: grid; gap: 18px; align-items: start; align-content: start">
+  <div class="app-detail-root" :class="{ 'app-detail-root--fill': currentTab === 'conversations' }">
     <n-card :bordered="true" content-style="display: none" header-style="padding-bottom: 0">
       <template #header>
         <div style="display: flex; align-items: center; justify-content: space-between">
@@ -92,6 +92,21 @@ function onTabChange(name: string | number) {
 </script>
 
 <style scoped>
+/* 详情页根容器：默认 grid 自上而下排布（header 卡片 + RouterView），内容靠上。
+   根容器由 DashboardLayout 的 .dashboard-page-frame 赋予 flex:1，已填满内容区高度。 */
+.app-detail-root {
+  display: grid;
+  gap: 18px;
+  align-items: start;
+  align-content: start;
+}
+/* 对话 tab 专用：把 RouterView 所在行设为 minmax(0, 1fr) 吃满剩余高度，
+   使 AppConversationsTab 能以 height:100% 填满并由其内部消息列表自身滚动，
+   从而消除整页右侧滚动条。仅作用于对话 tab，不影响其他内容靠上排布的 tab。 */
+.app-detail-root--fill {
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: stretch;
+}
 .tab-nav {
   display: flex;
   /* header slot 内，左右对齐 header padding，通过负 margin 拉齐两端 */
