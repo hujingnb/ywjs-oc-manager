@@ -313,6 +313,38 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         '                            "Please try again later!"',
         't("oc.run.pairing_too_many")',
     ),
+    # --- 回复发送给更新进程失败：{e} 在调用点传入 ---
+    (
+        'f"✗ Failed to send response to update process: {e}"',
+        't("oc.run.update_send_failed", err=e)',
+    ),
+    # --- 回复已发送给更新进程：{label} 在调用点传入 ---
+    (
+        'f"✓ Sent `{label}` to the update process."',
+        't("oc.run.update_sent", label=label)',
+    ),
+    # --- 更新进程需要输入（源码四段 f-string 隐式拼接为一个 send 实参）---
+    #     标题段与输入提示段各成 key，中间 {prompt_text}{default_hint} 动态行保留原文；
+    #     整块用 + 显式拼接（t() 函数调用无法与字面量隐式拼接），故合为一条 old。
+    (
+        'f"⚕ **Update needs your input:**\\n\\n"\n'
+        '                                f"{prompt_text}{default_hint}\\n\\n"\n'
+        '                                f"Reply `/approve` (yes) or `/deny` (no), "\n'
+        '                                f"or type your answer directly."',
+        't("oc.run.update_needs_input")\n'
+        '                                + f"{prompt_text}{default_hint}\\n\\n"\n'
+        '                                + t("oc.run.update_reply_hint")',
+    ),
+    # --- 上下文压缩中止（源码六段相邻字面量隐式拼接整条合一）；{_err} 作 err kwarg ---
+    (
+        '"⚠️ Context compression aborted "\n'
+        '                                            f"({_err}). No messages were dropped — "\n'
+        '                                            "conversation is unchanged. Run /compress "\n'
+        '                                            "to retry, /reset for a clean session, or "\n'
+        '                                            "check your auxiliary.compression model "\n'
+        '                                            "configuration."',
+        't("oc.run.compression_aborted", err=_err)',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 

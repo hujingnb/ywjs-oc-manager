@@ -203,4 +203,25 @@ oc:
     pairing_too_many:
       en: "Too many pairing requests right now~ Please try again later!"
       zh: "当前配对请求过多~ 请稍后再试!"
+    # --- 更新进程交互（/approve 转发给更新子进程）---
+    # 回复发送给更新进程失败；{err} 为异常文本。
+    update_send_failed:
+      en: "✗ Failed to send response to update process: {err}"
+      zh: "✗ 发送回复到更新进程失败:{err}"
+    # 回复已发送给更新进程；{label} 为回复内容预览。
+    update_sent:
+      en: "✓ Sent `{label}` to the update process."
+      zh: "✓ 已发送 `{label}` 到更新进程。"
+    # 更新进程需要用户输入（标题段，换行为字面 \n）。
+    update_needs_input:
+      en: "⚕ **Update needs your input:**\n\n"
+      zh: "⚕ **更新需要你的输入:**\n\n"
+    # 更新进程输入提示（源码两段相邻 f-string 隐式拼接，中间动态内容由调用点保留）。
+    update_reply_hint:
+      en: "Reply `/approve` (yes) or `/deny` (no), or type your answer directly."
+      zh: "回复 `/approve`(同意)或 `/deny`(拒绝),或直接输入你的回答。"
+    # --- 上下文压缩中止（源码六段相邻字面量隐式拼接，整条合一）；{err} 为压缩错误原因。---
+    compression_aborted:
+      en: "⚠️ Context compression aborted ({err}). No messages were dropped — conversation is unchanged. Run /compress to retry, /reset for a clean session, or check your auxiliary.compression model configuration."
+      zh: "⚠️ 上下文压缩已中止({err})。没有丢弃任何消息 —— 对话内容未改变。请运行 /compress 重试,或用 /reset 开始干净会话,或检查你的 auxiliary.compression 模型配置。"
   base: {}
