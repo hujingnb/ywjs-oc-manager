@@ -49,10 +49,10 @@ func (h *ModelsHandler) List(c *gin.Context) {
 	models, err := h.service.List(c.Request.Context(), principal)
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) {
-			c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权查看模型列表"))
+			apierror.JSON(c, http.StatusForbidden, "FORBIDDEN", apierror.MsgModelForbidden)
 			return
 		}
-		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "模型列表暂时不可用"))
+		apierror.JSON(c, http.StatusInternalServerError, "INTERNAL", apierror.MsgModelUnavailable)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"models": models})

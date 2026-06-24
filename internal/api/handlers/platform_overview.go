@@ -49,9 +49,9 @@ func (h *PlatformOverviewHandler) Get(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrForbidden):
-			c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "仅平台管理员可访问"))
+			apierror.JSON(c, http.StatusForbidden, "FORBIDDEN", apierror.MsgPlatformOverviewForbidden)
 		default:
-			c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "查询平台总览失败"))
+			apierror.JSON(c, http.StatusInternalServerError, "INTERNAL", apierror.MsgPlatformOverviewQueryFailed)
 		}
 		return
 	}

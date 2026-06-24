@@ -88,7 +88,7 @@ func (h *AuditHandler) ListByTarget(c *gin.Context) {
 	targetType := c.Query("target_type")
 	targetID := c.Query("target_id")
 	if targetType == "" || targetID == "" {
-		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", "缺少 target_type 或 target_id"))
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgAuditMissingTarget)
 		return
 	}
 	limit := queryInt32(c, "limit", 0)
@@ -104,10 +104,10 @@ func (h *AuditHandler) ListByTarget(c *gin.Context) {
 func writeAuditError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrForbidden):
-		c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权执行该操作"))
+		apierror.JSON(c, http.StatusForbidden, "FORBIDDEN", apierror.MsgAuditForbidden)
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "资源不存在"))
+		apierror.JSON(c, http.StatusNotFound, "NOT_FOUND", apierror.MsgNotFound)
 	default:
-		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "服务暂时不可用"))
+		apierror.JSON(c, http.StatusInternalServerError, "INTERNAL", apierror.MsgAuditServiceUnavailable)
 	}
 }
