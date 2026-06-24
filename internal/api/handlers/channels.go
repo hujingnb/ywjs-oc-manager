@@ -116,12 +116,12 @@ func (h *ChannelsHandler) Unbind(c *gin.Context) {
 func writeChannelError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrForbidden):
-		c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权操作渠道"))
+		apierror.JSON(c, http.StatusForbidden, "FORBIDDEN", apierror.MsgChannelForbidden)
 	case errors.Is(err, service.ErrNotFound):
-		c.JSON(http.StatusNotFound, apierror.New("NOT_FOUND", "应用或渠道绑定不存在"))
+		apierror.JSON(c, http.StatusNotFound, "NOT_FOUND", apierror.MsgChannelBindingNotFound)
 	case errors.Is(err, service.ErrChannelAdapterMissing):
-		c.JSON(http.StatusServiceUnavailable, apierror.New("CHANNEL_ADAPTER_MISSING", "当前渠道未启用"))
+		apierror.JSON(c, http.StatusServiceUnavailable, "CHANNEL_ADAPTER_MISSING", apierror.MsgChannelAdapterMissing)
 	default:
-		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "渠道服务暂时不可用"))
+		apierror.JSON(c, http.StatusInternalServerError, "INTERNAL", apierror.MsgChannelUnavailable)
 	}
 }
