@@ -1,3 +1,15 @@
 oc:
-  run: {}
+  run:
+    timeout_inactive:
+      en: "⏱️ Agent inactive for {timeout_mins} min — no tool calls or API responses."
+      zh: "⏱️ 智能体已闲置 {timeout_mins} 分钟 —— 无工具调用也无 API 响应。"
+    timeout_stuck_tool:
+      en: "The agent appears stuck on tool `{cur_tool}` ({secs_ago:.0f}s since last activity, iteration {iter_n}/{iter_max})."
+      zh: "智能体疑似卡在工具 `{cur_tool}` (距上次活动 {secs_ago:.0f} 秒, 迭代 {iter_n}/{iter_max})。"
+    timeout_last_activity:
+      en: "Last activity: {last_desc} ({secs_ago:.0f}s ago, iteration {iter_n}/{iter_max}). The agent may have been waiting on an API response."
+      zh: "最近活动:{last_desc}(距今 {secs_ago:.0f} 秒, 迭代 {iter_n}/{iter_max})。 智能体可能正在等待 API 响应。"
+    timeout_increase_limit:
+      en: "To increase the limit, set agent.gateway_timeout in config.yaml (value in seconds, 0 = no limit) and restart the gateway.\nTry again, or use /reset to start fresh."
+      zh: "如需提高上限,请在 config.yaml 中设置 agent.gateway_timeout (单位为秒,0 = 不限制),然后重启网关。\n请重试,或使用 /reset 开始新会话。"
   base: {}

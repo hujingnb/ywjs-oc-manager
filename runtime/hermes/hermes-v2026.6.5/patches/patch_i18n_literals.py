@@ -24,7 +24,35 @@ BASE = pathlib.Path("/usr/local/lib/hermes-agent/gateway/platforms/base.py")
 I18N_IMPORT = "from agent.i18n import t"
 
 # 替换表：(完整英文表达式源文本, t() 调用字符串)。由后续任务按组填充。
-REPLACEMENTS_RUN: list[tuple[str, str]] = []
+REPLACEMENTS_RUN: list[tuple[str, str]] = [
+    # 闲置 / 网关超时诊断 _diag_lines 块（4 条逻辑消息，相邻字面量隐式拼接）。
+    # old 整段逐字符复制自 upstream run.py，缩进与换行须与源文件一致才能命中。
+    (
+        'f"⏱️ Agent inactive for {_timeout_mins} min — no tool calls "\n'
+        '                    f"or API responses."',
+        't("oc.run.timeout_inactive", timeout_mins=_timeout_mins)',
+    ),
+    (
+        'f"The agent appears stuck on tool `{_cur_tool}` "\n'
+        '                        f"({_secs_ago:.0f}s since last activity, "\n'
+        '                        f"iteration {_iter_n}/{_iter_max})."',
+        't("oc.run.timeout_stuck_tool", cur_tool=_cur_tool, secs_ago=_secs_ago, '
+        'iter_n=_iter_n, iter_max=_iter_max)',
+    ),
+    (
+        'f"Last activity: {_last_desc} ({_secs_ago:.0f}s ago, "\n'
+        '                        f"iteration {_iter_n}/{_iter_max}). "\n'
+        '                        "The agent may have been waiting on an API response."',
+        't("oc.run.timeout_last_activity", last_desc=_last_desc, secs_ago=_secs_ago, '
+        'iter_n=_iter_n, iter_max=_iter_max)',
+    ),
+    (
+        '"To increase the limit, set agent.gateway_timeout in config.yaml "\n'
+        '                    "(value in seconds, 0 = no limit) and restart the gateway.\\n"\n'
+        '                    "Try again, or use /reset to start fresh."',
+        't("oc.run.timeout_increase_limit")',
+    ),
+]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 
 TARGETS: list[tuple[pathlib.Path, list[tuple[str, str]], bool]] = [
