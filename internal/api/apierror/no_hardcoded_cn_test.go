@@ -14,7 +14,7 @@ import (
 // 动态明细路径(safe/validation 经 redactlog/validationServiceMessage、运行时换算)传变量,天然不命中。
 func TestNoHardcodedChineseInApiErrors(t *testing.T) {
 	re := regexp.MustCompile(`apierror\.New\([^)]*[\x{4e00}-\x{9fff}]`)
-	// 定位仓库根下的 internal/api（从本测试文件 internal/api/apierror 上溯两级）
+	// 定位仓库根下的 internal/api（从本测试文件 internal/api/apierror 上溯三级到仓库根）
 	root := filepath.Join("..", "..", "..", "internal", "api")
 	var offenders []string
 	_ = filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
