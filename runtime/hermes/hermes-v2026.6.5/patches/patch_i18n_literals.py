@@ -502,6 +502,76 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         '                    + f"Reason: {desc}\\n\\n"\n'
         '                    + t("oc.run.confirm_reply_hint")',
     ),
+    # --- Hermes 自更新通知 ---
+    # 更新完成（L15250 整条单行字面量）。
+    (
+        '"✅ Hermes update finished."',
+        't("oc.run.update_finished")',
+    ),
+    # 更新失败带退出码（L15254：.format 定位占位 → 改 kwarg；{exit_code} 在调用点传入）。
+    (
+        '"❌ Hermes update failed (exit code {}).".format(exit_code)',
+        't("oc.run.update_failed_exit", exit_code=exit_code)',
+    ),
+    # 更新超时（L15342 单行字面量）。
+    (
+        '"❌ Hermes update timed out after 30 minutes."',
+        't("oc.run.update_timed_out")',
+    ),
+    # 更新完成带输出（L15442 f-string）：完成标题复用 update_finished，
+    # 输出代码块保留原文用 + 显式拼接；{output} 在调用点传入。
+    (
+        'f"✅ Hermes update finished.\\n\\n```\\n{output}\\n```"',
+        't("oc.run.update_finished") + f"\\n\\n```\\n{output}\\n```"',
+    ),
+    # 更新失败带输出（L15444 f-string）：失败前缀译入 catalog，
+    # 输出代码块保留原文用 + 显式拼接；{output} 在调用点传入。
+    (
+        'f"❌ Hermes update failed.\\n\\n```\\n{output}\\n```"',
+        't("oc.run.update_failed_output") + f"```\\n{output}\\n```"',
+    ),
+    # 更新成功完成（L15446 单行字面量）。
+    (
+        '"✅ Hermes update finished successfully."',
+        't("oc.run.update_finished_ok")',
+    ),
+    # 更新失败、查日志（L15448 单行字面量）。
+    (
+        '"❌ Hermes update failed. Check the gateway logs or run `hermes update` manually for details."',
+        't("oc.run.update_failed_logs")',
+    ),
+    # 网关重启成功（L15511 单行字面量）。
+    (
+        '"♻ Gateway restarted successfully. Your session continues."',
+        't("oc.run.gateway_restarted")',
+    ),
+    # --- 代理模式错误 ---
+    # 缺 aiohttp（L16684 单行字面量）。
+    (
+        '"⚠️ Proxy mode requires aiohttp. Install with: pip install aiohttp"',
+        't("oc.run.proxy_needs_aiohttp")',
+    ),
+    # 未配置代理地址（L16693 单行字面量）。
+    (
+        '"⚠️ Proxy URL not configured (GATEWAY_PROXY_URL or gateway.proxy_url)"',
+        't("oc.run.proxy_url_missing")',
+    ),
+    # 代理非 200 错误（L16835 f-string）：前缀译入 catalog，
+    # {resp.status}): {error_text[:300]} 保留原文用 + 显式拼接。
+    (
+        'f"⚠️ Proxy error ({resp.status}): {error_text[:300]}"',
+        't("oc.run.proxy_error") + f"{resp.status}): {error_text[:300]}"',
+    ),
+    # 代理连接错误（L16891 f-string）：前缀译入 catalog，{e} 保留原文用 + 显式拼接。
+    (
+        'f"⚠️ Proxy connection error: {e}"',
+        't("oc.run.proxy_conn_error") + f"{e}"',
+    ),
+    # 远端智能体无响应（L16929 单行字面量，or 兜底）。
+    (
+        '"(No response from remote agent)"',
+        't("oc.run.proxy_no_response")',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 
