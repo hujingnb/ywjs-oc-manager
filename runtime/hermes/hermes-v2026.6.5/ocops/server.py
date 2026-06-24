@@ -99,6 +99,36 @@ async def get_doctor(request):
     return _ok(doctor.collect_doctor())
 
 
+async def get_config(request):
+    """GET /oc/config：返回实例当前运行的 display.language，供 manager 实时查询。
+
+    不依赖 DB 快照，直接读容器内 /opt/data/config.yaml（由 OC_DATA_DIR 指定根目录）
+    的 display.language 字段。
+    - 文件缺失或不含 display.language 键时，回落返回默认值 "en"，不报错。
+    - 鉴权同其它 /oc/* 端点（Bearer OC_OPS_TOKEN），由 AuthMiddleware 统一校验。
+
+    响应：{"display_language": "zh"|"en"（或任意 config 中配置的语言代码）}
+    """
+    import yaml  # PyYAML 在 hermes 镜像中已可用；延迟 import 与其它端点保持一致风格
+
+    config_path = _data_root() / "config.yaml"
+    language = "en"  # 默认回落值：文件缺失或无 display.language 键均返回 en
+    try:
+        text = config_path.read_text(encoding="utf-8")
+        cfg = yaml.safe_load(text) or {}
+        # 取 display.language，若 display 键缺失或不是 dict 则安全跳过，保持默认 en
+        display = cfg.get("display") if isinstance(cfg, dict) else None
+        if isinstance(display, dict):
+            lang = display.get("language")
+            if lang:
+                language = str(lang)
+    except FileNotFoundError:
+        # config.yaml 不存在属正常边界（实例刚创建未写入），静默回落 en
+        pass
+
+    return _ok({"display_language": language})
+
+
 async def channel_status(request):
     """GET /oc/channels/{channel}/status：查询渠道绑定态。
     未知 channel 或其他业务错误 → 对应 HTTP 状态码 + {code,message}。"""
@@ -647,6 +677,7 @@ routes = [
     Route("/healthz", healthz),
     Route("/oc/info", get_info),
     Route("/oc/doctor", get_doctor),
+    Route("/oc/config", get_config),
     Route("/oc/channels/{channel}/status", channel_status),
     Route("/oc/channels/{channel}/unbind", channel_unbind, methods=["POST"]),
     # cron 端点（Task 9）

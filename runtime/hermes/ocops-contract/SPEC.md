@@ -52,6 +52,7 @@ accepts any.
 | `GET` | `/healthz` | - | Plain text `ok`, unauthenticated. |
 | `GET` | `/oc/info` | - | `schema/core/info.schema.json` |
 | `GET` | `/oc/doctor` | - | `schema/core/doctor.schema.json` |
+| `GET` | `/oc/config` | - | `schema/core/config.schema.json` |
 
 ### Channels
 
