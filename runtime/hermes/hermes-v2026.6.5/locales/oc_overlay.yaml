@@ -181,4 +181,26 @@ oc:
     unknown_command:
       en: "Unknown command `/{command}`. Type /commands to see what's available, or resend without the leading slash to send as a regular message."
       zh: "未知命令 `/{command}`。输入 /commands 查看可用命令,或去掉开头的斜杠重新发送,即可作为普通消息处理。"
+    # --- 技能未安装/被禁用提示（源码两段 f-string 隐式拼接，换行为字面 \n）---
+    # 技能已安装但被禁用；{name} 为技能名。
+    skill_disabled:
+      en: "The **{name}** skill is installed but disabled.\nEnable it with: `hermes skills config`"
+      zh: "技能 **{name}** 已安装但被禁用。\n用 `hermes skills config` 启用"
+    # 技能可用但尚未安装；{name} 为技能名，{install_path} 为安装路径。
+    skill_not_installed:
+      en: "The **{name}** skill is available but not installed.\nInstall it with: `hermes skills install {install_path}`"
+      zh: "技能 **{name}** 可用但尚未安装。\n用 `hermes skills install {install_path}`"
+    # 技能在指定平台被禁用；{name} 为技能名，{platform} 为平台标识。
+    skill_disabled_platform:
+      en: "The **{name}** skill is disabled for {platform}.\nEnable it with: `hermes skills config`"
+      zh: "技能 **{name}** 已在以下平台被禁用:{platform}。\n用 `hermes skills config` 启用"
+    # --- 配对流程（未识别用户首次私聊）---
+    # 配对引导（源码前三段 f-string 隐式拼接，第四行 hermes pairing approve 命令保留字面）；{code} 为配对码。
+    pairing_intro:
+      en: "Hi~ I don't recognize you yet!\n\nHere's your pairing code: `{code}`\n\nAsk the bot owner to run:\n"
+      zh: "你好~ 我还不认识你!\n\n这是你的配对码:`{code}`\n\n请让机器人管理员运行:\n"
+    # 配对请求过于频繁、被限流（源码两段相邻字面量隐式拼接）。
+    pairing_too_many:
+      en: "Too many pairing requests right now~ Please try again later!"
+      zh: "当前配对请求过多~ 请稍后再试!"
   base: {}

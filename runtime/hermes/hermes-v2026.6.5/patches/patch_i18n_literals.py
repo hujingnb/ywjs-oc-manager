@@ -278,6 +278,41 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         '                            f"as a regular message."',
         't("oc.run.unknown_command", command=command)',
     ),
+    # --- 技能已安装但被禁用（源码两段 f-string 隐式拼接）；{command_name} 作 name kwarg ---
+    (
+        'f"The **{command_name}** skill is installed but disabled.\\n"\n'
+        '                        f"Enable it with: `hermes skills config`"',
+        't("oc.run.skill_disabled", name=command_name)',
+    ),
+    # --- 技能可用但尚未安装；{command_name}/{install_path} 在调用点传入 ---
+    (
+        'f"The **{command_name}** skill is available but not installed.\\n"\n'
+        '                        f"Install it with: `hermes skills install {install_path}`"',
+        't("oc.run.skill_not_installed", name=command_name, install_path=install_path)',
+    ),
+    # --- 技能在指定平台被禁用；{_skill_name}/{_plat} 作 name/platform kwarg ---
+    (
+        'f"The **{_skill_name}** skill is disabled for {_plat}.\\n"\n'
+        '                                f"Enable it with: `hermes skills config`"',
+        't("oc.run.skill_disabled_platform", name=_skill_name, platform=_plat)',
+    ),
+    # --- 配对引导（源码四段 f-string 隐式拼接）；{code} 在调用点传入。
+    #     前三段译入 catalog，第四行 `hermes pairing approve ...` 命令保留原文，
+    #     用 + 显式拼接到 t() 结果之后（隐式拼接遇函数调用会断，故改显式）---
+    (
+        'f"Hi~ I don\'t recognize you yet!\\n\\n"\n'
+        '                            f"Here\'s your pairing code: `{code}`\\n\\n"\n'
+        '                            f"Ask the bot owner to run:\\n"\n'
+        '                            f"`hermes pairing approve {platform_name} {code}`"',
+        't("oc.run.pairing_intro", code=code)\n'
+        '                            + f"`hermes pairing approve {platform_name} {code}`"',
+    ),
+    # --- 配对请求过多被限流（源码两段相邻字面量隐式拼接）---
+    (
+        '"Too many pairing requests right now~ "\n'
+        '                            "Please try again later!"',
+        't("oc.run.pairing_too_many")',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 
