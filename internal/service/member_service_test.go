@@ -322,6 +322,52 @@ func TestMemberServiceResetPasswordSucceeds(t *testing.T) {
 	}
 }
 
+// TestCreateMemberInheritsCreatorLocale 验证新增成员（仅建成员路径）时，
+// 新成员的 locale 继承自创建者（操作管理员）的 locale，与 Spec C「新成员随创建者」一致。
+func TestCreateMemberInheritsCreatorLocale(t *testing.T) {
+	store := newMemberStoreStub(t)
+	// 预置创建者（org_admin），locale 设为 "zh"，模拟创建者语言偏好已设置。
+	store.users[testAdminUID] = sqlc.User{
+		ID:     mustUUID(t, testAdminUID),
+		OrgID:  null.StringFrom(store.orgs[testOrgID].ID),
+		Role:   domain.UserRoleOrgAdmin,
+		Status: domain.StatusActive,
+		Locale: null.StringFrom("zh"),
+	}
+	// 传入默认语言 "en"，验证当创建者 locale 有效时优先使用创建者 locale 而非默认值。
+	svc := NewMemberService(store, fakeHash, "en")
+
+	_, err := svc.CreateMember(context.Background(), orgAdminPrincipal(), testOrgID, MemberInput{
+		Username: "newmember", DisplayName: "新成员", Password: "password",
+	})
+	require.NoError(t, err)
+	// 断言 CreateUser 入参中 Locale 应为创建者的 "zh"，而非默认的 "en"。
+	assert.Equal(t, null.StringFrom("zh"), store.lastCreate.Locale, "新成员 locale 应继承创建者 zh")
+}
+
+// TestCreateMemberFallsBackToDefaultLocale 验证当创建者 locale 为空时，
+// 新成员的 locale 回落到平台默认语言（defaultLocale），避免 locale=NULL 入库。
+func TestCreateMemberFallsBackToDefaultLocale(t *testing.T) {
+	store := newMemberStoreStub(t)
+	// 预置创建者（org_admin），locale 未设置（Valid=false），模拟未配置语言偏好的情况。
+	store.users[testAdminUID] = sqlc.User{
+		ID:     mustUUID(t, testAdminUID),
+		OrgID:  null.StringFrom(store.orgs[testOrgID].ID),
+		Role:   domain.UserRoleOrgAdmin,
+		Status: domain.StatusActive,
+		// Locale 使用零值（null.String{}），表示未设置。
+	}
+	// 平台默认语言为 "en"，当创建者 locale 为空时应回落。
+	svc := NewMemberService(store, fakeHash, "en")
+
+	_, err := svc.CreateMember(context.Background(), orgAdminPrincipal(), testOrgID, MemberInput{
+		Username: "newmember2", DisplayName: "新成员2", Password: "password",
+	})
+	require.NoError(t, err)
+	// 断言 CreateUser 入参中 Locale 应为平台默认 "en"。
+	assert.Equal(t, null.StringFrom("en"), store.lastCreate.Locale, "创建者 locale 为空时应回落到平台默认 en")
+}
+
 // fakeHash 在测试中用前缀代替真实 Argon2id，避免单测耗时。
 func fakeHash(password string) (string, error) { return "hashed:" + password, nil }
 
@@ -471,6 +517,7 @@ func (s *memberStoreStub) CreateUser(_ context.Context, arg sqlc.CreateUserParam
 		return errors.New("duplicate username in organization")
 	}
 	// 使用 service 传入的 arg.ID（由 service 调用 newUUID() 生成），供后续 GetUser(userID) 读回。
+	// Locale 字段同步保留，供 locale 继承断言验证。
 	user := sqlc.User{
 		ID:           arg.ID,
 		OrgID:        arg.OrgID,
@@ -479,6 +526,7 @@ func (s *memberStoreStub) CreateUser(_ context.Context, arg sqlc.CreateUserParam
 		DisplayName:  arg.DisplayName,
 		Role:         arg.Role,
 		Status:       arg.Status,
+		Locale:       arg.Locale,
 	}
 	s.usersByOrgUsername[key] = user
 	s.users[user.ID] = user

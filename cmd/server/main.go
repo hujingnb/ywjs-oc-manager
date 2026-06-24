@@ -137,7 +137,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		return fmt.Errorf("初始化认证令牌管理器失败: %w", err)
 	}
 
-	memberService := service.NewMemberService(dbStore.Queries, hashPasswordWithDefault)
+	// 传入平台默认语言，新增成员时继承创建者 locale，缺省回落此值（与 onboarding 路径一致）。
+	memberService := service.NewMemberService(dbStore.Queries, hashPasswordWithDefault, cfg.I18n.DefaultLocale)
 	// k8s 模型下不再需要选节点，pod 落点由调度器决定；直接构造 onboarding 服务。
 	// 传入平台默认语言，创建实例时快照 owner 语言偏好，未设置时回退此默认值。
 	onboardingService := service.NewMemberOnboardingService(store.NewOnboardingRunner(dbStore), hashPasswordWithDefault, cfg.I18n.DefaultLocale)

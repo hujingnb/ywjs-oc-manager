@@ -48,17 +48,25 @@ type MemberService struct {
 	defaultRole    string
 	maxPageSize    int32
 	defaultPageNum int32
+	// defaultLocale 是平台默认语言（en/zh），创建成员时若创建者 locale 未设置则回落此值。
+	defaultLocale string
 }
 
 // NewMemberService 创建成员服务，调用方负责注入 hash 实现。
+// defaultLocale 为可选变参：传入平台默认语言（来自 cfg.I18n.DefaultLocale），缺省按 "en" 处理。
 // 默认页大小和上限对所有列表接口生效，避免恶意请求拉取整张用户表。
-func NewMemberService(store MemberStore, hash PasswordHasher) *MemberService {
+func NewMemberService(store MemberStore, hash PasswordHasher, defaultLocale ...string) *MemberService {
+	dl := "en"
+	if len(defaultLocale) > 0 && defaultLocale[0] != "" {
+		dl = defaultLocale[0]
+	}
 	return &MemberService{
 		store:          store,
 		hashPassword:   hash,
 		defaultRole:    domain.UserRoleOrgMember,
 		maxPageSize:    200,
 		defaultPageNum: 50,
+		defaultLocale:  dl,
 	}
 }
 
@@ -129,6 +137,14 @@ func (s *MemberService) CreateMember(ctx context.Context, principal auth.Princip
 	if err != nil {
 		return MemberResult{}, fmt.Errorf("生成密码 hash 失败: %w", err)
 	}
+
+	// 继承创建者（操作管理员）的 locale，与 OnboardMember 路径保持一致（Spec C）。
+	// 若 GetUser 查询失败或 locale 未设置，安全回落到平台默认 s.defaultLocale，不阻断流程。
+	memberLocale := s.defaultLocale
+	if creator, err := s.store.GetUser(ctx, principal.UserID); err == nil && creator.Locale.Valid && creator.Locale.String != "" {
+		memberLocale = creator.Locale.String
+	}
+
 	// CreateUser 为 :exec；预先生成 ID，写入后通过 GetUser 读回。
 	userID := newUUID()
 	if err := s.store.CreateUser(ctx, sqlc.CreateUserParams{
@@ -139,6 +155,7 @@ func (s *MemberService) CreateMember(ctx context.Context, principal auth.Princip
 		DisplayName:  input.DisplayName,
 		Role:         role,
 		Status:       domain.StatusActive,
+		Locale:       null.StringFrom(memberLocale),
 	}); err != nil {
 		return MemberResult{}, fmt.Errorf("创建成员失败: %w", err)
 	}
