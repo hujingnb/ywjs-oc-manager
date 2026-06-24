@@ -211,6 +211,25 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         '"⚡ Force-stopped. The agent was still starting — session unlocked."',
         't("oc.run.force_stopped")',
     ),
+    # --- 网关 draining 排队/拒绝：{gerund} = 已翻译的 _status_action_gerund() 结果 ---
+    # 三条 f-string 各自唯一，replace 会覆盖文件内全部相同出现处。
+    (
+        'f"⏳ Gateway is {self._status_action_gerund()} — queued for the next turn after it comes back."',
+        't("oc.run.gateway_draining_queued", gerund=self._status_action_gerund())',
+    ),
+    (
+        'f"⏳ Gateway is {self._status_action_gerund()} and is not accepting another turn right now."',
+        't("oc.run.gateway_not_accepting_turn", gerund=self._status_action_gerund())',
+    ),
+    (
+        'f"⏳ Gateway is {self._status_action_gerund()} and is not accepting new work right now."',
+        't("oc.run.gateway_not_accepting_work", gerund=self._status_action_gerund())',
+    ),
+    # --- 命令被 hook 拦截：{command} 在调用点传入 ---
+    (
+        'f"Command `/{command}` was blocked by a hook."',
+        't("oc.run.command_blocked_hook", command=command)',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 

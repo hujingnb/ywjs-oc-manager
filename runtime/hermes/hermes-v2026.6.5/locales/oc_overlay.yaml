@@ -127,4 +127,21 @@ oc:
     force_stopped:
       en: "⚡ Force-stopped. The agent was still starting — session unlocked."
       zh: "⚡ 已强制停止。智能体仍在启动中 —— 会话已解锁。"
+    # --- 网关 draining 排队/拒绝（{gerund} 为已翻译的状态动作，由 _status_action_gerund() 给出）---
+    # draining 中、排队待恢复。
+    gateway_draining_queued:
+      en: "⏳ Gateway is {gerund} — queued for the next turn after it comes back."
+      zh: "⏳ 网关{gerund} —— 已加入队列,待其恢复后于下一轮处理。"
+    # draining 中、暂不接受新回合。
+    gateway_not_accepting_turn:
+      en: "⏳ Gateway is {gerund} and is not accepting another turn right now."
+      zh: "⏳ 网关{gerund},当前暂不接受新的回合。"
+    # draining 中、暂不接受新任务。
+    gateway_not_accepting_work:
+      en: "⏳ Gateway is {gerund} and is not accepting new work right now."
+      zh: "⏳ 网关{gerund},当前暂不接受新任务。"
+    # 命令被 hook 拦截（deny 决策无自定义消息时的兜底），{command} 为命令名。
+    command_blocked_hook:
+      en: "Command `/{command}` was blocked by a hook."
+      zh: "命令 `/{command}` 被某个 hook 拦截。"
   base: {}
