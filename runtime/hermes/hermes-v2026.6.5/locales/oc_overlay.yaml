@@ -399,4 +399,34 @@ oc:
     proxy_no_response:
       en: "(No response from remote agent)"
       zh: "(远端智能体无响应)"
+    # --- run_agent 鉴权失败 / 通用错误（final_response 回包）---
+    # 模型服务商鉴权失败前缀（其后 `{exc}` 异常文本由调用点保留）。
+    provider_auth_failed_exc:
+      en: "⚠️ Provider authentication failed: "
+      zh: "⚠️ 模型服务商鉴权失败:"
+    # 通用错误前缀（其后 `{error_type})` 由调用点保留，保留行尾左括号）。
+    encountered_error:
+      en: "Sorry, I encountered an error ("
+      zh: "抱歉,我遇到了错误("
+    # 请求被 API 拒绝（status_code==400 时追加，保留前导空格）。
+    request_rejected_api:
+      en: " The request was rejected by the API."
+      zh: " 该请求被 API 拒绝。"
+    # 无法加载配置前缀（其后 `{exc}` 异常文本由调用点保留）。
+    config_load_failed:
+      en: "❌ Could not load config: "
+      zh: "❌ 无法加载配置:"
+    # 上下文注入被拒绝（_ctx_result.warnings 为空时的兜底）。
+    context_injection_refused:
+      en: "Context injection refused."
+      zh: "上下文注入被拒绝。"
+    # --- 澄清提问送达失败 / 用户未响应 ---
+    # 澄清提问无法送达（adapter 发送失败兜底哨兵）。
+    clarify_not_delivered:
+      en: "[clarify prompt could not be delivered]"
+      zh: "[澄清提问无法送达]"
+    # 用户未在超时时间内响应前缀（其后 `{int(timeout/60)}m]` 由调用点保留）。
+    clarify_no_response:
+      en: "[user did not respond within "
+      zh: "[用户未在 "
   base: {}

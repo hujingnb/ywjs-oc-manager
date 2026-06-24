@@ -577,6 +577,44 @@ REPLACEMENTS_RUN: list[tuple[str, str]] = [
         '"(No response from remote agent)"',
         't("oc.run.proxy_no_response")',
     ),
+    # --- run_agent 鉴权失败 / 通用错误（final_response 回包）---
+    # 鉴权失败 final_response（L17721 f-string）：前缀译入 catalog，{exc} 保留原文用 + 显式拼接。
+    (
+        'f"⚠️ Provider authentication failed: {exc}"',
+        't("oc.run.provider_auth_failed_exc") + f"{exc}"',
+    ),
+    # 通用错误首段（L9920 f-string，多段隐式拼接的第一段）：前缀译入 catalog，
+    # {error_type}).\n 动态尾段保留原文用 + 显式拼接（隐式拼接遇 t() 会断，故改 +）。
+    (
+        'f"Sorry, I encountered an error ({error_type}).\\n"',
+        't("oc.run.encountered_error") + f"{error_type}).\\n"',
+    ),
+    # 请求被 API 拒绝（L9918 status_hint 赋值，整条单行字面量，保留前导空格）。
+    (
+        '" The request was rejected by the API."',
+        't("oc.run.request_rejected_api")',
+    ),
+    # 无法加载配置（L11431 f-string）：前缀译入 catalog，{exc} 保留原文用 + 显式拼接。
+    (
+        'f"❌ Could not load config: {exc}"',
+        't("oc.run.config_load_failed") + f"{exc}"',
+    ),
+    # 上下文注入被拒绝（L8788 or 兜底单行字面量）。
+    (
+        '"Context injection refused."',
+        't("oc.run.context_injection_refused")',
+    ),
+    # --- 澄清提问送达失败 / 用户未响应 ---
+    # 澄清提问无法送达（L18042 单行字面量哨兵）。
+    (
+        '"[clarify prompt could not be delivered]"',
+        't("oc.run.clarify_not_delivered")',
+    ),
+    # 用户未响应（L18048 f-string）：前缀译入 catalog，{int(timeout/60)}m] 保留原文用 + 显式拼接。
+    (
+        'f"[user did not respond within {int(timeout / 60)}m]"',
+        't("oc.run.clarify_no_response") + f"{int(timeout / 60)}m]"',
+    ),
 ]
 REPLACEMENTS_BASE: list[tuple[str, str]] = []
 
