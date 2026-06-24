@@ -50,28 +50,30 @@ func RegisterAssistantVersionRoutes(router gin.IRouter, h *AssistantVersionsHand
 func writeAVError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrAssistantVersionDenied):
-		c.JSON(http.StatusForbidden, apierror.New("FORBIDDEN", "无权操作助手版本"))
+		apierror.JSON(c, http.StatusForbidden, "FORBIDDEN", apierror.MsgAssistantVersionForbidden)
 	case errors.Is(err, service.ErrAssistantVersionNotFound):
-		c.JSON(http.StatusNotFound, apierror.New("ASSISTANT_VERSION_NOT_FOUND", "助手版本不存在"))
+		apierror.JSON(c, http.StatusNotFound, "ASSISTANT_VERSION_NOT_FOUND", apierror.MsgAssistantVersionNotFound)
 	case errors.Is(err, service.ErrAssistantVersionNameTaken):
-		c.JSON(http.StatusConflict, apierror.New("ASSISTANT_VERSION_NAME_TAKEN", "助手版本名称已存在"))
+		apierror.JSON(c, http.StatusConflict, "ASSISTANT_VERSION_NAME_TAKEN", apierror.MsgAssistantVersionNameTaken)
 	case errors.Is(err, service.ErrAssistantVersionInUse):
-		c.JSON(http.StatusConflict, apierror.New("ASSISTANT_VERSION_IN_USE", "助手版本正被引用，不可删除"))
+		apierror.JSON(c, http.StatusConflict, "ASSISTANT_VERSION_IN_USE", apierror.MsgAssistantVersionInUse)
 	case errors.Is(err, service.ErrAssistantVersionSkillNameTaken):
-		c.JSON(http.StatusConflict, apierror.New("ASSISTANT_VERSION_SKILL_NAME_TAKEN", "版本内 skill 名称已存在"))
+		apierror.JSON(c, http.StatusConflict, "ASSISTANT_VERSION_SKILL_NAME_TAKEN", apierror.MsgAssistantVersionSkillNameTaken)
 	case errors.Is(err, service.ErrPlatformSkillNotFound):
-		c.JSON(http.StatusNotFound, apierror.New("PLATFORM_SKILL_NOT_FOUND", "平台技能不存在"))
+		apierror.JSON(c, http.StatusNotFound, "PLATFORM_SKILL_NOT_FOUND", apierror.MsgAssistantVersionPlatformSkillNotFound)
 	case errors.Is(err, service.ErrIndustryKnowledgeNotFound):
-		c.JSON(http.StatusNotFound, apierror.New("INDUSTRY_KNOWLEDGE_NOT_FOUND", "行业知识库不存在"))
+		// 「行业知识库不存在」中文与 industry_knowledge domain 完全一致，跨 domain 复用同一 key。
+		apierror.JSON(c, http.StatusNotFound, "INDUSTRY_KNOWLEDGE_NOT_FOUND", apierror.MsgIndustryKnowledgeNotFound)
 	case errors.Is(err, service.ErrAppSkillSourceUnknown):
-		c.JSON(http.StatusBadRequest, apierror.New("APP_SKILL_SOURCE_UNKNOWN", "未知的 skill 来源"))
+		apierror.JSON(c, http.StatusBadRequest, "APP_SKILL_SOURCE_UNKNOWN", apierror.MsgAssistantVersionSkillSourceUnknown)
 	case errors.Is(err, service.ErrAssistantVersionInvalid):
+		// 该分支文案来自 service 校验链动态原因（err.Error()），无静态可译部分，保留原样。
 		c.JSON(http.StatusBadRequest, apierror.New("ASSISTANT_VERSION_INVALID", err.Error()))
 	case errors.Is(err, service.ErrSkillMarketUpstreamUnavailable):
 		// 上游技能市场（clawhub）下载失败且缓存未命中 → 502，区别于 manager 自身 500。
-		c.JSON(http.StatusBadGateway, apierror.New("UPSTREAM_UNAVAILABLE", "上游技能市场暂时不可用，请稍后重试"))
+		apierror.JSON(c, http.StatusBadGateway, "UPSTREAM_UNAVAILABLE", apierror.MsgAssistantVersionUpstreamUnavailable)
 	default:
-		c.JSON(http.StatusInternalServerError, apierror.New("INTERNAL", "操作助手版本失败"))
+		apierror.JSON(c, http.StatusInternalServerError, "INTERNAL", apierror.MsgAssistantVersionInternal)
 	}
 }
 
@@ -138,7 +140,7 @@ func (h *AssistantVersionsHandler) Get(c *gin.Context) {
 func (h *AssistantVersionsHandler) Create(c *gin.Context) {
 	var req CreateAssistantVersionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "请求体格式错误"))
+		apierror.JSON(c, http.StatusBadRequest, "INVALID_REQUEST", apierror.MsgAssistantVersionInvalidRequest)
 		return
 	}
 	out, err := h.service.Create(c.Request.Context(), principalFromCtx(c), service.AssistantVersionInput{
@@ -171,7 +173,7 @@ func (h *AssistantVersionsHandler) Create(c *gin.Context) {
 func (h *AssistantVersionsHandler) Update(c *gin.Context) {
 	var req UpdateAssistantVersionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "请求体格式错误"))
+		apierror.JSON(c, http.StatusBadRequest, "INVALID_REQUEST", apierror.MsgAssistantVersionInvalidRequest)
 		return
 	}
 	input := service.AssistantVersionInput{
@@ -228,7 +230,7 @@ func (h *AssistantVersionsHandler) Delete(c *gin.Context) {
 func (h *AssistantVersionsHandler) AddSkillFromLibrary(c *gin.Context) {
 	var req AddSkillFromLibraryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, apierror.New("INVALID_REQUEST", "请求体格式错误"))
+		apierror.JSON(c, http.StatusBadRequest, "INVALID_REQUEST", apierror.MsgAssistantVersionInvalidRequest)
 		return
 	}
 	out, err := h.service.AddSkillFromLibrary(c.Request.Context(), principalFromCtx(c), c.Param("id"), service.AddSkillFromLibraryInput{

@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/service"
@@ -306,5 +307,6 @@ func TestAVAddSkillFromLibraryMapsUpstreamUnavailable(t *testing.T) {
 	resp := httptest.NewRecorder()
 	router.ServeHTTP(resp, req)
 	require.Equal(t, http.StatusBadGateway, resp.Code)
-	assert.Contains(t, resp.Body.String(), "上游技能市场暂时不可用")
+	// 测试请求未经过 locale 中间件，LocaleFrom 回落默认 en；断言改走 Localize 以与 msgKey catalog 保持语义等价。
+	assert.Contains(t, resp.Body.String(), apierror.Localize(apierror.MsgAssistantVersionUpstreamUnavailable, apierror.LocaleFrom(nil)))
 }
