@@ -115,6 +115,26 @@ manager 与前端**零改动**。
   → SessionDB（5.16 已有）
 ```
 
+## 模块级 helper 依赖（真机验证补记，2026-06-25）
+
+会话 handler 除了 `db.*` / `self._*` 方法依赖外，还以**裸函数**调用两个 6.5
+**模块级**函数：`_handle_list_sessions` 调 `_coerce_request_bool`（解析
+`include_children` 布尔查询参数）、`_handle_session_chat[/stream]` 调
+`_session_chat_user_message`（解析 message/input）。这两个在 6.5 是模块级函数
+（非 `self.` 方法），5.16 上游缺失。最初仅按 `db.` / `self._` 模式扫描依赖，
+**漏掉裸函数调用** → 部署后 list/chat 路径运行时 `NameError` 500（单测用 fake
+api_server 测不出，构建期 fail-loud 也测不出，只有真机暴露）。
+
+**根治方法 = AST 传递闭包分析**：以会话块方法为种子，递归收集其引用的、在 6.5
+有模块级定义而 5.16 没有的名字（函数 + 常量），得到完整缺失集合：
+`_coerce_request_bool` + `_session_chat_user_message` + 两个 bool 字符串常量
+（`_TRUE/_FALSE_REQUEST_BOOL_STRINGS`）。其余传递依赖
+（`_content_has_visible_payload` / `_normalize_multimodal_content` /
+`_multimodal_validation_error` / `_openai_error`）5.16 原生已有。补丁因此新增
+**第 3 处注入 MODULE_HELPERS**：把这 4 个定义逐字注入到 `class APIServerAdapter`
+之前（**模块级**，不能进类体，否则裸调用解析不到）。fail-loud 加 MODULE_ANCHOR
+锚点。未来 6.5 会话块变更重新提取时，须同步重跑闭包分析确认模块级依赖集合。
+
 ## 风险与缓解
 
 - **唯一实质风险：`chat`/`chat_stream` 的 `_run_agent` 调用契约**。5.16 有
