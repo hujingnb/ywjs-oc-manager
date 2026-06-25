@@ -21,10 +21,10 @@ sys.path.insert(0, str(_PATCHES_DIR))
 import patch_api_server_sessions as _mod  # noqa: E402
 
 
-# 最小仿真 api_server.py：含两个锚点（路由末尾行 + HTTP Handlers 区块）。
-# 路由注册行 12 空格缩进，与 ROUTE_ANCHOR 一致。
+# 最小仿真 api_server.py：含三个锚点（模块级类定义行 + 路由末尾行 + HTTP Handlers 区块）。
+# 路由注册行 12 空格缩进，与 ROUTE_ANCHOR 一致；类定义行须与 MODULE_ANCHOR 逐字一致。
 _FAKE_API_SERVER = (
-    "class APIServerAdapter:\n"
+    "class APIServerAdapter(BasePlatformAdapter):\n"
     "\n"
     "    async def connect(self):\n"
     '            self._app.router.add_post("/v1/runs/{run_id}/stop", self._handle_stop_run)\n'
@@ -68,6 +68,34 @@ def test_handlers_before_http_handlers_section():
     # 会话块应插入到 HTTP Handlers 区块之前
     result = _mod.patch(_FAKE_API_SERVER)
     assert result.index("_handle_list_sessions") < result.index("# HTTP Handlers")
+
+
+def test_injects_module_level_helpers():
+    # 会话 handler 以裸函数调用的模块级 helper / 常量必须随补丁注入
+    result = _mod.patch(_FAKE_API_SERVER)
+    assert "def _coerce_request_bool(" in result, "应注入模块级 _coerce_request_bool"
+    assert "def _session_chat_user_message(" in result, "应注入模块级 _session_chat_user_message"
+    assert "_TRUE_REQUEST_BOOL_STRINGS" in result, "应注入 bool 字符串常量"
+    assert "_FALSE_REQUEST_BOOL_STRINGS" in result, "应注入 bool 字符串常量"
+
+
+def test_module_helpers_at_module_scope_before_class():
+    # 模块级 helper 必须在 class APIServerAdapter 之前、且为 0 缩进（模块级），
+    # 否则会变成类方法、裸调用解析不到 → 运行时 NameError。
+    result = _mod.patch(_FAKE_API_SERVER)
+    assert "\ndef _coerce_request_bool(" in result, "_coerce_request_bool 应为模块级（0 缩进）"
+    assert result.index("def _coerce_request_bool(") < result.index(
+        "class APIServerAdapter(BasePlatformAdapter):"
+    ), "模块级 helper 应注入在 APIServerAdapter 类定义之前"
+
+
+def test_raises_if_module_anchor_missing():
+    # 模块级锚点（class APIServerAdapter）缺失 → RuntimeError
+    bad = _FAKE_API_SERVER.replace(
+        "class APIServerAdapter(BasePlatformAdapter):", "class SomethingElse:"
+    )
+    with pytest.raises(RuntimeError, match="模块级锚点"):
+        _mod.patch(bad)
 
 
 def test_routes_after_stop_run_route():

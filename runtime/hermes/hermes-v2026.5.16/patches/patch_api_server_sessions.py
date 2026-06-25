@@ -8,12 +8,20 @@
      （5 个块内 helper + 9 个 _handle_*session* handler，含完整 chat_stream）
      与 _turn_transcript_messages classmethod。
   2. 在 connect() 路由注册块末尾追加 9 条 /api/sessions 路由。
+  3. 在 APIServerAdapter 类定义前插入 MODULE_HELPERS——会话 handler 以「裸函数」
+     调用的模块级 helper/常量（_coerce_request_bool + _session_chat_user_message
+     + 两个 bool 字符串常量）。这些在 6.5 是模块级函数（非 self. 方法），5.16
+     上游缺失；必须注入到模块级（不能进类体），否则裸调用解析不到 → 运行时
+     NameError（list/chat 路径 500）。
 
 SESSIONS_BLOCK 逐字提取自 6.5 api_server.py（会话块 L1267-1700 + classmethod
 _turn_transcript_messages L3364-3401），其依赖的 db.*、_check_auth/
 _ensure_session_db/_parse_session_key_header/_run_agent/
 _response_messages_turn_start_index 与模块级 web/asyncio/time/logger/json 在
-5.16 api_server.py 均已存在，故无需改 hermes_state。
+5.16 api_server.py 均已存在，故无需改 hermes_state。MODULE_HELPERS 的其余传递
+依赖（_content_has_visible_payload/_normalize_multimodal_content/
+_multimodal_validation_error/_openai_error）5.16 亦原生存在。缺失集合由 AST
+传递闭包分析确定（种子=会话块方法，闭包内 6.5 模块级有定义而 5.16 没有的名字）。
 
 端点鉴权沿用上游 api_server 自身的 _check_auth（与 6.5 行为一致）。
 """
@@ -535,9 +543,68 @@ HANDLER_ANCHOR = (
     "    # ------------------------------------------------------------------\n"
 )
 
+# --------------------------------------------------------------------------
+# 注入片段 3：会话 handler 依赖的「模块级」helper / 常量。
+# 会话块里的 _handle_list_sessions 以裸函数调用 _coerce_request_bool（解析
+# include_children 布尔查询参数）、_handle_session_chat[/stream] 以裸调用
+# _session_chat_user_message（解析 message/input）。这两个在 6.5 是模块级函数
+# （非 self. 方法），5.16 上游没有；其余传递依赖
+# （_content_has_visible_payload / _normalize_multimodal_content /
+# _multimodal_validation_error / _openai_error）5.16 已原生存在，无需注入。
+# 逐字提取自 6.5 api_server.py：常量 + _coerce_request_bool（L82-108）、
+# _session_chat_user_message（L323-334）。必须注入到「模块级」（class
+# APIServerAdapter 之前），否则会变成类方法、裸调用解析不到 → 运行时 NameError。
+# --------------------------------------------------------------------------
+MODULE_HELPERS = r'''
+_TRUE_REQUEST_BOOL_STRINGS = frozenset({"1", "true", "yes", "on"})
+_FALSE_REQUEST_BOOL_STRINGS = frozenset({"0", "false", "no", "off"})
+
+
+def _coerce_request_bool(value: Any, default: bool = False) -> bool:
+    """Normalize boolean-like API payload values.
+
+    External clients should send real JSON booleans, but some OpenAI-compatible
+    frontends and middleware serialize flags like ``stream`` as strings.  Using
+    Python truthiness on those values misroutes requests because ``"false"`` is
+    still truthy.  Treat only explicit bool-ish scalars as booleans; everything
+    else falls back to the caller's default.
+    """
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in _TRUE_REQUEST_BOOL_STRINGS:
+            return True
+        if normalized in _FALSE_REQUEST_BOOL_STRINGS:
+            return False
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return default
+
+
+def _session_chat_user_message(body: Dict[str, Any], *, param: str = "message") -> tuple[Any, Optional["web.Response"]]:
+    """Parse and normalize session chat ``message`` / ``input`` like chat completions."""
+    user_message = body.get("message") or body.get("input")
+    if not _content_has_visible_payload(user_message):
+        return None, web.json_response(
+            _openai_error("Missing 'message' field", code="missing_message"),
+            status=400,
+        )
+    try:
+        return _normalize_multimodal_content(user_message), None
+    except ValueError as exc:
+        return None, _multimodal_validation_error(exc, param=param)
+'''
+
+# 模块级锚点：APIServerAdapter 类定义行（在其之前插入 MODULE_HELPERS）
+MODULE_ANCHOR = "class APIServerAdapter(BasePlatformAdapter):\n"
+
 
 def patch(content: str) -> str:
-    # 校验两个锚点都存在，任一缺失则报错中断构建
+    # 校验三个锚点都存在，任一缺失则报错中断构建
     if HANDLER_ANCHOR not in content:
         raise RuntimeError(
             "patch_api_server_sessions: 找不到 HTTP Handlers 锚点——"
@@ -548,11 +615,18 @@ def patch(content: str) -> str:
             "patch_api_server_sessions: 找不到路由锚点（/v1/runs/{run_id}/stop）——"
             "上游 api_server.py 结构变更，请更新补丁脚本。"
         )
+    if MODULE_ANCHOR not in content:
+        raise RuntimeError(
+            "patch_api_server_sessions: 找不到模块级锚点（class APIServerAdapter）——"
+            "上游 api_server.py 结构变更，请更新补丁脚本。"
+        )
     # 幂等检查：已注入则跳过，避免重复执行累积
     if "_handle_list_sessions" in content:
         print("patch_api_server_sessions: 已注入，跳过。", flush=True)
         return content
 
+    # 插入模块级 helper（在 APIServerAdapter 类定义之前）
+    content = content.replace(MODULE_ANCHOR, MODULE_HELPERS + "\n\n" + MODULE_ANCHOR)
     # 插入会话块（在 HTTP Handlers 区块之前）
     content = content.replace(HANDLER_ANCHOR, SESSIONS_BLOCK + "\n" + HANDLER_ANCHOR)
     # 追加路由注册行（在最后一条路由之后）
