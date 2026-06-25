@@ -117,6 +117,7 @@ import { useI18n } from 'vue-i18n'
 import { NButton, NInput, NModal, NSpace, NTag, useMessage } from 'naive-ui'
 import * as api from '@/api/conversations'
 import type { ConversationSession } from '@/api/conversations'
+import { isDialogueMessage } from '@/domain/conversation'
 import ConversationMessageView from './ConversationMessageView.vue'
 
 // appId 由路由 props: true 注入，标识当前实例。
@@ -163,7 +164,10 @@ async function loadSessions() {
 async function selectSession(sid: string) {
   currentId.value = sid
   try {
-    messages.value = await api.listMessages(props.appId, sid)
+    // 只展示对话正文：过滤掉引擎的工具消息（role==='tool'）与仅含工具调用的空内容步骤，
+    // 详见 isDialogueMessage。后端透传全量消息，是否展示由查看页决定。
+    const all = await api.listMessages(props.appId, sid)
+    messages.value = all.filter(isDialogueMessage)
     await scrollToBottom()
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
