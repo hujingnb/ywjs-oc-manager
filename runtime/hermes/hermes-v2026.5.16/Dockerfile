@@ -124,11 +124,15 @@ RUN chmod +x /usr/local/bin/oc-entrypoint /usr/local/bin/oc-kb \
 #   4) patch_api_server_reload：给 hermes api_server 注入 POST /oc/skills/reload 端点
 #      （与 gateway 同进程），成功后 oc-ops 可 POST http://127.0.0.1:8642/oc/skills/reload
 #      触发免重启 skill 热加载。
+#   5) patch_api_server_sessions：给 hermes api_server 注入 /api/sessions 会话端点
+#      （list/create/get/patch/delete/messages/fork/chat/chat_stream，与 6.5 一致），
+#      使被 pin 到 5.16 的实例对话页可用；锚点缺失即 exit 1 让构建失败。
 RUN set -e; \
     python3 /usr/local/lib/oc-entrypoint/patches/merge_oc_locales.py; \
     python3 /usr/local/lib/oc-entrypoint/patches/patch_i18n_literals.py; \
     python3 /usr/local/lib/oc-entrypoint/patches/check_oc_i18n_consistency.py; \
-    python3 /usr/local/lib/oc-entrypoint/patches/patch_api_server_reload.py
+    python3 /usr/local/lib/oc-entrypoint/patches/patch_api_server_reload.py; \
+    python3 /usr/local/lib/oc-entrypoint/patches/patch_api_server_sessions.py
 
 # 镜像身份信息写到固定位置，供 oc-info 读取
 ARG OC_IMAGE_VARIANT
