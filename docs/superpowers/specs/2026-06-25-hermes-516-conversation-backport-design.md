@@ -30,14 +30,21 @@ manager 与前端**零改动**。
 | agent 续聊 `_run_agent` | 已存在（与 6.5 同 4 处） | 需构建后核对调用契约 |
 | api_server 4 个外部 helper：`_check_auth` `_ensure_session_db` `_parse_session_key_header` `_run_agent` | 全部已存在 | 现成可用 |
 | api_server `/api/sessions` 全套 handler + 路由（含块内自带 5 个 helper：`_parse_nonnegative_int` `_session_response` `_message_response` `_read_json_body` `_conversation_history_for_session`） | **完全缺失** | 需注入 |
+| chat/stream 用到的 classmethod helper `_turn_transcript_messages`（6.5 `api_server.py` L3364–3401，在会话块外）；其转依赖 `_response_messages_turn_start_index` | `_turn_transcript_messages` **缺失**；`_response_messages_turn_start_index` 5.16 **已有**（`@staticmethod`，签名与 6.5 一致） | `_turn_transcript_messages` 随会话块一并注入；链终止 |
 | oc-ops `ocops/conversation.py` 转发层 + `ocops/server.py` 路由 | **缺失** | 从 6.5 复制 |
 | manager 侧链路 | 版本无关，且会话解码已加固（commit a076419 `decodeListLenient`） | 不动 |
 
-**关键事实**：6.5 api_server 的会话特性是一段**自包含连续块**（约
-`api_server.py` 1267–1620，~354 行），其依赖的 `db.*` 在 5.16 全有、4 个外部
-helper 在 5.16 全有、块内另带 5 个 helper；且 6.5 handler **实测 0 次引用**那
-4 个 5.16 缺失的新 kwarg。因此移植**无需改 `hermes_state`、无需任何签名
-适配**，纯属把该块 + 9 行路由注入 5.16 的 `api_server.py`。
+**关键事实**：6.5 api_server 的会话特性主体是一段**自包含连续块**（
+`api_server.py` **1267–1700，~434 行**，含块尾的 `_handle_session_chat_stream`
+完整体），其依赖的 `db.*` 在 5.16 全有、4 个外部 helper（`_check_auth`/
+`_ensure_session_db`/`_parse_session_key_header`/`_run_agent`）在 5.16 全有、块内
+另带 5 个 helper；chat/stream 额外用到的 classmethod `_turn_transcript_messages`
+（6.5 L3364–3401，块外）需随块一并注入，其转依赖 `_response_messages_turn_start_index`
+在 5.16 已有（`@staticmethod`，签名一致），依赖链至此终止。模块级符号
+`web`/`asyncio`/`time`/`logger`/`json` 在 5.16 `api_server.py` 均已 import。且
+6.5 handler **实测 0 次引用**那 4 个 5.16 缺失的新 kwarg。因此移植**无需改
+`hermes_state`、无需任何签名适配**，纯属把会话块 + `_turn_transcript_messages`
++ 9 行路由注入 5.16 的 `api_server.py`。
 
 ## 方案
 
@@ -52,12 +59,14 @@ helper 在 5.16 全有、块内另带 5 个 helper；且 6.5 handler **实测 0 
 结构与现有 `patch_api_server_reload.py` 同款（同一锚点机制、fail-loud、幂等）：
 
 - **注入目标**：镜像内 `/usr/local/lib/hermes-agent/gateway/platforms/api_server.py`。
-- **注入内容（内嵌字符串常量）**：从 6.5 `api_server.py` 1267–1620 逐字提取的
-  会话块（5 个块内 helper + 9 个 `_handle_*session*` handler）；字符串常量头部
-  注释标注出处（`6.5 api_server.py L1267-1620`），便于未来 6.5 块变更时重新
+- **注入内容（内嵌字符串常量）**：从 6.5 `api_server.py` 逐字提取的两段——
+  ① 会话块 **L1267–1700**（5 个块内 helper + 9 个 `_handle_*session*` handler，
+  含完整 chat_stream 体）；② classmethod helper `_turn_transcript_messages`
+  **L3364–3401**。字符串常量头部注释标注出处行号，便于未来 6.5 块变更时重新
   提取覆盖。
 - **锚点**：复用现成的
-  - `HANDLER_ANCHOR`（`# HTTP Handlers` 区块）→ 在其前插入会话块；
+  - `HANDLER_ANCHOR`（`# HTTP Handlers` 区块）→ 在其前插入会话块 +
+    `_turn_transcript_messages`（两段拼接为同一注入字符串，均为类体方法缩进）；
   - `ROUTE_ANCHOR`（最后一条已有路由 `/v1/runs/{run_id}/stop`）→ 其后追加 9
     行 `add_get/add_post/add_patch/add_delete("/api/sessions...", self._handle_*)`
     路由注册。
