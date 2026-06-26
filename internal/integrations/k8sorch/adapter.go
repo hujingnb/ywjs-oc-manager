@@ -136,6 +136,36 @@ func (a *KubernetesAdapter) RolloutRestart(ctx context.Context, appID string) er
 	return wrapK8s("滚动重启 Deployment", err)
 }
 
+// PatchSecretKeys 对 app-<id>-token Secret 增删指定 key，不动其他 key。
+// set 写入/覆盖指定 key；del 删除指定 key。
+// 用于渠道绑定时增加 feishu-* 凭证 key、解绑时删除这些 key，
+// 同时保留 control-token 等已有 key 不受影响。
+// 用 retry.RetryOnConflict 处理 Get→Update 间控制器并发修改导致的乐观锁冲突（409 Conflict），
+// 每次重试重新 Get 最新版本再写入，避免并发场景下 resourceVersion 不一致导致更新失败。
+func (a *KubernetesAdapter) PatchSecretKeys(ctx context.Context, appID string, set map[string]string, del []string) error {
+	api := a.client.CoreV1().Secrets(a.namespace)
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		s, err := api.Get(ctx, secretName(appID), metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		if s.Data == nil {
+			s.Data = map[string][]byte{}
+		}
+		// 写入/覆盖指定 key（绑定场景：写入飞书凭证）
+		for k, v := range set {
+			s.Data[k] = []byte(v)
+		}
+		// 删除指定 key（解绑场景：移除飞书凭证）
+		for _, k := range del {
+			delete(s.Data, k)
+		}
+		_, uerr := api.Update(ctx, s, metav1.UpdateOptions{})
+		return uerr
+	})
+	return wrapK8s("patch Secret keys", err)
+}
+
 // Delete 删除三资源（NotFound 视为成功）。
 func (a *KubernetesAdapter) Delete(ctx context.Context, appID string) error {
 	del := metav1.DeleteOptions{}

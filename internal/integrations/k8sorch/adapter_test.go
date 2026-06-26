@@ -192,6 +192,38 @@ func TestIsTerminalBad(t *testing.T) {
 	}
 }
 
+// TestPatchSecretKeysSetAndDelete 验证按 key 增删 Secret 不影响其他 key（control-token 保留）。
+// 覆盖飞书渠道绑定（写入 feishu-* key）与解绑（删除 feishu-* key）两条路径，
+// 确保操作不会覆盖 Secret 中已有的 control-token 等无关 key。
+func TestPatchSecretKeysSetAndDelete(t *testing.T) {
+	// 预置已有 control-token 的 Secret，模拟 app 已创建后的真实状态。
+	client := fake.NewSimpleClientset(&corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: secretName("app-1"), Namespace: "oc-apps"},
+		Data:       map[string][]byte{"control-token": []byte("tok")},
+	})
+	a := &KubernetesAdapter{client: client, namespace: "oc-apps"}
+
+	// 增三个飞书 key（渠道绑定场景）：set 写入、del 为 nil。
+	err := a.PatchSecretKeys(context.Background(), "app-1",
+		map[string]string{"feishu-app-id": "cli_x", "feishu-app-secret": "sec", "feishu-domain": "feishu"}, nil)
+	require.NoError(t, err)
+	got, _ := client.CoreV1().Secrets("oc-apps").Get(context.Background(), secretName("app-1"), metav1.GetOptions{})
+	// 新 key 应写入
+	require.Equal(t, "cli_x", string(got.Data["feishu-app-id"]))
+	// control-token 不应被动：PatchSecretKeys 只改指定 key，不替换整个 Secret
+	require.Equal(t, "tok", string(got.Data["control-token"]), "control-token 不应被动")
+
+	// 删三个飞书 key（渠道解绑场景）：set 为 nil、del 传 key 列表。
+	require.NoError(t, a.PatchSecretKeys(context.Background(), "app-1", nil,
+		[]string{"feishu-app-id", "feishu-app-secret", "feishu-domain"}))
+	got2, _ := client.CoreV1().Secrets("oc-apps").Get(context.Background(), secretName("app-1"), metav1.GetOptions{})
+	// 飞书 key 应被删除
+	_, ok := got2.Data["feishu-app-id"]
+	require.False(t, ok)
+	// control-token 仍保留
+	require.Equal(t, "tok", string(got2.Data["control-token"]))
+}
+
 // TestRolloutRestartPatchesAnnotation 验证 RolloutRestart 给 pod template 写入 restartedAt 注解、不动镜像/副本。
 // 渠道绑定后重载 hermes platform 的等价 kubectl rollout restart 路径。
 func TestRolloutRestartPatchesAnnotation(t *testing.T) {
