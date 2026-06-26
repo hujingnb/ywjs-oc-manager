@@ -82,6 +82,49 @@ func (h *ChannelStartLoginHandler) Handle(ctx context.Context, job sqlc.Job) err
 			endpoint = ep
 		}
 	}
+	// 飞书分支：与微信「引擎自落盘」模式不同，按 mode 分流。
+	//  - manual：凭证已由 service（手填路径）写入 adapter/metadata，worker 无需出码，
+	//    直接进入 check（凭证注入在 check handler 完成）。
+	//  - scan：起 oc-ops SSE 取二维码，domain（feishu|lark）经 AuthInput.ChannelName 透传，
+	//    BeginAuth 拿到首个 qrcode 事件即返回，后台 goroutine 继续等扫码授权回填凭证。
+	if payload.ChannelType == domain.ChannelTypeFeishu {
+		if payload.Mode == "manual" {
+			return h.enqueueCheck(ctx, payload, 1*time.Second)
+		}
+		challenge, err := adapter.BeginAuth(ctx, channel.AuthInput{
+			AppID:       payload.AppID,
+			OwnerUserID: app.OwnerUserID,
+			ChannelName: payload.Domain,
+			Endpoint:    endpoint,
+		})
+		if err != nil {
+			_ = h.store.SetChannelBindingStatus(ctx, sqlc.SetChannelBindingStatusParams{
+				AppID:       binding.AppID,
+				ChannelType: binding.ChannelType,
+				Status:      domain.ChannelStatusFailed,
+				LastError:   null.StringFrom(redactlog.SafeErrorMessage(err)),
+			})
+			return fmt.Errorf("发起飞书扫码失败: %w", err)
+		}
+		meta, err := json.Marshal(map[string]any{
+			"type":        challenge.Type,
+			"qrcode":      challenge.QRCode,
+			"expires_at":  challenge.ExpiresAt,
+			"acquired_by": "qr",
+			"domain":      payload.Domain,
+		})
+		if err != nil {
+			return fmt.Errorf("序列化飞书二维码失败: %w", err)
+		}
+		if err := h.store.SetChannelBindingChallenge(ctx, sqlc.SetChannelBindingChallengeParams{
+			AppID:        binding.AppID,
+			ChannelType:  binding.ChannelType,
+			MetadataJson: meta,
+		}); err != nil {
+			return fmt.Errorf("保存飞书二维码失败: %w", err)
+		}
+		return h.enqueueCheck(ctx, payload, 5*time.Second)
+	}
 	challenge, err := adapter.BeginAuth(ctx, channel.AuthInput{
 		AppID:       payload.AppID,
 		OwnerUserID: app.OwnerUserID,
@@ -353,6 +396,10 @@ func (h *ChannelCheckBindingHandler) load(ctx context.Context, payload channelLo
 type channelLoginPayload struct {
 	AppID       string `json:"app_id"`
 	ChannelType string `json:"channel_type"`
+	// Mode 仅飞书使用：scan（扫码出码）| manual（手填凭证已就绪）。
+	Mode string `json:"mode,omitempty"`
+	// Domain 仅飞书使用：feishu | lark，决定 oc-ops 注册走哪个开放平台域。
+	Domain string `json:"domain,omitempty"`
 }
 
 func decodeChannelLoginPayload(raw []byte) (channelLoginPayload, error) {

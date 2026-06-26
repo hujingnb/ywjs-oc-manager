@@ -283,6 +283,76 @@ func TestChannelCheckBindingHandlerSkipsResolverFallbackWithoutResolver(t *testi
 	require.Equal(t, domain.ChannelStatusPendingAuth, store.binding.Status)
 }
 
+// workerFakeFeishuRunner 是 channel.FeishuRegisterRunner 的 worker 包内测试实现：
+// 一次性把预置事件塞入 channel 后立即 close，模拟 oc-ops 飞书扫码注册 SSE 事件流。
+// 之所以在 worker 测试里单独定义（而非复用 channel 包测试里的同名 fake），是因为
+// 那个定义在 channel 包的 _test.go 内，跨包不可见；这里仅需 qrcode 事件即可驱动
+// FeishuAdapter.BeginAuth 拿到二维码返回。
+type workerFakeFeishuRunner struct{ events []ocops.FeishuRegisterEvent }
+
+// StreamFeishuRegister 返回携带预置事件的只读 channel；缓冲容量等于事件数，
+// 确保塞入不阻塞，close 后 adapter 既能读到 qrcode 也能让后台 goroutine 读完剩余事件。
+func (r *workerFakeFeishuRunner) StreamFeishuRegister(_ context.Context, _ channel.AuthInput, _ string) (<-chan ocops.FeishuRegisterEvent, error) {
+	ch := make(chan ocops.FeishuRegisterEvent, len(r.events))
+	for _, e := range r.events {
+		ch <- e
+	}
+	close(ch)
+	return ch, nil
+}
+
+// feishuStartJob 构造一条飞书 channel_start_login job，payload 含 app_id /
+// channel_type=feishu / mode（scan|manual）/ domain（feishu|lark）。
+func feishuStartJob(t *testing.T, mode, feishuDomain string) sqlc.Job {
+	t.Helper()
+	payload := `{"app_id":"` + testChannelWorkerAppID + `","channel_type":"feishu","mode":"` + mode + `","domain":"` + feishuDomain + `"}`
+	return sqlc.Job{Type: domain.JobTypeChannelStartLogin, PayloadJson: []byte(payload)}
+}
+
+// newFeishuWorkerStore 复用 channelWorkerStore，但把绑定渠道改为 feishu，
+// 否则 GetChannelBindingByAppAndType 因 ChannelType 不匹配返回 ErrNoRows。
+func newFeishuWorkerStore(t *testing.T) *channelWorkerStore {
+	store := newChannelWorkerStore(t)
+	store.binding.ChannelType = domain.ChannelTypeFeishu
+	return store
+}
+
+// TestChannelStartLoginFeishuScanSavesQR 验证飞书扫码：BeginAuth 拿到二维码后
+// 把二维码 metadata 写入 channel_binding，并入队 channel_check_binding。
+func TestChannelStartLoginFeishuScanSavesQR(t *testing.T) {
+	store := newFeishuWorkerStore(t)
+	registry := channel.NewRegistry()
+	registry.MustRegister(channel.NewFeishuAdapter(&workerFakeFeishuRunner{events: []ocops.FeishuRegisterEvent{
+		{Event: "qrcode", URL: "https://open.feishu.cn/qr/x"},
+	}}))
+	handler := NewChannelStartLoginHandler(store, registry, nil)
+
+	err := handler.Handle(context.Background(), feishuStartJob(t, "scan", "feishu"))
+	require.NoError(t, err)
+	// 二维码 URL 应写入 challenge metadata，供前端 PollAuth 展示。
+	require.Contains(t, string(store.binding.MetadataJson), "open.feishu.cn/qr/x")
+	require.Equal(t, domain.ChannelStatusPendingAuth, store.binding.Status)
+	// 扫码后应入队一条 check 任务，进入轮询绑定阶段。
+	require.Len(t, store.jobs, 1)
+	require.Equal(t, domain.JobTypeChannelCheckBinding, store.jobs[0].Type)
+}
+
+// TestChannelStartLoginFeishuManualEnqueuesCheck 验证手填：凭证已由 service 写入
+// metadata，worker 不调 SSE、不出码，直接入队 check（注入阶段在 check handler 做）。
+func TestChannelStartLoginFeishuManualEnqueuesCheck(t *testing.T) {
+	store := newFeishuWorkerStore(t)
+	registry := channel.NewRegistry()
+	// manual 模式不消费 runner，传 nil 即可。
+	registry.MustRegister(channel.NewFeishuAdapter(nil))
+	handler := NewChannelStartLoginHandler(store, registry, nil)
+
+	err := handler.Handle(context.Background(), feishuStartJob(t, "manual", "feishu"))
+	require.NoError(t, err)
+	// 手填路径不出码，仅入队一条 check 任务。
+	require.Len(t, store.jobs, 1)
+	require.Equal(t, domain.JobTypeChannelCheckBinding, store.jobs[0].Type)
+}
+
 type workerFakeChannelAdapter struct {
 	challenge channel.AuthChallenge
 	progress  channel.AuthProgress
