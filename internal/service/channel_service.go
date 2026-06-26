@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/guregu/null/v5"
@@ -21,6 +22,10 @@ type ChannelStore interface {
 	GetApp(ctx context.Context, id string) (sqlc.App, error)
 	GetChannelBindingByAppAndType(ctx context.Context, arg sqlc.GetChannelBindingByAppAndTypeParams) (sqlc.ChannelBinding, error)
 	SetChannelBindingStatus(ctx context.Context, arg sqlc.SetChannelBindingStatusParams) error
+	// UpsertChannelBindingUnbound 为飞书 create-on-demand 建绑定行（已存在则 no-op）。
+	UpsertChannelBindingUnbound(ctx context.Context, arg sqlc.UpsertChannelBindingUnboundParams) error
+	// SetFeishuCredentials 写入飞书凭证 metadata 并置状态（手填阶段含 secret 密文）。
+	SetFeishuCredentials(ctx context.Context, arg sqlc.SetFeishuCredentialsParams) error
 	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) error
 	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) error
 }
@@ -30,6 +35,9 @@ type ChannelService struct {
 	store    ChannelStore
 	registry *channel.Registry
 	notifier JobNotifier
+	// cipher 用于加密飞书手填的 app_secret 后入库；扫码模式与微信渠道不依赖它。
+	// 经 SetCipher 注入，复用 manager 进程内同一份 master_key 的 Cipher 实例。
+	cipher *auth.Cipher
 }
 
 // NewChannelService 创建 service。
@@ -39,6 +47,12 @@ func NewChannelService(store ChannelStore, registry *channel.Registry, notifier 
 		n = notifier[0]
 	}
 	return &ChannelService{store: store, registry: registry, notifier: n}
+}
+
+// SetCipher 注入加密原语。飞书手填模式需要它加密 app_secret；
+// 与构造分离是为了避免给已用 variadic notifier 的构造再塞一个可选参数，保持调用点清晰。
+func (s *ChannelService) SetCipher(cipher *auth.Cipher) {
+	s.cipher = cipher
 }
 
 // ChallengeResult 是 BeginAuth 对外返回的视图。
@@ -164,6 +178,116 @@ func (s *ChannelService) BeginAuth(ctx context.Context, principal auth.Principal
 	}, nil
 }
 
+// FeishuAuthInput 是飞书发起的 service 入参（与 handler 的 FeishuChannelAuthRequest 对应）。
+type FeishuAuthInput struct {
+	// Mode 是发起模式：scan 扫码自动创建、manual 手填兜底。
+	Mode string
+	// Domain 是飞书域：feishu | lark，空值回退 feishu。
+	Domain string
+	// AppID 是飞书自建应用 App ID，manual 模式必填。
+	AppID string
+	// AppSecret 是飞书自建应用 App Secret，manual 模式必填，加密后写入 metadata。
+	AppSecret string
+}
+
+// BeginFeishuAuth 是飞书双模式发起入口（与微信 BeginAuth 并列，handler 按渠道分流）。
+// 飞书无预建绑定行，先 create-on-demand；manual 模式加密 secret 后写凭证 metadata，
+// scan 模式仅写 domain 占位（凭证由 worker 经 adapter 取得）；两模式都入队
+// channel_start_login job，worker 按 payload.mode 区分推进阶段。
+func (s *ChannelService) BeginFeishuAuth(ctx context.Context, principal auth.Principal, appID string, in FeishuAuthInput) (ChallengeResult, error) {
+	app, err := s.loadManageableApp(ctx, principal, appID)
+	if err != nil {
+		return ChallengeResult{}, err
+	}
+	if s.registry == nil {
+		return ChallengeResult{}, ErrChannelAdapterMissing
+	}
+	if _, err := s.registry.Lookup(domain.ChannelTypeFeishu); err != nil {
+		return ChallengeResult{}, fmt.Errorf("%w: %s", ErrChannelAdapterMissing, domain.ChannelTypeFeishu)
+	}
+	// create-on-demand：飞书绑定行不在实例创建时预建，发起时按需建立（已存在 no-op）。
+	if err := s.store.UpsertChannelBindingUnbound(ctx, sqlc.UpsertChannelBindingUnboundParams{
+		ID:          newUUID(),
+		AppID:       app.ID,
+		ChannelType: domain.ChannelTypeFeishu,
+	}); err != nil {
+		return ChallengeResult{}, fmt.Errorf("创建飞书绑定行失败: %w", err)
+	}
+	feishuDomain := in.Domain
+	if feishuDomain == "" {
+		feishuDomain = "feishu"
+	}
+	var meta map[string]any
+	if in.Mode == "manual" {
+		// 手填兜底：app_id/app_secret 必填，secret 加密入库，明文绝不落 metadata。
+		if in.AppID == "" || in.AppSecret == "" {
+			return ChallengeResult{}, ErrInvalidChannelCredential
+		}
+		if s.cipher == nil {
+			return ChallengeResult{}, fmt.Errorf("飞书 secret 加密器未配置")
+		}
+		enc, err := s.cipher.Encrypt([]byte(in.AppSecret))
+		if err != nil {
+			return ChallengeResult{}, fmt.Errorf("加密飞书 secret 失败: %w", err)
+		}
+		meta = map[string]any{
+			"app_id":                in.AppID,
+			"app_secret_ciphertext": enc,
+			"domain":                feishuDomain,
+			"acquired_by":           "manual",
+			"injected":              "false",
+		}
+	} else {
+		// 扫码自动创建：此刻尚无凭证，仅暂存 domain，worker 经 adapter 取二维码/凭证。
+		meta = map[string]any{
+			"domain":      feishuDomain,
+			"acquired_by": "qr",
+			"injected":    "false",
+		}
+	}
+	metaJSON, err := json.Marshal(meta)
+	if err != nil {
+		return ChallengeResult{}, fmt.Errorf("序列化飞书 metadata 失败: %w", err)
+	}
+	if err := s.store.SetFeishuCredentials(ctx, sqlc.SetFeishuCredentialsParams{
+		MetadataJson: metaJSON,
+		Status:       domain.ChannelStatusPendingAuth,
+		AppID:        app.ID,
+	}); err != nil {
+		return ChallengeResult{}, fmt.Errorf("写入飞书凭证失败: %w", err)
+	}
+	// 入队 channel_start_login：payload 带 mode/domain，worker 据此分流扫码或手填注册。
+	payload, err := json.Marshal(map[string]any{
+		"app_id":       app.ID,
+		"channel_type": domain.ChannelTypeFeishu,
+		"mode":         in.Mode,
+		"domain":       feishuDomain,
+		"requested_by": principal.UserID,
+	})
+	if err != nil {
+		return ChallengeResult{}, fmt.Errorf("序列化飞书登录任务失败: %w", err)
+	}
+	jobID := newUUID()
+	if err := s.store.CreateJob(ctx, sqlc.CreateJobParams{
+		ID:          jobID,
+		Type:        domain.JobTypeChannelStartLogin,
+		Priority:    90,
+		RunAfter:    time.Now(),
+		MaxAttempts: 3,
+		PayloadJson: payload,
+	}); err != nil {
+		return ChallengeResult{}, fmt.Errorf("创建飞书登录任务失败: %w", err)
+	}
+	if s.notifier != nil {
+		_ = s.notifier.Enqueue(ctx, jobID)
+	}
+	return ChallengeResult{
+		Status:      domain.ChannelStatusPendingAuth,
+		ChannelType: domain.ChannelTypeFeishu,
+		JobID:       jobID,
+	}, nil
+}
+
 // PollAuth 查询登录进度。真实状态推进由 channel_check_binding worker 完成；
 // 这里只读取 DB 中的 channel_bindings，保证轮询接口轻量且可恢复。
 func (s *ChannelService) PollAuth(ctx context.Context, principal auth.Principal, appID, channelType string) (ProgressResult, error) {
@@ -271,6 +395,10 @@ func channelBindingMetadata(raw []byte) map[string]string {
 	}
 	metadata := make(map[string]string, len(data))
 	for key, value := range data {
+		// 过滤密文 / secret 类敏感字段，不得透传前端（如飞书 app_secret_ciphertext）。
+		if strings.Contains(key, "ciphertext") || strings.Contains(strings.ToLower(key), "secret") {
+			continue
+		}
 		switch v := value.(type) {
 		case string:
 			metadata[key] = v

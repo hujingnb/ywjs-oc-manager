@@ -164,6 +164,71 @@ func TestChannelServiceUnbindPlatformAdminForbidden(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
+// TestChannelServiceBeginAuthFeishuManualCreatesBinding 验证飞书手填：
+// 无绑定行时 create-on-demand，secret 加密写 metadata，并入队 channel_start_login job。
+func TestChannelServiceBeginAuthFeishuManualCreatesBinding(t *testing.T) {
+	store := newChannelStub(t)
+	store.bindingMissing = true // GetChannelBindingByAppAndType 首次返回 ErrNoRows
+	registry := channel.NewRegistry()
+	registry.MustRegister(channel.NewFeishuAdapter(nil))
+	svc := NewChannelService(store, registry)
+	svc.SetCipher(newRuntimeTokenTestCipher(t)) // manual 模式需 cipher 加密 secret
+	req := FeishuAuthInput{Mode: "manual", AppID: "cli_x", AppSecret: "sec", Domain: "feishu"}
+
+	res, err := svc.BeginFeishuAuth(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, req)
+	require.NoError(t, err)
+	require.NotEmpty(t, res.JobID)
+	require.True(t, store.upsertCalled, "应 create-on-demand 绑定行")
+	require.NotEmpty(t, store.feishuMeta, "应写入飞书 metadata")
+	require.NotContains(t, string(store.feishuMeta), "\"sec\"", "secret 必须加密，不得明文出现")
+	require.Len(t, store.jobs, 1)
+	require.Equal(t, domain.JobTypeChannelStartLogin, store.jobs[0].Type)
+}
+
+// TestChannelServiceBeginAuthFeishuScanCreatesBinding 验证飞书扫码：
+// create-on-demand 绑定行、metadata 不含凭证、入队 job，且无需 cipher。
+func TestChannelServiceBeginAuthFeishuScanCreatesBinding(t *testing.T) {
+	store := newChannelStub(t)
+	store.bindingMissing = true
+	registry := channel.NewRegistry()
+	registry.MustRegister(channel.NewFeishuAdapter(nil))
+	svc := NewChannelService(store, registry)
+
+	res, err := svc.BeginFeishuAuth(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, FeishuAuthInput{Mode: "scan", Domain: "lark"})
+	require.NoError(t, err)
+	require.NotEmpty(t, res.JobID)
+	require.True(t, store.upsertCalled)
+	require.NotContains(t, string(store.feishuMeta), "ciphertext", "扫码阶段尚无凭证")
+	require.Len(t, store.jobs, 1)
+}
+
+// TestChannelServiceBeginAuthFeishuManualMissingCredential 验证手填缺 app_id/secret 时拒绝。
+func TestChannelServiceBeginAuthFeishuManualMissingCredential(t *testing.T) {
+	store := newChannelStub(t)
+	store.bindingMissing = true
+	registry := channel.NewRegistry()
+	registry.MustRegister(channel.NewFeishuAdapter(nil))
+	svc := NewChannelService(store, registry)
+	svc.SetCipher(newRuntimeTokenTestCipher(t))
+
+	_, err := svc.BeginFeishuAuth(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, FeishuAuthInput{Mode: "manual", AppID: "cli_x"})
+	require.ErrorIs(t, err, ErrInvalidChannelCredential)
+}
+
+// TestChannelServicePollAuthRedactsSecret 验证 PollAuth 不把 *_ciphertext 透传前端。
+func TestChannelServicePollAuthRedactsSecret(t *testing.T) {
+	store := newChannelStub(t)
+	store.binding.ChannelType = domain.ChannelTypeFeishu
+	store.binding.MetadataJson = []byte(`{"app_id":"cli_x","app_secret_ciphertext":"ENC","domain":"feishu"}`)
+	svc := NewChannelService(store, channel.NewRegistry())
+
+	p, err := svc.PollAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeFeishu)
+	require.NoError(t, err)
+	require.Equal(t, "cli_x", p.Metadata["app_id"])
+	_, leaked := p.Metadata["app_secret_ciphertext"]
+	require.False(t, leaked, "secret 密文不得透传前端")
+}
+
 type fakeAdapter struct {
 	challenge channel.AuthChallenge
 	progress  channel.AuthProgress
@@ -189,6 +254,13 @@ type channelStub struct {
 	appStatusSet  bool
 	lastAppStatus string
 	appStatusErr  error
+	// bindingMissing 为 true 时 GetChannelBindingByAppAndType 返回 ErrNoRows，
+	// 用于模拟飞书 create-on-demand 场景下绑定行尚未建立。
+	bindingMissing bool
+	// upsertCalled 记录是否调用过 UpsertChannelBindingUnbound（create-on-demand）。
+	upsertCalled bool
+	// feishuMeta 记录 SetFeishuCredentials 写入的 metadata，用于断言 secret 已加密。
+	feishuMeta []byte
 }
 
 func newChannelStub(t *testing.T) *channelStub {
@@ -216,10 +288,27 @@ func (s *channelStub) GetApp(_ context.Context, id string) (sqlc.App, error) {
 }
 
 func (s *channelStub) GetChannelBindingByAppAndType(_ context.Context, arg sqlc.GetChannelBindingByAppAndTypeParams) (sqlc.ChannelBinding, error) {
+	if s.bindingMissing {
+		return sqlc.ChannelBinding{}, sql.ErrNoRows
+	}
 	if arg.AppID != s.binding.AppID || arg.ChannelType != s.binding.ChannelType {
 		return sqlc.ChannelBinding{}, sql.ErrNoRows
 	}
 	return s.binding, nil
+}
+
+// UpsertChannelBindingUnbound 记录 create-on-demand 调用，供飞书发起断言。
+func (s *channelStub) UpsertChannelBindingUnbound(_ context.Context, _ sqlc.UpsertChannelBindingUnboundParams) error {
+	s.upsertCalled = true
+	return nil
+}
+
+// SetFeishuCredentials 记录飞书凭证 metadata 与状态，供加密/过滤断言。
+func (s *channelStub) SetFeishuCredentials(_ context.Context, arg sqlc.SetFeishuCredentialsParams) error {
+	s.feishuMeta = arg.MetadataJson
+	s.binding.MetadataJson = arg.MetadataJson
+	s.binding.Status = arg.Status
+	return nil
 }
 
 func (s *channelStub) SetChannelBindingChallenge(_ context.Context, arg sqlc.SetChannelBindingChallengeParams) error {

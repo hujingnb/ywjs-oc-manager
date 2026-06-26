@@ -251,6 +251,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 
 	channelRegistry := channel.NewRegistry()
 	channelService := service.NewChannelService(dbStore.Queries, channelRegistry, redisQueue)
+	// 飞书手填模式需加密 app_secret 后入库，复用进程内同一份 master_key 的 cipher。
+	channelService.SetCipher(cipher)
 	// 微信扫码登录走 oc-ops HTTP SSE：runner 持 ocopsClient（满足 hermes.ChannelLoginStreamer），
 	// 每次登录按 AuthInput.Endpoint（worker 经 ocopsResolver 解析后注入）路由到目标实例。
 	wechatRunner := channel.NewDockerCommandRunner(ocopsClient)

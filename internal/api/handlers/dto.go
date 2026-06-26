@@ -146,6 +146,18 @@ type OnboardMemberRequest struct {
 	VersionID string `json:"version_id" binding:"required"`
 }
 
+// FeishuChannelAuthRequest 是飞书渠道发起请求体（扫码 mode=scan 无需凭证；手填 mode=manual 带凭证）。
+type FeishuChannelAuthRequest struct {
+	// Mode 是发起模式：scan 扫码自动创建、manual 手填兜底。
+	Mode string `json:"mode" binding:"required,oneof=scan manual"`
+	// Domain 是飞书域：feishu | lark，默认 feishu。
+	Domain string `json:"domain"`
+	// AppID 是飞书自建应用 App ID，manual 模式必填。
+	AppID string `json:"app_id"`
+	// AppSecret 是飞书自建应用 App Secret，manual 模式必填，加密后入库。
+	AppSecret string `json:"app_secret"`
+}
+
 // CreateMemberAppRequest 为已有成员创建新实例的请求体。
 // k8s 模型下不需要指定节点，pod 落点由调度器决定。
 type CreateMemberAppRequest struct {
