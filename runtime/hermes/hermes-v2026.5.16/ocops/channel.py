@@ -11,6 +11,7 @@ import io
 import shutil
 from pathlib import Path
 
+from ocops.conversation import _API_BASE, _api_server_key
 from ocops.errors import OpsError
 
 # 二维码 URL 前缀：hermes 上游 qr_login 把扫码 URL print 到 stdout，所有
@@ -27,14 +28,20 @@ _WEIXIN_ACCOUNT_SIDECAR_SUFFIXES = (".context-tokens.json", ".sync.json")
 
 
 def channel_status(channel: str, data_root: Path) -> dict:
-    """查询渠道绑定态；当前仅支持 weixin，未知 channel 抛 BAD_REQUEST。
+    """查询渠道绑定态：weixin 走 accounts 文件态，feishu 走 api_server /health/detailed。
 
-    返回结构：
+    weixin 返回结构：
       - 未绑定：{"channel": "weixin", "bound": False}
       - 已绑定：{"channel": "weixin", "bound": True, "account_id": "<id>"}
     account_id 取 accounts/<id>.json 文件名去掉 .json 后缀；
     同一目录下只取第一个（当前单账号绑定语义）。
+
+    feishu 没有本地账号文件（凭证经环境变量注入引擎），其「是否绑定」只能由
+    引擎实际连接结果判定，故委托 _feishu_status 读运行态。未知 channel 抛 BAD_REQUEST。
     """
+    if channel == "feishu":
+        # 飞书绑定态以引擎运行态为准，不查本地文件。
+        return _feishu_status()
     if channel != "weixin":
         raise OpsError("BAD_REQUEST", f"unknown channel: {channel}")
     accounts_dir = data_root / "weixin" / "accounts"
@@ -52,6 +59,69 @@ def channel_status(channel: str, data_root: Path) -> dict:
                 "account_id": entry.name[: -len(".json")]}
     # 目录存在但无账号文件：视为未绑定。
     return {"channel": "weixin", "bound": False}
+
+
+def _feishu_status() -> dict:
+    """读 hermes api_server /health/detailed 的 platforms.feishu 运行态，映射为渠道绑定态。
+
+    引擎把各渠道运行态写入 runtime status 的 platforms.<name> 下，字段为
+    state / error_code / error_message（见引擎 gateway/status.py write_runtime_status），
+    api_server /health/detailed 原样透出该 platforms 字典（见引擎
+    gateway/platforms/api_server.py _handle_health_detailed）。注意引擎里键名是
+    state 而非 platform_state，本函数读 state、对外仍以 platform_state 暴露给 manager
+    以稳定渠道契约。映射规则：
+      - state == "connected" → bound=True（已成功连上飞书开放平台）
+      - state == "fatal"     → bound=False，携带 error_code / error_message 供前端展示原因
+      - 其他（connecting / retrying / disconnected / 字段缺失）→ bound=False，pending 态
+
+    引擎 runtime status 不写 bot_open_id，故 bound 态下 bot_open_id 多为空串（best-effort）。
+    api_server 不可达或响应非 JSON 时抛 INTERNAL，由上层映射为 HTTP 5xx。
+    """
+    import json as _json
+    import urllib.request as _u
+
+    # 复用 conversation 的 api_server 回环地址与 Bearer key 来源，避免硬编码与重复取 key 逻辑。
+    req = _u.Request(_API_BASE + "/health/detailed", method="GET")
+    key = _api_server_key()
+    if key:
+        # /health/detailed 本身不鉴权，但带上 key 与其它转发保持一致、无副作用。
+        req.add_header("Authorization", "Bearer " + key)
+    try:
+        with _u.urlopen(req, timeout=10) as resp:
+            data = _json.loads(resp.read().decode("utf-8"))
+    except Exception as e:  # noqa: BLE001 - 网络/解析失败统一映射为 INTERNAL
+        raise OpsError("INTERNAL", f"查询 /health/detailed 失败: {e}")
+    fe = (data.get("platforms") or {}).get("feishu") or {}
+    # 引擎字段为 state；缺失时视为尚未连接。
+    state = fe.get("state", "")
+    if state == "connected":
+        return {"channel": "feishu", "bound": True, "platform_state": state,
+                "bot_open_id": fe.get("bot_open_id", "")}
+    if state == "fatal":
+        return {"channel": "feishu", "bound": False, "platform_state": state,
+                "error_code": fe.get("error_code", "") or "",
+                "error_message": fe.get("error_message", "") or ""}
+    # connecting / retrying / disconnected / 字段缺失：统一归为「连接中」待定态。
+    return {"channel": "feishu", "bound": False, "platform_state": state or "connecting"}
+
+
+def feishu_probe(app_id: str, app_secret: str, domain: str = "feishu") -> dict:
+    """手填模式即时校验飞书凭证：返回 {"ok": bool, "bot_name": str|None, "bot_open_id": str|None}。
+
+    驱动引擎 gateway.platforms.feishu.probe_bot（内部走 /open-apis/bot/v3/info）。
+    SDK 不可用或凭证无效返回 ok=False，不抛异常——校验失败属正常业务结果，不应 500。
+    """
+    try:
+        from gateway.platforms.feishu import probe_bot
+    except ImportError:
+        return {"ok": False, "bot_name": None, "bot_open_id": None}
+    try:
+        info = probe_bot(app_id, app_secret, domain)
+    except Exception:  # noqa: BLE001 - 凭证无效/网络异常一律视为校验未通过
+        info = None
+    if not info:
+        return {"ok": False, "bot_name": None, "bot_open_id": None}
+    return {"ok": True, "bot_name": info.get("bot_name"), "bot_open_id": info.get("bot_open_id")}
 
 
 def channel_unbind(channel: str, data_root: Path) -> dict:
