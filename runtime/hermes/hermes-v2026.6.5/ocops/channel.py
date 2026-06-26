@@ -181,3 +181,81 @@ async def channel_login(channel: str):
         return
     # 凭证 truthy：登录成功，凭证已由 qr_login 落盘到 /opt/data/weixin/accounts/。
     yield {"event": "bound"}
+
+
+async def feishu_register(domain: str = "feishu"):
+    """飞书扫码自动创建的 async 事件流：先 yield qrcode，最后 yield credentials/failed。
+
+    驱动 hermes 引擎 gateway.platforms.feishu 的设备码注册函数：
+      _begin_registration(domain) -> {device_code, qr_url, interval, expire_in}
+      _poll_registration(device_code, interval, expire_in, domain) -> {app_id, app_secret, domain, open_id} | None
+
+    事件序列：
+      - 引擎 SDK 不可用 → {"event":"failed","reason":...}
+      - 正常 → {"event":"qrcode","url":...} 然后
+               {"event":"credentials","app_id":...,"app_secret":...,"domain":...,
+                "bot_name":...,"bot_open_id":...}
+      - 扫码超时/拒绝 → {"event":"failed","reason":"registration timeout or denied"}
+
+    刻意不抛异常：所有失败降级为 failed 事件，让上层 SSE 端点优雅收尾。
+    凭证（含 app_secret）经此 SSE 在 oc-ops↔manager 内网鉴权通道回传，由 manager 落库即加密。
+    """
+    try:
+        from gateway.platforms.feishu import (
+            _begin_registration,
+            _poll_registration,
+            probe_bot,
+        )
+    except ImportError as e:
+        yield {"event": "failed", "reason": f"hermes feishu SDK not available: {e}"}
+        return
+
+    loop = asyncio.get_event_loop()
+    try:
+        begin = await loop.run_in_executor(None, _begin_registration, domain)
+    except Exception as e:  # noqa: BLE001 - 注册启动失败降级为 failed
+        yield {"event": "failed", "reason": f"begin registration failed: {e}"}
+        return
+
+    # 先把二维码 URL 发给前端展示。
+    yield {"event": "qrcode", "url": begin.get("qr_url", "")}
+
+    # 阻塞轮询（在线程池里跑，避免堵事件循环），直到扫码成功/超时。
+    def _poll():
+        return _poll_registration(
+            device_code=begin["device_code"],
+            interval=begin.get("interval", 5),
+            expire_in=begin.get("expire_in", 600),
+            domain=domain,
+        )
+
+    try:
+        result = await loop.run_in_executor(None, _poll)
+    except Exception as e:  # noqa: BLE001
+        yield {"event": "failed", "reason": f"poll registration failed: {e}"}
+        return
+
+    if not result or not result.get("app_id") or not result.get("app_secret"):
+        yield {"event": "failed", "reason": "registration timeout or denied"}
+        return
+
+    # best-effort 探测 bot 名/open_id（失败不影响凭证回传）。
+    bot_name, bot_open_id = None, None
+    try:
+        info = await loop.run_in_executor(
+            None, probe_bot, result["app_id"], result["app_secret"], result.get("domain", domain)
+        )
+        if info:
+            bot_name = info.get("bot_name")
+            bot_open_id = info.get("bot_open_id")
+    except Exception:  # noqa: BLE001 - 探测失败忽略
+        pass
+
+    yield {
+        "event": "credentials",
+        "app_id": result["app_id"],
+        "app_secret": result["app_secret"],
+        "domain": result.get("domain", domain),
+        "bot_name": bot_name,
+        "bot_open_id": bot_open_id,
+    }
