@@ -62,6 +62,12 @@ RUN mkdir -p /root/.local/bin && \
 RUN uv pip install --python /usr/local/lib/hermes-agent/venv/bin/python --no-cache-dir \
       aiohttp cryptography qrcode
 
+# 显式预装 feishu / lark platform 必需依赖（容器启动即 ready，不允许运行时 lazy install）。
+# 引擎 gateway/platforms/feishu.py 长连接走 lark_oapi + websockets；扫码注册用 urllib 不依赖 SDK，
+# 但实际 WebSocket 运行必须有这两个包，否则飞书平台起不来（线上 pod 出网受限时 lazy 装会失败）。
+RUN uv pip install --python /usr/local/lib/hermes-agent/venv/bin/python --no-cache-dir \
+      lark-oapi==1.5.3 websockets
+
 # oc-entrypoint Python 依赖：pyyaml 用于 manifest 解析；pytest 用于镜像构建期自检；
 # jsonschema 校验 manifest/契约。
 # 末尾的构建期自检（python -m pytest）用 system python 跑，因此 ocops server/SSE
