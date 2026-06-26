@@ -64,6 +64,9 @@ vi.mock('@/api/hooks/useChannel', async (importOriginal) => {
       observedChannelTypes.push(channelTypeRef.value)
       return { mutateAsync: unbindChannel }
     },
+    // 飞书发起 hook 仅接收 appId，内部调用 useQueryClient；测试环境无 VueQueryPlugin，
+    // 故以桩替换避免真实初始化报错。飞书面板默认不渲染（默认选中微信），mutateAsync 不会被触发。
+    useBeginFeishuAuth: () => ({ mutateAsync: vi.fn() }),
   }
 })
 
@@ -115,34 +118,40 @@ describe('AppChannelsTab', () => {
       expect.stringContaining('Line'),
     ])
 
+    // 当前已支持渠道为微信 + 飞书共 2 个；两者均展示「已支持」且可点击进入详情。
     const supported = wrapper.findAll('.channel-list-item.supported')
-    expect(supported).toHaveLength(1)
-    expect(supported[0].text()).toContain('已支持')
-    expect(supported[0].text()).toContain('微信')
+    expect(supported).toHaveLength(2)
+    expect(supported.every(item => item.text().includes('已支持'))).toBe(true)
+    const supportedText = supported.map(item => item.text()).join('|')
+    expect(supportedText).toContain('微信')
+    expect(supportedText).toContain('飞书')
     // 微信 logo 用新的 type 钩子，且为内联 SVG
     expect(wrapper.find('.channel-logo--wechat').exists()).toBe(true)
 
+    // 飞书转为已支持后，其余 7 个渠道仍为灰色不可用入口。
     const unsupported = wrapper.findAll('.channel-list-item.unsupported')
-    expect(unsupported).toHaveLength(8)
+    expect(unsupported).toHaveLength(7)
     expect(unsupported.every(item => item.attributes('aria-disabled') === 'true')).toBe(true)
     expect(unsupported.every(item => item.attributes('disabled') !== undefined)).toBe(true)
     expect(unsupported.every(item => item.text().includes('暂不支持'))).toBe(true)
-    // 未支持渠道 logo 均带灰度 muted 标记（原有 3 个不支持 + 新增 5 个 = 8 个）
-    expect(wrapper.findAll('.channel-logo.muted')).toHaveLength(8)
+    // 未支持渠道 logo 均带灰度 muted 标记（9 个渠道中微信、飞书已支持，余 7 个置灰）
+    expect(wrapper.findAll('.channel-logo.muted')).toHaveLength(7)
     // 抽查 3 个新增渠道的 type 钩子（非全覆盖，discord/slack 由上面 muted 计数间接保障）
     expect(wrapper.find('.channel-logo--telegram').exists()).toBe(true)
     expect(wrapper.find('.channel-logo--whatsapp').exists()).toBe(true)
     expect(wrapper.find('.channel-logo--line').exists()).toBe(true)
   })
 
-  // 非微信路由参数：未支持渠道只能作为灰色入口展示，详情区和接口参数仍固定使用微信。
-  it('非微信 channelType 仍固定展示并请求微信渠道详情', () => {
+  // 路由 channelType 参数不自动选中：飞书虽已支持，但默认详情区仍落在微信，需用户主动点击切换。
+  // 飞书 hook 现也会在 setup 阶段初始化（进度查询在未选中飞书时被禁用），因此只断言微信进度/发起/解绑
+  // 三个 hook 各以 'wechat' 调用一次，而不再断言 observedChannelTypes 完全等于三个 'wechat'。
+  it('路由 channelType=feishu 时详情区仍默认展示微信', () => {
     const wrapper = mountChannelsTab('feishu')
     const detail = wrapper.find('.channel-detail')
 
     expect(detail.text()).toContain('微信')
     expect(detail.text()).not.toContain('飞书')
-    expect(observedChannelTypes).toEqual(['wechat', 'wechat', 'wechat'])
+    expect(observedChannelTypes.filter(type => type === 'wechat')).toHaveLength(3)
   })
 
   // 已绑定状态：头部以「微信 · 已绑定」呈现，已绑定身份单独成行；不泄露后端原值 bound。

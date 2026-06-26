@@ -126,6 +126,41 @@ export function useBeginChannelAuth(appId: Ref<string | undefined>, channelType:
   })
 }
 
+// FeishuAuthBody 描述飞书发起绑定的请求体。
+// scan（扫码自动创建）仅需 mode + domain；manual（手动填写）额外携带 app_id / app_secret。
+// app_secret 仅在 manual 模式回传后端，前端不做持久化也不回显。
+export interface FeishuAuthBody {
+  // 接入模式：scan 走扫码自动建应用，manual 走开放平台手填应用凭证。
+  mode: 'scan' | 'manual'
+  // 部署域：feishu（国内）/ lark（国际），决定后端调用的开放平台 endpoint。
+  domain: string
+  // 手填模式的应用 App ID，scan 模式省略。
+  app_id?: string
+  // 手填模式的应用 App Secret，scan 模式省略；不在前端缓存或回显。
+  app_secret?: string
+}
+
+// useBeginFeishuAuth 触发飞书渠道绑定，区别于通用 useBeginChannelAuth 在于发起需携带双模式 body。
+// 复用通用进度轮询（GET /channels/feishu/auth）与解绑接口，仅发起入口不同。
+// 成功后失效飞书进度缓存，让轮询尽快拉到扫码二维码或手填校验结果。
+export function useBeginFeishuAuth(appId: Ref<string | undefined>) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: FeishuAuthBody) => {
+      if (!appId.value) throw new Error(i18n.global.t('common.errors.missingChannelParam'))
+      // apiRequest 接收原始对象 body 并在内部 JSON 序列化、补 Content-Type，故此处直接透传 body。
+      const response = await apiRequest<{ challenge: ChannelChallenge }>(
+        `/api/v1/apps/${appId.value}/channels/feishu/auth`,
+        { method: 'POST', body },
+      )
+      return response.challenge
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: progressKey(appId.value, 'feishu') })
+    },
+  })
+}
+
 // useUnbindChannel 解绑渠道。
 // 解绑成功后刷新进度缓存，让页面回到未绑定状态。
 export function useUnbindChannel(appId: Ref<string | undefined>, channelType: Ref<string | undefined>) {

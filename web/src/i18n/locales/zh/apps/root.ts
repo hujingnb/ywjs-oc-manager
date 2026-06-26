@@ -139,6 +139,23 @@ export default {
     channelLineDesc: '日本与东南亚用户场景',
     supported: '已支持',
     unsupported: '暂不支持',
+    // 飞书渠道双模式接入（扫码自动创建 / 手动填写）专用文案。
+    feishuModeLabel: '接入模式',
+    feishuModeScan: '扫码自动创建',
+    feishuModeManual: '手动填写',
+    feishuDomainLabel: '部署域',
+    feishuDomainFeishu: '飞书（国内）',
+    feishuDomainLark: 'Lark（国际）',
+    feishuAppId: 'App ID',
+    feishuAppSecret: 'App Secret',
+    feishuSubmit: '提交',
+    feishuGuideTitle: '图文指引',
+    feishuBotName: '机器人名称：',
+    feishuDomainCurrent: '部署域：',
+    feishuScanGuide:
+      '1. 选择部署域（飞书国内 / Lark 国际）后点击「发起登录」。\n2. 用飞书 App 扫描下方二维码，并授权登录开放平台。\n3. 授权后系统会自动创建并配置机器人应用，请保持页面打开等待绑定完成。\n4. 状态变为「已绑定」即接入成功，可在会话中 @机器人 使用助手。',
+    feishuManualGuide:
+      '1. 登录飞书开放平台（open.feishu.cn）/ Lark 开发者后台，创建「企业自建应用」。\n2. 在「凭证与基础信息」中获取 App ID 与 App Secret。\n3. 为应用开通机器人能力，并发布版本使其在企业内生效。\n4. 将 App ID 与 App Secret 填入上方表单并提交，等待状态变为「已绑定」。',
     // status 是渠道绑定进度状态的用户可读文案，由 formatChannelStatus 解析为 i18n key 后消费。
     status: {
       unbound: '未绑定',

@@ -44,7 +44,7 @@
             </h3>
           </div>
 
-          <n-space :size="8">
+          <n-space v-if="selectedChannelType === 'wechat'" :size="8">
             <n-button
               type="primary"
               :disabled="!appId || !canManage"
@@ -65,14 +65,116 @@
           </n-space>
         </div>
 
-        <p v-if="progress?.bound_identity" class="state-text">{{ t('apps.channels.boundIdentity') }}{{ progress.bound_identity }}</p>
-        <p v-if="progress?.error_message" class="state-text danger">{{ t('apps.channels.errorMsg') }}{{ progress.error_message }}</p>
-        <p v-if="isWaitingForChallenge" class="state-text">{{ t('apps.channels.waitingQr') }}</p>
-        <p v-if="challengeExpired" class="state-text danger">
-          {{ t('apps.channels.qrExpired') }}
-        </p>
+        <!-- 微信渠道详情：扫码绑定 + 状态提示，沿用既有逻辑，飞书选中时不渲染。 -->
+        <template v-if="selectedChannelType === 'wechat'">
+          <p v-if="progress?.bound_identity" class="state-text">{{ t('apps.channels.boundIdentity') }}{{ progress.bound_identity }}</p>
+          <p v-if="progress?.error_message" class="state-text danger">{{ t('apps.channels.errorMsg') }}{{ progress.error_message }}</p>
+          <p v-if="isWaitingForChallenge" class="state-text">{{ t('apps.channels.waitingQr') }}</p>
+          <p v-if="challengeExpired" class="state-text danger">
+            {{ t('apps.channels.qrExpired') }}
+          </p>
 
-        <AuthChallengeRenderer v-if="visibleChallenge" :challenge="visibleChallenge" @rendered="onQrRendered" />
+          <AuthChallengeRenderer v-if="visibleChallenge" :challenge="visibleChallenge" @rendered="onQrRendered" />
+        </template>
+
+        <!-- 飞书渠道详情：模式选择 + 部署域 + 扫码/手填 + 图文指引 + 已绑定详情/解绑。 -->
+        <template v-else-if="selectedChannelType === 'feishu'">
+          <div class="feishu-panel">
+            <!-- 接入模式与部署域：单选 + 下拉，决定后续走扫码还是手填及调用的开放平台域。 -->
+            <div class="feishu-controls">
+              <label class="feishu-field">
+                <span class="feishu-field-label">{{ t('apps.channels.feishuModeLabel') }}</span>
+                <n-radio-group v-model:value="feishuMode" :disabled="!canManage || feishuBound">
+                  <n-radio-button value="scan">{{ t('apps.channels.feishuModeScan') }}</n-radio-button>
+                  <n-radio-button value="manual">{{ t('apps.channels.feishuModeManual') }}</n-radio-button>
+                </n-radio-group>
+              </label>
+              <label class="feishu-field">
+                <span class="feishu-field-label">{{ t('apps.channels.feishuDomainLabel') }}</span>
+                <n-select
+                  v-model:value="feishuDomain"
+                  :options="feishuDomainOptions"
+                  :disabled="!canManage || feishuBound"
+                  class="feishu-domain-select"
+                />
+              </label>
+            </div>
+
+            <!-- 已绑定详情：展示 bot 信息与部署域，secret 不回显，提供解绑入口。 -->
+            <template v-if="feishuBound">
+              <div class="feishu-bound">
+                <p v-if="feishuProgress?.channel_name" class="state-text">{{ t('apps.channels.feishuBotName') }}{{ feishuProgress.channel_name }}</p>
+                <p v-if="feishuProgress?.bound_identity" class="state-text">{{ t('apps.channels.boundIdentity') }}{{ feishuProgress.bound_identity }}</p>
+                <p class="state-text">{{ t('apps.channels.feishuDomainCurrent') }}{{ feishuDomain === 'lark' ? t('apps.channels.feishuDomainLark') : t('apps.channels.feishuDomainFeishu') }}</p>
+              </div>
+              <n-space :size="8">
+                <n-button v-if="feishuCanUnbind" @click="unbindFeishu">{{ t('apps.channels.unbind') }}</n-button>
+              </n-space>
+            </template>
+
+            <!-- 未绑定：按模式展示扫码或手填表单。 -->
+            <template v-else>
+              <!-- 扫码自动创建：点发起后轮询二维码并复用 AuthChallengeRenderer 渲染。 -->
+              <template v-if="feishuMode === 'scan'">
+                <n-space :size="8">
+                  <n-button
+                    type="primary"
+                    :disabled="!appId || !canManage"
+                    :loading="feishuBeginning"
+                    @click="beginFeishuScan"
+                  >
+                    {{ t('apps.channels.beginLogin') }}
+                  </n-button>
+                </n-space>
+                <p v-if="feishuProgress?.error_message" class="state-text danger">{{ t('apps.channels.errorMsg') }}{{ feishuProgress.error_message }}</p>
+                <p v-if="feishuWaitingForChallenge" class="state-text">{{ t('apps.channels.waitingQr') }}</p>
+                <AuthChallengeRenderer v-if="feishuVisibleChallenge" :challenge="feishuVisibleChallenge" />
+              </template>
+
+              <!-- 手动填写：输入开放平台应用 App ID / App Secret 后提交校验。 -->
+              <template v-else>
+                <div class="feishu-form">
+                  <label class="feishu-field">
+                    <span class="feishu-field-label">{{ t('apps.channels.feishuAppId') }}</span>
+                    <n-input
+                      v-model:value="feishuAppId"
+                      :disabled="!canManage"
+                      :placeholder="t('apps.channels.feishuAppId')"
+                    />
+                  </label>
+                  <label class="feishu-field">
+                    <span class="feishu-field-label">{{ t('apps.channels.feishuAppSecret') }}</span>
+                    <n-input
+                      v-model:value="feishuAppSecret"
+                      type="password"
+                      show-password-on="click"
+                      :disabled="!canManage"
+                      :placeholder="t('apps.channels.feishuAppSecret')"
+                    />
+                  </label>
+                </div>
+                <n-space :size="8">
+                  <n-button
+                    type="primary"
+                    :disabled="!appId || !canManage || feishuManualInvalid"
+                    :loading="feishuBeginning"
+                    @click="submitFeishuManual"
+                  >
+                    {{ t('apps.channels.feishuSubmit') }}
+                  </n-button>
+                </n-space>
+                <p v-if="feishuProgress?.error_message" class="state-text danger">{{ t('apps.channels.errorMsg') }}{{ feishuProgress.error_message }}</p>
+              </template>
+            </template>
+
+            <!-- 图文指引：按当前模式展示扫码授权或开放平台建应用步骤，默认折叠。 -->
+            <n-collapse class="feishu-guide">
+              <n-collapse-item :title="t('apps.channels.feishuGuideTitle')" name="guide">
+                <p class="feishu-guide-text">{{ feishuMode === 'scan' ? t('apps.channels.feishuScanGuide') : t('apps.channels.feishuManualGuide') }}</p>
+              </n-collapse-item>
+            </n-collapse>
+          </div>
+        </template>
       </section>
     </div>
   </n-card>
@@ -80,7 +182,17 @@
 
 <script setup lang="ts">
 import { computed, inject, ref, toRef, watch, type Ref } from 'vue'
-import { NButton, NCard, NSpace } from 'naive-ui'
+import {
+  NButton,
+  NCard,
+  NCollapse,
+  NCollapseItem,
+  NInput,
+  NRadioButton,
+  NRadioGroup,
+  NSelect,
+  NSpace,
+} from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 
 import type { AppDTO } from '@/api/hooks/useApps'
@@ -88,6 +200,7 @@ import AuthChallengeRenderer from '@/components/AuthChallengeRenderer.vue'
 import ChannelLogo, { type ChannelLogoType } from './ChannelLogo.vue'
 import {
   useBeginChannelAuth,
+  useBeginFeishuAuth,
   useChannelProgressQuery,
   useUnbindChannel,
   channelChallengeFromProgress,
@@ -119,7 +232,7 @@ interface ChannelDisplay {
 const channels = computed<ReadonlyArray<ChannelDisplay>>(() => [
   { type: 'wechat', name: t('apps.channels.channelWechat'), description: t('apps.channels.channelWechatDesc'), supported: true, statusLabel: t('apps.channels.supported') },
   { type: 'work_wechat', name: t('apps.channels.channelWorkWechat'), description: t('apps.channels.channelWorkWechatDesc'), supported: false, statusLabel: t('apps.channels.unsupported') },
-  { type: 'feishu', name: t('apps.channels.channelFeishu'), description: t('apps.channels.channelFeishuDesc'), supported: false, statusLabel: t('apps.channels.unsupported') },
+  { type: 'feishu', name: t('apps.channels.channelFeishu'), description: t('apps.channels.channelFeishuDesc'), supported: true, statusLabel: t('apps.channels.supported') },
   { type: 'dingtalk', name: t('apps.channels.channelDingtalk'), description: t('apps.channels.channelDingtalkDesc'), supported: false, statusLabel: t('apps.channels.unsupported') },
   { type: 'telegram', name: t('apps.channels.channelTelegram'), description: t('apps.channels.channelTelegramDesc'), supported: false, statusLabel: t('apps.channels.unsupported') },
   { type: 'whatsapp', name: t('apps.channels.channelWhatsapp'), description: t('apps.channels.channelWhatsappDesc'), supported: false, statusLabel: t('apps.channels.unsupported') },
@@ -131,23 +244,112 @@ const channels = computed<ReadonlyArray<ChannelDisplay>>(() => [
 const auth = useAuthStore()
 const app = inject<Ref<AppDTO | null>>('app')
 const appId = toRef(props, 'appId')
-// supportedChannelType 是当前唯一可操作渠道；外部传入的非微信 channelType 只影响未来扩展场景，
-// 在后端正式支持前必须忽略，避免详情区和绑定接口误用暂不支持渠道。
-const supportedChannelType = 'wechat'
-const channelType = computed(() => supportedChannelType)
-const channelTypeRef = computed(() => channelType.value)
-// activeChannel 当前始终落在微信；保留 computed 是为了让模板只依赖展示模型。
-const activeChannel = computed(() => channels.value.find(channel => channel.type === channelType.value) ?? channels.value[0])
+// selectedChannelType 是当前详情区展示的已支持渠道；目前可在 wechat / feishu 间切换。
+// 暂不支持渠道点击被忽略，不会改变此值，确保详情区只渲染有真实绑定能力的渠道。
+const selectedChannelType = ref<'wechat' | 'feishu'>('wechat')
+// channelType / channelTypeRef 固定指向 wechat，供既有微信 hook（进度/发起/解绑）专用，
+// 切换到飞书时微信轮询仍以原契约在后台运行，微信链路逻辑保持零改动。
+const channelType = computed(() => 'wechat')
+const channelTypeRef = computed<string | undefined>(() => 'wechat')
+// activeChannel 跟随 selectedChannelType，让标题、状态与列表高亮反映当前选中渠道。
+const activeChannel = computed(() => channels.value.find(channel => channel.type === selectedChannelType.value) ?? channels.value[0])
 
-// selectChannel 只接受当前已支持的微信渠道；暂不支持渠道保持禁用且不改变详情或请求参数。
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+// selectChannel 仅接受已支持渠道（wechat / feishu）；暂不支持渠道保持禁用且不切换详情区。
 function selectChannel(channel: ChannelDisplay) {
   if (!channel.supported) return
+  if (channel.type === 'wechat' || channel.type === 'feishu') {
+    selectedChannelType.value = channel.type
+  }
 }
 
 const { data: progress } = useChannelProgressQuery(appId, channelTypeRef)
 const beginMutation = useBeginChannelAuth(appId, channelTypeRef)
 const unbindMutation = useUnbindChannel(appId, channelTypeRef)
+
+// ---- 飞书渠道（双模式：扫码自动创建 / 手动填写）----
+// feishuProgressType 仅在选中飞书时返回 'feishu'，否则返回 undefined 关闭轮询，
+// 避免停留在微信详情区时仍向飞书进度接口发请求。
+const feishuProgressType = computed<string | undefined>(() => (selectedChannelType.value === 'feishu' ? 'feishu' : undefined))
+// feishuChannelRef 固定为 'feishu'，供解绑接口构造路径与失效缓存 key 使用。
+const feishuChannelRef = computed<string | undefined>(() => 'feishu')
+const { data: feishuProgress } = useChannelProgressQuery(appId, feishuProgressType)
+const beginFeishuMutation = useBeginFeishuAuth(appId)
+const unbindFeishuMutation = useUnbindChannel(appId, feishuChannelRef)
+
+// feishuMode 决定面板呈现扫码二维码还是手填表单，默认扫码自动创建。
+const feishuMode = ref<'scan' | 'manual'>('scan')
+// feishuDomain 决定后端调用的开放平台域，默认飞书国内。
+const feishuDomain = ref<'feishu' | 'lark'>('feishu')
+// feishuAppId / feishuAppSecret 仅手填模式使用；secret 不回显、不持久化，提交后即从内存清理。
+const feishuAppId = ref('')
+const feishuAppSecret = ref('')
+// feishuBeginning 是飞书发起/提交的本地提交态，覆盖按钮 loading。
+const feishuBeginning = ref(false)
+// feishuChallenge 保存发起后立即返回的挑战，轮询进度若带回二维码则优先使用进度结果。
+const feishuChallenge = ref<ChannelChallenge | null>(null)
+// feishuAuthStarted 区分“已点发起但后端尚未返回二维码”和“完全未发起”的展示状态。
+const feishuAuthStarted = ref(false)
+
+// feishuDomainOptions 提供部署域下拉项；label 随语言切换响应式更新。
+const feishuDomainOptions = computed(() => [
+  { label: t('apps.channels.feishuDomainFeishu'), value: 'feishu' },
+  { label: t('apps.channels.feishuDomainLark'), value: 'lark' },
+])
+
+// feishuStatusLabel 展示飞书绑定进度状态文案。
+const feishuStatusLabel = computed(() => formatChannelStatus(feishuProgress.value?.status))
+// feishuBound 表示飞书已绑定，用于切换已绑定详情区与解绑按钮。
+const feishuBound = computed(() => feishuProgress.value?.status === 'bound')
+// feishuCanUnbind 受管理权限与绑定态共同约束，真正校验仍由后端兜底。
+const feishuCanUnbind = computed(() => canManage.value && feishuBound.value)
+// feishuManualInvalid 在手填模式下两项凭证任一为空时禁用提交按钮。
+const feishuManualInvalid = computed(() => !feishuAppId.value.trim() || !feishuAppSecret.value.trim())
+
+// feishuProgressChallenge 从轮询进度的 metadata.qrcode 还原扫码挑战，刷新页面也能恢复二维码。
+const feishuProgressChallenge = computed<ChannelChallenge | null>(() => channelChallengeFromProgress(feishuProgress.value, 'feishu'))
+// feishuVisibleChallenge 优先展示轮询结果，轮询尚未带回时回退到发起接口的立即响应。
+const feishuVisibleChallenge = computed(() => feishuProgressChallenge.value ?? (feishuChallenge.value?.qrcode ? feishuChallenge.value : null))
+// feishuWaitingForChallenge 在已发起但二维码尚未就绪时提示“生成中”。
+const feishuWaitingForChallenge = computed(() => shouldShowChallengePending(feishuAuthStarted.value, feishuVisibleChallenge.value, feishuProgress.value?.status))
+
+// beginFeishuScan 发起扫码自动创建：仅提交 mode/domain，由 worker 异步建应用并回写二维码。
+async function beginFeishuScan() {
+  if (!canManage.value) return
+  feishuBeginning.value = true
+  try {
+    feishuChallenge.value = await beginFeishuMutation.mutateAsync({ mode: 'scan', domain: feishuDomain.value })
+    feishuAuthStarted.value = true
+  } finally {
+    feishuBeginning.value = false
+  }
+}
+
+// submitFeishuManual 提交手填应用凭证：携带 app_id/app_secret/domain，后端校验并完成绑定。
+async function submitFeishuManual() {
+  if (!canManage.value || feishuManualInvalid.value) return
+  feishuBeginning.value = true
+  try {
+    feishuChallenge.value = await beginFeishuMutation.mutateAsync({
+      mode: 'manual',
+      domain: feishuDomain.value,
+      app_id: feishuAppId.value.trim(),
+      app_secret: feishuAppSecret.value,
+    })
+    feishuAuthStarted.value = true
+    // 提交成功后清空 secret，避免长期驻留内存或被后续误用。
+    feishuAppSecret.value = ''
+  } finally {
+    feishuBeginning.value = false
+  }
+}
+
+// unbindFeishu 解绑飞书后清空本地挑战与发起态，等待进度缓存失效后回到未绑定展示。
+async function unbindFeishu() {
+  if (!canManage.value) return
+  await unbindFeishuMutation.mutateAsync()
+  feishuAuthStarted.value = false
+  feishuChallenge.value = null
+}
 
 // beginning 是本地提交态，覆盖 beginMutation 尚未返回挑战内容前的按钮文案。
 const beginning = ref(false)
@@ -162,7 +364,12 @@ function onQrRendered(qr: string) {
   renderedQrcode.value = qr
 }
 
-const statusLabel = computed(() => formatChannelStatus(progress.value?.status))
+// statusLabel 跟随当前选中渠道展示对应进度状态，微信选中时取值与原逻辑一致。
+const statusLabel = computed(() =>
+  selectedChannelType.value === 'feishu'
+    ? formatChannelStatus(feishuProgress.value?.status)
+    : formatChannelStatus(progress.value?.status),
+)
 
 // canManage 控制发起登录和解绑按钮，真正权限仍由后端接口再次校验。
 const canManage = computed(() => canManageApp(auth.user, app?.value))
@@ -366,6 +573,61 @@ async function unbind() {
   color: var(--color-text-secondary);
   font-size: 14px;
   font-weight: 400;
+}
+
+/* 飞书面板：纵向排布模式选择、表单、二维码与指引，整体与微信详情区视觉一致。 */
+.feishu-panel {
+  display: grid;
+  gap: 16px;
+}
+
+/* 控制区把模式单选与部署域下拉横向排布，窄屏自动换行。 */
+.feishu-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: flex-end;
+}
+
+.feishu-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.feishu-field-label {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.feishu-domain-select {
+  min-width: 200px;
+}
+
+/* 手填表单纵向排布，限制最大宽度避免输入框过长。 */
+.feishu-form {
+  display: grid;
+  gap: 12px;
+  max-width: 420px;
+}
+
+/* 已绑定详情用次要文字密排展示 bot 信息与部署域。 */
+.feishu-bound {
+  display: grid;
+  gap: 4px;
+}
+
+.feishu-guide {
+  margin-top: 4px;
+}
+
+/* 指引正文保留换行，便于以多步骤文本呈现操作步骤。 */
+.feishu-guide-text {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-line;
 }
 
 @media (max-width: 760px) {
