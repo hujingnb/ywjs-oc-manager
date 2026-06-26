@@ -37,8 +37,10 @@ const (
 	APIKeyStatusDisabled = "disabled"
 	APIKeyStatusError    = "error"
 
-	// ChannelTypeWeChat 是当前唯一落地的渠道类型。
+	// ChannelTypeWeChat 是微信渠道类型。
 	ChannelTypeWeChat = "wechat"
+	// ChannelTypeFeishu 是飞书 / Lark 渠道（扫码自动创建 + 手填兜底，WebSocket 长连接）。
+	ChannelTypeFeishu = "feishu"
 
 	// ChannelStatus* 描述渠道绑定流程和用户主动解绑状态。
 	ChannelStatusUnbound       = "unbound"
