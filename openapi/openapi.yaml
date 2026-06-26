@@ -297,6 +297,26 @@ components:
           example: 应用不存在
           type: string
       type: object
+    handlers.FeishuChannelAuthRequest:
+      properties:
+        app_id:
+          description: AppID 是飞书自建应用 App ID，manual 模式必填。
+          type: string
+        app_secret:
+          description: AppSecret 是飞书自建应用 App Secret，manual 模式必填，加密后入库。
+          type: string
+        domain:
+          description: Domain 是飞书域：feishu | lark，默认 feishu。
+          type: string
+        mode:
+          description: Mode 是发起模式：scan 扫码自动创建、manual 手填兜底。
+          enum:
+          - scan
+          - manual
+          type: string
+      required:
+      - mode
+      type: object
     handlers.InitKnowledgeUploadRequest:
       properties:
         filename:
@@ -2384,7 +2404,7 @@ paths:
       tags:
       - channels
     post:
-      description: 为指定应用和渠道类型发起登录授权流程，返回挑战信息（如二维码 URL）
+      description: 为指定应用和渠道类型发起登录授权流程，返回挑战信息（如二维码 URL）。feishu 渠道需传请求体，其他渠道（如 wechat）无需请求体。
       parameters:
       - description: 应用 ID
         in: path
@@ -2392,12 +2412,22 @@ paths:
         required: true
         schema:
           type: string
-      - description: 渠道类型（如 wechat）
+      - description: 渠道类型（如 wechat、feishu）
         in: path
         name: channelType
         required: true
         schema:
           type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.FeishuChannelAuthRequest'
+                description: 飞书渠道发起请求体（仅 feishu 渠道）
+                summary: body
+        description: 飞书渠道发起请求体（仅 feishu 渠道）
       responses:
         "200":
           content:
@@ -2407,6 +2437,12 @@ paths:
                   $ref: '#/components/schemas/service.ChallengeResult'
                 type: object
           description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
         "401":
           content:
             application/json:

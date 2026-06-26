@@ -42,13 +42,16 @@ func RegisterChannelRoutes(router gin.IRouter, handler *ChannelsHandler) {
 // BeginAuth 触发渠道登录挑战。
 //
 // @Summary      触发渠道登录挑战
-// @Description  为指定应用和渠道类型发起登录授权流程，返回挑战信息（如二维码 URL）
+// @Description  为指定应用和渠道类型发起登录授权流程，返回挑战信息（如二维码 URL）。feishu 渠道需传请求体，其他渠道（如 wechat）无需请求体。
 // @Tags         channels
+// @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        appId       path      string  true  "应用 ID"
-// @Param        channelType path      string  true  "渠道类型（如 wechat）"
+// @Param        appId       path      string                   true   "应用 ID"
+// @Param        channelType path      string                   true   "渠道类型（如 wechat、feishu）"
+// @Param        body        body      FeishuChannelAuthRequest false  "飞书渠道发起请求体（仅 feishu 渠道）"
 // @Success      200         {object}  map[string]service.ChallengeResult
+// @Failure      400         {object}  ErrorResponse
 // @Failure      401         {object}  ErrorResponse
 // @Failure      403         {object}  ErrorResponse
 // @Failure      404         {object}  ErrorResponse

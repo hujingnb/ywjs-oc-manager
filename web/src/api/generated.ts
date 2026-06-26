@@ -406,7 +406,7 @@ export interface paths {
         put?: never;
         /**
          * 触发渠道登录挑战
-         * @description 为指定应用和渠道类型发起登录授权流程，返回挑战信息（如二维码 URL）
+         * @description 为指定应用和渠道类型发起登录授权流程，返回挑战信息（如二维码 URL）。feishu 渠道需传请求体，其他渠道（如 wechat）无需请求体。
          */
         post: {
             parameters: {
@@ -415,12 +415,17 @@ export interface paths {
                 path: {
                     /** @description 应用 ID */
                     appId: string;
-                    /** @description 渠道类型（如 wechat） */
+                    /** @description 渠道类型（如 wechat、feishu） */
                     channelType: string;
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            /** @description 飞书渠道发起请求体（仅 feishu 渠道） */
+            requestBody?: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.FeishuChannelAuthRequest"];
+                };
+            };
             responses: {
                 /** @description OK */
                 200: {
@@ -431,6 +436,15 @@ export interface paths {
                         "application/json": {
                             [key: string]: components["schemas"]["service.ChallengeResult"];
                         };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
                     };
                 };
                 /** @description Unauthorized */
@@ -12350,6 +12364,19 @@ export interface components {
              * @example 应用不存在
              */
             message?: string;
+        };
+        "handlers.FeishuChannelAuthRequest": {
+            /** @description AppID 是飞书自建应用 App ID，manual 模式必填。 */
+            app_id?: string;
+            /** @description AppSecret 是飞书自建应用 App Secret，manual 模式必填，加密后入库。 */
+            app_secret?: string;
+            /** @description Domain 是飞书域：feishu | lark，默认 feishu。 */
+            domain?: string;
+            /**
+             * @description Mode 是发起模式：scan 扫码自动创建、manual 手填兜底。
+             * @enum {string}
+             */
+            mode: "scan" | "manual";
         };
         "handlers.InitKnowledgeUploadRequest": {
             /** @description Filename 是原始文件名，服务端会取 base 后用于暂存 key 与最终文档名。 */
