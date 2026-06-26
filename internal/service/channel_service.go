@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -14,8 +15,22 @@ import (
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/channel"
+	redactlog "oc-manager/internal/log"
 	"oc-manager/internal/store/sqlc"
 )
+
+// FeishuSecretPatcher 抽象给 app 的 control-token Secret 增删飞书 key 的能力，
+// 由 k8sorch.KubernetesAdapter.PatchSecretKeys 实现。解绑时删 feishu-* key
+// 使引擎下次重启不再装载飞书凭证。
+type FeishuSecretPatcher interface {
+	PatchSecretKeys(ctx context.Context, appID string, set map[string]string, del []string) error
+}
+
+// ChannelRestarter 抽象重启 app 运行时（hermes）让其重载渠道 platform 配置的能力。
+// k8s 下由 Orchestrator.RolloutRestart 实现（按 appID 重建 pod）。
+type ChannelRestarter interface {
+	RestartApp(ctx context.Context, appID string) error
+}
 
 // ChannelStore 抽象渠道服务的数据访问能力。
 type ChannelStore interface {
@@ -38,6 +53,11 @@ type ChannelService struct {
 	// cipher 用于加密飞书手填的 app_secret 后入库；扫码模式与微信渠道不依赖它。
 	// 经 SetCipher 注入，复用 manager 进程内同一份 master_key 的 Cipher 实例。
 	cipher *auth.Cipher
+	// feishuPatcher / feishuRestarter 用于飞书解绑即时清理：删 app Secret 的 feishu-* key
+	// 并重启 pod，使引擎下次重启不再启用飞书平台。微信解绑不依赖二者。
+	// 经 SetFeishuUnbindDeps 注入；k8s 未启用时留 nil，解绑仅置 DB 状态不报错。
+	feishuPatcher   FeishuSecretPatcher
+	feishuRestarter ChannelRestarter
 }
 
 // NewChannelService 创建 service。
@@ -53,6 +73,13 @@ func NewChannelService(store ChannelStore, registry *channel.Registry, notifier 
 // 与构造分离是为了避免给已用 variadic notifier 的构造再塞一个可选参数，保持调用点清晰。
 func (s *ChannelService) SetCipher(cipher *auth.Cipher) {
 	s.cipher = cipher
+}
+
+// SetFeishuUnbindDeps 注入飞书解绑所需的 Secret patch 与重启能力。
+// 与构造分离：k8s 编排器经类型断言取得（PatchSecretKeys 仅 *KubernetesAdapter 暴露），
+// 未启用 k8s 时不注入，解绑飞书分支因 patcher==nil 跳过。
+func (s *ChannelService) SetFeishuUnbindDeps(p FeishuSecretPatcher, r ChannelRestarter) {
+	s.feishuPatcher, s.feishuRestarter = p, r
 }
 
 // ChallengeResult 是 BeginAuth 对外返回的视图。
@@ -353,6 +380,20 @@ func (s *ChannelService) Unbind(ctx context.Context, principal auth.Principal, a
 		LastError:   null.String{},
 	}); err != nil {
 		return fmt.Errorf("解绑渠道失败: %w", err)
+	}
+	if channelType == domain.ChannelTypeFeishu && s.feishuPatcher != nil {
+		// 飞书解绑是用户即时动作（不走 worker）：删 app Secret 的三把飞书 key 并重启，
+		// 使引擎下次重启不再启用飞书平台。删 key / 重启失败只记日志不阻断——
+		// DB status=unbound_by_user 已是 source of truth，凭证残留也不会被引擎装载。
+		if err := s.feishuPatcher.PatchSecretKeys(ctx, app.ID, nil,
+			[]string{"feishu-app-id", "feishu-app-secret", "feishu-domain"}); err != nil {
+			slog.ErrorContext(ctx, "解绑删飞书 Secret key 失败", "app_id", app.ID, redactlog.Err(err))
+		}
+		if s.feishuRestarter != nil {
+			if err := s.feishuRestarter.RestartApp(ctx, app.ID); err != nil {
+				slog.ErrorContext(ctx, "解绑后重启失败", "app_id", app.ID, redactlog.Err(err))
+			}
+		}
 	}
 	return nil
 }

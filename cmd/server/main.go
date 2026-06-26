@@ -253,6 +253,15 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	channelService := service.NewChannelService(dbStore.Queries, channelRegistry, redisQueue)
 	// 飞书手填模式需加密 app_secret 后入库，复用进程内同一份 master_key 的 cipher。
 	channelService.SetCipher(cipher)
+	// 飞书解绑即时清理：删 app Secret 的 feishu-* key + 重启，使引擎下次重启不再启用飞书。
+	// PatchSecretKeys 仅 *KubernetesAdapter 暴露（Orchestrator 接口未含），按需类型断言取出；
+	// restarter 复用渠道 worker 同款 orchChannelRestarter（包装 RolloutRestart）。
+	// k8s 未启用时 patcher 留 nil，解绑飞书分支跳过，仅置 DB 状态不报错。
+	var feishuUnbindPatcher service.FeishuSecretPatcher
+	if p, ok := orch.(service.FeishuSecretPatcher); ok {
+		feishuUnbindPatcher = p
+	}
+	channelService.SetFeishuUnbindDeps(feishuUnbindPatcher, orchChannelRestarter{orch: orch})
 	// 微信扫码登录走 oc-ops HTTP SSE：runner 持 ocopsClient（满足 hermes.ChannelLoginStreamer），
 	// 每次登录按 AuthInput.Endpoint（worker 经 ocopsResolver 解析后注入）路由到目标实例。
 	wechatRunner := channel.NewDockerCommandRunner(ocopsClient)

@@ -155,6 +155,32 @@ func TestChannelServiceUnbindUpdatesStatus(t *testing.T) {
 	require.Equal(t, domain.ChannelStatusUnboundByUser, store.lastStatus)
 }
 
+// TestChannelServiceUnbindFeishuDeletesSecretKeys 验证飞书解绑删 Secret key + 重启 + 置 unbound_by_user。
+func TestChannelServiceUnbindFeishuDeletesSecretKeys(t *testing.T) {
+	store := newChannelStub(t)
+	store.binding.ChannelType = domain.ChannelTypeFeishu
+	patcher := &fakeFeishuPatcher{}
+	restarter := &fakeRestarter{}
+	svc := NewChannelService(store, channel.NewRegistry())
+	svc.SetFeishuUnbindDeps(patcher, restarter)
+	require.NoError(t, svc.Unbind(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, domain.ChannelTypeFeishu))
+	require.Equal(t, domain.ChannelStatusUnboundByUser, store.lastStatus)
+	require.ElementsMatch(t, []string{"feishu-app-id", "feishu-app-secret", "feishu-domain"}, patcher.deleted)
+	require.True(t, restarter.restarted)
+}
+
+// TestChannelServiceUnbindWechatUnchanged 验证微信解绑不调飞书依赖（patcher/restarter 不触发）。
+func TestChannelServiceUnbindWechatUnchanged(t *testing.T) {
+	store := newChannelStub(t) // 默认 wechat binding
+	patcher := &fakeFeishuPatcher{}
+	restarter := &fakeRestarter{}
+	svc := NewChannelService(store, channel.NewRegistry())
+	svc.SetFeishuUnbindDeps(patcher, restarter)
+	require.NoError(t, svc.Unbind(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, domain.ChannelTypeWeChat))
+	require.Empty(t, patcher.deleted)
+	require.False(t, restarter.restarted)
+}
+
 // TestChannelServiceUnbindPlatformAdminForbidden 验证渠道服务解绑平台管理员禁止访问的异常或拒绝路径场景。
 func TestChannelServiceUnbindPlatformAdminForbidden(t *testing.T) {
 	store := newChannelStub(t)
@@ -228,6 +254,23 @@ func TestChannelServicePollAuthRedactsSecret(t *testing.T) {
 	_, leaked := p.Metadata["app_secret_ciphertext"]
 	require.False(t, leaked, "secret 密文不得透传前端")
 }
+
+// fakeFeishuPatcher 记录飞书解绑时对 app Secret 的增删 key，供断言三把飞书 key 被删除。
+type fakeFeishuPatcher struct {
+	deleted []string
+	set     map[string]string
+}
+
+func (p *fakeFeishuPatcher) PatchSecretKeys(_ context.Context, _ string, set map[string]string, del []string) error {
+	p.set = set
+	p.deleted = append(p.deleted, del...)
+	return nil
+}
+
+// fakeRestarter 记录解绑后是否触发了 app 运行时重启。
+type fakeRestarter struct{ restarted bool }
+
+func (r *fakeRestarter) RestartApp(_ context.Context, _ string) error { r.restarted = true; return nil }
 
 type fakeAdapter struct {
 	challenge channel.AuthChallenge
