@@ -250,6 +250,54 @@ func TestAppInitializeK8s_BootstrapURLTrailingSlash(t *testing.T) {
 		"BootstrapURL 应正确拼接")
 }
 
+// TestBuildAppSpecCarriesFeishuCredentials 验证 app 初始化渲染 AppSpec 时，
+// 若该 app 已绑定飞书（channel_bindings 有 feishu 行、status=bound、metadata_json
+// 含 app_id + app_secret_ciphertext + domain），buildAppSpec 解密 secret 后把明文
+// 填入 AppSpec.FeishuAppID/FeishuAppSecret/FeishuDomain——保证 app 重建 / 镜像升级
+// 时 RenderSecret 仍能据此带出飞书凭证、配置不丢。
+func TestBuildAppSpecCarriesFeishuCredentials(t *testing.T) {
+	cipher := testCipher(t)
+
+	// 已绑定飞书：解密密文带出三字段明文。
+	t.Run("已绑定飞书时解密带出 app_id/secret/domain", func(t *testing.T) {
+		store := newAppInitStub(t)
+		// 用同一把测试 cipher 加密 secret 明文，模拟 bind 时落库的 app_secret_ciphertext。
+		ct, err := cipher.Encrypt([]byte("s3cret"))
+		require.NoError(t, err)
+		meta, err := json.Marshal(map[string]string{
+			"app_id":                "cli_abc",
+			"app_secret_ciphertext": ct,
+			"domain":                "feishu",
+		})
+		require.NoError(t, err)
+		// 构造一条 bound 状态的飞书绑定，让 GetChannelBindingByAppAndType 命中。
+		store.channelBindings = map[string]sqlc.ChannelBinding{
+			domain.ChannelTypeFeishu: {
+				AppID:        testAppID,
+				ChannelType:  domain.ChannelTypeFeishu,
+				Status:       domain.ChannelStatusBound,
+				MetadataJson: meta,
+			},
+		}
+		handler := NewAppInitializeHandler(store, &fakeNewAPI{}, AppInitializeConfig{Cipher: cipher})
+		spec := handler.buildAppSpec(context.Background(), store.app, testRuntimeImageRef, "token")
+		assert.Equal(t, "cli_abc", spec.FeishuAppID)
+		assert.Equal(t, "s3cret", spec.FeishuAppSecret)
+		assert.Equal(t, "feishu", spec.FeishuDomain)
+	})
+
+	// 未绑定飞书：GetChannelBindingByAppAndType 返回 sql.ErrNoRows，
+	// 静默降级为空、buildAppSpec 不报错（无 error 返回值，路径不应 panic）。
+	t.Run("未绑定飞书时三字段为空且不报错", func(t *testing.T) {
+		store := newAppInitStub(t) // 未设置 channelBindings → 查询返回 sql.ErrNoRows
+		handler := NewAppInitializeHandler(store, &fakeNewAPI{}, AppInitializeConfig{Cipher: cipher})
+		spec := handler.buildAppSpec(context.Background(), store.app, testRuntimeImageRef, "token")
+		assert.Empty(t, spec.FeishuAppID)
+		assert.Empty(t, spec.FeishuAppSecret)
+		assert.Empty(t, spec.FeishuDomain)
+	})
+}
+
 // TestAppInitializeIsIdempotentForBindingWaiting 验证应用初始化保持幂等针对绑定 Waiting 的特殊分支或幂等场景。
 func TestAppInitializeIsIdempotentForBindingWaiting(t *testing.T) {
 	store := newAppInitStub(t)
@@ -386,6 +434,9 @@ type appInitStub struct {
 	// hasBoundCalls 记录 AppHasBoundChannelBinding 被调用次数，
 	// 供「init 完成 / 幂等分支 都应触发自愈探测」的用例断言。
 	hasBoundCalls int
+	// channelBindings 让 GetChannelBindingByAppAndType 在测试中返回受控的渠道绑定行，
+	// 按 channel_type 索引；未设置对应类型时返回 sql.ErrNoRows，模拟「未绑定该渠道」。
+	channelBindings map[string]sqlc.ChannelBinding
 }
 
 // newAppInitStub 构造 appInitStub；ID 字段迁移为 string（MySQL uuid）。
@@ -523,6 +574,15 @@ func (s *appInitStub) SetAppRuntimeToken(_ context.Context, arg sqlc.SetAppRunti
 func (s *appInitStub) AppHasBoundChannelBinding(_ context.Context, _ string) (bool, error) {
 	s.hasBoundCalls++
 	return s.channelBound, nil
+}
+
+// GetChannelBindingByAppAndType 从内存 channelBindings 按 channel_type 返回绑定行，
+// 模拟 buildAppSpec 查飞书绑定；未设置对应类型时返回 sql.ErrNoRows（同真实 :one 无行）。
+func (s *appInitStub) GetChannelBindingByAppAndType(_ context.Context, arg sqlc.GetChannelBindingByAppAndTypeParams) (sqlc.ChannelBinding, error) {
+	if b, ok := s.channelBindings[arg.ChannelType]; ok {
+		return b, nil
+	}
+	return sqlc.ChannelBinding{}, sql.ErrNoRows
 }
 
 // fakeNewAPI 同时充当 NewAPIClientFactory 与 APIKeyClient：UserScopedFor 直接返回自身，

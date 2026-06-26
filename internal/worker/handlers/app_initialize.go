@@ -53,6 +53,10 @@ type AppInitializeStore interface {
 	AppHasBoundChannelBinding(ctx context.Context, appID string) (bool, error)
 	// SetAppRuntimeToken 写入 Hermes 调 manager runtime API 的 app 级 token。
 	SetAppRuntimeToken(ctx context.Context, arg sqlc.SetAppRuntimeTokenParams) error
+	// GetChannelBindingByAppAndType 按 app + 渠道类型查单条绑定行，供 buildAppSpec
+	// 在渲染 AppSpec 时带出已绑定飞书凭证（DB 是 source of truth，Secret 是派生物，
+	// 每次 app 重建 / 镜像升级都从 DB 重新带出，避免配置丢失）。
+	GetChannelBindingByAppAndType(ctx context.Context, arg sqlc.GetChannelBindingByAppAndTypeParams) (sqlc.ChannelBinding, error)
 }
 
 // APIKeyClient 是「以业务 user 身份调 token 相关接口」的最小能力集合。
@@ -361,7 +365,7 @@ func (h *AppInitializeHandler) phaseCreate(ctx context.Context, app *sqlc.App, i
 	if err != nil {
 		return fmt.Errorf("解密 runtime token 失败（phaseCreate）: %w", err)
 	}
-	spec := h.buildAppSpec(*app, imageRef, controlToken)
+	spec := h.buildAppSpec(ctx, *app, imageRef, controlToken)
 	if err := h.orch.EnsureApp(ctx, spec); err != nil {
 		return fmt.Errorf("k8s EnsureApp 失败: %w", err)
 	}
@@ -388,9 +392,30 @@ func (h *AppInitializeHandler) phaseStart(ctx context.Context, app *sqlc.App) er
 }
 
 // buildAppSpec 把 app + 解析出的 hermes 镜像 + control token 渲染为 k8sorch.AppSpec。
-func (h *AppInitializeHandler) buildAppSpec(app sqlc.App, hermesImage, controlToken string) k8sorch.AppSpec {
+// 若该 app 已绑定飞书，还会从 channel_bindings 解密带出飞书凭证写入 spec，
+// 使 RenderSecret 在 app 重建 / 镜像升级时不丢飞书配置。
+func (h *AppInitializeHandler) buildAppSpec(ctx context.Context, app sqlc.App, hermesImage, controlToken string) k8sorch.AppSpec {
 	// bootstrapURL 由 BootstrapBaseURL 拼 appID 构成，pod 调此地址拉初始化配置。
 	bootstrapURL := strings.TrimRight(h.k8sCfg.BootstrapBaseURL, "/") + "/internal/apps/" + app.ID + "/bootstrap"
+
+	// 已绑定飞书：解密带出凭证，使 RenderSecret 在重建/升级时不丢配置。
+	// 绑定查询失败 / 无行 / 解密失败均静默降级为空——飞书未绑定的 app 不应因此报错。
+	var feishuAppID, feishuSecret, feishuDomain string
+	if binding, err := h.store.GetChannelBindingByAppAndType(ctx, sqlc.GetChannelBindingByAppAndTypeParams{
+		AppID: app.ID, ChannelType: domain.ChannelTypeFeishu,
+	}); err == nil && binding.Status == domain.ChannelStatusBound && len(binding.MetadataJson) > 0 {
+		var m struct {
+			AppID            string `json:"app_id"`
+			SecretCiphertext string `json:"app_secret_ciphertext"`
+			Domain           string `json:"domain"`
+		}
+		if json.Unmarshal(binding.MetadataJson, &m) == nil && m.SecretCiphertext != "" && h.cfg.Cipher != nil {
+			if plain, derr := h.cfg.Cipher.Decrypt(m.SecretCiphertext); derr == nil {
+				feishuAppID, feishuSecret, feishuDomain = m.AppID, string(plain), m.Domain
+			}
+		}
+	}
+
 	return k8sorch.AppSpec{
 		AppID:           app.ID,
 		HermesImage:     hermesImage,
@@ -409,6 +434,9 @@ func (h *AppInitializeHandler) buildAppSpec(app sqlc.App, hermesImage, controlTo
 			HTTPSProxy: h.k8sCfg.Proxy.HTTPSProxy,
 			NoProxy:    h.k8sCfg.Proxy.NoProxy,
 		},
+		FeishuAppID:     feishuAppID,
+		FeishuAppSecret: feishuSecret,
+		FeishuDomain:    feishuDomain,
 	}
 }
 
