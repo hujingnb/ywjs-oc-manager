@@ -31,6 +31,12 @@ type ChannelStatus struct {
 	Channel   string `json:"channel"`
 	Bound     bool   `json:"bound"`
 	AccountID string `json:"account_id,omitempty"`
+	// PlatformState 是渠道在第三方平台侧的健康态（如飞书 health 返回的运行状态），
+	// 供 Task 17 worker 健康探测判定；微信渠道不返回该字段时保持空字符串。
+	PlatformState string `json:"platform_state,omitempty"`
+	// ErrorMessage 是平台侧健康异常时的原因描述（如飞书凭证失效 / 连接断开），
+	// 仅在 PlatformState 异常时有值；正常态为空。
+	ErrorMessage string `json:"error_message,omitempty"`
 }
 
 // ChannelResult 是 POST /oc/channels/{channel}/unbind 的响应体。
@@ -38,4 +44,26 @@ type ChannelStatus struct {
 type ChannelResult struct {
 	Status string `json:"status"`
 	Reason string `json:"reason,omitempty"`
+}
+
+// FeishuRegisterEvent 是 oc-ops /oc/channels/feishu/register SSE 的一条事件。
+// 扫码注册链路按序推送：qrcode（二维码 URL）→ credentials（扫码授权后回填的应用凭证）；
+// 注册失败时推 failed（Reason 携带原因）。字段对齐 server 端 feishu register 协程的 yield 结构。
+type FeishuRegisterEvent struct {
+	Event     string `json:"event"`            // qrcode | credentials | failed
+	URL       string `json:"url,omitempty"`    // qrcode 事件的二维码 URL
+	AppID     string `json:"app_id,omitempty"` // 以下为 credentials 事件携带的应用凭证
+	AppSecret string `json:"app_secret,omitempty"`
+	Domain    string `json:"domain,omitempty"`
+	BotName   string `json:"bot_name,omitempty"`
+	BotOpenID string `json:"bot_open_id,omitempty"`
+	Reason    string `json:"reason,omitempty"` // failed 事件的失败原因
+}
+
+// FeishuProbeResult 是 POST /oc/channels/feishu/probe 手填校验的响应体。
+// 用户手填 app_id/app_secret 后即时校验：OK 表示凭证有效，并回带机器人身份。
+type FeishuProbeResult struct {
+	OK        bool   `json:"ok"`
+	BotName   string `json:"bot_name"`
+	BotOpenID string `json:"bot_open_id"`
 }
