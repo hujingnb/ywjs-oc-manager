@@ -80,3 +80,37 @@ func TestFeishuAdapterScanFailed(t *testing.T) {
 	}
 	t.Fatal("未达到 failed 状态")
 }
+
+// fakeFeishuProber 模拟 oc-ops 手填校验。
+type fakeFeishuProber struct {
+	ok      bool
+	botName string
+}
+
+func (p *fakeFeishuProber) ProbeFeishu(_ context.Context, _ AuthInput, _, _, _ string) (bool, string, string, error) {
+	return p.ok, p.botName, "", nil
+}
+
+// TestFeishuAdapterManualProbeOK 验证手填校验通过后置凭证 + bot_name。
+func TestFeishuAdapterManualProbeOK(t *testing.T) {
+	a := NewFeishuAdapter(nil)
+	a.SetProber(&fakeFeishuProber{ok: true, botName: "Bot"})
+	ch, err := a.BeginManual(context.Background(), AuthInput{AppID: "app-1"},
+		FeishuCredentials{AppID: "cli_x", AppSecret: "sec", Domain: "feishu"})
+	require.NoError(t, err)
+	require.Equal(t, "feishu_manual", ch.Type)
+	c, ok := a.TakeCredentials("app-1")
+	require.True(t, ok)
+	require.Equal(t, "Bot", c.BotName)
+}
+
+// TestFeishuAdapterManualProbeFail 验证校验失败返回错误且不置凭证。
+func TestFeishuAdapterManualProbeFail(t *testing.T) {
+	a := NewFeishuAdapter(nil)
+	a.SetProber(&fakeFeishuProber{ok: false})
+	_, err := a.BeginManual(context.Background(), AuthInput{AppID: "app-1"},
+		FeishuCredentials{AppID: "cli_x", AppSecret: "bad", Domain: "feishu"})
+	require.Error(t, err)
+	_, ok := a.TakeCredentials("app-1")
+	require.False(t, ok)
+}

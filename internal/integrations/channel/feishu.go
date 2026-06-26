@@ -43,6 +43,7 @@ type feishuState struct {
 // 这与微信「引擎自落盘、adapter 只判 bound」的模式不同：飞书凭证需 manager 中转。
 type FeishuAdapter struct {
 	runner FeishuRegisterRunner
+	prober FeishuProber
 	mu     sync.Mutex
 	states map[string]*feishuState
 }
@@ -138,6 +139,31 @@ func (a *FeishuAdapter) TakeCredentials(appID string) (FeishuCredentials, bool) 
 // SetCredentials 直接写入凭证（手填模式无 SSE，由 service/worker 注入；Task 12 用）。
 func (a *FeishuAdapter) SetCredentials(appID string, c FeishuCredentials) {
 	a.set(appID, feishuState{status: AuthStatusPending, creds: &c, updated: time.Now()})
+}
+
+// FeishuProber 抽象手填模式经 oc-ops 即时校验飞书凭证的能力。
+type FeishuProber interface {
+	ProbeFeishu(ctx context.Context, input AuthInput, appID, appSecret, domain string) (ok bool, botName, botOpenID string, err error)
+}
+
+// SetProber 注入手填校验器。
+func (a *FeishuAdapter) SetProber(p FeishuProber) { a.prober = p }
+
+// BeginManual 手填模式：可选 probe 校验，通过则置凭证（带回 bot_name/open_id）。
+func (a *FeishuAdapter) BeginManual(ctx context.Context, input AuthInput, creds FeishuCredentials) (AuthChallenge, error) {
+	if a.prober != nil {
+		ok, botName, botOpenID, err := a.prober.ProbeFeishu(ctx, input, creds.AppID, creds.AppSecret, creds.Domain)
+		if err != nil {
+			return AuthChallenge{}, fmt.Errorf("飞书凭证校验失败: %w", err)
+		}
+		if !ok {
+			a.set(input.AppID, feishuState{status: AuthStatusFailed, errMsg: "飞书凭证无效", updated: time.Now()})
+			return AuthChallenge{}, errors.New("飞书凭证无效")
+		}
+		creds.BotName, creds.BotOpenID = botName, botOpenID
+	}
+	a.SetCredentials(input.AppID, creds)
+	return AuthChallenge{Type: "feishu_manual"}, nil
 }
 
 // set 以写锁覆盖某 app 的内部状态。

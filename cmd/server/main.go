@@ -263,6 +263,13 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		return fmt.Errorf("注册微信渠道失败: %w", err)
 	}
 
+	// 飞书渠道：扫码注册 SSE + 手填 probe 都经 oc-ops；runner/prober 适配 ocopsClient。
+	feishuAdapter := channel.NewFeishuAdapter(channel.NewOcOpsFeishuRunner(ocopsClient))
+	feishuAdapter.SetProber(channel.NewOcOpsFeishuProber(ocopsClient))
+	if err := channelRegistry.Register(feishuAdapter); err != nil {
+		return fmt.Errorf("注册飞书渠道失败: %w", err)
+	}
+
 	// new-api 装配：
 	//   - newapiClient 是顶层 admin 视角；可调创建 user / 充值 / 查日志 / 查 quota；
 	//   - newapiFactory 在 worker handler 跑 job 时把 (app→org→credentials) 翻译成
