@@ -232,6 +232,16 @@ func (s *ChannelService) BeginFeishuAuth(ctx context.Context, principal auth.Pri
 	if _, err := s.registry.Lookup(domain.ChannelTypeFeishu); err != nil {
 		return ChallengeResult{}, fmt.Errorf("%w: %s", ErrChannelAdapterMissing, domain.ChannelTypeFeishu)
 	}
+	// bound 短路（对齐微信 BeginAuth）：已绑定的飞书 app 再次发起直接返回 bound，
+	// 不重跑 upsert / 写 metadata / 入队 job。飞书 binding 首次发起时尚不存在
+	// （create-on-demand），ErrNoRows 属正常路径，继续往下走 upsert。
+	existing, err := s.store.GetChannelBindingByAppAndType(ctx, sqlc.GetChannelBindingByAppAndTypeParams{AppID: app.ID, ChannelType: domain.ChannelTypeFeishu})
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return ChallengeResult{}, fmt.Errorf("查询飞书绑定失败: %w", err)
+	}
+	if err == nil && existing.Status == domain.ChannelStatusBound {
+		return ChallengeResult{Status: domain.ChannelStatusBound, ChannelType: domain.ChannelTypeFeishu}, nil
+	}
 	// create-on-demand：飞书绑定行不在实例创建时预建，发起时按需建立（已存在 no-op）。
 	if err := s.store.UpsertChannelBindingUnbound(ctx, sqlc.UpsertChannelBindingUnboundParams{
 		ID:          newUUID(),

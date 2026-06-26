@@ -382,26 +382,34 @@ func (h *ChannelCheckBindingHandler) handleFeishuCheck(ctx context.Context, app 
 		if acquiredBy == "" {
 			acquiredBy = "qr"
 		}
-		newMeta, err := json.Marshal(map[string]any{
+		// 凭证全集 metadata；injected 字段在持久化/翻转两个阶段分别置 false/true，
+		// 其余字段两次写入完全一致，保证幂等：重试时凭证已在 DB、可重新注入。
+		credMeta := map[string]any{
 			"app_id":                creds.AppID,
 			"app_secret_ciphertext": enc,
 			"domain":                creds.Domain,
 			"acquired_by":           acquiredBy,
 			"bot_name":              creds.BotName,
 			"bot_open_id":           creds.BotOpenID,
-			"injected":              "true",
-		})
+		}
+		// ① 持久化优先：先把凭证密文 + bot 信息落库，但 injected 仍 "false"。
+		// 这一步把扫码内存凭证固化到 DB，且使后续 patch/重启失败可重试（重试时
+		// injected 仍 false → 重新进阶段1 → takeFeishuCredentials 从 DB 密文恢复）。
+		credMeta["injected"] = "false"
+		persistMeta, err := json.Marshal(credMeta)
 		if err != nil {
 			return fmt.Errorf("序列化飞书凭证 metadata 失败: %w", err)
 		}
 		if err := h.store.SetFeishuCredentials(ctx, sqlc.SetFeishuCredentialsParams{
-			MetadataJson: newMeta,
+			MetadataJson: persistMeta,
 			Status:       domain.ChannelStatusPendingAuth,
 			AppID:        app.ID,
 		}); err != nil {
 			return fmt.Errorf("写入飞书凭证失败: %w", err)
 		}
-		// 注入 app Secret：引擎重启后从 env 读 feishu-* 明文连接开放平台。patcher 未注入时跳过。
+		// ② 注入 app Secret：引擎重启后从 env 读 feishu-* 明文连接开放平台。
+		// 失败必须 return error（injected 仍 false）触发重试，否则飞书 key 永不注入。
+		// PatchSecretKeys 幂等：重试 set 相同 key 无副作用。
 		if h.feishuPatcher != nil {
 			if err := h.feishuPatcher.PatchSecretKeys(ctx, app.ID, map[string]string{
 				"feishu-app-id":     creds.AppID,
@@ -411,11 +419,25 @@ func (h *ChannelCheckBindingHandler) handleFeishuCheck(ctx context.Context, app 
 				return fmt.Errorf("patch 飞书 Secret 失败: %w", err)
 			}
 		}
-		// 重启失败仅告警不阻塞：metadata/Secret 已就绪，后续阶段2 health 探测仍能驱动 bound。
+		// ③ 重启失败仅告警不阻塞：metadata/Secret 已就绪，后续阶段2 health 探测仍能驱动 bound。
 		if h.restarter != nil {
 			if err := h.restarter.RestartApp(ctx, app.ID); err != nil {
 				slog.ErrorContext(ctx, "飞书凭证注入后重启 hermes 失败", "app_id", app.ID, redactlog.Err(err))
 			}
+		}
+		// ④ 注入 + 重启完成后才翻 injected="true"，使下一轮 check 进入阶段2 health 探测。
+		// 其余字段重复写一遍保持幂等。
+		credMeta["injected"] = "true"
+		injectedMeta, err := json.Marshal(credMeta)
+		if err != nil {
+			return fmt.Errorf("序列化飞书凭证 metadata 失败: %w", err)
+		}
+		if err := h.store.SetFeishuCredentials(ctx, sqlc.SetFeishuCredentialsParams{
+			MetadataJson: injectedMeta,
+			Status:       domain.ChannelStatusPendingAuth,
+			AppID:        app.ID,
+		}); err != nil {
+			return fmt.Errorf("翻转飞书 injected 标记失败: %w", err)
 		}
 		// 等重启 + 引擎建立长连接，再进入阶段2 health 探测。
 		return enqueueChannelCheck(ctx, h.store, payload, 8*time.Second)
@@ -443,28 +465,31 @@ func (h *ChannelCheckBindingHandler) handleFeishuCheck(ctx context.Context, app 
 	}
 }
 
-// takeFeishuCredentials 取出飞书凭证：扫码模式经 adapter.TakeCredentials 私有交接；
-// 手填模式（acquired_by=manual）凭证已由 service 加密写入 metadata，从密文解密取出。
+// takeFeishuCredentials 取出飞书凭证，按优先级两路恢复：
+//  1. 扫码内存优先：经 adapter.TakeCredentials 私有交接当前进程刚回填的凭证；
+//  2. DB 密文恢复：内存取不到时，只要 metadata 含 app_secret_ciphertext 即解密还原。
+//
+// 第 2 路不再限定 acquired_by=="manual"，同时覆盖三种场景：手填（service 写入密文）、
+// 扫码持久化后重试（阶段1 ① 已落库 → patch/重启失败重试时内存已空）、worker 重启 /
+// 多副本（扫码内存凭证仅存于原进程，TakeCredentials 在新进程必然 false）。
 func (h *ChannelCheckBindingHandler) takeFeishuCredentials(adapter channel.ChannelAdapter, payload channelLoginPayload, meta map[string]any) (channel.FeishuCredentials, bool) {
 	if fa, ok := adapter.(*channel.FeishuAdapter); ok {
 		if c, ok := fa.TakeCredentials(payload.AppID); ok {
 			return c, true
 		}
 	}
-	// 手填：service 已把 app_secret 密文写进 metadata，解密还原明文凭证。
-	if ab, _ := meta["acquired_by"].(string); ab == "manual" {
-		enc, _ := meta["app_secret_ciphertext"].(string)
-		appID, _ := meta["app_id"].(string)
-		dom, _ := meta["domain"].(string)
-		botName, _ := meta["bot_name"].(string)
-		botOpenID, _ := meta["bot_open_id"].(string)
-		if enc != "" && appID != "" && h.cipher != nil {
-			if plain, err := h.cipher.Decrypt(enc); err == nil {
-				return channel.FeishuCredentials{
-					AppID: appID, AppSecret: string(plain), Domain: dom,
-					BotName: botName, BotOpenID: botOpenID,
-				}, true
-			}
+	// DB 密文恢复：解密还原明文，并带出 metadata 已有的 domain / bot 信息（阶段1 ① 已写）。
+	enc, _ := meta["app_secret_ciphertext"].(string)
+	appID, _ := meta["app_id"].(string)
+	if enc != "" && appID != "" && h.cipher != nil {
+		if plain, err := h.cipher.Decrypt(enc); err == nil {
+			dom, _ := meta["domain"].(string)
+			botName, _ := meta["bot_name"].(string)
+			botOpenID, _ := meta["bot_open_id"].(string)
+			return channel.FeishuCredentials{
+				AppID: appID, AppSecret: string(plain), Domain: dom,
+				BotName: botName, BotOpenID: botOpenID,
+			}, true
 		}
 	}
 	return channel.FeishuCredentials{}, false

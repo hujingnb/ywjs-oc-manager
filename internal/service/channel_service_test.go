@@ -228,6 +228,26 @@ func TestChannelServiceBeginAuthFeishuScanCreatesBinding(t *testing.T) {
 	require.Len(t, store.jobs, 1)
 }
 
+// TestChannelServiceBeginFeishuAuthBoundShortCircuit 验证 bound 短路：
+// 已绑定的飞书 app 再次发起，直接返回 bound，不重跑 upsert / 不写 metadata / 不入队 job。
+func TestChannelServiceBeginFeishuAuthBoundShortCircuit(t *testing.T) {
+	store := newChannelStub(t)
+	// 现有飞书 binding 已是 bound 状态。
+	store.binding.ChannelType = domain.ChannelTypeFeishu
+	store.binding.Status = domain.ChannelStatusBound
+	registry := channel.NewRegistry()
+	registry.MustRegister(channel.NewFeishuAdapter(nil))
+	svc := NewChannelService(store, registry)
+
+	res, err := svc.BeginFeishuAuth(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, FeishuAuthInput{Mode: "scan", Domain: "feishu"})
+	require.NoError(t, err)
+	require.Equal(t, domain.ChannelStatusBound, res.Status)
+	require.Equal(t, domain.ChannelTypeFeishu, res.ChannelType)
+	require.False(t, store.upsertCalled, "bound 短路不应 create-on-demand")
+	require.Empty(t, store.feishuMeta, "bound 短路不应写 metadata")
+	require.Empty(t, store.jobs, "bound 短路不应入队 job")
+}
+
 // TestChannelServiceBeginAuthFeishuManualMissingCredential 验证手填缺 app_id/secret 时拒绝。
 func TestChannelServiceBeginAuthFeishuManualMissingCredential(t *testing.T) {
 	store := newChannelStub(t)

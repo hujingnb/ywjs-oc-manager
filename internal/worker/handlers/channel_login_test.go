@@ -360,9 +360,14 @@ type fakeFeishuPatcher struct {
 	patched bool
 	set     map[string]string
 	deleted []string
+	// err 非 nil 时 PatchSecretKeys 返回该错误，模拟 apiserver 抖动 / Secret 不存在 / RBAC 失败。
+	err error
 }
 
 func (p *fakeFeishuPatcher) PatchSecretKeys(_ context.Context, _ string, set map[string]string, del []string) error {
+	if p.err != nil {
+		return p.err
+	}
 	p.patched = true
 	p.set = set
 	p.deleted = del
@@ -432,6 +437,62 @@ func TestFeishuCheckPhase1InjectsAndRestarts(t *testing.T) {
 	// 阶段1结束应入队一条 check（进入阶段2 health 探测）。
 	require.Len(t, store.jobs, 1)
 	require.Equal(t, domain.JobTypeChannelCheckBinding, store.jobs[0].Type)
+}
+
+// TestFeishuCheckPhase1PatchFailureRecoverable 验证阶段1 PatchSecretKeys 失败时可恢复：
+// Handle 返回 error 触发 job 重试；DB metadata 的 injected 仍为 "false"（未翻 true），
+// 且 app_secret_ciphertext 已落库（凭证已持久化）——这样重试时能从 DB 重新注入，
+// 而非因 injected=="true" 跳过阶段1 导致飞书 key 永不注入而无限卡死。
+func TestFeishuCheckPhase1PatchFailureRecoverable(t *testing.T) {
+	store := newFeishuCheckStore(t)
+	store.binding.MetadataJson = []byte(`{"acquired_by":"qr","domain":"feishu","injected":"false"}`)
+	fa := channel.NewFeishuAdapter(nil)
+	fa.SetCredentials(testChannelWorkerAppID, channel.FeishuCredentials{AppID: "cli_x", AppSecret: "sec", Domain: "feishu", BotName: "Bot", BotOpenID: "ou_1"})
+	registry := channel.NewRegistry()
+	registry.MustRegister(fa)
+	// patcher 注入失败，模拟 apiserver 抖动 / Secret 不存在。
+	patcher := &fakeFeishuPatcher{err: errors.New("apiserver 抖动")}
+	restarter := &workerFakeRestarter{}
+	h := NewChannelCheckBindingHandler(store, registry, nil)
+	h.SetRestarter(restarter)
+	h.SetFeishuDeps(patcher, newTestCipher(t), &fakeHealthClient{})
+
+	err := h.Handle(context.Background(), feishuCheckJob(t))
+	require.Error(t, err, "patch 失败应返回 error 触发重试")
+	// 凭证已持久化但 injected 仍 false：重试时阶段1 可从 DB 恢复重新注入。
+	require.Contains(t, string(store.feishuMeta), "\"injected\":\"false\"", "patch 失败时 injected 不得翻 true")
+	require.Contains(t, string(store.feishuMeta), "app_secret_ciphertext", "凭证密文应已落库")
+	require.NotContains(t, string(store.feishuMeta), "\"sec\"", "secret 落库必须密文")
+}
+
+// TestFeishuCheckPhase1RetryFromDBCredentials 验证阶段1 凭证从 DB 密文恢复：
+// 模拟「凭证已持久化到 DB 密文、adapter 内存为空（扫码重试 / worker 重启 / 多副本）」，
+// TakeCredentials 取不到时，阶段1 仍能从 DB metadata 解密恢复凭证，完成 patch + 翻 injected=true。
+func TestFeishuCheckPhase1RetryFromDBCredentials(t *testing.T) {
+	store := newFeishuCheckStore(t)
+	cipher := newTestCipher(t)
+	// 预置：凭证密文已在 DB（第一次写入持久化的结果），injected 仍 false。
+	enc, err := cipher.Encrypt([]byte("sec"))
+	require.NoError(t, err)
+	store.binding.MetadataJson = []byte(`{"app_id":"cli_x","app_secret_ciphertext":"` + enc + `","domain":"feishu","acquired_by":"qr","bot_name":"Bot","bot_open_id":"ou_1","injected":"false"}`)
+	// adapter 内存为空：TakeCredentials 返回 false，强制走 DB 恢复路径。
+	registry := channel.NewRegistry()
+	registry.MustRegister(channel.NewFeishuAdapter(nil))
+	patcher := &fakeFeishuPatcher{}
+	restarter := &workerFakeRestarter{}
+	h := NewChannelCheckBindingHandler(store, registry, nil)
+	h.SetRestarter(restarter)
+	h.SetFeishuDeps(patcher, cipher, &fakeHealthClient{})
+
+	require.NoError(t, h.Handle(context.Background(), feishuCheckJob(t)))
+	require.True(t, patcher.patched, "应从 DB 恢复凭证后 patch feishu-* key")
+	require.Equal(t, "cli_x", patcher.set["feishu-app-id"])
+	require.Equal(t, "sec", patcher.set["feishu-app-secret"], "secret 应从 DB 密文解密恢复")
+	require.Equal(t, 1, restarter.calls, "注入后应触发重启")
+	require.Contains(t, string(store.feishuMeta), "\"injected\":\"true\"", "patch 成功后 injected 翻 true")
+	// 恢复时应带出 metadata 已有的 bot 信息，供阶段2 bound identity 使用。
+	require.Contains(t, string(store.feishuMeta), "\"bot_open_id\":\"ou_1\"")
+	require.Contains(t, string(store.feishuMeta), "\"bot_name\":\"Bot\"")
 }
 
 // TestFeishuCheckPhase2HealthConnectedBinds 验证已注入→health connected→MarkBound（identity 取 metadata bot_open_id）。
