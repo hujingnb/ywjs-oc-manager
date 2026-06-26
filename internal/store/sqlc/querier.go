@@ -272,6 +272,9 @@ type Querier interface {
 	SetAppVersion(ctx context.Context, arg SetAppVersionParams) error
 	SetChannelBindingChallenge(ctx context.Context, arg SetChannelBindingChallengeParams) error
 	SetChannelBindingStatus(ctx context.Context, arg SetChannelBindingStatusParams) error
+	// 写入飞书凭证 metadata（app_id 明文 + secret 密文 + domain + bot 信息 + injected 标记）并置状态。
+	// 供 BeginAuth service（Task 14）与凭证注入 worker（Task 17）调用。
+	SetFeishuCredentials(ctx context.Context, arg SetFeishuCredentialsParams) error
 	SetOrganizationNewAPIUser(ctx context.Context, arg SetOrganizationNewAPIUserParams) error
 	SetOrganizationStatus(ctx context.Context, arg SetOrganizationStatusParams) error
 	// 远端 dataset 创建成功后写入 RAGFlow ID，并清理上一轮生命周期错误。
@@ -316,6 +319,10 @@ type Querier interface {
 	UpdateUserLocale(ctx context.Context, arg UpdateUserLocaleParams) error
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) error
+	// 飞书无预建绑定行，BeginAuth 时 create-on-demand（已存在则忽略）。
+	// app_active_key 是 VIRTUAL 生成列（非 deleted 行 = app_id），不能显式赋值，
+	// ON DUPLICATE KEY 命中唯一约束 (app_active_key, channel_type) 时做 no-op。
+	UpsertChannelBindingUnbound(ctx context.Context, arg UpsertChannelBindingUnboundParams) error
 }
 
 var _ Querier = (*Queries)(nil)

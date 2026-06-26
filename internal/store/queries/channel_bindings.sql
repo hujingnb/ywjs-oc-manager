@@ -52,3 +52,18 @@ SELECT EXISTS (
     FROM channel_bindings
     WHERE app_id = ? AND status = 'bound'
 ) AS has_bound;
+
+-- name: UpsertChannelBindingUnbound :exec
+-- 飞书无预建绑定行，BeginAuth 时 create-on-demand（已存在则忽略）。
+-- app_active_key 是 VIRTUAL 生成列（非 deleted 行 = app_id），不能显式赋值，
+-- ON DUPLICATE KEY 命中唯一约束 (app_active_key, channel_type) 时做 no-op。
+INSERT INTO channel_bindings (id, app_id, channel_type, status)
+VALUES (?, ?, ?, 'unbound')
+ON DUPLICATE KEY UPDATE id = id;
+
+-- name: SetFeishuCredentials :exec
+-- 写入飞书凭证 metadata（app_id 明文 + secret 密文 + domain + bot 信息 + injected 标记）并置状态。
+-- 供 BeginAuth service（Task 14）与凭证注入 worker（Task 17）调用。
+UPDATE channel_bindings
+SET metadata_json = ?, status = ?, last_error = NULL, updated_at = now()
+WHERE app_id = ? AND channel_type = 'feishu' AND status <> 'deleted';

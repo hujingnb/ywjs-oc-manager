@@ -176,3 +176,42 @@ func (q *Queries) SetChannelBindingStatus(ctx context.Context, arg SetChannelBin
 	)
 	return err
 }
+
+const setFeishuCredentials = `-- name: SetFeishuCredentials :exec
+UPDATE channel_bindings
+SET metadata_json = ?, status = ?, last_error = NULL, updated_at = now()
+WHERE app_id = ? AND channel_type = 'feishu' AND status <> 'deleted'
+`
+
+type SetFeishuCredentialsParams struct {
+	MetadataJson []byte `db:"metadata_json" json:"metadata_json"`
+	Status       string `db:"status" json:"status"`
+	AppID        string `db:"app_id" json:"app_id"`
+}
+
+// 写入飞书凭证 metadata（app_id 明文 + secret 密文 + domain + bot 信息 + injected 标记）并置状态。
+// 供 BeginAuth service（Task 14）与凭证注入 worker（Task 17）调用。
+func (q *Queries) SetFeishuCredentials(ctx context.Context, arg SetFeishuCredentialsParams) error {
+	_, err := q.db.ExecContext(ctx, setFeishuCredentials, arg.MetadataJson, arg.Status, arg.AppID)
+	return err
+}
+
+const upsertChannelBindingUnbound = `-- name: UpsertChannelBindingUnbound :exec
+INSERT INTO channel_bindings (id, app_id, channel_type, status)
+VALUES (?, ?, ?, 'unbound')
+ON DUPLICATE KEY UPDATE id = id
+`
+
+type UpsertChannelBindingUnboundParams struct {
+	ID          string `db:"id" json:"id"`
+	AppID       string `db:"app_id" json:"app_id"`
+	ChannelType string `db:"channel_type" json:"channel_type"`
+}
+
+// 飞书无预建绑定行，BeginAuth 时 create-on-demand（已存在则忽略）。
+// app_active_key 是 VIRTUAL 生成列（非 deleted 行 = app_id），不能显式赋值，
+// ON DUPLICATE KEY 命中唯一约束 (app_active_key, channel_type) 时做 no-op。
+func (q *Queries) UpsertChannelBindingUnbound(ctx context.Context, arg UpsertChannelBindingUnboundParams) error {
+	_, err := q.db.ExecContext(ctx, upsertChannelBindingUnbound, arg.ID, arg.AppID, arg.ChannelType)
+	return err
+}
