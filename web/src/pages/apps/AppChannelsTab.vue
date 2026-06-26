@@ -105,7 +105,7 @@
               <div class="feishu-bound">
                 <p v-if="feishuProgress?.channel_name" class="state-text">{{ t('apps.channels.feishuBotName') }}{{ feishuProgress.channel_name }}</p>
                 <p v-if="feishuProgress?.bound_identity" class="state-text">{{ t('apps.channels.boundIdentity') }}{{ feishuProgress.bound_identity }}</p>
-                <p class="state-text">{{ t('apps.channels.feishuDomainCurrent') }}{{ feishuDomain === 'lark' ? t('apps.channels.feishuDomainLark') : t('apps.channels.feishuDomainFeishu') }}</p>
+                <p class="state-text">{{ t('apps.channels.feishuDomainCurrent') }}{{ feishuEffectiveDomain === 'lark' ? t('apps.channels.feishuDomainLark') : t('apps.channels.feishuDomainFeishu') }}</p>
               </div>
               <n-space :size="8">
                 <n-button v-if="feishuCanUnbind" @click="unbindFeishu">{{ t('apps.channels.unbind') }}</n-button>
@@ -304,6 +304,14 @@ const feishuBound = computed(() => feishuProgress.value?.status === 'bound')
 const feishuCanUnbind = computed(() => canManage.value && feishuBound.value)
 // feishuManualInvalid 在手填模式下两项凭证任一为空时禁用提交按钮。
 const feishuManualInvalid = computed(() => !feishuAppId.value.trim() || !feishuAppSecret.value.trim())
+// feishuEffectiveDomain 优先从绑定进度的 metadata.domain 读取（刷新页面后仍正确，
+// 避免 lark 实例被本地 ref 默认值 'feishu' 误显示），未绑定或 metadata 无 domain 时
+// 回退到本地 feishuDomain ref（即用户当前在下拉中选择的值）。
+const feishuEffectiveDomain = computed<'feishu' | 'lark'>(() => {
+  const d = feishuProgress.value?.metadata?.domain
+  if (d === 'feishu' || d === 'lark') return d
+  return feishuDomain.value
+})
 
 // feishuProgressChallenge 从轮询进度的 metadata.qrcode 还原扫码挑战，刷新页面也能恢复二维码。
 const feishuProgressChallenge = computed<ChannelChallenge | null>(() => channelChallengeFromProgress(feishuProgress.value, 'feishu'))
