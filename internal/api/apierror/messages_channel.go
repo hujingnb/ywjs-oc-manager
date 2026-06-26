@@ -17,6 +17,8 @@ const (
 	MsgChannelAdapterMissing MsgKey = "err.channel.adapter_missing"
 	// MsgChannelUnavailable 渠道服务暂时不可用。
 	MsgChannelUnavailable MsgKey = "err.channel.unavailable"
+	// MsgChannelInvalidRequest 渠道请求参数无效（如飞书凭证缺失或请求体格式错误）。
+	MsgChannelInvalidRequest MsgKey = "err.channel.invalid_request"
 )
 
 // init 把渠道 domain 错误译文并入中心 catalog。
@@ -26,5 +28,6 @@ func init() {
 		MsgChannelBindingNotFound: {"zh": "应用或渠道绑定不存在", "en": "The application or channel binding does not exist"},
 		MsgChannelAdapterMissing:  {"zh": "当前渠道未启用", "en": "The current channel is not enabled"},
 		MsgChannelUnavailable:     {"zh": "渠道服务暂时不可用", "en": "The channel service is temporarily unavailable"},
+		MsgChannelInvalidRequest:  {"zh": "渠道请求参数无效", "en": "Invalid channel request parameters"},
 	})
 }

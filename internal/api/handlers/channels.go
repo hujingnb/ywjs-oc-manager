@@ -9,6 +9,7 @@ import (
 
 	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
+	"oc-manager/internal/domain"
 	"oc-manager/internal/service"
 )
 
@@ -19,6 +20,8 @@ type ChannelsHandler struct {
 
 type channelService interface {
 	BeginAuth(ctx context.Context, principal auth.Principal, appID, channelType string) (service.ChallengeResult, error)
+	// BeginFeishuAuth 是飞书专用发起入口，接收双模式入参（scan 扫码 / manual 手填凭证）。
+	BeginFeishuAuth(ctx context.Context, principal auth.Principal, appID string, in service.FeishuAuthInput) (service.ChallengeResult, error)
 	PollAuth(ctx context.Context, principal auth.Principal, appID, channelType string) (service.ProgressResult, error)
 	Unbind(ctx context.Context, principal auth.Principal, appID, channelType string) error
 }
@@ -54,7 +57,32 @@ func RegisterChannelRoutes(router gin.IRouter, handler *ChannelsHandler) {
 // @Router       /apps/{appId}/channels/{channelType}/auth [post]
 func (h *ChannelsHandler) BeginAuth(c *gin.Context) {
 	principal := principalFromCtx(c)
-	result, err := h.service.BeginAuth(c.Request.Context(), principal, c.Param("appId"), c.Param("channelType"))
+	appID := c.Param("appId")
+	channelType := c.Param("channelType")
+
+	// 飞书走双模式专用入口（读请求体 mode/domain/凭证），与微信等渠道分流。
+	if channelType == domain.ChannelTypeFeishu {
+		var req FeishuChannelAuthRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgChannelInvalidRequest)
+			return
+		}
+		result, err := h.service.BeginFeishuAuth(c.Request.Context(), principal, appID, service.FeishuAuthInput{
+			Mode:      req.Mode,
+			Domain:    req.Domain,
+			AppID:     req.AppID,
+			AppSecret: req.AppSecret,
+		})
+		if err != nil {
+			writeChannelError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"challenge": result})
+		return
+	}
+
+	// 其他渠道（如微信）走原有无请求体路径。
+	result, err := h.service.BeginAuth(c.Request.Context(), principal, appID, channelType)
 	if err != nil {
 		writeChannelError(c, err)
 		return
@@ -121,6 +149,9 @@ func writeChannelError(c *gin.Context, err error) {
 		apierror.JSON(c, http.StatusNotFound, "NOT_FOUND", apierror.MsgChannelBindingNotFound)
 	case errors.Is(err, service.ErrChannelAdapterMissing):
 		apierror.JSON(c, http.StatusServiceUnavailable, "CHANNEL_ADAPTER_MISSING", apierror.MsgChannelAdapterMissing)
+	// ErrInvalidChannelCredential：飞书手填模式缺少必填凭证，属客户端错误，映射为 400。
+	case errors.Is(err, service.ErrInvalidChannelCredential):
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgChannelInvalidRequest)
 	default:
 		apierror.JSON(c, http.StatusInternalServerError, "INTERNAL", apierror.MsgChannelUnavailable)
 	}
