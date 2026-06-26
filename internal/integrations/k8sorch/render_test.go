@@ -181,3 +181,51 @@ func TestRenderService(t *testing.T) {
 func TestRenderSecret(t *testing.T) {
 	assertGolden(t, "secret.golden.yaml", RenderSecret(testSpec(), "oc-apps"))
 }
+
+// TestRenderSecretIncludesFeishuKeys 验证 AppSpec 带飞书配置时 Secret 写入三个飞书 key。
+func TestRenderSecretIncludesFeishuKeys(t *testing.T) {
+	spec := AppSpec{
+		AppID:           "app-1",
+		ControlToken:    "tok",
+		FeishuAppID:     "cli_abc",
+		FeishuAppSecret: "plain-secret",
+		FeishuDomain:    "feishu",
+	}
+	sec := RenderSecret(spec, "oc-apps")
+	require.Equal(t, "cli_abc", sec.StringData["feishu-app-id"])
+	require.Equal(t, "plain-secret", sec.StringData["feishu-app-secret"])
+	require.Equal(t, "feishu", sec.StringData["feishu-domain"])
+}
+
+// TestRenderSecretOmitsFeishuKeysWhenUnset 验证未绑定飞书时不写飞书 key（optional env 不注入）。
+func TestRenderSecretOmitsFeishuKeysWhenUnset(t *testing.T) {
+	sec := RenderSecret(AppSpec{AppID: "app-1", ControlToken: "tok"}, "oc-apps")
+	_, ok := sec.StringData["feishu-app-id"]
+	require.False(t, ok)
+}
+
+// TestRenderDeploymentInjectsFeishuOptionalEnv 验证 hermes 容器永久带三条 optional 飞书 env，
+// 未绑定时 Secret 无对应 key、optional=true 使 env 不注入、引擎不启用飞书平台。
+func TestRenderDeploymentInjectsFeishuOptionalEnv(t *testing.T) {
+	// 复用 testSpec 保证 ResourceLimits 有效（RenderDeployment 调 resource.MustParse，空串 panic）
+	dep := RenderDeployment(testSpec(), "oc-apps")
+	// 按名定位 hermes 容器，比硬编码索引更健壮
+	hermes := containerByName(dep, "hermes")
+	require.NotNil(t, hermes, "渲染结果必须包含名为 hermes 的容器")
+	// 期望的 feishu env 名称 → Secret key 对应关系
+	want := map[string]string{
+		"FEISHU_APP_ID":     "feishu-app-id",
+		"FEISHU_APP_SECRET": "feishu-app-secret",
+		"FEISHU_DOMAIN":     "feishu-domain",
+	}
+	// 收集 hermes env 中来自 SecretKeyRef 的 key 映射
+	found := map[string]string{}
+	for _, e := range hermes.Env {
+		if e.ValueFrom != nil && e.ValueFrom.SecretKeyRef != nil {
+			found[e.Name] = e.ValueFrom.SecretKeyRef.Key
+		}
+	}
+	for name, key := range want {
+		require.Equal(t, key, found[name], "env %s 应来自 secret key %s", name, key)
+	}
+}

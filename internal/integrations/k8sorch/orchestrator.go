@@ -52,6 +52,12 @@ type AppSpec struct {
 	// Proxy 为需直连外网的容器（hermes 微信平台 / oc-ops 渠道登录）注入代理 env；
 	// 各字段留空则不注入对应项（生产 pod 有外网出口时全空）。
 	Proxy ProxyEnv
+	// FeishuAppID 是飞书应用 App ID（明文，未绑定为空）。
+	FeishuAppID string
+	// FeishuAppSecret 是飞书 App Secret 明文（buildAppSpec 从 DB 密文解密后填入，引擎需明文；未绑定为空）。
+	FeishuAppSecret string
+	// FeishuDomain 是飞书 domain：feishu（国内）/ lark（国际），未绑定为空。
+	FeishuDomain string
 }
 
 // ProxyEnv 是注入容器的代理环境变量（HTTP(S)_PROXY/NO_PROXY），留空不注入。

@@ -30,6 +30,24 @@ spec:
             secretKeyRef:
               key: control-token
               name: app-a1-token
+        - name: FEISHU_APP_ID
+          valueFrom:
+            secretKeyRef:
+              key: feishu-app-id
+              name: app-a1-token
+              optional: true
+        - name: FEISHU_APP_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: feishu-app-secret
+              name: app-a1-token
+              optional: true
+        - name: FEISHU_DOMAIN
+          valueFrom:
+            secretKeyRef:
+              key: feishu-domain
+              name: app-a1-token
+              optional: true
         image: registry/hermes:v1
         name: hermes
         readinessProbe:

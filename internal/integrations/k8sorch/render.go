@@ -24,12 +24,20 @@ func selectorLabels(appID string) map[string]string {
 	return map[string]string{"app": appID}
 }
 
-// RenderSecret 渲染 per-app 控制 token Secret（control-token 键）。
+// RenderSecret 渲染 per-app 控制 token Secret（control-token 键）；已绑定飞书时附带飞书凭证 key。
 func RenderSecret(spec AppSpec, namespace string) *corev1.Secret {
+	data := map[string]string{"control-token": spec.ControlToken}
+	// 已绑定飞书：把凭证带入 Secret，保证 app 重建/镜像升级不丢配置（DB 是 source of truth）。
+	// FeishuAppSecret 存明文——引擎 FEISHU_APP_SECRET 需明文，buildAppSpec 调用前已解密。
+	if spec.FeishuAppID != "" && spec.FeishuAppSecret != "" {
+		data["feishu-app-id"] = spec.FeishuAppID
+		data["feishu-app-secret"] = spec.FeishuAppSecret
+		data["feishu-domain"] = spec.FeishuDomain
+	}
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: secretName(spec.AppID), Namespace: namespace, Labels: appLabels(spec.AppID)},
 		Type:       corev1.SecretTypeOpaque,
-		StringData: map[string]string{"control-token": spec.ControlToken},
+		StringData: data,
 	}
 }
 
@@ -110,11 +118,13 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 							// 拒绝启动（含 loopback-only 绑定）。复用 per-app control-token 作为 key——
 							// api_server 仅绑 127.0.0.1、只有同 pod 内 oc-ops 可达，per-app 密钥安全足够；
 							// oc-ops 容器注入同一 key（见下）后即可鉴权调用 /api/sessions。
-							Env: append([]corev1.EnvVar{
+							// 飞书三条 env 永久注入 hermes 容器；未绑定时 Secret 无对应 key，optional=true 使
+							// env 不注入，引擎 getenv 为空 → 飞书平台不启用。Deployment 模板永不因绑定变化。
+							Env: append(append([]corev1.EnvVar{
 								{Name: "HERMES_HOME", Value: "/opt/data"},
 								{Name: "API_SERVER_ENABLED", Value: "true"},
 								{Name: "API_SERVER_KEY", ValueFrom: ctrlTokenEnv.ValueFrom},
-							}, proxyEnv...),
+							}, feishuOptionalEnv(spec.AppID)...), proxyEnv...),
 							VolumeMounts: []corev1.VolumeMount{inputMountRO, dataMount},
 							Resources:    corev1.ResourceRequirements{Requests: reqs, Limits: lims},
 							// readinessProbe：exec hermes gateway status，验证网关真正就绪。
@@ -184,6 +194,25 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 		dep.Spec.Template.Labels[k] = v
 	}
 	return dep
+}
+
+// feishuOptionalEnv 返回飞书三条 optional SecretKeyRef env（FEISHU_APP_ID / FEISHU_APP_SECRET /
+// FEISHU_DOMAIN），供 hermes 容器永久挂载。Optional=true 保证：未绑定飞书时 Secret 无对应 key，
+// k8s 不注入该 env（引擎 getenv 为空 → 飞书平台不启用），Deployment 模板无需随绑定状态变化。
+func feishuOptionalEnv(appID string) []corev1.EnvVar {
+	optionalTrue := true
+	ref := func(key string) *corev1.EnvVarSource {
+		return &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: secretName(appID)},
+			Key:                  key,
+			Optional:             &optionalTrue,
+		}}
+	}
+	return []corev1.EnvVar{
+		{Name: "FEISHU_APP_ID", ValueFrom: ref("feishu-app-id")},
+		{Name: "FEISHU_APP_SECRET", ValueFrom: ref("feishu-app-secret")},
+		{Name: "FEISHU_DOMAIN", ValueFrom: ref("feishu-domain")},
+	}
 }
 
 // buildProxyEnv 把 ProxyEnv 转成容器 env 列表；空字段不产生 env（保持 pod 干净，
