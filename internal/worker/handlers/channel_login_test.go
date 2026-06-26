@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/channel"
 	"oc-manager/internal/integrations/ocops"
@@ -353,6 +354,118 @@ func TestChannelStartLoginFeishuManualEnqueuesCheck(t *testing.T) {
 	require.Equal(t, domain.JobTypeChannelCheckBinding, store.jobs[0].Type)
 }
 
+// fakeFeishuPatcher 实现 FeishuSecretPatcher，记录被注入的 feishu-* key 与删除项，
+// 供阶段1断言「凭证已 patch 到 app Secret」。
+type fakeFeishuPatcher struct {
+	patched bool
+	set     map[string]string
+	deleted []string
+}
+
+func (p *fakeFeishuPatcher) PatchSecretKeys(_ context.Context, _ string, set map[string]string, del []string) error {
+	p.patched = true
+	p.set = set
+	p.deleted = del
+	return nil
+}
+
+// fakeHealthClient 实现 FeishuHealthClient，返回预置的 platform_state / bot_open_id / errMsg，
+// 模拟 oc-ops ChannelStatus(feishu) 的健康探测结果。
+type fakeHealthClient struct {
+	state     string
+	botOpenID string
+	errMsg    string
+	err       error
+}
+
+func (c *fakeHealthClient) FeishuStatus(_ context.Context, _ string) (string, string, string, error) {
+	return c.state, c.botOpenID, c.errMsg, c.err
+}
+
+// newTestCipher 用固定 32 字节 master_key 造 cipher，供飞书 secret 加解密断言。
+func newTestCipher(t *testing.T) *auth.Cipher {
+	t.Helper()
+	c, err := auth.NewCipher([]byte("0123456789abcdef0123456789abcdef"))
+	require.NoError(t, err)
+	return c
+}
+
+// feishuCheckJob 构造一条飞书 channel_check_binding job（payload channel_type=feishu）。
+func feishuCheckJob(t *testing.T) sqlc.Job {
+	t.Helper()
+	return sqlc.Job{
+		Type:        domain.JobTypeChannelCheckBinding,
+		PayloadJson: []byte(`{"app_id":"` + testChannelWorkerAppID + `","channel_type":"feishu"}`),
+	}
+}
+
+// newFeishuCheckStore 构造飞书 check 用 store：渠道改 feishu、状态 pending_auth，
+// metadata 由各测试自行覆盖（injected 标记决定走阶段1 还是阶段2）。
+func newFeishuCheckStore(t *testing.T) *channelWorkerStore {
+	store := newFeishuWorkerStore(t)
+	store.binding.Status = domain.ChannelStatusPendingAuth
+	return store
+}
+
+// TestFeishuCheckPhase1InjectsAndRestarts 验证扫码凭证就绪→加密落库+patch Secret+重启+标 injected。
+func TestFeishuCheckPhase1InjectsAndRestarts(t *testing.T) {
+	store := newFeishuCheckStore(t)
+	// injected=false：进入阶段1，凭证从 adapter 取出后注入并重启。
+	store.binding.MetadataJson = []byte(`{"acquired_by":"qr","domain":"feishu","injected":"false"}`)
+	fa := channel.NewFeishuAdapter(nil)
+	fa.SetCredentials(testChannelWorkerAppID, channel.FeishuCredentials{AppID: "cli_x", AppSecret: "sec", Domain: "feishu", BotName: "Bot", BotOpenID: "ou_1"})
+	registry := channel.NewRegistry()
+	registry.MustRegister(fa)
+	patcher := &fakeFeishuPatcher{}
+	restarter := &workerFakeRestarter{}
+	h := NewChannelCheckBindingHandler(store, registry, nil)
+	h.SetRestarter(restarter)
+	h.SetFeishuDeps(patcher, newTestCipher(t), &fakeHealthClient{})
+
+	require.NoError(t, h.Handle(context.Background(), feishuCheckJob(t)))
+	require.True(t, patcher.patched, "应 patch feishu-* key")
+	require.Equal(t, "cli_x", patcher.set["feishu-app-id"])
+	require.Equal(t, "sec", patcher.set["feishu-app-secret"])
+	require.Equal(t, 1, restarter.calls, "注入后应触发重启")
+	require.Contains(t, string(store.feishuMeta), "\"injected\":\"true\"")
+	require.NotContains(t, string(store.feishuMeta), "\"sec\"", "secret 落库必须密文")
+	// 阶段1结束应入队一条 check（进入阶段2 health 探测）。
+	require.Len(t, store.jobs, 1)
+	require.Equal(t, domain.JobTypeChannelCheckBinding, store.jobs[0].Type)
+}
+
+// TestFeishuCheckPhase2HealthConnectedBinds 验证已注入→health connected→MarkBound（identity 取 metadata bot_open_id）。
+func TestFeishuCheckPhase2HealthConnectedBinds(t *testing.T) {
+	store := newFeishuCheckStore(t)
+	store.app.Status = domain.AppStatusBindingWaiting
+	// injected=true：进入阶段2，identity 从 metadata 的 bot_open_id 取（health 不回传）。
+	store.binding.MetadataJson = []byte(`{"app_id":"cli_x","domain":"feishu","bot_name":"Bot","bot_open_id":"ou_1","injected":"true"}`)
+	registry := channel.NewRegistry()
+	registry.MustRegister(channel.NewFeishuAdapter(nil))
+	h := NewChannelCheckBindingHandler(store, registry, nil)
+	h.SetFeishuDeps(&fakeFeishuPatcher{}, newTestCipher(t), &fakeHealthClient{state: "connected"})
+
+	require.NoError(t, h.Handle(context.Background(), feishuCheckJob(t)))
+	require.Equal(t, domain.ChannelStatusBound, store.binding.Status)
+	require.Equal(t, "ou_1", store.binding.BoundIdentity.String, "identity 来自 metadata，非 health")
+	require.Equal(t, "Bot", store.binding.ChannelName.String)
+	require.True(t, store.appStatusSet)
+}
+
+// TestFeishuCheckPhase2HealthFatalFails 验证 health fatal→failed 带原因。
+func TestFeishuCheckPhase2HealthFatalFails(t *testing.T) {
+	store := newFeishuCheckStore(t)
+	store.binding.MetadataJson = []byte(`{"app_id":"cli_x","injected":"true"}`)
+	registry := channel.NewRegistry()
+	registry.MustRegister(channel.NewFeishuAdapter(nil))
+	h := NewChannelCheckBindingHandler(store, registry, nil)
+	h.SetFeishuDeps(&fakeFeishuPatcher{}, newTestCipher(t), &fakeHealthClient{state: "fatal", errMsg: "invalid app_secret"})
+
+	require.NoError(t, h.Handle(context.Background(), feishuCheckJob(t)))
+	require.Equal(t, domain.ChannelStatusFailed, store.binding.Status)
+	require.Contains(t, store.binding.LastError.String, "invalid app_secret")
+}
+
 type workerFakeChannelAdapter struct {
 	challenge channel.AuthChallenge
 	progress  channel.AuthProgress
@@ -405,6 +518,9 @@ type channelWorkerStore struct {
 	jobs         []sqlc.Job
 	auditLogs    []sqlc.CreateAuditLogParams
 	appStatusSet bool
+	// feishuMeta 记录最近一次 SetFeishuCredentials 写入的 metadata，供飞书阶段1断言
+	// 「injected=true 已落库 + secret 密文化」。
+	feishuMeta []byte
 }
 
 // newChannelWorkerStore 构造 channelWorkerStore；ID 字段迁移为 string（MySQL uuid）。
@@ -493,5 +609,14 @@ func (s *channelWorkerStore) CreateJob(_ context.Context, arg sqlc.CreateJobPara
 // CreateAuditLog :exec 语义仅返回 error；存档入参供断言。
 func (s *channelWorkerStore) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) error {
 	s.auditLogs = append(s.auditLogs, arg)
+	return nil
+}
+
+// SetFeishuCredentials :exec 语义仅返回 error；记录飞书凭证 metadata 与状态，
+// 供阶段1注入断言（feishuMeta 落 injected=true、secret 密文）。
+func (s *channelWorkerStore) SetFeishuCredentials(_ context.Context, arg sqlc.SetFeishuCredentialsParams) error {
+	s.feishuMeta = arg.MetadataJson
+	s.binding.MetadataJson = arg.MetadataJson
+	s.binding.Status = arg.Status
 	return nil
 }

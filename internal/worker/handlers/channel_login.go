@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	null "github.com/guregu/null/v5"
 
+	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/channel"
 	"oc-manager/internal/integrations/ocops"
@@ -34,6 +35,7 @@ type ChannelLoginStore interface {
 	GetChannelBindingByAppAndType(ctx context.Context, arg sqlc.GetChannelBindingByAppAndTypeParams) (sqlc.ChannelBinding, error)
 	SetChannelBindingChallenge(ctx context.Context, arg sqlc.SetChannelBindingChallengeParams) error
 	SetChannelBindingStatus(ctx context.Context, arg sqlc.SetChannelBindingStatusParams) error
+	SetFeishuCredentials(ctx context.Context, arg sqlc.SetFeishuCredentialsParams) error
 	MarkChannelBindingBound(ctx context.Context, arg sqlc.MarkChannelBindingBoundParams) error
 	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) error
 	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) error
@@ -205,12 +207,32 @@ type ChannelRestarter interface {
 	RestartApp(ctx context.Context, appID string) error
 }
 
+// FeishuSecretPatcher 抽象「给 app 的 control-token Secret 增删飞书 key」的能力，
+// 由 k8sorch.KubernetesAdapter.PatchSecretKeys 实现。飞书凭证以 feishu-app-id /
+// feishu-app-secret / feishu-domain 注入 Secret，引擎重启后从 env 读取明文连接开放平台。
+type FeishuSecretPatcher interface {
+	PatchSecretKeys(ctx context.Context, appID string, set map[string]string, del []string) error
+}
+
+// FeishuHealthClient 抽象「查飞书在开放平台侧的连通态」，由 oc-ops ChannelStatus(feishu) 适配。
+// 返回 state（platform_state，如 connected/fatal）、botOpenID（health 不回传，恒为空，
+// 由 worker 改用 metadata 的 bot_open_id）、errMessage（异常原因）。
+type FeishuHealthClient interface {
+	FeishuStatus(ctx context.Context, appID string) (state, botOpenID, errMessage string, err error)
+}
+
 // ChannelCheckBindingHandler 执行 channel_check_binding job。
 type ChannelCheckBindingHandler struct {
 	store     ChannelLoginStore
 	registry  *channel.Registry
 	resolver  channel.BindingResolver
 	restarter ChannelRestarter
+	// feishuPatcher / cipher / feishuHealth 仅飞书两阶段 check 使用：
+	// feishuPatcher 把凭证注入 app Secret，cipher 把 secret 加密后落 metadata，
+	// feishuHealth 在注入重启后探测开放平台连通态。微信路径不依赖三者。
+	feishuPatcher FeishuSecretPatcher
+	cipher        *auth.Cipher
+	feishuHealth  FeishuHealthClient
 }
 
 // NewChannelCheckBindingHandler 创建 channel_check_binding handler。
@@ -221,6 +243,12 @@ func NewChannelCheckBindingHandler(store ChannelLoginStore, registry *channel.Re
 // SetRestarter 注入容器重启能力,bound 后触发 hermes 容器重启以重新读 platforms 配置。
 func (h *ChannelCheckBindingHandler) SetRestarter(r ChannelRestarter) {
 	h.restarter = r
+}
+
+// SetFeishuDeps 注入飞书两阶段 check 所需依赖：Secret patch、密文 cipher、health 探测客户端。
+// 仅飞书渠道走这三者；未注入时飞书 check 降级（patcher 为 nil 跳过注入、health 为 nil 重新入队）。
+func (h *ChannelCheckBindingHandler) SetFeishuDeps(p FeishuSecretPatcher, cipher *auth.Cipher, hc FeishuHealthClient) {
+	h.feishuPatcher, h.cipher, h.feishuHealth = p, cipher, hc
 }
 
 // Handle 查询渠道绑定状态，bound 后补写身份并把 binding_waiting 应用推进到 running。
@@ -238,6 +266,11 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 	}
 	if binding.Status == domain.ChannelStatusBound {
 		return nil
+	}
+	// 飞书走专用两阶段流程（注入凭证 → health 探测连通），与微信「引擎自落盘 + PollAuth 判 bound」
+	// 模式完全不同，故在此分流；微信及其余渠道继续走下面的 PollAuth 逻辑。
+	if payload.ChannelType == domain.ChannelTypeFeishu {
+		return h.handleFeishuCheck(ctx, app, binding, payload, adapter)
 	}
 	progress, err := adapter.PollAuth(ctx, channel.AuthInput{
 		AppID:       payload.AppID,
@@ -308,6 +341,183 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 		}
 	}
 	return nil
+}
+
+// handleFeishuCheck 执行飞书两阶段 check，靠 metadata 的 injected 标记区分阶段：
+//
+//	阶段1（injected != "true"）：取凭证（扫码经 adapter.TakeCredentials；手填从 metadata
+//	  解密已写入的密文）→ secret 加密写 metadata 标 injected="true" → PatchSecretKeys 注入
+//	  feishu-* 到 app Secret → RolloutRestart 重建 pod 让引擎读 env 连接 → 状态保持
+//	  pending_auth → 入队 check 进入阶段2。凭证未就绪时：adapter 已 failed 则置 failed，
+//	  否则继续等（re-enqueue）。
+//	阶段2（injected == "true"）：经 oc-ops health 查 platform_state →
+//	  connected 则 MarkChannelBindingBound（identity 取 metadata 的 bot_open_id，
+//	  channel_name 取 metadata 的 bot_name——health 不回传 bot_open_id）；
+//	  fatal 则置 failed 带原因；其余态 re-enqueue 继续等连接建立。
+func (h *ChannelCheckBindingHandler) handleFeishuCheck(ctx context.Context, app sqlc.App, binding sqlc.ChannelBinding, payload channelLoginPayload, adapter channel.ChannelAdapter) error {
+	var meta map[string]any
+	_ = json.Unmarshal(binding.MetadataJson, &meta)
+	injected, _ := meta["injected"].(string)
+
+	if injected != "true" {
+		// ── 阶段1：取凭证 → 加密落库 → 注入 Secret → 重启 ──
+		creds, ok := h.takeFeishuCredentials(adapter, payload, meta)
+		if !ok {
+			// 凭证尚未就绪：扫码授权回填需时间。adapter 若已 failed（如用户拒绝 / 注册失败）
+			// 立即置 failed；否则继续等下一轮。
+			if p, perr := adapter.PollAuth(ctx, channel.AuthInput{AppID: payload.AppID}); perr == nil && p.Status == channel.AuthStatusFailed {
+				return h.failFeishu(ctx, app, binding, payload, p.ErrorMessage)
+			}
+			return enqueueChannelCheck(ctx, h.store, payload, 3*time.Second)
+		}
+		if h.cipher == nil {
+			return fmt.Errorf("飞书 check 缺少 cipher，无法加密 secret")
+		}
+		enc, err := h.cipher.Encrypt([]byte(creds.AppSecret))
+		if err != nil {
+			return fmt.Errorf("加密飞书 secret 失败: %w", err)
+		}
+		// acquired_by 沿用原 metadata（qr|manual）；缺失默认 qr（扫码路径）。
+		acquiredBy, _ := meta["acquired_by"].(string)
+		if acquiredBy == "" {
+			acquiredBy = "qr"
+		}
+		newMeta, err := json.Marshal(map[string]any{
+			"app_id":                creds.AppID,
+			"app_secret_ciphertext": enc,
+			"domain":                creds.Domain,
+			"acquired_by":           acquiredBy,
+			"bot_name":              creds.BotName,
+			"bot_open_id":           creds.BotOpenID,
+			"injected":              "true",
+		})
+		if err != nil {
+			return fmt.Errorf("序列化飞书凭证 metadata 失败: %w", err)
+		}
+		if err := h.store.SetFeishuCredentials(ctx, sqlc.SetFeishuCredentialsParams{
+			MetadataJson: newMeta,
+			Status:       domain.ChannelStatusPendingAuth,
+			AppID:        app.ID,
+		}); err != nil {
+			return fmt.Errorf("写入飞书凭证失败: %w", err)
+		}
+		// 注入 app Secret：引擎重启后从 env 读 feishu-* 明文连接开放平台。patcher 未注入时跳过。
+		if h.feishuPatcher != nil {
+			if err := h.feishuPatcher.PatchSecretKeys(ctx, app.ID, map[string]string{
+				"feishu-app-id":     creds.AppID,
+				"feishu-app-secret": creds.AppSecret,
+				"feishu-domain":     creds.Domain,
+			}, nil); err != nil {
+				return fmt.Errorf("patch 飞书 Secret 失败: %w", err)
+			}
+		}
+		// 重启失败仅告警不阻塞：metadata/Secret 已就绪，后续阶段2 health 探测仍能驱动 bound。
+		if h.restarter != nil {
+			if err := h.restarter.RestartApp(ctx, app.ID); err != nil {
+				slog.ErrorContext(ctx, "飞书凭证注入后重启 hermes 失败", "app_id", app.ID, redactlog.Err(err))
+			}
+		}
+		// 等重启 + 引擎建立长连接，再进入阶段2 health 探测。
+		return enqueueChannelCheck(ctx, h.store, payload, 8*time.Second)
+	}
+
+	// ── 阶段2：health 探测开放平台连通态 ──
+	if h.feishuHealth == nil {
+		return enqueueChannelCheck(ctx, h.store, payload, 5*time.Second)
+	}
+	state, _, errMsg, err := h.feishuHealth.FeishuStatus(ctx, app.ID)
+	if err != nil {
+		// health 查询本身失败（实例尚在重启 / 暂不可达）：继续等，不直接判失败。
+		return enqueueChannelCheck(ctx, h.store, payload, 5*time.Second)
+	}
+	switch state {
+	case "connected":
+		// identity / channel_name 取 metadata（health 不回传 bot_open_id）。
+		identity, _ := meta["bot_open_id"].(string)
+		channelName, _ := meta["bot_name"].(string)
+		return h.finalizeChannelBound(ctx, app, binding, payload, identity, channelName, binding.MetadataJson)
+	case "fatal":
+		return h.failFeishu(ctx, app, binding, payload, errMsg)
+	default:
+		return enqueueChannelCheck(ctx, h.store, payload, 5*time.Second)
+	}
+}
+
+// takeFeishuCredentials 取出飞书凭证：扫码模式经 adapter.TakeCredentials 私有交接；
+// 手填模式（acquired_by=manual）凭证已由 service 加密写入 metadata，从密文解密取出。
+func (h *ChannelCheckBindingHandler) takeFeishuCredentials(adapter channel.ChannelAdapter, payload channelLoginPayload, meta map[string]any) (channel.FeishuCredentials, bool) {
+	if fa, ok := adapter.(*channel.FeishuAdapter); ok {
+		if c, ok := fa.TakeCredentials(payload.AppID); ok {
+			return c, true
+		}
+	}
+	// 手填：service 已把 app_secret 密文写进 metadata，解密还原明文凭证。
+	if ab, _ := meta["acquired_by"].(string); ab == "manual" {
+		enc, _ := meta["app_secret_ciphertext"].(string)
+		appID, _ := meta["app_id"].(string)
+		dom, _ := meta["domain"].(string)
+		botName, _ := meta["bot_name"].(string)
+		botOpenID, _ := meta["bot_open_id"].(string)
+		if enc != "" && appID != "" && h.cipher != nil {
+			if plain, err := h.cipher.Decrypt(enc); err == nil {
+				return channel.FeishuCredentials{
+					AppID: appID, AppSecret: string(plain), Domain: dom,
+					BotName: botName, BotOpenID: botOpenID,
+				}, true
+			}
+		}
+	}
+	return channel.FeishuCredentials{}, false
+}
+
+// failFeishu 把飞书绑定置 failed 并写审计（仿微信 failed 分支）：msg 为空时回退到通用文案。
+func (h *ChannelCheckBindingHandler) failFeishu(ctx context.Context, app sqlc.App, binding sqlc.ChannelBinding, payload channelLoginPayload, msg string) error {
+	safeMessage := "飞书绑定失败"
+	if msg != "" {
+		safeMessage = redactlog.SafeErrorMessage(errors.New(msg))
+	}
+	_ = h.store.SetChannelBindingStatus(ctx, sqlc.SetChannelBindingStatusParams{
+		AppID:       binding.AppID,
+		ChannelType: binding.ChannelType,
+		Status:      domain.ChannelStatusFailed,
+		LastError:   null.StringFrom(safeMessage),
+	})
+	return recordChannelAppAudit(ctx, h.store, app, "channel_bound", "failed", safeMessage,
+		fmt.Sprintf("渠道 %s", channelLabelWorker(payload.ChannelType)),
+		map[string]any{
+			"channel_type": payload.ChannelType,
+		})
+}
+
+// ocOpsChannelStatusClient 是飞书 health 探测所需的最小 oc-ops 能力子集（便于装配/单测解耦）。
+type ocOpsChannelStatusClient interface {
+	ChannelStatus(ctx context.Context, ep ocops.Endpoint, channel string) (ocops.ChannelStatus, error)
+}
+
+// ocOpsFeishuHealthClient 经 endpoint resolver 解析 app→oc-ops 坐标，再调 ChannelStatus(feishu)
+// 取 platform_state / error_message，实现 FeishuHealthClient。health 不回传 bot_open_id，
+// 故 botOpenID 恒返回空，由 worker 改用 metadata 的 bot_open_id 作 bound identity。
+type ocOpsFeishuHealthClient struct {
+	resolver ChannelEndpointResolver
+	ops      ocOpsChannelStatusClient
+}
+
+// NewOcOpsFeishuHealthClient 构造 oc-ops 飞书 health 适配器。
+func NewOcOpsFeishuHealthClient(resolver ChannelEndpointResolver, ops ocOpsChannelStatusClient) FeishuHealthClient {
+	return &ocOpsFeishuHealthClient{resolver: resolver, ops: ops}
+}
+
+// FeishuStatus 解析坐标后查 oc-ops 飞书渠道健康态。
+func (c *ocOpsFeishuHealthClient) FeishuStatus(ctx context.Context, appID string) (string, string, string, error) {
+	ep, err := c.resolver.ResolveEndpoint(ctx, appID)
+	if err != nil {
+		return "", "", "", fmt.Errorf("解析 oc-ops 坐标失败: %w", err)
+	}
+	st, err := c.ops.ChannelStatus(ctx, ep, domain.ChannelTypeFeishu)
+	if err != nil {
+		return "", "", "", err
+	}
+	return st.PlatformState, "", st.ErrorMessage, nil
 }
 
 // finalizeChannelBound 把「渠道绑定成功」的统一收尾动作集中到一处:

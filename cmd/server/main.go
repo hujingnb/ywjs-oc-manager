@@ -495,6 +495,15 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	channelCheckHandler := handlers.NewChannelCheckBindingHandler(dbStore.Queries, channelRegistry, wechatResolver)
 	// 渠道绑定后重载 hermes platform：经 Orchestrator.RolloutRestart 重建 pod（spec-A2b 落地）。
 	channelCheckHandler.SetRestarter(orchChannelRestarter{orch: orch})
+	// 飞书两阶段 check 依赖：凭证注入 app Secret（PatchSecretKeys 仅 *KubernetesAdapter 实现，
+	// Orchestrator 接口未暴露，按需类型断言取出；未启用 k8s 时 patcher 留 nil，飞书注入降级）、
+	// cipher 把 secret 加密落 metadata、health 客户端经 endpoint resolver 查 oc-ops 飞书连通态。
+	var feishuPatcher handlers.FeishuSecretPatcher
+	if p, ok := orch.(handlers.FeishuSecretPatcher); ok {
+		feishuPatcher = p
+	}
+	feishuHealth := handlers.NewOcOpsFeishuHealthClient(ocopsEndpointResolver{resolver: ocopsResolver}, ocopsClient)
+	channelCheckHandler.SetFeishuDeps(feishuPatcher, cipher, feishuHealth)
 	if err := registry.Register(domain.JobTypeChannelCheckBinding, channelCheckHandler.Handle); err != nil {
 		return fmt.Errorf("注册 channel_check_binding handler 失败: %w", err)
 	}
