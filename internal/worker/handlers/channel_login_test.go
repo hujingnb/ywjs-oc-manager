@@ -425,7 +425,7 @@ func TestFeishuCheckPhase1InjectsAndRestarts(t *testing.T) {
 	restarter := &workerFakeRestarter{}
 	h := NewChannelCheckBindingHandler(store, registry, nil)
 	h.SetRestarter(restarter)
-	h.SetFeishuDeps(patcher, newTestCipher(t), &fakeHealthClient{})
+	h.SetFeishuDeps(patcher, newTestCipher(t), &fakeHealthClient{}, nil)
 
 	require.NoError(t, h.Handle(context.Background(), feishuCheckJob(t)))
 	require.True(t, patcher.patched, "应 patch feishu-* key")
@@ -455,7 +455,7 @@ func TestFeishuCheckPhase1PatchFailureRecoverable(t *testing.T) {
 	restarter := &workerFakeRestarter{}
 	h := NewChannelCheckBindingHandler(store, registry, nil)
 	h.SetRestarter(restarter)
-	h.SetFeishuDeps(patcher, newTestCipher(t), &fakeHealthClient{})
+	h.SetFeishuDeps(patcher, newTestCipher(t), &fakeHealthClient{}, nil)
 
 	err := h.Handle(context.Background(), feishuCheckJob(t))
 	require.Error(t, err, "patch 失败应返回 error 触发重试")
@@ -482,7 +482,7 @@ func TestFeishuCheckPhase1RetryFromDBCredentials(t *testing.T) {
 	restarter := &workerFakeRestarter{}
 	h := NewChannelCheckBindingHandler(store, registry, nil)
 	h.SetRestarter(restarter)
-	h.SetFeishuDeps(patcher, cipher, &fakeHealthClient{})
+	h.SetFeishuDeps(patcher, cipher, &fakeHealthClient{}, nil)
 
 	require.NoError(t, h.Handle(context.Background(), feishuCheckJob(t)))
 	require.True(t, patcher.patched, "应从 DB 恢复凭证后 patch feishu-* key")
@@ -504,7 +504,7 @@ func TestFeishuCheckPhase2HealthConnectedBinds(t *testing.T) {
 	registry := channel.NewRegistry()
 	registry.MustRegister(channel.NewFeishuAdapter(nil))
 	h := NewChannelCheckBindingHandler(store, registry, nil)
-	h.SetFeishuDeps(&fakeFeishuPatcher{}, newTestCipher(t), &fakeHealthClient{state: "connected"})
+	h.SetFeishuDeps(&fakeFeishuPatcher{}, newTestCipher(t), &fakeHealthClient{state: "connected"}, nil)
 
 	require.NoError(t, h.Handle(context.Background(), feishuCheckJob(t)))
 	require.Equal(t, domain.ChannelStatusBound, store.binding.Status)
@@ -520,11 +520,102 @@ func TestFeishuCheckPhase2HealthFatalFails(t *testing.T) {
 	registry := channel.NewRegistry()
 	registry.MustRegister(channel.NewFeishuAdapter(nil))
 	h := NewChannelCheckBindingHandler(store, registry, nil)
-	h.SetFeishuDeps(&fakeFeishuPatcher{}, newTestCipher(t), &fakeHealthClient{state: "fatal", errMsg: "invalid app_secret"})
+	h.SetFeishuDeps(&fakeFeishuPatcher{}, newTestCipher(t), &fakeHealthClient{state: "fatal", errMsg: "invalid app_secret"}, nil)
 
 	require.NoError(t, h.Handle(context.Background(), feishuCheckJob(t)))
 	require.Equal(t, domain.ChannelStatusFailed, store.binding.Status)
 	require.Contains(t, store.binding.LastError.String, "invalid app_secret")
+}
+
+// fakeWorkerFeishuProber 实现 worker 侧 FeishuProber：记录是否被调用并返回预置校验结果，
+// 模拟 oc-ops feishu_probe 对「缺 bot 身份」的手填凭证做即时校验（/bot/v3/info）。
+type fakeWorkerFeishuProber struct {
+	called    bool   // 记录是否被调用，供断言扫码路径不触发 probe
+	ok        bool   // 校验结果：true=凭证有效
+	botName   string // 校验成功带回的机器人名（仅 probe 能拿到）
+	botOpenID string // 校验成功带回的机器人 open_id（仅 probe 能拿到）
+	err       error  // 非 nil 模拟网络错误，触发 worker re-enqueue 重试
+}
+
+// ProbeFeishu 记录调用并返回预置结果；签名与生产 ProbeFeishu 一致（appID 解析坐标用，feishuAppID/secret/domain 透传 oc-ops）。
+func (p *fakeWorkerFeishuProber) ProbeFeishu(_ context.Context, _, _, _, _ string) (bool, string, string, error) {
+	p.called = true
+	return p.ok, p.botName, p.botOpenID, p.err
+}
+
+// TestFeishuCheckManualProbeOKCapturesIdentity 验证手填凭证经 worker probe 校验：
+// 手填路径（service 写入密文、acquired_by=manual、无 bot 身份、injected=false）下，
+// adapter 内存无凭证→从 DB 密文恢复→因缺 bot 身份触发 probe；probe ok=true 时带出
+// bot_name/bot_open_id 写入 metadata，并完成 patch + 翻 injected=true。
+func TestFeishuCheckManualProbeOKCapturesIdentity(t *testing.T) {
+	store := newFeishuCheckStore(t)
+	cipher := newTestCipher(t)
+	// 手填凭证：service 已加密落库，无 bot_name/bot_open_id（只有 probe 能拿到）。
+	enc, err := cipher.Encrypt([]byte("sec"))
+	require.NoError(t, err)
+	store.binding.MetadataJson = []byte(`{"app_id":"cli_x","app_secret_ciphertext":"` + enc + `","domain":"feishu","acquired_by":"manual","injected":"false"}`)
+	// adapter 内存为空：手填无 SSE credentials 事件，强制走 DB 恢复路径。
+	registry := channel.NewRegistry()
+	registry.MustRegister(channel.NewFeishuAdapter(nil))
+	patcher := &fakeFeishuPatcher{}
+	restarter := &workerFakeRestarter{}
+	prober := &fakeWorkerFeishuProber{ok: true, botName: "ManualBot", botOpenID: "ou_manual"}
+	h := NewChannelCheckBindingHandler(store, registry, nil)
+	h.SetRestarter(restarter)
+	h.SetFeishuDeps(patcher, cipher, &fakeHealthClient{}, prober)
+
+	require.NoError(t, h.Handle(context.Background(), feishuCheckJob(t)))
+	require.True(t, prober.called, "缺 bot 身份的手填凭证应经 probe 校验")
+	require.True(t, patcher.patched, "校验通过后应 patch feishu-* key")
+	require.Equal(t, "sec", patcher.set["feishu-app-secret"], "secret 应从 DB 密文解密恢复")
+	require.Contains(t, string(store.feishuMeta), "\"injected\":\"true\"", "校验通过后应完成注入翻 injected=true")
+	require.Contains(t, string(store.feishuMeta), "\"bot_open_id\":\"ou_manual\"", "probe 带回的 bot_open_id 应落库")
+	require.Contains(t, string(store.feishuMeta), "\"bot_name\":\"ManualBot\"", "probe 带回的 bot_name 应落库")
+}
+
+// TestFeishuCheckManualProbeInvalidFails 验证手填凭证 probe 校验失败（如错误 app_secret）：
+// probe ok=false→置 failed、不 patch Secret，避免无效凭证被静默接受注入。
+func TestFeishuCheckManualProbeInvalidFails(t *testing.T) {
+	store := newFeishuCheckStore(t)
+	cipher := newTestCipher(t)
+	enc, err := cipher.Encrypt([]byte("bad"))
+	require.NoError(t, err)
+	store.binding.MetadataJson = []byte(`{"app_id":"cli_x","app_secret_ciphertext":"` + enc + `","domain":"feishu","acquired_by":"manual","injected":"false"}`)
+	registry := channel.NewRegistry()
+	registry.MustRegister(channel.NewFeishuAdapter(nil))
+	patcher := &fakeFeishuPatcher{}
+	prober := &fakeWorkerFeishuProber{ok: false}
+	h := NewChannelCheckBindingHandler(store, registry, nil)
+	h.SetRestarter(&workerFakeRestarter{})
+	h.SetFeishuDeps(patcher, cipher, &fakeHealthClient{}, prober)
+
+	require.NoError(t, h.Handle(context.Background(), feishuCheckJob(t)))
+	require.True(t, prober.called, "手填凭证应经 probe 校验")
+	require.False(t, patcher.patched, "无效凭证不得注入 Secret")
+	require.Equal(t, domain.ChannelStatusFailed, store.binding.Status, "无效凭证应置 failed")
+}
+
+// TestFeishuCheckScanSkipsProbe 验证扫码凭证跳过 probe：扫码 credentials 事件已带 bot 身份，
+// 阶段1 不应再触发 probe，仍完成 patch + 翻 injected=true（行为与 probe 改造前一致）。
+func TestFeishuCheckScanSkipsProbe(t *testing.T) {
+	store := newFeishuCheckStore(t)
+	store.binding.MetadataJson = []byte(`{"acquired_by":"qr","domain":"feishu","injected":"false"}`)
+	fa := channel.NewFeishuAdapter(nil)
+	// 扫码凭证已带 bot_name/bot_open_id（credentials 事件回填）。
+	fa.SetCredentials(testChannelWorkerAppID, channel.FeishuCredentials{AppID: "cli_x", AppSecret: "sec", Domain: "feishu", BotName: "Bot", BotOpenID: "ou_1"})
+	registry := channel.NewRegistry()
+	registry.MustRegister(fa)
+	patcher := &fakeFeishuPatcher{}
+	// prober 即便返回值不同也不应被调用，故 botName 设为「不该被使用」的哨兵值。
+	prober := &fakeWorkerFeishuProber{ok: true, botName: "ShouldNotUse", botOpenID: "ou_should_not_use"}
+	h := NewChannelCheckBindingHandler(store, registry, nil)
+	h.SetRestarter(&workerFakeRestarter{})
+	h.SetFeishuDeps(patcher, newTestCipher(t), &fakeHealthClient{}, prober)
+
+	require.NoError(t, h.Handle(context.Background(), feishuCheckJob(t)))
+	require.False(t, prober.called, "扫码凭证已带 bot 身份，不应再 probe")
+	require.True(t, patcher.patched, "扫码凭证仍应正常注入")
+	require.Contains(t, string(store.feishuMeta), "\"bot_open_id\":\"ou_1\"", "应保留扫码带回的 bot_open_id")
 }
 
 type workerFakeChannelAdapter struct {

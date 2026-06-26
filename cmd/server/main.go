@@ -274,9 +274,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		return fmt.Errorf("注册微信渠道失败: %w", err)
 	}
 
-	// 飞书渠道：扫码注册 SSE + 手填 probe 都经 oc-ops；runner/prober 适配 ocopsClient。
+	// 飞书渠道：扫码注册 SSE 经 oc-ops runner；手填凭证的 probe 校验改由 worker 阶段1
+	// （ChannelCheckBindingHandler）执行（彼时已有 per-app oc-ops 坐标 + 运行中实例）。
 	feishuAdapter := channel.NewFeishuAdapter(channel.NewOcOpsFeishuRunner(ocopsClient))
-	feishuAdapter.SetProber(channel.NewOcOpsFeishuProber(ocopsClient))
 	if err := channelRegistry.Register(feishuAdapter); err != nil {
 		return fmt.Errorf("注册飞书渠道失败: %w", err)
 	}
@@ -511,8 +511,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if p, ok := orch.(handlers.FeishuSecretPatcher); ok {
 		feishuPatcher = p
 	}
-	feishuHealth := handlers.NewOcOpsFeishuHealthClient(ocopsEndpointResolver{resolver: ocopsResolver}, ocopsClient)
-	channelCheckHandler.SetFeishuDeps(feishuPatcher, cipher, feishuHealth)
+	// 同一 oc-ops 适配器实例同时满足 health 探测（阶段2）与手填 probe 校验（阶段1）。
+	feishuOcOps := handlers.NewOcOpsFeishuHealthClient(ocopsEndpointResolver{resolver: ocopsResolver}, ocopsClient)
+	channelCheckHandler.SetFeishuDeps(feishuPatcher, cipher, feishuOcOps, feishuOcOps)
 	if err := registry.Register(domain.JobTypeChannelCheckBinding, channelCheckHandler.Handle); err != nil {
 		return fmt.Errorf("注册 channel_check_binding handler 失败: %w", err)
 	}
