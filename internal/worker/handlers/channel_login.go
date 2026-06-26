@@ -366,10 +366,12 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 // handleFeishuCheck 执行飞书两阶段 check，靠 metadata 的 injected 标记区分阶段：
 //
 //	阶段1（injected != "true"）：取凭证（扫码经 adapter.TakeCredentials；手填从 metadata
-//	  解密已写入的密文）→ secret 加密写 metadata 标 injected="true" → PatchSecretKeys 注入
-//	  feishu-* 到 app Secret → RolloutRestart 重建 pod 让引擎读 env 连接 → 状态保持
-//	  pending_auth → 入队 check 进入阶段2。凭证未就绪时：adapter 已 failed 则置 failed，
-//	  否则继续等（re-enqueue）。
+//	  解密已写入的密文）→ 手填凭证（无 bot 身份）先经 oc-ops probe 校验并带回 bot 身份，
+//	  无效即置 failed →【幂等四步】① 先把凭证密文写 metadata 但 injected 仍 "false"（持久化优先，
+//	  使凭证不丢、扫码内存凭证落库可恢复）→ ② PatchSecretKeys 注入 feishu-* 到 app Secret
+//	  （失败即 return error 触发重试，injected 仍 false）→ ③ RolloutRestart 重建 pod 让引擎读 env
+//	  → ④ 注入成功后才翻 injected="true" → 入队 check 进入阶段2。凭证未就绪时：adapter 已 failed
+//	  则置 failed，否则继续等（re-enqueue）。
 //	阶段2（injected == "true"）：经 oc-ops health 查 platform_state →
 //	  connected 则 MarkChannelBindingBound（identity 取 metadata 的 bot_open_id，
 //	  channel_name 取 metadata 的 bot_name——health 不回传 bot_open_id）；
