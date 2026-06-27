@@ -181,8 +181,8 @@ export default {
   uploadProgressModal: {
     modalTitle: '文件上传',
     cancelUpload: '取消上传',
-    // finalizing：分片上传字节已传完、服务端合并阶段的提示，避免看起来卡在 100%。
-    finalizing: '合并中…',
+    // finalizing：上传字节已传完、服务端处理（合并分片 / 推送 RAGFlow）期间的提示，避免看起来卡在 100%。
+    finalizing: '处理中…',
     summaryText: '成功 {succeeded} · 失败 {failed} · 取消 {cancelled}',
     failedDetails: '失败详情',
     closeBtn: '关闭',

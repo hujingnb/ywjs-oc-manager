@@ -78,8 +78,8 @@ describe('UploadProgressModal', () => {
     expect(wrapper.text()).not.toContain('关闭')
   })
 
-  // 合并阶段（分片 complete 期间）：字节已 100%，显示「合并中…」而非字节数，且隐藏取消按钮。
-  it('合并阶段渲染「合并中…」并隐藏取消按钮', async () => {
+  // 合并阶段（分片 complete 期间）：字节已 100%，显示「处理中…」而非字节数，且隐藏取消按钮。
+  it('合并阶段渲染「处理中…」并隐藏取消按钮', async () => {
     const wrapper = mountModal()
     const store = useUploadProgressStore()
     store.session = {
@@ -90,7 +90,7 @@ describe('UploadProgressModal', () => {
       startedAt: Date.now(),
     }
     await nextTick()
-    expect(wrapper.text()).toContain('合并中…')
+    expect(wrapper.text()).toContain('处理中…')
     // 合并阶段不再展示「X / Y」字节文案，也不显示取消按钮
     expect(wrapper.text()).not.toContain('取消上传')
     expect(wrapper.find('.progress').attributes('data-pct')).toBe('100')
