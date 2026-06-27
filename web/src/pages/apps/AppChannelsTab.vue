@@ -47,7 +47,7 @@
           <n-space v-if="selectedChannelType === 'wechat'" :size="8">
             <n-button
               type="primary"
-              :disabled="!appId || !canManage"
+              :disabled="!appId || !canManage || !instanceReady"
               :loading="beginning"
               @click="beginAuth"
             >
@@ -55,7 +55,7 @@
             </n-button>
             <n-button
               v-if="showRefreshChallenge"
-              :disabled="!canManage"
+              :disabled="!canManage || !instanceReady"
               :loading="beginning"
               @click="beginAuth"
             >
@@ -67,6 +67,8 @@
 
         <!-- 微信渠道详情：扫码绑定 + 状态提示，沿用既有逻辑，飞书选中时不渲染。 -->
         <template v-if="selectedChannelType === 'wechat'">
+          <!-- 实例非运行态(重启中/升级中)时发起被禁用，给出原因提示，避免误以为按钮坏了。 -->
+          <p v-if="canManage && !instanceReady" class="state-text">{{ t('apps.channels.instanceNotReady') }}</p>
           <p v-if="progress?.bound_identity" class="state-text">{{ t('apps.channels.boundIdentity') }}{{ progress.bound_identity }}</p>
           <p v-if="progress?.error_message" class="state-text danger">{{ t('apps.channels.errorMsg') }}{{ progress.error_message }}</p>
           <p v-if="isWaitingForChallenge" class="state-text">{{ t('apps.channels.waitingQr') }}</p>
@@ -110,13 +112,15 @@
               <n-space :size="8">
                 <n-button
                   type="primary"
-                  :disabled="!appId || !canManage"
+                  :disabled="!appId || !canManage || !instanceReady"
                   :loading="feishuBeginning"
                   @click="beginFeishuScan"
                 >
                   {{ t('apps.channels.beginLogin') }}
                 </n-button>
               </n-space>
+              <!-- 实例非运行态(重启中/升级中)时发起被禁用，提示原因避免误以为是 bug。 -->
+              <p v-if="canManage && !instanceReady" class="state-text">{{ t('apps.channels.instanceNotReady') }}</p>
               <p v-if="feishuProgress?.error_message" class="state-text danger">{{ t('apps.channels.errorMsg') }}{{ feishuProgress.error_message }}</p>
               <!-- 扫码后凭证已回传（二维码消费、注入连接中）显示“验证连接中”，未出码时才显示“生成二维码”，
                    避免飞书扫码后误显示微信导向的“正在生成登录二维码”。 -->
@@ -321,6 +325,14 @@ const statusLabel = computed(() =>
 // canManage 控制发起登录和解绑按钮，真正权限仍由后端接口再次校验。
 const canManage = computed(() => canManageApp(auth.user, app?.value))
 const canUnbind = computed(() => canManage.value && progress.value?.status === 'bound')
+// instanceReady 闸门：渠道发起依赖实例内 oc-ops 可用。允许集与后端
+// domain.AppCanInitiateChannelAuth 严格一致——running / binding_waiting / binding_failed：
+// 这三态 pod 在跑、oc-ops 可达，且【首次绑定合法地发生在 binding_waiting】
+// （binding_waiting→running 是扫码成功后才迁移），故不能只放行 running。
+// 其余状态（restarting 重启中、pulling_runtime_image 等升级/初始化、stopped/error）
+// pod 用 Recreate 重建或未就绪、oc-ops 短暂不可达，发起会拿到 502/409，统一拦在前端并提示原因。
+const AUTH_READY_STATUSES = new Set(['running', 'binding_waiting', 'binding_failed'])
+const instanceReady = computed(() => AUTH_READY_STATUSES.has(app?.value?.status ?? ''))
 
 // progressChallenge 从轮询结果恢复挑战，避免刷新页面后丢失二维码或验证码展示。
 const progressChallenge = computed<ChannelChallenge | null>(() => {

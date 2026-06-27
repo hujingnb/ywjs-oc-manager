@@ -22,6 +22,7 @@ const appStatusViews: Record<string, Omit<StatusView, 'params'>> = {
   binding_waiting:        { label: 'domain.appStatus.binding_waiting',       tone: 'warning' },
   binding_failed:         { label: 'domain.appStatus.binding_failed',        tone: 'danger' },
   running:                { label: 'domain.appStatus.running',               tone: 'success' },
+  restarting:             { label: 'domain.appStatus.restarting',            tone: 'warning' },
   stopped:                { label: 'domain.appStatus.stopped',               tone: 'neutral' },
   error:                  { label: 'domain.appStatus.error',                 tone: 'danger' },
   deleted:                { label: 'domain.appStatus.deleted',               tone: 'neutral' },

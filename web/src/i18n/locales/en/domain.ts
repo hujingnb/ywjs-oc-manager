@@ -11,6 +11,7 @@ export default {
     binding_waiting: 'Awaiting binding',
     binding_failed: 'Binding failed',
     running: 'Running',
+    restarting: 'Restarting',
     stopped: 'Stopped',
     error: 'Error',
     deleted: 'Deleted',

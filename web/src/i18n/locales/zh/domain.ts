@@ -11,6 +11,7 @@ export default {
     binding_waiting: '待绑定',
     binding_failed: '绑定失败',
     running: '运行中',
+    restarting: '重启中',
     stopped: '已停止',
     error: '异常',
     deleted: '已删除',
