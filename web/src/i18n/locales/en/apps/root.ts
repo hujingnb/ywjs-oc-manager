@@ -144,13 +144,10 @@ export default {
     feishuDomainLabel: 'Domain',
     feishuDomainFeishu: 'Feishu (China)',
     feishuDomainLark: 'Lark (Global)',
-    feishuGuideTitle: 'Setup guide',
     feishuBotName: 'Bot name: ',
     feishuDomainCurrent: 'Domain: ',
     feishuGeneratingQr: 'Generating QR code…',
     feishuConnecting: 'Scanned, verifying and connecting…',
-    feishuScanGuide:
-      '1. Choose a domain (Feishu / Lark), then click "Begin login".\n2. Scan the QR code below with the Feishu app and authorize on the open platform.\n3. The bot application is created and configured automatically — keep this page open until binding completes.\n4. When the status turns to "Bound", the channel is connected; @mention the bot in a chat to use the assistant.',
     // status 是渠道绑定进度状态的用户可读文案，由 formatChannelStatus 解析为 i18n key 后消费。
     status: {
       unbound: 'Not bound',

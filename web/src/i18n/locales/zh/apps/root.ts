@@ -144,13 +144,10 @@ export default {
     feishuDomainLabel: '部署域',
     feishuDomainFeishu: '飞书（国内）',
     feishuDomainLark: 'Lark（国际）',
-    feishuGuideTitle: '图文指引',
     feishuBotName: '机器人名称：',
     feishuDomainCurrent: '部署域：',
     feishuGeneratingQr: '正在生成二维码…',
     feishuConnecting: '已扫码，正在验证并连接…',
-    feishuScanGuide:
-      '1. 选择部署域（飞书国内 / Lark 国际）后点击「发起登录」。\n2. 用飞书 App 扫描下方二维码，并授权登录开放平台。\n3. 授权后系统会自动创建并配置机器人应用，请保持页面打开等待绑定完成。\n4. 状态变为「已绑定」即接入成功，可在会话中 @机器人 使用助手。',
     // status 是渠道绑定进度状态的用户可读文案，由 formatChannelStatus 解析为 i18n key 后消费。
     status: {
       unbound: '未绑定',

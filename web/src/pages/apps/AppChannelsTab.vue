@@ -128,13 +128,6 @@
               <p v-else-if="feishuWaitingForChallenge" class="state-text">{{ t('apps.channels.feishuGeneratingQr') }}</p>
               <AuthChallengeRenderer v-if="feishuVisibleChallenge" :challenge="feishuVisibleChallenge" />
             </template>
-
-            <!-- 图文指引：展示扫码授权步骤，默认折叠。 -->
-            <n-collapse class="feishu-guide">
-              <n-collapse-item :title="t('apps.channels.feishuGuideTitle')" name="guide">
-                <p class="feishu-guide-text">{{ t('apps.channels.feishuScanGuide') }}</p>
-              </n-collapse-item>
-            </n-collapse>
           </div>
         </template>
       </section>
@@ -147,8 +140,6 @@ import { computed, inject, ref, toRef, watch, type Ref } from 'vue'
 import {
   NButton,
   NCard,
-  NCollapse,
-  NCollapseItem,
   NSelect,
   NSpace,
 } from 'naive-ui'
@@ -567,19 +558,6 @@ async function unbind() {
 .feishu-bound {
   display: grid;
   gap: 4px;
-}
-
-.feishu-guide {
-  margin-top: 4px;
-}
-
-/* 指引正文保留换行，便于以多步骤文本呈现操作步骤。 */
-.feishu-guide-text {
-  margin: 0;
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  line-height: 1.7;
-  white-space: pre-line;
 }
 
 @media (max-width: 760px) {
