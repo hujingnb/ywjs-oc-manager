@@ -22,6 +22,9 @@ export interface XhrUploadOptions {
   onProgress?: (loaded: number, total: number) => void
   // 取消信号，调用方在中途 abort 上传。
   signal?: AbortSignal
+  // 请求体发送完成（字节已全部上传、等待服务端响应）时触发。
+  // 直传场景据此进入「处理中」反馈，避免进度卡在 100% 看起来像卡死。
+  onUploadComplete?: () => void
   // 是否注入 Bearer。默认 true；登录类接口可置 false。
   withAuth?: boolean
 }
@@ -69,6 +72,13 @@ export function xhrUpload(url: string, opts: XhrUploadOptions): Promise<XhrUploa
     if (opts.onProgress) {
       xhr.upload.onprogress = (e: ProgressEvent) => {
         opts.onProgress!(e.loaded, e.total)
+      }
+    }
+
+    // upload.onload：浏览器在请求体发送完成时触发——此刻字节已全部上传，仅在等服务端响应。
+    if (opts.onUploadComplete) {
+      xhr.upload.onload = () => {
+        opts.onUploadComplete!()
       }
     }
 

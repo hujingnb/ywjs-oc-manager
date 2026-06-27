@@ -19,7 +19,11 @@ vi.mock('@/api/client', () => clientMocks)
 // 通过 lastInstance 暴露给测试，便于断言 requestHeaders 与触发回调。
 class FakeXHR {
   static lastInstance: FakeXHR | null = null
-  upload = { onprogress: null as ((e: ProgressEvent) => void) | null }
+  // upload 暴露 onprogress 与 onload：onload 对应请求体发送完成（字节已传完、等服务端响应）。
+  upload = {
+    onprogress: null as ((e: ProgressEvent) => void) | null,
+    onload: null as (() => void) | null,
+  }
   status = 0
   responseText = ''
   onload: (() => void) | null = null
@@ -40,6 +44,10 @@ class FakeXHR {
   // 测试辅助：触发 upload 进度事件
   _emitProgress(loaded: number, total: number): void {
     this.upload.onprogress?.({ loaded, total, lengthComputable: true } as ProgressEvent)
+  }
+  // 测试辅助：触发 upload.onload，模拟请求体已全部发送完成
+  _emitUploadComplete(): void {
+    this.upload.onload?.()
   }
   // 测试辅助：模拟服务端 2xx/4xx/5xx 响应
   _complete(status: number, body: string, contentType = 'application/json'): void {
@@ -180,5 +188,25 @@ describe('xhrUpload', () => {
     expect(FakeXHR.lastInstance!.body).toBe(body)
     const headers = Object.fromEntries(FakeXHR.lastInstance!.requestHeaders)
     expect(headers['Content-Type']).toBeUndefined()
+  })
+
+  // onUploadComplete：请求体发送完成（upload.onload）时被调用一次，用于进入「处理中」反馈。
+  it('请求体发送完成触发 onUploadComplete', async () => {
+    const onUploadComplete = vi.fn()
+    const { xhrUpload } = await import('./xhrUpload')
+    const promise = xhrUpload('/api/v1/upload', { body: new Blob(['x']), onUploadComplete })
+    FakeXHR.lastInstance!._emitUploadComplete()
+    FakeXHR.lastInstance!._complete(200, '{}')
+    await promise
+    expect(onUploadComplete).toHaveBeenCalledTimes(1)
+  })
+
+  // 不传 onUploadComplete：upload.onload 触发也不报错（可选回调，缺省无操作）。
+  it('未传 onUploadComplete 时 upload.onload 不报错', async () => {
+    const { xhrUpload } = await import('./xhrUpload')
+    const promise = xhrUpload('/api/v1/upload', { body: new Blob(['x']) })
+    FakeXHR.lastInstance!._emitUploadComplete()
+    FakeXHR.lastInstance!._complete(200, '{}')
+    await expect(promise).resolves.toMatchObject({ status: 200 })
   })
 })
