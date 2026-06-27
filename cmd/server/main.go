@@ -260,6 +260,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		feishuUnbindPatcher = p
 	}
 	channelService.SetFeishuUnbindDeps(feishuUnbindPatcher, orchChannelRestarter{orch: orch})
+	// 企业微信手填发起需在 service 内加密 secret 落 metadata（飞书在 worker 加密，企业微信在 service）。
+	channelService.SetCipher(cipher)
 	// 微信扫码登录走 oc-ops HTTP SSE：runner 持 ocopsClient（满足 hermes.ChannelLoginStreamer），
 	// 每次登录按 AuthInput.Endpoint（worker 经 ocopsResolver 解析后注入）路由到目标实例。
 	wechatRunner := channel.NewDockerCommandRunner(ocopsClient)
