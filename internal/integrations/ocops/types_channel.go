@@ -59,11 +59,3 @@ type FeishuRegisterEvent struct {
 	BotOpenID string `json:"bot_open_id,omitempty"`
 	Reason    string `json:"reason,omitempty"` // failed 事件的失败原因
 }
-
-// FeishuProbeResult 是 POST /oc/channels/feishu/probe 手填校验的响应体。
-// 用户手填 app_id/app_secret 后即时校验：OK 表示凭证有效，并回带机器人身份。
-type FeishuProbeResult struct {
-	OK        bool   `json:"ok"`
-	BotName   string `json:"bot_name"`
-	BotOpenID string `json:"bot_open_id"`
-}

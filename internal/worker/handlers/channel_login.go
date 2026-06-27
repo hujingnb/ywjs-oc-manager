@@ -84,15 +84,10 @@ func (h *ChannelStartLoginHandler) Handle(ctx context.Context, job sqlc.Job) err
 			endpoint = ep
 		}
 	}
-	// 飞书分支：与微信「引擎自落盘」模式不同，按 mode 分流。
-	//  - manual：凭证已由 service（手填路径）写入 adapter/metadata，worker 无需出码，
-	//    直接进入 check（凭证注入在 check handler 完成）。
-	//  - scan：起 oc-ops SSE 取二维码，domain（feishu|lark）经 AuthInput.ChannelName 透传，
-	//    BeginAuth 拿到首个 qrcode 事件即返回，后台 goroutine 继续等扫码授权回填凭证。
+	// 飞书分支：与微信「引擎自落盘」模式不同，走扫码自动创建。
+	// 起 oc-ops SSE 取二维码，domain（feishu|lark）经 AuthInput.ChannelName 透传，
+	// BeginAuth 拿到首个 qrcode 事件即返回，后台 goroutine 继续等扫码授权回填凭证。
 	if payload.ChannelType == domain.ChannelTypeFeishu {
-		if payload.Mode == "manual" {
-			return h.enqueueCheck(ctx, payload, 1*time.Second)
-		}
 		challenge, err := adapter.BeginAuth(ctx, channel.AuthInput{
 			AppID:       payload.AppID,
 			OwnerUserID: app.OwnerUserID,
@@ -221,37 +216,18 @@ type FeishuHealthClient interface {
 	FeishuStatus(ctx context.Context, appID string) (state, botOpenID, errMessage string, err error)
 }
 
-// FeishuProber 抽象「对手填飞书凭证经 oc-ops feishu_probe 即时校验」的能力。
-// 手填凭证（service 写入密文）无扫码 credentials 事件，故没有 bot 身份且从不校验；
-// 阶段1 对「缺 bot 身份」的凭证调本接口：appID 用于解析目标实例 oc-ops 坐标，
-// feishuAppID/appSecret/domain 透传开放平台凭证。返回 ok=false 表示凭证无效、
-// botName/botOpenID 为 probe /bot/v3/info 拿到的机器人身份、err 为网络等暂时性错误
-// （由调用方 re-enqueue 重试，不永久判失败）。
-type FeishuProber interface {
-	ProbeFeishu(ctx context.Context, appID, feishuAppID, appSecret, domain string) (ok bool, botName, botOpenID string, err error)
-}
-
-// FeishuOcOpsClient 同时具备飞书 health 探测与手填 probe 校验，由同一 oc-ops 适配器
-// （ocOpsFeishuHealthClient）实现，便于 main 装配时用一个实例满足两路依赖。
-type FeishuOcOpsClient interface {
-	FeishuHealthClient
-	FeishuProber
-}
-
 // ChannelCheckBindingHandler 执行 channel_check_binding job。
 type ChannelCheckBindingHandler struct {
 	store     ChannelLoginStore
 	registry  *channel.Registry
 	resolver  channel.BindingResolver
 	restarter ChannelRestarter
-	// feishuPatcher / cipher / feishuHealth / feishuProber 仅飞书两阶段 check 使用：
-	// feishuPatcher 把凭证注入 app Secret，cipher 把 secret 加密后落 metadata，
-	// feishuHealth 在注入重启后探测开放平台连通态，feishuProber 在阶段1 对「缺 bot
-	// 身份」的手填凭证做即时校验并带出机器人身份。微信路径不依赖四者。
+	// feishuPatcher / cipher / feishuHealth 仅飞书两阶段 check 使用：
+	// feishuPatcher 把扫码凭证注入 app Secret，cipher 把 secret 加密后落 metadata，
+	// feishuHealth 在注入重启后探测开放平台连通态。微信路径不依赖三者。
 	feishuPatcher FeishuSecretPatcher
 	cipher        *auth.Cipher
 	feishuHealth  FeishuHealthClient
-	feishuProber  FeishuProber
 }
 
 // NewChannelCheckBindingHandler 创建 channel_check_binding handler。
@@ -264,11 +240,10 @@ func (h *ChannelCheckBindingHandler) SetRestarter(r ChannelRestarter) {
 	h.restarter = r
 }
 
-// SetFeishuDeps 注入飞书两阶段 check 所需依赖：Secret patch、密文 cipher、health 探测客户端、
-// 手填 probe 校验器。仅飞书渠道走这四者；未注入时飞书 check 降级（patcher 为 nil 跳过注入、
-// health 为 nil 重新入队、prober 为 nil 时缺 bot 身份的手填凭证无法校验 → re-enqueue 等待装配修复）。
-func (h *ChannelCheckBindingHandler) SetFeishuDeps(p FeishuSecretPatcher, cipher *auth.Cipher, hc FeishuHealthClient, prober FeishuProber) {
-	h.feishuPatcher, h.cipher, h.feishuHealth, h.feishuProber = p, cipher, hc, prober
+// SetFeishuDeps 注入飞书两阶段 check 所需依赖：Secret patch、密文 cipher、health 探测客户端。
+// 仅飞书渠道走这三者；未注入时飞书 check 降级（patcher 为 nil 跳过注入、health 为 nil 重新入队）。
+func (h *ChannelCheckBindingHandler) SetFeishuDeps(p FeishuSecretPatcher, cipher *auth.Cipher, hc FeishuHealthClient) {
+	h.feishuPatcher, h.cipher, h.feishuHealth = p, cipher, hc
 }
 
 // Handle 查询渠道绑定状态，bound 后补写身份并把 binding_waiting 应用推进到 running。
@@ -365,9 +340,8 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 
 // handleFeishuCheck 执行飞书两阶段 check，靠 metadata 的 injected 标记区分阶段：
 //
-//	阶段1（injected != "true"）：取凭证（扫码经 adapter.TakeCredentials；手填从 metadata
-//	  解密已写入的密文）→ 手填凭证（无 bot 身份）先经 oc-ops probe 校验并带回 bot 身份，
-//	  无效即置 failed →【幂等四步】① 先把凭证密文写 metadata 但 injected 仍 "false"（持久化优先，
+//	阶段1（injected != "true"）：取凭证（扫码经 adapter.TakeCredentials；重试时从 metadata
+//	  解密已写入的密文）→【幂等四步】① 先把凭证密文写 metadata 但 injected 仍 "false"（持久化优先，
 //	  使凭证不丢、扫码内存凭证落库可恢复）→ ② PatchSecretKeys 注入 feishu-* 到 app Secret
 //	  （失败即 return error 触发重试，injected 仍 false）→ ③ RolloutRestart 重建 pod 让引擎读 env
 //	  → ④ 注入成功后才翻 injected="true" → 入队 check 进入阶段2。凭证未就绪时：adapter 已 failed
@@ -392,28 +366,8 @@ func (h *ChannelCheckBindingHandler) handleFeishuCheck(ctx context.Context, app 
 			}
 			return enqueueChannelCheck(ctx, h.store, payload, 3*time.Second)
 		}
-		// 手填凭证校验：手填路径（service 写入密文）无 SSE credentials 事件，故 creds 不带
-		// bot 身份；此前从不校验，会静默接受错误 app_secret 且 bound_identity 为空。
-		// 这里对「缺 bot 身份」的凭证调 oc-ops feishu_probe（/bot/v3/info）即时校验：
-		//   - 无效（ok=false）→ 置 failed、不注入；
-		//   - 有效 → 带出 bot_name/bot_open_id 再进入注入；
-		//   - 网络等暂时性错误 → re-enqueue 重试，不永久卡死。
-		// 扫码凭证已在 credentials 事件回填 bot 身份，creds.BotOpenID/BotName 非空 → 跳过 probe，行为不变。
-		if creds.BotOpenID == "" && creds.BotName == "" {
-			if h.feishuProber == nil {
-				// 理论上生产装配必注入 prober；缺失时不可校验手填凭证，re-enqueue 等待修复，
-				// 避免未校验凭证被静默注入。
-				return enqueueChannelCheck(ctx, h.store, payload, 5*time.Second)
-			}
-			ok, botName, botOpenID, perr := h.feishuProber.ProbeFeishu(ctx, app.ID, creds.AppID, creds.AppSecret, creds.Domain)
-			if perr != nil {
-				return enqueueChannelCheck(ctx, h.store, payload, 5*time.Second)
-			}
-			if !ok {
-				return h.failFeishu(ctx, app, binding, payload, "飞书凭证无效")
-			}
-			creds.BotName, creds.BotOpenID = botName, botOpenID
-		}
+		// 扫码凭证已在 credentials 事件回填 bot_name/bot_open_id，直接用于落库；
+		// 偶发为空时即为空（引擎建连后阶段2 health 仍能驱动 bound）。
 		if h.cipher == nil {
 			return fmt.Errorf("飞书 check 缺少 cipher，无法加密 secret")
 		}
@@ -421,7 +375,7 @@ func (h *ChannelCheckBindingHandler) handleFeishuCheck(ctx context.Context, app 
 		if err != nil {
 			return fmt.Errorf("加密飞书 secret 失败: %w", err)
 		}
-		// acquired_by 沿用原 metadata（qr|manual）；缺失默认 qr（扫码路径）。
+		// acquired_by 沿用原 metadata（扫码路径恒为 qr）；缺失默认 qr。
 		acquiredBy, _ := meta["acquired_by"].(string)
 		if acquiredBy == "" {
 			acquiredBy = "qr"
@@ -513,9 +467,8 @@ func (h *ChannelCheckBindingHandler) handleFeishuCheck(ctx context.Context, app 
 //  1. 扫码内存优先：经 adapter.TakeCredentials 私有交接当前进程刚回填的凭证；
 //  2. DB 密文恢复：内存取不到时，只要 metadata 含 app_secret_ciphertext 即解密还原。
 //
-// 第 2 路不再限定 acquired_by=="manual"，同时覆盖三种场景：手填（service 写入密文）、
-// 扫码持久化后重试（阶段1 ① 已落库 → patch/重启失败重试时内存已空）、worker 重启 /
-// 多副本（扫码内存凭证仅存于原进程，TakeCredentials 在新进程必然 false）。
+// 第 2 路覆盖扫码重试场景：扫码持久化后重试（阶段1 ① 已落库 → patch/重启失败重试时内存已空）、
+// worker 重启 / 多副本（扫码内存凭证仅存于原进程，TakeCredentials 在新进程必然 false）。
 func (h *ChannelCheckBindingHandler) takeFeishuCredentials(adapter channel.ChannelAdapter, payload channelLoginPayload, meta map[string]any) (channel.FeishuCredentials, bool) {
 	if fa, ok := adapter.(*channel.FeishuAdapter); ok {
 		if c, ok := fa.TakeCredentials(payload.AppID); ok {
@@ -558,24 +511,22 @@ func (h *ChannelCheckBindingHandler) failFeishu(ctx context.Context, app sqlc.Ap
 		})
 }
 
-// ocOpsChannelStatusClient 是飞书 health 探测与手填 probe 所需的最小 oc-ops 能力子集
-// （便于装配/单测解耦）。ChannelStatus 供阶段2 查连通态，FeishuProbe 供阶段1 校验手填凭证。
+// ocOpsChannelStatusClient 是飞书 health 探测所需的最小 oc-ops 能力子集
+// （便于装配/单测解耦）。ChannelStatus 供阶段2 查连通态。
 type ocOpsChannelStatusClient interface {
 	ChannelStatus(ctx context.Context, ep ocops.Endpoint, channel string) (ocops.ChannelStatus, error)
-	FeishuProbe(ctx context.Context, ep ocops.Endpoint, appID, appSecret, domain string) (ocops.FeishuProbeResult, error)
 }
 
-// ocOpsFeishuHealthClient 经 endpoint resolver 解析 app→oc-ops 坐标，实现 FeishuHealthClient
-// 与 FeishuProber（即 FeishuOcOpsClient）：FeishuStatus 调 ChannelStatus(feishu) 取连通态，
-// ProbeFeishu 调 FeishuProbe 校验手填凭证。health 不回传 bot_open_id，故 FeishuStatus 的
+// ocOpsFeishuHealthClient 经 endpoint resolver 解析 app→oc-ops 坐标，实现 FeishuHealthClient：
+// FeishuStatus 调 ChannelStatus(feishu) 取连通态。health 不回传 bot_open_id，故 FeishuStatus 的
 // botOpenID 恒返回空，由 worker 改用 metadata 的 bot_open_id 作 bound identity。
 type ocOpsFeishuHealthClient struct {
 	resolver ChannelEndpointResolver
 	ops      ocOpsChannelStatusClient
 }
 
-// NewOcOpsFeishuHealthClient 构造 oc-ops 飞书适配器，同时满足 health 探测与手填 probe 两路依赖。
-func NewOcOpsFeishuHealthClient(resolver ChannelEndpointResolver, ops ocOpsChannelStatusClient) FeishuOcOpsClient {
+// NewOcOpsFeishuHealthClient 构造 oc-ops 飞书 health 适配器。
+func NewOcOpsFeishuHealthClient(resolver ChannelEndpointResolver, ops ocOpsChannelStatusClient) FeishuHealthClient {
 	return &ocOpsFeishuHealthClient{resolver: resolver, ops: ops}
 }
 
@@ -590,20 +541,6 @@ func (c *ocOpsFeishuHealthClient) FeishuStatus(ctx context.Context, appID string
 		return "", "", "", err
 	}
 	return st.PlatformState, "", st.ErrorMessage, nil
-}
-
-// ProbeFeishu 解析 appID→oc-ops 坐标后，调 feishu_probe 校验手填凭证并带回机器人身份。
-// appID 是 manager 侧 app id（用于寻址运行中实例），feishuAppID 是开放平台 app_id（cli_xxx）。
-func (c *ocOpsFeishuHealthClient) ProbeFeishu(ctx context.Context, appID, feishuAppID, appSecret, domain string) (bool, string, string, error) {
-	ep, err := c.resolver.ResolveEndpoint(ctx, appID)
-	if err != nil {
-		return false, "", "", fmt.Errorf("解析 oc-ops 坐标失败: %w", err)
-	}
-	res, err := c.ops.FeishuProbe(ctx, ep, feishuAppID, appSecret, domain)
-	if err != nil {
-		return false, "", "", err
-	}
-	return res.OK, res.BotName, res.BotOpenID, nil
 }
 
 // finalizeChannelBound 把「渠道绑定成功」的统一收尾动作集中到一处:
@@ -692,8 +629,6 @@ func (h *ChannelCheckBindingHandler) load(ctx context.Context, payload channelLo
 type channelLoginPayload struct {
 	AppID       string `json:"app_id"`
 	ChannelType string `json:"channel_type"`
-	// Mode 仅飞书使用：scan（扫码出码）| manual（手填凭证已就绪）。
-	Mode string `json:"mode,omitempty"`
 	// Domain 仅飞书使用：feishu | lark，决定 oc-ops 注册走哪个开放平台域。
 	Domain string `json:"domain,omitempty"`
 }

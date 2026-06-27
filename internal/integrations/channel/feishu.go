@@ -18,7 +18,7 @@ type FeishuRegisterRunner interface {
 	StreamFeishuRegister(ctx context.Context, input AuthInput, domain string) (<-chan ocops.FeishuRegisterEvent, error)
 }
 
-// FeishuCredentials 是扫码 / 手填取得的飞书凭证（仅在 manager 内部流转，secret 明文）。
+// FeishuCredentials 是扫码取得的飞书凭证（仅在 manager 内部流转，secret 明文）。
 // 该结构绝不进入 AuthProgress：secret 经 TakeCredentials 私有交接给 worker，
 // 不经 PollAuth 透传前端，防止凭证泄露。
 type FeishuCredentials struct {
@@ -135,7 +135,7 @@ func (a *FeishuAdapter) TakeCredentials(appID string) (FeishuCredentials, bool) 
 	return c, true
 }
 
-// SetCredentials 直接写入凭证（手填模式无 SSE，由 service/worker 注入；Task 12 用）。
+// SetCredentials 直接写入凭证（测试构造 adapter 内存态用，等价 consume 收到 credentials 事件）。
 func (a *FeishuAdapter) SetCredentials(appID string, c FeishuCredentials) {
 	a.set(appID, feishuState{status: AuthStatusPending, creds: &c, updated: time.Now()})
 }

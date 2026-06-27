@@ -65,10 +65,6 @@ var ErrInstanceLimitReached = errors.New("已达企业实例数量上限")
 // ErrChannelAdapterMissing 表示 service 调用时未注册对应渠道。
 var ErrChannelAdapterMissing = errors.New("当前渠道未启用")
 
-// ErrInvalidChannelCredential 表示飞书手填模式缺少必填的 app_id / app_secret，
-// handler 层应映射为 400。
-var ErrInvalidChannelCredential = errors.New("飞书凭证缺少 app_id 或 app_secret")
-
 // 工作区 -----------------------------------------------------------
 // 来源：原 workspace_service.go
 

@@ -190,29 +190,8 @@ func TestChannelServiceUnbindPlatformAdminForbidden(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
-// TestChannelServiceBeginAuthFeishuManualCreatesBinding 验证飞书手填：
-// 无绑定行时 create-on-demand，secret 加密写 metadata，并入队 channel_start_login job。
-func TestChannelServiceBeginAuthFeishuManualCreatesBinding(t *testing.T) {
-	store := newChannelStub(t)
-	store.bindingMissing = true // GetChannelBindingByAppAndType 首次返回 ErrNoRows
-	registry := channel.NewRegistry()
-	registry.MustRegister(channel.NewFeishuAdapter(nil))
-	svc := NewChannelService(store, registry)
-	svc.SetCipher(newRuntimeTokenTestCipher(t)) // manual 模式需 cipher 加密 secret
-	req := FeishuAuthInput{Mode: "manual", AppID: "cli_x", AppSecret: "sec", Domain: "feishu"}
-
-	res, err := svc.BeginFeishuAuth(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, req)
-	require.NoError(t, err)
-	require.NotEmpty(t, res.JobID)
-	require.True(t, store.upsertCalled, "应 create-on-demand 绑定行")
-	require.NotEmpty(t, store.feishuMeta, "应写入飞书 metadata")
-	require.NotContains(t, string(store.feishuMeta), "\"sec\"", "secret 必须加密，不得明文出现")
-	require.Len(t, store.jobs, 1)
-	require.Equal(t, domain.JobTypeChannelStartLogin, store.jobs[0].Type)
-}
-
 // TestChannelServiceBeginAuthFeishuScanCreatesBinding 验证飞书扫码：
-// create-on-demand 绑定行、metadata 不含凭证、入队 job，且无需 cipher。
+// create-on-demand 绑定行、metadata 不含凭证、入队 job。
 func TestChannelServiceBeginAuthFeishuScanCreatesBinding(t *testing.T) {
 	store := newChannelStub(t)
 	store.bindingMissing = true
@@ -220,12 +199,13 @@ func TestChannelServiceBeginAuthFeishuScanCreatesBinding(t *testing.T) {
 	registry.MustRegister(channel.NewFeishuAdapter(nil))
 	svc := NewChannelService(store, registry)
 
-	res, err := svc.BeginFeishuAuth(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, FeishuAuthInput{Mode: "scan", Domain: "lark"})
+	res, err := svc.BeginFeishuAuth(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, FeishuAuthInput{Domain: "lark"})
 	require.NoError(t, err)
 	require.NotEmpty(t, res.JobID)
 	require.True(t, store.upsertCalled)
 	require.NotContains(t, string(store.feishuMeta), "ciphertext", "扫码阶段尚无凭证")
 	require.Len(t, store.jobs, 1)
+	require.Equal(t, domain.JobTypeChannelStartLogin, store.jobs[0].Type)
 }
 
 // TestChannelServiceBeginFeishuAuthBoundShortCircuit 验证 bound 短路：
@@ -239,26 +219,13 @@ func TestChannelServiceBeginFeishuAuthBoundShortCircuit(t *testing.T) {
 	registry.MustRegister(channel.NewFeishuAdapter(nil))
 	svc := NewChannelService(store, registry)
 
-	res, err := svc.BeginFeishuAuth(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, FeishuAuthInput{Mode: "scan", Domain: "feishu"})
+	res, err := svc.BeginFeishuAuth(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, FeishuAuthInput{Domain: "feishu"})
 	require.NoError(t, err)
 	require.Equal(t, domain.ChannelStatusBound, res.Status)
 	require.Equal(t, domain.ChannelTypeFeishu, res.ChannelType)
 	require.False(t, store.upsertCalled, "bound 短路不应 create-on-demand")
 	require.Empty(t, store.feishuMeta, "bound 短路不应写 metadata")
 	require.Empty(t, store.jobs, "bound 短路不应入队 job")
-}
-
-// TestChannelServiceBeginAuthFeishuManualMissingCredential 验证手填缺 app_id/secret 时拒绝。
-func TestChannelServiceBeginAuthFeishuManualMissingCredential(t *testing.T) {
-	store := newChannelStub(t)
-	store.bindingMissing = true
-	registry := channel.NewRegistry()
-	registry.MustRegister(channel.NewFeishuAdapter(nil))
-	svc := NewChannelService(store, registry)
-	svc.SetCipher(newRuntimeTokenTestCipher(t))
-
-	_, err := svc.BeginFeishuAuth(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, FeishuAuthInput{Mode: "manual", AppID: "cli_x"})
-	require.ErrorIs(t, err, ErrInvalidChannelCredential)
 }
 
 // TestChannelServicePollAuthRedactsSecret 验证 PollAuth 不把 *_ciphertext 透传前端。

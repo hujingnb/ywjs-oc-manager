@@ -1,15 +1,12 @@
-// client_feishu.go — ocops 包飞书渠道的客户端方法（扫码注册 SSE + 手填校验）。
+// client_feishu.go — ocops 包飞书渠道的客户端方法（扫码注册 SSE）。
 //
-// 飞书渠道支持两种凭证获取路径：
-//   - 扫码自动创建：FeishuRegister 订阅 oc-ops 的 register SSE，逐条拿到
-//     qrcode（二维码 URL）与 credentials（回填的 app_id/app_secret 等）；
-//   - 手填兜底：FeishuProbe 即时校验用户手填的凭证有效性。
+// 飞书渠道经扫码自动创建获取凭证：FeishuRegister 订阅 oc-ops 的 register SSE，
+// 逐条拿到 qrcode（二维码 URL）与 credentials（回填的 app_id/app_secret 等）。
 //
 // 健康态状态查询复用 client_channel.go 的 ChannelStatus(ctx, ep, "feishu")，
 // 其返回的 ChannelStatus 已含 PlatformState / ErrorMessage 供 worker 探测。
 //
-// SSE 消费复用 client_sse.go 的 openStream + scanSSE，与 ChannelLogin 保持同一模式；
-// 非流式 probe 复用 client.go 的 DoJSON（统一鉴权 / 编解码 / 状态码映射）。
+// SSE 消费复用 client_sse.go 的 openStream + scanSSE，与 ChannelLogin 保持同一模式。
 package ocops
 
 import (
@@ -52,18 +49,4 @@ func (c *Client) FeishuRegister(ctx context.Context, ep Endpoint, domain string)
 		})
 	}()
 	return ch, nil
-}
-
-// FeishuProbe 手填模式即时校验飞书凭证：POST /oc/channels/feishu/probe。
-// 请求体携带 app_id/app_secret/domain，返回校验结果与机器人身份；
-// 复用 DoJSON 统一处理鉴权头、JSON 编解码与非 2xx 哨兵错误映射。
-func (c *Client) FeishuProbe(ctx context.Context, ep Endpoint, appID, appSecret, domain string) (FeishuProbeResult, error) {
-	reqBody := map[string]string{
-		"app_id":     appID,
-		"app_secret": appSecret,
-		"domain":     domain,
-	}
-	var out FeishuProbeResult
-	err := c.DoJSON(ctx, ep, http.MethodPost, "/oc/channels/feishu/probe", reqBody, &out)
-	return out, err
 }

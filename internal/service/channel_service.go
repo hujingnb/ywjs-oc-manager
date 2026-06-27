@@ -39,7 +39,7 @@ type ChannelStore interface {
 	SetChannelBindingStatus(ctx context.Context, arg sqlc.SetChannelBindingStatusParams) error
 	// UpsertChannelBindingUnbound 为飞书 create-on-demand 建绑定行（已存在则 no-op）。
 	UpsertChannelBindingUnbound(ctx context.Context, arg sqlc.UpsertChannelBindingUnboundParams) error
-	// SetFeishuCredentials 写入飞书凭证 metadata 并置状态（手填阶段含 secret 密文）。
+	// SetFeishuCredentials 写入飞书凭证 metadata 并置状态（扫码发起阶段仅 domain 占位）。
 	SetFeishuCredentials(ctx context.Context, arg sqlc.SetFeishuCredentialsParams) error
 	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) error
 	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) error
@@ -50,9 +50,6 @@ type ChannelService struct {
 	store    ChannelStore
 	registry *channel.Registry
 	notifier JobNotifier
-	// cipher 用于加密飞书手填的 app_secret 后入库；扫码模式与微信渠道不依赖它。
-	// 经 SetCipher 注入，复用 manager 进程内同一份 master_key 的 Cipher 实例。
-	cipher *auth.Cipher
 	// feishuPatcher / feishuRestarter 用于飞书解绑即时清理：删 app Secret 的 feishu-* key
 	// 并重启 pod，使引擎下次重启不再启用飞书平台。微信解绑不依赖二者。
 	// 经 SetFeishuUnbindDeps 注入；k8s 未启用时留 nil，解绑仅置 DB 状态不报错。
@@ -67,12 +64,6 @@ func NewChannelService(store ChannelStore, registry *channel.Registry, notifier 
 		n = notifier[0]
 	}
 	return &ChannelService{store: store, registry: registry, notifier: n}
-}
-
-// SetCipher 注入加密原语。飞书手填模式需要它加密 app_secret；
-// 与构造分离是为了避免给已用 variadic notifier 的构造再塞一个可选参数，保持调用点清晰。
-func (s *ChannelService) SetCipher(cipher *auth.Cipher) {
-	s.cipher = cipher
 }
 
 // SetFeishuUnbindDeps 注入飞书解绑所需的 Secret patch 与重启能力。
@@ -207,20 +198,13 @@ func (s *ChannelService) BeginAuth(ctx context.Context, principal auth.Principal
 
 // FeishuAuthInput 是飞书发起的 service 入参（与 handler 的 FeishuChannelAuthRequest 对应）。
 type FeishuAuthInput struct {
-	// Mode 是发起模式：scan 扫码自动创建、manual 手填兜底。
-	Mode string
 	// Domain 是飞书域：feishu | lark，空值回退 feishu。
 	Domain string
-	// AppID 是飞书自建应用 App ID，manual 模式必填。
-	AppID string
-	// AppSecret 是飞书自建应用 App Secret，manual 模式必填，加密后写入 metadata。
-	AppSecret string
 }
 
-// BeginFeishuAuth 是飞书双模式发起入口（与微信 BeginAuth 并列，handler 按渠道分流）。
-// 飞书无预建绑定行，先 create-on-demand；manual 模式加密 secret 后写凭证 metadata，
-// scan 模式仅写 domain 占位（凭证由 worker 经 adapter 取得）；两模式都入队
-// channel_start_login job，worker 按 payload.mode 区分推进阶段。
+// BeginFeishuAuth 是飞书扫码自动创建发起入口（与微信 BeginAuth 并列，handler 按渠道分流）。
+// 飞书无预建绑定行，先 create-on-demand；仅写 domain 占位（凭证由 worker 经 adapter 扫码取得），
+// 入队 channel_start_login job 让 worker 起 oc-ops SSE 出二维码并推进后续阶段。
 func (s *ChannelService) BeginFeishuAuth(ctx context.Context, principal auth.Principal, appID string, in FeishuAuthInput) (ChallengeResult, error) {
 	app, err := s.loadManageableApp(ctx, principal, appID)
 	if err != nil {
@@ -254,33 +238,11 @@ func (s *ChannelService) BeginFeishuAuth(ctx context.Context, principal auth.Pri
 	if feishuDomain == "" {
 		feishuDomain = "feishu"
 	}
-	var meta map[string]any
-	if in.Mode == "manual" {
-		// 手填兜底：app_id/app_secret 必填，secret 加密入库，明文绝不落 metadata。
-		if in.AppID == "" || in.AppSecret == "" {
-			return ChallengeResult{}, ErrInvalidChannelCredential
-		}
-		if s.cipher == nil {
-			return ChallengeResult{}, fmt.Errorf("飞书 secret 加密器未配置")
-		}
-		enc, err := s.cipher.Encrypt([]byte(in.AppSecret))
-		if err != nil {
-			return ChallengeResult{}, fmt.Errorf("加密飞书 secret 失败: %w", err)
-		}
-		meta = map[string]any{
-			"app_id":                in.AppID,
-			"app_secret_ciphertext": enc,
-			"domain":                feishuDomain,
-			"acquired_by":           "manual",
-			"injected":              "false",
-		}
-	} else {
-		// 扫码自动创建：此刻尚无凭证，仅暂存 domain，worker 经 adapter 取二维码/凭证。
-		meta = map[string]any{
-			"domain":      feishuDomain,
-			"acquired_by": "qr",
-			"injected":    "false",
-		}
+	// 扫码自动创建：此刻尚无凭证，仅暂存 domain，worker 经 adapter 取二维码/凭证。
+	meta := map[string]any{
+		"domain":      feishuDomain,
+		"acquired_by": "qr",
+		"injected":    "false",
 	}
 	metaJSON, err := json.Marshal(meta)
 	if err != nil {
@@ -293,11 +255,10 @@ func (s *ChannelService) BeginFeishuAuth(ctx context.Context, principal auth.Pri
 	}); err != nil {
 		return ChallengeResult{}, fmt.Errorf("写入飞书凭证失败: %w", err)
 	}
-	// 入队 channel_start_login：payload 带 mode/domain，worker 据此分流扫码或手填注册。
+	// 入队 channel_start_login：payload 带 domain，worker 起 oc-ops SSE 出二维码扫码注册。
 	payload, err := json.Marshal(map[string]any{
 		"app_id":       app.ID,
 		"channel_type": domain.ChannelTypeFeishu,
-		"mode":         in.Mode,
 		"domain":       feishuDomain,
 		"requested_by": principal.UserID,
 	})

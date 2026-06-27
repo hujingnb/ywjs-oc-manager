@@ -1,9 +1,8 @@
-// client_feishu_test.go — 飞书渠道客户端方法（注册 SSE / 手填校验）的单元测试。
+// client_feishu_test.go — 飞书渠道客户端方法（注册 SSE）的单元测试。
 package ocops_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -65,37 +64,4 @@ func TestFeishuRegisterNon2xxReturnsError(t *testing.T) {
 	events, err := c.FeishuRegister(context.Background(), ep, "feishu")
 	require.Error(t, err)
 	assert.Nil(t, events)
-}
-
-// TestFeishuProbeReturnsResult 验证手填模式即时校验返回凭证有效性与机器人信息。
-// 业务场景：用户手填 app_id/app_secret 后，oc-ops /probe 返回 ok 与机器人身份。
-func TestFeishuProbeReturnsResult(t *testing.T) {
-	var gotPath, gotAuth, gotCT string
-	var gotBody map[string]string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		gotAuth = r.Header.Get("Authorization")
-		gotCT = r.Header.Get("Content-Type")
-		_ = json.NewDecoder(r.Body).Decode(&gotBody)
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"ok":true,"bot_name":"测试机器人","bot_open_id":"ou_x"}`))
-	}))
-	defer srv.Close()
-
-	c := ocops.NewClient(srv.Client())
-	ep := ocops.Endpoint{BaseURL: srv.URL, Token: "secret"}
-	res, err := c.FeishuProbe(context.Background(), ep, "cli_x", "sec", "feishu")
-	require.NoError(t, err)
-
-	// 校验结果按契约解析
-	assert.True(t, res.OK)
-	assert.Equal(t, "测试机器人", res.BotName)
-	assert.Equal(t, "ou_x", res.BotOpenID)
-	// 校验请求构造：路径、鉴权头、Content-Type、请求体字段
-	assert.Equal(t, "/oc/channels/feishu/probe", gotPath)
-	assert.Equal(t, "Bearer secret", gotAuth)
-	assert.Equal(t, "application/json", gotCT)
-	assert.Equal(t, "cli_x", gotBody["app_id"])
-	assert.Equal(t, "sec", gotBody["app_secret"])
-	assert.Equal(t, "feishu", gotBody["domain"])
 }

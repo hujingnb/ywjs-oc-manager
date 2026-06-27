@@ -27,8 +27,8 @@ type channelServiceStub struct {
 	feishuErr    error
 	// beganFeishu 记录 BeginFeishuAuth 是否被调用，用于断言分流路径。
 	beganFeishu bool
-	// lastFeishuMode 记录最近一次调用 BeginFeishuAuth 传入的 mode，用于断言请求体解析正确。
-	lastFeishuMode string
+	// lastFeishuDomain 记录最近一次调用 BeginFeishuAuth 传入的 domain，用于断言请求体解析正确。
+	lastFeishuDomain string
 }
 
 func (s *channelServiceStub) BeginAuth(_ context.Context, _ auth.Principal, _, _ string) (service.ChallengeResult, error) {
@@ -46,7 +46,7 @@ func (s *channelServiceStub) Unbind(_ context.Context, _ auth.Principal, _, _ st
 // BeginFeishuAuth stub 记录调用，用于飞书分流路径测试。
 func (s *channelServiceStub) BeginFeishuAuth(_ context.Context, _ auth.Principal, _ string, in service.FeishuAuthInput) (service.ChallengeResult, error) {
 	s.beganFeishu = true
-	s.lastFeishuMode = in.Mode
+	s.lastFeishuDomain = in.Domain
 	return s.feishuResult, s.feishuErr
 }
 
@@ -146,47 +146,28 @@ func TestChannelsBeginFeishuAuthScan(t *testing.T) {
 	router := newChannelsTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
-	body := strings.NewReader(`{"mode":"scan","domain":"feishu"}`)
+	body := strings.NewReader(`{"domain":"feishu"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/apps/app-1/channels/feishu/auth", body)
 	req.Header.Set("Content-Type", "application/json")
 	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
-	// 飞书分流到 BeginFeishuAuth，mode 字段正确传递。
+	// 飞书分流到 BeginFeishuAuth，domain 字段正确传递。
 	require.True(t, stub.beganFeishu)
-	require.Equal(t, "scan", stub.lastFeishuMode)
+	require.Equal(t, "feishu", stub.lastFeishuDomain)
 	assert.Contains(t, w.Body.String(), "challenge")
 }
 
-// TestChannelsBeginFeishuAuthManual 验证飞书 manual 模式（含凭证）被正确分流，
-// mode 字段区分 scan/manual。
-func TestChannelsBeginFeishuAuthManual(t *testing.T) {
-	stub := &channelServiceStub{feishuResult: service.ChallengeResult{Status: "pending_auth", ChannelType: "feishu"}}
-	router := newChannelsTestRouter(t, stub)
-
-	w := httptest.NewRecorder()
-	body := strings.NewReader(`{"mode":"manual","domain":"lark","app_id":"cli_x","app_secret":"sec"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/apps/app-1/channels/feishu/auth", body)
-	req.Header.Set("Content-Type", "application/json")
-	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
-	router.ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusOK, w.Code)
-	// manual 模式同样走飞书分流，mode 字段正确传递。
-	require.True(t, stub.beganFeishu)
-	require.Equal(t, "manual", stub.lastFeishuMode)
-}
-
-// TestChannelsBeginFeishuAuthBadBody 验证飞书请求体格式错误（缺少 mode）时返回 400，
+// TestChannelsBeginFeishuAuthBadBody 验证飞书请求体 domain 非法（不在 feishu/lark 内）时返回 400，
 // 不触发 service 调用。
 func TestChannelsBeginFeishuAuthBadBody(t *testing.T) {
 	stub := &channelServiceStub{}
 	router := newChannelsTestRouter(t, stub)
 
 	w := httptest.NewRecorder()
-	// 缺少 mode 字段（binding 要求 required,oneof=scan manual），应触发 400。
-	body := strings.NewReader(`{"domain":"feishu"}`)
+	// domain 非法（binding 要求 omitempty,oneof=feishu lark），应触发 400。
+	body := strings.NewReader(`{"domain":"qq"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/apps/app-1/channels/feishu/auth", body)
 	req.Header.Set("Content-Type", "application/json")
 	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
@@ -195,23 +176,6 @@ func TestChannelsBeginFeishuAuthBadBody(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	// BeginFeishuAuth 不应被调用。
 	assert.False(t, stub.beganFeishu)
-}
-
-// TestChannelsBeginFeishuAuthInvalidCredential 验证飞书 service 返回 ErrInvalidChannelCredential 时
-// handler 映射为 400，而非 500。
-func TestChannelsBeginFeishuAuthInvalidCredential(t *testing.T) {
-	stub := &channelServiceStub{feishuErr: service.ErrInvalidChannelCredential}
-	router := newChannelsTestRouter(t, stub)
-
-	w := httptest.NewRecorder()
-	body := strings.NewReader(`{"mode":"manual","app_id":"cli_x"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/apps/app-1/channels/feishu/auth", body)
-	req.Header.Set("Content-Type", "application/json")
-	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
-	router.ServeHTTP(w, req)
-
-	// ErrInvalidChannelCredential 应映射为 400，而非通用 500。
-	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 // TestChannelsBeginWechatUnchanged 验证微信渠道在飞书分流引入后仍走原 BeginAuth 路径，

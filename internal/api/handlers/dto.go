@@ -146,17 +146,11 @@ type OnboardMemberRequest struct {
 	VersionID string `json:"version_id" binding:"required"`
 }
 
-// FeishuChannelAuthRequest 是飞书渠道发起请求体（扫码 mode=scan 无需凭证；手填 mode=manual 带凭证）。
+// FeishuChannelAuthRequest 是飞书渠道发起请求体（仅扫码自动创建，无需凭证）。
 type FeishuChannelAuthRequest struct {
-	// Mode 是发起模式：scan 扫码自动创建、manual 手填兜底。
-	Mode string `json:"mode" binding:"required,oneof=scan manual"`
 	// Domain 是飞书域：feishu | lark，默认 feishu；omitempty 允许留空回退，
 	// 但显式传值时必须落在 feishu/lark 内，防御非法 domain 透传 oc-ops。
 	Domain string `json:"domain" binding:"omitempty,oneof=feishu lark"`
-	// AppID 是飞书自建应用 App ID，manual 模式必填。
-	AppID string `json:"app_id"`
-	// AppSecret 是飞书自建应用 App Secret，manual 模式必填，加密后入库。
-	AppSecret string `json:"app_secret"`
 }
 
 // CreateMemberAppRequest 为已有成员创建新实例的请求体。

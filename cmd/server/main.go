@@ -251,8 +251,6 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 
 	channelRegistry := channel.NewRegistry()
 	channelService := service.NewChannelService(dbStore.Queries, channelRegistry, redisQueue)
-	// 飞书手填模式需加密 app_secret 后入库，复用进程内同一份 master_key 的 cipher。
-	channelService.SetCipher(cipher)
 	// 飞书解绑即时清理：删 app Secret 的 feishu-* key + 重启，使引擎下次重启不再启用飞书。
 	// PatchSecretKeys 仅 *KubernetesAdapter 暴露（Orchestrator 接口未含），按需类型断言取出；
 	// restarter 复用渠道 worker 同款 orchChannelRestarter（包装 RolloutRestart）。
@@ -274,8 +272,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		return fmt.Errorf("注册微信渠道失败: %w", err)
 	}
 
-	// 飞书渠道：扫码注册 SSE 经 oc-ops runner；手填凭证的 probe 校验改由 worker 阶段1
-	// （ChannelCheckBindingHandler）执行（彼时已有 per-app oc-ops 坐标 + 运行中实例）。
+	// 飞书渠道：扫码注册 SSE 经 oc-ops runner，引擎建 bot 后经 SSE 回传凭证，
+	// worker 阶段1（ChannelCheckBindingHandler）注入 Secret 并重启。
 	feishuAdapter := channel.NewFeishuAdapter(channel.NewOcOpsFeishuRunner(ocopsClient))
 	if err := channelRegistry.Register(feishuAdapter); err != nil {
 		return fmt.Errorf("注册飞书渠道失败: %w", err)
@@ -511,9 +509,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if p, ok := orch.(handlers.FeishuSecretPatcher); ok {
 		feishuPatcher = p
 	}
-	// 同一 oc-ops 适配器实例同时满足 health 探测（阶段2）与手填 probe 校验（阶段1）。
+	// oc-ops 适配器实例满足阶段2 health 探测。
 	feishuOcOps := handlers.NewOcOpsFeishuHealthClient(ocopsEndpointResolver{resolver: ocopsResolver}, ocopsClient)
-	channelCheckHandler.SetFeishuDeps(feishuPatcher, cipher, feishuOcOps, feishuOcOps)
+	channelCheckHandler.SetFeishuDeps(feishuPatcher, cipher, feishuOcOps)
 	if err := registry.Register(domain.JobTypeChannelCheckBinding, channelCheckHandler.Handle); err != nil {
 		return fmt.Errorf("注册 channel_check_binding handler 失败: %w", err)
 	}
