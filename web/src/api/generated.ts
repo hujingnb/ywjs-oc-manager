@@ -12366,21 +12366,12 @@ export interface components {
             message?: string;
         };
         "handlers.FeishuChannelAuthRequest": {
-            /** @description AppID 是飞书自建应用 App ID，manual 模式必填。 */
-            app_id?: string;
-            /** @description AppSecret 是飞书自建应用 App Secret，manual 模式必填，加密后入库。 */
-            app_secret?: string;
             /**
              * @description Domain 是飞书域：feishu | lark，默认 feishu；omitempty 允许留空回退，
              *     但显式传值时必须落在 feishu/lark 内，防御非法 domain 透传 oc-ops。
              * @enum {string}
              */
             domain?: "feishu" | "lark";
-            /**
-             * @description Mode 是发起模式：scan 扫码自动创建、manual 手填兜底。
-             * @enum {string}
-             */
-            mode: "scan" | "manual";
         };
         "handlers.InitKnowledgeUploadRequest": {
             /** @description Filename 是原始文件名，服务端会取 base 后用于暂存 key 与最终文档名。 */

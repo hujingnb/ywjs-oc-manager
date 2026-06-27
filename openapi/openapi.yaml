@@ -299,12 +299,6 @@ components:
       type: object
     handlers.FeishuChannelAuthRequest:
       properties:
-        app_id:
-          description: AppID 是飞书自建应用 App ID，manual 模式必填。
-          type: string
-        app_secret:
-          description: AppSecret 是飞书自建应用 App Secret，manual 模式必填，加密后入库。
-          type: string
         domain:
           description: |-
             Domain 是飞书域：feishu | lark，默认 feishu；omitempty 允许留空回退，
@@ -313,14 +307,6 @@ components:
           - feishu
           - lark
           type: string
-        mode:
-          description: Mode 是发起模式：scan 扫码自动创建、manual 手填兜底。
-          enum:
-          - scan
-          - manual
-          type: string
-      required:
-      - mode
       type: object
     handlers.InitKnowledgeUploadRequest:
       properties:
