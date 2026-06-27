@@ -19,7 +19,7 @@
           </span>
         </div>
         <NProgress type="line" :percentage="currentPct" :processing="isFinalizing" />
-        <!-- 合并阶段：字节已传完，服务端在合并并推送 RAGFlow，显示「合并中…」避免看起来卡死在 100% -->
+        <!-- 处理阶段：字节已传完，服务端在合并分片 / 推送 RAGFlow，显示「处理中…」避免看起来卡死在 100% -->
         <p class="state-text">
           <template v-if="isFinalizing">{{ t('components.uploadProgressModal.finalizing') }}</template>
           <template v-else>{{ formatBytes(session.currentLoaded) }} / {{ formatBytes(currentItem.size) }}</template>
@@ -71,8 +71,8 @@ const currentPct = computed(() => {
   return Math.min(Math.round((loaded / item.size) * 100), 100)
 })
 
-// isFinalizing 标识当前文件进入服务端合并阶段（分片 complete 期间）：字节 100% 但仍在处理，
-// 用于把「X MB / Y MB」换成「合并中…」并让进度条动画起来，消除"卡在 100%"的错觉。
+// isFinalizing 标识当前文件进入服务端处理阶段（字节 100% 但仍在处理）：分片 complete 期间或直传等响应期间，
+// 用于把「X MB / Y MB」换成「处理中…」并让进度条动画起来，消除"卡在 100%"的错觉。
 const isFinalizing = computed(() => store.session?.currentFinalizing ?? false)
 
 // failedItems 仅在会话结束后展示，供用户查看出错原因；不影响进行中视图。

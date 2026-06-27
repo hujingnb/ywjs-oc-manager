@@ -59,7 +59,7 @@ describe('知识库文件上传', () => {
     const onFinalizing = vi.fn()
     await uploadKnowledgeFile(target, makeFile(17 * 1024 * 1024), undefined, undefined, onFinalizing)
 
-    // 进入合并阶段的回调被触发一次（用于前端显示「合并中…」）
+    // 进入服务端处理阶段的回调被触发一次（用于前端显示「处理中…」）
     expect(onFinalizing).toHaveBeenCalledTimes(1)
     // init + complete 各一次
     expect(apiRequest).toHaveBeenCalledWith('/api/v1/organizations/o1/knowledge-uploads', {

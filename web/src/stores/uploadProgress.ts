@@ -26,8 +26,8 @@ export interface UploadSession {
   currentIndex: number
   // 当前 item 已传字节，由 runner 内 ctx.onProgress 回调写入。
   currentLoaded: number
-  // 当前 item 是否进入服务端「合并/收尾」阶段（分片上传 complete 期间）：
-  // 此时字节已传完(100%)但服务端仍在合并并推送 RAGFlow，UI 据此显示「合并中…」而非干卡 100%。
+  // 当前 item 是否进入服务端「处理/收尾」阶段（字节已传完 100%）：
+  // 分片上传在 complete 期间、直传在请求体发完等服务端响应期间，UI 据此显示「处理中…」而非干卡 100%。
   // 可选：run() 总会初始化为 false，但部分测试夹具构造 session 时不关心该字段。
   currentFinalizing?: boolean
   // 会话起始时间戳；v1 不渲染速率，仅留作 log。
@@ -41,7 +41,7 @@ export interface RunItem {
 }
 
 // RunnerContext 由 store 注入给 runner：onProgress 上报字节进度，signal 响应取消，
-// onFinalizing 在字节传完、进入服务端合并阶段时调用（仅分片上传用，直传不调）。
+// onFinalizing 在字节传完、进入服务端处理阶段时调用（分片上传 complete 前、直传请求体发完后）。
 export interface RunnerContext {
   onProgress: (loaded: number, total: number) => void
   signal: AbortSignal
@@ -124,7 +124,7 @@ export const useUploadProgressStore = defineStore('uploadProgress', () => {
                 session.value.currentLoaded = loaded
               }
             },
-            // 进入合并阶段：同样加 currentIndex 守卫，避免延迟回调污染下一文件。
+            // 进入服务端处理阶段：同样加 currentIndex 守卫，避免延迟回调污染下一文件。
             onFinalizing: () => {
               if (session.value && session.value.currentIndex === i) {
                 session.value.currentFinalizing = true

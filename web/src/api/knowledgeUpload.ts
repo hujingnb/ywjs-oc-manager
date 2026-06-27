@@ -111,7 +111,7 @@ async function chunkedUpload(
       onProgress?.(end, total)
     }
     // 3) 合并并触发解析。complete 期间服务端要把整文件从对象存储推给 RAGFlow，可能耗时若干秒，
-    //    先通知前端进入「合并中」状态，避免进度卡在 100% 看起来像卡死。
+    //    先通知前端进入「处理中」状态，避免进度卡在 100% 看起来像卡死。
     onFinalizing?.()
     await apiRequest(`${uploadsPath}/${uploadId}/complete`, { method: 'POST' })
   } catch (err) {
