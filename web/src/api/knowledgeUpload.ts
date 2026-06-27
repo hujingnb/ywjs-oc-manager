@@ -26,7 +26,8 @@ interface InitUploadResponse {
 }
 
 // uploadKnowledgeFile 按文件大小选择直传或分片上传；onProgress 上报聚合字节进度，signal 支持取消，
-// onFinalizing 在分片全部传完、进入服务端合并阶段时触发（直传不调，直传的 100% 仍是上传中）。
+// onFinalizing 在字节传完、进入服务端处理阶段时触发：分片上传在 complete 前调用，直传在请求体发完、
+// 等服务端响应期间调用。前端据此显示「处理中…」，避免进度卡在 100% 看起来像卡死。
 export async function uploadKnowledgeFile(
   target: KnowledgeUploadTarget,
   file: File,
@@ -35,7 +36,7 @@ export async function uploadKnowledgeFile(
   onFinalizing?: () => void,
 ): Promise<void> {
   if (file.size < CHUNK_THRESHOLD) {
-    await directUpload(target.directPath, file, onProgress, signal)
+    await directUpload(target.directPath, file, onProgress, signal, onFinalizing)
     return
   }
   try {
@@ -43,7 +44,7 @@ export async function uploadKnowledgeFile(
   } catch (err) {
     // 后端未启用对象存储（分片不可用）时回退直传，保证功能可用。
     if (isMultipartUnavailable(err)) {
-      await directUpload(target.directPath, file, onProgress, signal)
+      await directUpload(target.directPath, file, onProgress, signal, onFinalizing)
       return
     }
     throw err
@@ -51,11 +52,14 @@ export async function uploadKnowledgeFile(
 }
 
 // directUpload 以 application/octet-stream 把整个文件直传到知识库端点（原有行为）。
+// onFinalizing 在请求体发送完成（字节已全部上传、等服务端把文件推给 RAGFlow）时触发，
+// 前端据此从字节进度切到「处理中…」，消除卡在 100% 的错觉。
 async function directUpload(
   directPath: string,
   file: File,
   onProgress?: (loaded: number, total: number) => void,
   signal?: AbortSignal,
+  onFinalizing?: () => void,
 ): Promise<void> {
   const params = new URLSearchParams({ filename: file.name })
   await xhrUpload(`${directPath}?${params.toString()}`, {
@@ -64,6 +68,7 @@ async function directUpload(
     body: file,
     onProgress,
     signal,
+    onUploadComplete: onFinalizing,
   })
 }
 

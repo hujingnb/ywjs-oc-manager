@@ -36,6 +36,18 @@ describe('知识库文件上传', () => {
     expect(opts.method).toBe('POST')
   })
 
+  // 小文件直传：xhrUpload 收到 onUploadComplete 后（请求体发完），onFinalizing 被触发一次，
+  // 用于前端在等服务端响应期间显示「处理中…」。
+  it('小文件直传请求体发完后触发 onFinalizing', async () => {
+    vi.mocked(xhrUpload).mockImplementation(async (_url, opts) => {
+      opts.onUploadComplete?.() // 模拟浏览器请求体发送完成
+      return { status: 202, body: {} }
+    })
+    const onFinalizing = vi.fn()
+    await uploadKnowledgeFile(target, makeFile(1024), undefined, undefined, onFinalizing)
+    expect(onFinalizing).toHaveBeenCalledTimes(1)
+  })
+
   // 大文件分片：init → 顺序 PUT 每片（17MB÷8MB=3 片，序号 1/2/3、末片 1MB）→ complete。
   it('大文件按 8MB 顺序分片并合并', async () => {
     vi.mocked(apiRequest).mockImplementation(async (path: string) => {
@@ -77,19 +89,25 @@ describe('知识库文件上传', () => {
     expect(apiRequest).toHaveBeenCalledWith('/api/v1/organizations/o1/knowledge-uploads/u9', { method: 'DELETE' })
   })
 
-  // init 返回 503 多分片不可用：回退到直传，保证功能可用。
-  it('后端未启用分片时回退直传', async () => {
+  // init 返回 503 分片不可用：回退到直传，保证功能可用；回退后的直传同样在请求体发完时触发 onFinalizing。
+  it('后端未启用分片时回退直传并触发 onFinalizing', async () => {
     vi.mocked(apiRequest).mockRejectedValue(
       Object.assign(new Error('unavailable'), { status: 503, body: { code: 'KNOWLEDGE_MULTIPART_UNAVAILABLE' } }),
     )
-    vi.mocked(xhrUpload).mockResolvedValue({ status: 202, body: {} })
+    vi.mocked(xhrUpload).mockImplementation(async (_url, opts) => {
+      opts.onUploadComplete?.() // 回退直传：模拟请求体发送完成
+      return { status: 202, body: {} }
+    })
 
-    await uploadKnowledgeFile(target, makeFile(17 * 1024 * 1024))
+    const onFinalizing = vi.fn()
+    await uploadKnowledgeFile(target, makeFile(17 * 1024 * 1024), undefined, undefined, onFinalizing)
 
     // 直传被调用（POST 到 directPath），且未发生 PUT 分片
     const calls = vi.mocked(xhrUpload).mock.calls
     expect(calls).toHaveLength(1)
     expect(calls[0][0]).toContain('/api/v1/organizations/o1/knowledge?filename=')
     expect(calls[0][1].method).toBe('POST')
+    // 回退直传也进入「处理中」阶段
+    expect(onFinalizing).toHaveBeenCalledTimes(1)
   })
 })
