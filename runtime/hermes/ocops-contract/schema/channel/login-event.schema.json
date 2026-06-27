@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "ocops Channel Login Event",
+  "title": "ocops Channel Auth/Login Event",
   "oneOf": [
     {
       "type": "object",
@@ -25,6 +25,19 @@
       "properties": {
         "event": { "const": "failed" },
         "reason": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["event", "app_id", "app_secret"],
+      "properties": {
+        "event": { "const": "credentials" },
+        "app_id": { "type": "string" },
+        "app_secret": { "type": "string" },
+        "domain": { "type": "string" },
+        "bot_name": { "type": ["string", "null"] },
+        "bot_open_id": { "type": ["string", "null"] }
       },
       "additionalProperties": false
     }

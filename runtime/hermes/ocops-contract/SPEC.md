@@ -61,6 +61,8 @@ accepts any.
 | `GET` | `/oc/channels/{channel}/status` | - | `schema/channel/status.schema.json` |
 | `POST` | `/oc/channels/{channel}/unbind` | - | `schema/channel/unbind.schema.json` |
 | `POST` | `/oc/channels/{channel}/login` | - | SSE `schema/channel/login-event.schema.json` frames. |
+| `POST` | `/oc/channels/{channel}/auth` | query passed through to the channel adapter (e.g. feishu `domain`) | SSE `schema/channel/login-event.schema.json` frames. |
+| `POST` | `/oc/channels/feishu/register` | query `domain` (`feishu`\|`lark`, default `feishu`) | SSE `schema/channel/login-event.schema.json` frames. |
 
 ### Cron
 
