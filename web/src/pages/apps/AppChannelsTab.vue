@@ -44,6 +44,7 @@
             </h3>
           </div>
 
+          <!-- 操作按钮统一放标题右侧：微信发起/刷新/解绑、飞书发起/解绑，两渠道布局一致。 -->
           <n-space v-if="selectedChannelType === 'wechat'" :size="8">
             <n-button
               type="primary"
@@ -63,6 +64,18 @@
             </n-button>
             <n-button v-if="canUnbind" @click="unbind">{{ t('apps.channels.unbind') }}</n-button>
           </n-space>
+          <n-space v-else-if="selectedChannelType === 'feishu'" :size="8">
+            <n-button
+              v-if="!feishuBound"
+              type="primary"
+              :disabled="!appId || !canManage || !instanceReady"
+              :loading="feishuBeginning"
+              @click="beginFeishuScan"
+            >
+              {{ t('apps.channels.beginLogin') }}
+            </n-button>
+            <n-button v-if="feishuCanUnbind" @click="unbindFeishu">{{ t('apps.channels.unbind') }}</n-button>
+          </n-space>
         </div>
 
         <!-- 微信渠道详情：扫码绑定 + 状态提示，沿用既有逻辑，飞书选中时不渲染。 -->
@@ -79,7 +92,7 @@
           <AuthChallengeRenderer v-if="visibleChallenge" :challenge="visibleChallenge" @rendered="onQrRendered" />
         </template>
 
-        <!-- 飞书渠道详情：部署域 + 扫码自动创建 + 图文指引 + 已绑定详情/解绑。 -->
+        <!-- 飞书渠道详情：部署域 + 已绑定 bot 详情 / 未绑定扫码二维码（发起、解绑按钮统一在标题右上）。 -->
         <template v-else-if="selectedChannelType === 'feishu'">
           <div class="feishu-panel">
             <!-- 部署域：下拉决定后端调用的开放平台域（飞书国内 / Lark 国际）。 -->
@@ -102,23 +115,10 @@
                 <p v-if="feishuProgress?.bound_identity" class="state-text">{{ t('apps.channels.boundIdentity') }}{{ feishuProgress.bound_identity }}</p>
                 <p class="state-text">{{ t('apps.channels.feishuDomainCurrent') }}{{ feishuEffectiveDomain === 'lark' ? t('apps.channels.feishuDomainLark') : t('apps.channels.feishuDomainFeishu') }}</p>
               </div>
-              <n-space :size="8">
-                <n-button v-if="feishuCanUnbind" @click="unbindFeishu">{{ t('apps.channels.unbind') }}</n-button>
-              </n-space>
             </template>
 
-            <!-- 未绑定：扫码自动创建，点发起后轮询二维码并复用 AuthChallengeRenderer 渲染。 -->
+            <!-- 未绑定：扫码自动创建（发起按钮在标题右上），轮询二维码并复用 AuthChallengeRenderer 渲染。 -->
             <template v-else>
-              <n-space :size="8">
-                <n-button
-                  type="primary"
-                  :disabled="!appId || !canManage || !instanceReady"
-                  :loading="feishuBeginning"
-                  @click="beginFeishuScan"
-                >
-                  {{ t('apps.channels.beginLogin') }}
-                </n-button>
-              </n-space>
               <!-- 实例非运行态(重启中/升级中)时发起被禁用，提示原因避免误以为是 bug。 -->
               <p v-if="canManage && !instanceReady" class="state-text">{{ t('apps.channels.instanceNotReady') }}</p>
               <p v-if="feishuProgress?.error_message" class="state-text danger">{{ t('apps.channels.errorMsg') }}{{ feishuProgress.error_message }}</p>
