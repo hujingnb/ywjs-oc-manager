@@ -270,7 +270,7 @@ local-migrate: ## kubectl exec manager-api 跑迁移（默认 up；DOWN=1 则回
 local-seed: ## kubectl exec manager-api 种子平台管理员 admin/admin123（幂等）
 	$(KUBECTL) -n $(K8S_NS) exec deploy/manager-api -- seed-admin admin admin123
 
-local-init-models: ## 初始化 new-api/RAGFlow 模型与管理 token（读 .env 厂商 key，幂等）；待 new-api/ragflow 就绪后由用户手动运行
+local-init-models: ## 初始化 new-api/RAGFlow 模型与管理 token（读 .env 厂商 key，幂等）；local-up 末尾自动执行，改 .env 后也可单独重跑
 	python3 scripts/local-init-models.py
 
 local-seed-e2e: ## kubectl exec manager-api 注入 Playwright e2e fixture（OCM_E2E=1 守门），打印 fixture JSON
