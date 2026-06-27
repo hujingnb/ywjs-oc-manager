@@ -48,6 +48,18 @@ spec:
               key: feishu-domain
               name: app-a1-token
               optional: true
+        - name: WECOM_BOT_ID
+          valueFrom:
+            secretKeyRef:
+              key: wecom-bot-id
+              name: app-a1-token
+              optional: true
+        - name: WECOM_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: wecom-secret
+              name: app-a1-token
+              optional: true
         image: registry/hermes:v1
         name: hermes
         readinessProbe:

@@ -34,6 +34,11 @@ func RenderSecret(spec AppSpec, namespace string) *corev1.Secret {
 		data["feishu-app-secret"] = spec.FeishuAppSecret
 		data["feishu-domain"] = spec.FeishuDomain
 	}
+	// 已绑定企业微信：带出 bot_id + secret 明文，保证重建/升级不丢配置（DB 是 source of truth）。
+	if spec.WorkWeChatBotID != "" && spec.WorkWeChatSecret != "" {
+		data["wecom-bot-id"] = spec.WorkWeChatBotID
+		data["wecom-secret"] = spec.WorkWeChatSecret
+	}
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: secretName(spec.AppID), Namespace: namespace, Labels: appLabels(spec.AppID)},
 		Type:       corev1.SecretTypeOpaque,
@@ -120,11 +125,11 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 							// oc-ops 容器注入同一 key（见下）后即可鉴权调用 /api/sessions。
 							// 飞书三条 env 永久注入 hermes 容器；未绑定时 Secret 无对应 key，optional=true 使
 							// env 不注入，引擎 getenv 为空 → 飞书平台不启用。Deployment 模板永不因绑定变化。
-							Env: append(append([]corev1.EnvVar{
+							Env: append(append(append([]corev1.EnvVar{
 								{Name: "HERMES_HOME", Value: "/opt/data"},
 								{Name: "API_SERVER_ENABLED", Value: "true"},
 								{Name: "API_SERVER_KEY", ValueFrom: ctrlTokenEnv.ValueFrom},
-							}, feishuOptionalEnv(spec.AppID)...), proxyEnv...),
+							}, feishuOptionalEnv(spec.AppID)...), workWechatOptionalEnv(spec.AppID)...), proxyEnv...),
 							VolumeMounts: []corev1.VolumeMount{inputMountRO, dataMount},
 							Resources:    corev1.ResourceRequirements{Requests: reqs, Limits: lims},
 							// readinessProbe：exec hermes gateway status，验证网关真正就绪。
@@ -212,6 +217,24 @@ func feishuOptionalEnv(appID string) []corev1.EnvVar {
 		{Name: "FEISHU_APP_ID", ValueFrom: ref("feishu-app-id")},
 		{Name: "FEISHU_APP_SECRET", ValueFrom: ref("feishu-app-secret")},
 		{Name: "FEISHU_DOMAIN", ValueFrom: ref("feishu-domain")},
+	}
+}
+
+// workWechatOptionalEnv 返回企业微信两条 optional SecretKeyRef env（WECOM_BOT_ID / WECOM_SECRET），
+// 供 hermes 容器永久挂载。Optional=true：未绑定时 Secret 无对应 key，k8s 不注入该 env
+// （引擎 getenv 为空 → 企业微信平台不启用），Deployment 模板无需随绑定状态变化。
+func workWechatOptionalEnv(appID string) []corev1.EnvVar {
+	optionalTrue := true
+	ref := func(key string) *corev1.EnvVarSource {
+		return &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: secretName(appID)},
+			Key:                  key,
+			Optional:             &optionalTrue,
+		}}
+	}
+	return []corev1.EnvVar{
+		{Name: "WECOM_BOT_ID", ValueFrom: ref("wecom-bot-id")},
+		{Name: "WECOM_SECRET", ValueFrom: ref("wecom-secret")},
 	}
 }
 

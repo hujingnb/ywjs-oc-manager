@@ -58,6 +58,10 @@ type AppSpec struct {
 	FeishuAppSecret string
 	// FeishuDomain 是飞书 domain：feishu（国内）/ lark（国际），未绑定为空。
 	FeishuDomain string
+	// WorkWeChatBotID 是企业微信智能机器人 Bot ID（明文，未绑定为空）。
+	WorkWeChatBotID string
+	// WorkWeChatSecret 是企业微信机器人 Secret 明文（buildAppSpec 从 DB 密文解密后填入，引擎需明文；未绑定为空）。
+	WorkWeChatSecret string
 }
 
 // ProxyEnv 是注入容器的代理环境变量（HTTP(S)_PROXY/NO_PROXY），留空不注入。

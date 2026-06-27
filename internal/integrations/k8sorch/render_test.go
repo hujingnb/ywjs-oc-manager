@@ -204,6 +204,30 @@ func TestRenderSecretOmitsFeishuKeysWhenUnset(t *testing.T) {
 	require.False(t, ok)
 }
 
+// TestRenderSecret_WorkWeChatKeys 覆盖已绑定企业微信时 Secret 带出 wecom-bot-id/wecom-secret；
+// 未绑定（字段空）时不写这两把 key，保证 optional env 注入语义。
+func TestRenderSecret_WorkWeChatKeys(t *testing.T) {
+	// 已绑定：两字段非空 → Secret 含两把 key。
+	bound := RenderSecret(AppSpec{AppID: "a1", ControlToken: "t", WorkWeChatBotID: "bot-1", WorkWeChatSecret: "sec-1"}, "ns")
+	assert.Equal(t, "bot-1", bound.StringData["wecom-bot-id"])
+	assert.Equal(t, "sec-1", bound.StringData["wecom-secret"])
+	// 未绑定：字段空 → 不写 key（避免空值 env 误启用平台）。
+	unbound := RenderSecret(AppSpec{AppID: "a1", ControlToken: "t"}, "ns")
+	_, hasBot := unbound.StringData["wecom-bot-id"]
+	assert.False(t, hasBot)
+}
+
+// TestWorkWechatOptionalEnv 覆盖 hermes 容器永久挂载两条 optional SecretKeyRef env，
+// optional=true 保证未绑定时不注入（引擎 getenv 为空→平台不启用）。
+func TestWorkWechatOptionalEnv(t *testing.T) {
+	envs := workWechatOptionalEnv("a1")
+	assert.Len(t, envs, 2)
+	assert.Equal(t, "WECOM_BOT_ID", envs[0].Name)
+	assert.Equal(t, "WECOM_SECRET", envs[1].Name)
+	// optional=true：Secret 缺 key 时 k8s 不报错、不注入该 env。
+	assert.True(t, *envs[0].ValueFrom.SecretKeyRef.Optional)
+}
+
 // TestRenderDeploymentInjectsFeishuOptionalEnv 验证 hermes 容器永久带三条 optional 飞书 env，
 // 未绑定时 Secret 无对应 key、optional=true 使 env 不注入、引擎不启用飞书平台。
 func TestRenderDeploymentInjectsFeishuOptionalEnv(t *testing.T) {
