@@ -1,8 +1,18 @@
-# ocops/channel.py（先实现 status/unbind 同步部分；login 在 Task 6 追加）
-"""渠道绑定运维：weixin 账号目录读写。从 oc-channel-status/unbind 抽取核心逻辑。
+# ocops/channel.py
+"""渠道绑定运维：按渠道抽象为 ChannelOps adapter，注册到 _CHANNEL_OPS 表，
+status / unbind / 扫码授权流统一经注册表派发。
 
-设计约束：manager 不解析凭证字段；status 仅判定是否存在账号文件，unbind 直接删目录
-（幂等），凭证由 hermes 自管。未知 channel 一律 BAD_REQUEST（HTTP 400）。"""
+新增渠道只需：① 新建 ChannelOps 子类，覆写需要的 status/unbind/auth_stream；
+② 模块末尾 register_channel(子类())。无需改任何 if-chain，扫码流走通用
+/oc/channels/{channel}/auth 路由即可（无需改 server.py）。
+
+设计约束：manager 不解析凭证字段。各渠道绑定态来源不同——
+  - weixin：个人号扫码，凭证由 hermes 自管落盘 accounts 目录；status 判文件存在、
+    unbind 删目录（幂等）。
+  - feishu：扫码自动创建 bot，凭证经扫码 SSE 回传、由 manager 注入 k8s Secret 的
+    env；oc-ops 侧无本地文件态，status 读 api_server /health/detailed 运行态、
+    unbind 为幂等空操作（真正清理在 manager 删 Secret key + 重启）。
+未知 channel 一律 BAD_REQUEST（HTTP 400）；扫码 SSE 的未知 channel 降级为 failed 终态。"""
 from __future__ import annotations
 
 import asyncio
@@ -13,6 +23,10 @@ from pathlib import Path
 
 from ocops.conversation import _API_BASE, _api_server_key
 from ocops.errors import OpsError
+
+# ============================================================================
+# 渠道无关的辅助常量与函数（被下方各 ChannelOps adapter 复用）
+# ============================================================================
 
 # 二维码 URL 前缀：hermes 上游 qr_login 把扫码 URL print 到 stdout，所有
 # 微信扫码 URL 都以此前缀开头。与 manager 侧 wechat_runner.go 的识别逻辑
@@ -25,40 +39,6 @@ _WEIXIN_QR_PREFIX = "https://liteapp.weixin.qq.com/"
 # 枚举账号时必须排除——否则 sorted(iterdir())[0] 会把 ".context-tokens" 误当
 # account_id（账号 id 自身含点号，无法靠分割点号区分），导致绑定身份显示错误。
 _WEIXIN_ACCOUNT_SIDECAR_SUFFIXES = (".context-tokens.json", ".sync.json")
-
-
-def channel_status(channel: str, data_root: Path) -> dict:
-    """查询渠道绑定态：weixin 走 accounts 文件态，feishu 走 api_server /health/detailed。
-
-    weixin 返回结构：
-      - 未绑定：{"channel": "weixin", "bound": False}
-      - 已绑定：{"channel": "weixin", "bound": True, "account_id": "<id>"}
-    account_id 取 accounts/<id>.json 文件名去掉 .json 后缀；
-    同一目录下只取第一个（当前单账号绑定语义）。
-
-    feishu 没有本地账号文件（凭证经环境变量注入引擎），其「是否绑定」只能由
-    引擎实际连接结果判定，故委托 _feishu_status 读运行态。未知 channel 抛 BAD_REQUEST。
-    """
-    if channel == "feishu":
-        # 飞书绑定态以引擎运行态为准，不查本地文件。
-        return _feishu_status()
-    if channel != "weixin":
-        raise OpsError("BAD_REQUEST", f"unknown channel: {channel}")
-    accounts_dir = data_root / "weixin" / "accounts"
-    if not accounts_dir.exists():
-        # 目录不存在：从未绑定或已解绑。
-        return {"channel": "weixin", "bound": False}
-    for entry in sorted(accounts_dir.iterdir()):
-        if not (entry.is_file() and entry.suffix == ".json"):
-            continue
-        # 跳过账号 sidecar 文件（context-tokens / sync），只认账号本体 <id>.json。
-        if entry.name.endswith(_WEIXIN_ACCOUNT_SIDECAR_SUFFIXES):
-            continue
-        # 当前只支持单账号绑定，遇到第一个真正的账号文件即返回。
-        return {"channel": "weixin", "bound": True,
-                "account_id": entry.name[: -len(".json")]}
-    # 目录存在但无账号文件：视为未绑定。
-    return {"channel": "weixin", "bound": False}
 
 
 def _feishu_status() -> dict:
@@ -105,21 +85,6 @@ def _feishu_status() -> dict:
     return {"channel": "feishu", "bound": False, "platform_state": state or "connecting"}
 
 
-def channel_unbind(channel: str, data_root: Path) -> dict:
-    """解绑渠道：删除账号目录（幂等）；未知 channel 抛 BAD_REQUEST。
-
-    直接删除 <data_root>/weixin/accounts/ 目录树，hermes 下次扫描
-    platforms 配置时识别为未绑定状态。目录不存在时也视为已解绑（幂等语义）。
-    """
-    if channel != "weixin":
-        raise OpsError("BAD_REQUEST", "unknown channel")
-    accounts_dir = data_root / "weixin" / "accounts"
-    if accounts_dir.exists():
-        # 整体删除账号目录；hermes 下次扫描会判定为未绑定状态。
-        shutil.rmtree(accounts_dir)
-    return {"status": "unbound"}
-
-
 class _QRLineWriter(io.StringIO):
     """捕获 qr_login print 输出的可写对象。
 
@@ -151,162 +116,300 @@ class _QRLineWriter(io.StringIO):
         return len(s)
 
 
-async def channel_login(channel: str):
-    """微信扫码登录的 async 事件流：先 yield qrcode 事件，最后 yield bound/timeout/failed。
+# ============================================================================
+# 渠道抽象：adapter 基类 + 注册表
+# ============================================================================
 
-    复用 hermes 上游 qr_login（venv 内可 import）。qr_login 在登录全程才返回、
-    而二维码 URL 在中途被 print，因此需要并发：用 asyncio.Queue + 一个把
-    redirect_stdout 捕获到的 QR 行推入队列的 writer；主循环在「等待队列新事件」
-    与「等待 qr_login 任务完成」之间竞速，保证 qrcode 事件能在 bound/timeout
-    之前 yield 出去。
+class ChannelOps:
+    """渠道运维 adapter 基类。每个渠道实现以下三类能力（按需覆写）：
 
-    事件序列：
-      - 未知 channel → 单条 {"event":"failed","reason":"unknown channel: <channel>"}
-      - SDK 不可用 → 单条 {"event":"failed","reason":"hermes SDK not available: ..."}
-      - 正常 → 零或多条 {"event":"qrcode","url":...}，末尾 {"event":"bound"}（cred truthy）
-        或 {"event":"timeout"}（返回 None）
-      - qr_login 抛异常 → 已 yield 的 qrcode 之后补一条
-        {"event":"failed","reason":...}（不向上抛，保证 SSE 流优雅结束）
+    - status(data_root) -> dict：同步返回绑定态（文件态或运行态，渠道自定）。
+    - unbind(data_root) -> dict：同步解绑（幂等）；env 注入型渠道无本地态时返回幂等成功。
+    - auth_stream(**params) -> async generator：yield 扫码授权事件
+      （qrcode / bound / credentials / timeout / failed 等，事件语义由渠道与
+      manager 侧 adapter 约定）。无扫码流的渠道用基类默认实现即给 failed 终态。
 
-    刻意不抛异常：所有失败都降级为 failed 事件，让上层 SSE 端点能把终态写完
-    再关闭流。
-    """
-    if channel != "weixin":
-        # 异常路径：未知 channel 直接给出 failed 终态并结束。
+    新增渠道：子类设 channel 标识、覆写所需方法，模块末尾 register_channel(子类())。"""
+
+    channel: str = ""
+
+    def status(self, data_root: Path) -> dict:
+        raise OpsError("BAD_REQUEST", f"channel {self.channel} 不支持状态查询")
+
+    def unbind(self, data_root: Path) -> dict:
+        raise OpsError("BAD_REQUEST", f"channel {self.channel} 不支持解绑")
+
+    async def auth_stream(self, **params):
+        # 默认无扫码授权流：直接给 failed 终态（async generator 需含 yield 才是生成器）。
+        yield {"event": "failed", "reason": f"channel {self.channel} 无扫码授权流"}
+
+
+# 渠道注册表：channel 标识 → adapter 实例。启动期由 register_channel 填充。
+_CHANNEL_OPS: dict[str, ChannelOps] = {}
+
+
+def register_channel(adapter: ChannelOps) -> None:
+    """注册渠道 adapter（启动期调用）。同名覆盖，便于测试替换。"""
+    _CHANNEL_OPS[adapter.channel] = adapter
+
+
+def _channel_ops(channel: str) -> ChannelOps:
+    """按渠道取 adapter；未注册抛 BAD_REQUEST（→ HTTP 400）。"""
+    adapter = _CHANNEL_OPS.get(channel)
+    if adapter is None:
+        raise OpsError("BAD_REQUEST", f"unknown channel: {channel}")
+    return adapter
+
+
+# ============================================================================
+# weixin：accounts 文件态 + qr_login 扫码 SSE
+# ============================================================================
+
+class WeixinChannelOps(ChannelOps):
+    """微信渠道：个人号扫码登录，凭证由 hermes 上游 qr_login 自管落盘 accounts 目录。"""
+
+    channel = "weixin"
+
+    def status(self, data_root: Path) -> dict:
+        """查 accounts 文件态：
+          - 未绑定：{"channel": "weixin", "bound": False}
+          - 已绑定：{"channel": "weixin", "bound": True, "account_id": "<id>"}
+        account_id 取 accounts/<id>.json 文件名去掉 .json 后缀；当前单账号绑定语义，
+        只取第一个真正的账号文件（排除 context-tokens / sync sidecar）。"""
+        accounts_dir = data_root / "weixin" / "accounts"
+        if not accounts_dir.exists():
+            # 目录不存在：从未绑定或已解绑。
+            return {"channel": "weixin", "bound": False}
+        for entry in sorted(accounts_dir.iterdir()):
+            if not (entry.is_file() and entry.suffix == ".json"):
+                continue
+            # 跳过账号 sidecar 文件（context-tokens / sync），只认账号本体 <id>.json。
+            if entry.name.endswith(_WEIXIN_ACCOUNT_SIDECAR_SUFFIXES):
+                continue
+            # 当前只支持单账号绑定，遇到第一个真正的账号文件即返回。
+            return {"channel": "weixin", "bound": True,
+                    "account_id": entry.name[: -len(".json")]}
+        # 目录存在但无账号文件：视为未绑定。
+        return {"channel": "weixin", "bound": False}
+
+    def unbind(self, data_root: Path) -> dict:
+        """删除 accounts 目录树（幂等）；hermes 下次扫描 platforms 配置即识别为未绑定。"""
+        accounts_dir = data_root / "weixin" / "accounts"
+        if accounts_dir.exists():
+            # 整体删除账号目录；hermes 下次扫描会判定为未绑定状态。
+            shutil.rmtree(accounts_dir)
+        return {"status": "unbound"}
+
+    async def auth_stream(self, **params):
+        """微信扫码登录的 async 事件流：先 yield qrcode 事件，最后 yield bound/timeout/failed。
+
+        复用 hermes 上游 qr_login（venv 内可 import）。qr_login 在登录全程才返回、
+        而二维码 URL 在中途被 print，因此需要并发：用 asyncio.Queue + 一个把
+        redirect_stdout 捕获到的 QR 行推入队列的 writer；主循环在「等待队列新事件」
+        与「等待 qr_login 任务完成」之间竞速，保证 qrcode 事件能在 bound/timeout
+        之前 yield 出去。
+
+        事件序列：
+          - SDK 不可用 → 单条 {"event":"failed","reason":"hermes SDK not available: ..."}
+          - 正常 → 零或多条 {"event":"qrcode","url":...}，末尾 {"event":"bound"}（cred truthy）
+            或 {"event":"timeout"}（返回 None）
+          - qr_login 抛异常 → 已 yield 的 qrcode 之后补一条 {"event":"failed","reason":...}
+
+        刻意不抛异常：所有失败都降级为 failed 事件，让上层 SSE 端点能把终态写完再关闭流。
+        weixin 不需要额外参数，**params 仅为兼容通用 auth_stream 签名（忽略）。
+        """
+        try:
+            # 上游 SDK 仅在 hermes 容器 venv 内安装；本地/CI 通常不可用。
+            from gateway.platforms.weixin import qr_login
+        except ImportError as e:
+            # SDK 缺失：降级为 failed 事件（不抛），保证流能优雅结束。
+            yield {"event": "failed", "reason": f"hermes SDK not available: {e}"}
+            return
+
+        # 无界队列：writer 在任意时刻 put_nowait 都不会阻塞 qr_login 协程。
+        queue: asyncio.Queue = asyncio.Queue()
+        writer = _QRLineWriter(queue)
+
+        async def _run_login():
+            # 在 qr_login 执行期间把 stdout 接管到 writer，使其 print 的二维码
+            # URL 被识别并投递到队列。redirect_stdout 只包住这一个协程的执行，
+            # 主循环（仅读队列、不写 stdout）不与之产生 stdout 竞争。
+            with contextlib.redirect_stdout(writer):
+                return await qr_login("/opt/data", bot_type="3", timeout_seconds=480)
+
+        login_task = asyncio.create_task(_run_login())
+        try:
+            # 主循环：在「队列出现新 QR 行」与「登录任务完成」之间竞速。
+            while True:
+                queue_get = asyncio.ensure_future(queue.get())
+                done, _pending = await asyncio.wait(
+                    {queue_get, login_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if queue_get in done:
+                    # 队列先就绪：拿到一条二维码 URL，立即 yield qrcode 事件。
+                    url = queue_get.result()
+                    yield {"event": "qrcode", "url": url}
+                else:
+                    # 登录任务先完成：取消尚未就绪的 queue.get，跳出循环处理终态。
+                    queue_get.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await queue_get
+                    break
+
+            # 任务已完成，先把队列里残留的 QR 行排空 yield，避免漏发已生成的二维码事件。
+            while not queue.empty():
+                yield {"event": "qrcode", "url": queue.get_nowait()}
+
+            # 取登录结果；qr_login 内部异常在此 re-raise，转成 failed 事件。
+            cred = login_task.result()
+        except Exception as e:  # noqa: BLE001 - 任何登录异常都降级为 failed 事件，不向上抛
+            yield {"event": "failed", "reason": str(e)}
+            return
+
+        if not cred:
+            # 上游返回 None：失败或超时，统一标记为 timeout（与原 CLI 协议一致）。
+            yield {"event": "timeout"}
+            return
+        # 凭证 truthy：登录成功，凭证已由 qr_login 落盘到 /opt/data/weixin/accounts/。
+        yield {"event": "bound"}
+
+
+# ============================================================================
+# feishu：env 注入 + health 运行态 + 设备码扫码 SSE
+# ============================================================================
+
+class FeishuChannelOps(ChannelOps):
+    """飞书渠道：扫码自动创建 bot，凭证经 SSE 回传由 manager 注入 env，运行态走 health。"""
+
+    channel = "feishu"
+
+    def status(self, data_root: Path) -> dict:
+        # 飞书无本地账号文件（凭证经环境变量注入引擎），绑定态以引擎运行态为准。
+        return _feishu_status()
+
+    def unbind(self, data_root: Path) -> dict:
+        # env 注入型渠道：oc-ops 侧无本地文件态可删（凭证在 k8s Secret，真正清理由
+        # manager 删 feishu-* key + RolloutRestart 完成），此处返回幂等成功即可。
+        return {"channel": "feishu", "status": "unbound"}
+
+    async def auth_stream(self, domain: str = "feishu", **params):
+        """飞书扫码自动创建的 async 事件流：先 yield qrcode，最后 yield credentials/failed。
+
+        驱动 hermes 引擎 gateway.platforms.feishu 的设备码注册函数：
+          _begin_registration(domain) -> {device_code, qr_url, interval, expire_in}
+          _poll_registration(device_code, interval, expire_in, domain) -> {app_id, app_secret, domain, open_id} | None
+
+        事件序列：
+          - 引擎 SDK 不可用 → {"event":"failed","reason":...}
+          - 正常 → {"event":"qrcode","url":...} 然后
+                   {"event":"credentials","app_id":...,"app_secret":...,"domain":...,
+                    "bot_name":...,"bot_open_id":...}
+          - 扫码超时/拒绝 → {"event":"failed","reason":"registration timeout or denied"}
+
+        刻意不抛异常：所有失败降级为 failed 事件，让上层 SSE 端点优雅收尾。
+        凭证（含 app_secret）经此 SSE 在 oc-ops↔manager 内网鉴权通道回传，由 manager 落库即加密。
+        """
+        try:
+            from gateway.platforms.feishu import (
+                _begin_registration,
+                _poll_registration,
+                probe_bot,
+            )
+        except ImportError as e:
+            yield {"event": "failed", "reason": f"hermes feishu SDK not available: {e}"}
+            return
+
+        loop = asyncio.get_event_loop()
+        try:
+            begin = await loop.run_in_executor(None, _begin_registration, domain)
+        except Exception as e:  # noqa: BLE001 - 注册启动失败降级为 failed
+            yield {"event": "failed", "reason": f"begin registration failed: {e}"}
+            return
+
+        # 先把二维码 URL 发给前端展示。
+        yield {"event": "qrcode", "url": begin.get("qr_url", "")}
+
+        # 阻塞轮询（在线程池里跑，避免堵事件循环），直到扫码成功/超时。
+        def _poll():
+            return _poll_registration(
+                device_code=begin["device_code"],
+                interval=begin.get("interval", 5),
+                expire_in=begin.get("expire_in", 600),
+                domain=domain,
+            )
+
+        try:
+            result = await loop.run_in_executor(None, _poll)
+        except Exception as e:  # noqa: BLE001
+            yield {"event": "failed", "reason": f"poll registration failed: {e}"}
+            return
+
+        if not result or not result.get("app_id") or not result.get("app_secret"):
+            yield {"event": "failed", "reason": "registration timeout or denied"}
+            return
+
+        # best-effort 探测 bot 名/open_id（失败不影响凭证回传）。
+        bot_name, bot_open_id = None, None
+        try:
+            info = await loop.run_in_executor(
+                None, probe_bot, result["app_id"], result["app_secret"], result.get("domain", domain)
+            )
+            if info:
+                bot_name = info.get("bot_name")
+                bot_open_id = info.get("bot_open_id")
+        except Exception:  # noqa: BLE001 - 探测失败忽略
+            pass
+
+        yield {
+            "event": "credentials",
+            "app_id": result["app_id"],
+            "app_secret": result["app_secret"],
+            "domain": result.get("domain", domain),
+            "bot_name": bot_name,
+            "bot_open_id": bot_open_id,
+        }
+
+
+# 启动期注册内置渠道。新增渠道在此追加 register_channel(子类())。
+register_channel(WeixinChannelOps())
+register_channel(FeishuChannelOps())
+
+
+# ============================================================================
+# 对外薄派发器：保持原函数签名，server.py 路由与 manager 客户端无需改动
+# ============================================================================
+
+def channel_status(channel: str, data_root: Path) -> dict:
+    """查询渠道绑定态（派发到对应 adapter.status）。未知 channel 抛 BAD_REQUEST（→400）。"""
+    return _channel_ops(channel).status(data_root)
+
+
+def channel_unbind(channel: str, data_root: Path) -> dict:
+    """解绑渠道（派发到 adapter.unbind，幂等）。未知 channel 抛 BAD_REQUEST（→400）。"""
+    return _channel_ops(channel).unbind(data_root)
+
+
+async def channel_auth_stream(channel: str, **params):
+    """通用扫码授权 SSE 派发：未来渠道走 /oc/channels/{channel}/auth 路由即可，无需改 server.py。
+
+    未知 channel 不抛异常，降级为单条 failed 终态，保证 SSE 流优雅结束（与各渠道
+    auth_stream 的失败降级语义一致）。"""
+    adapter = _CHANNEL_OPS.get(channel)
+    if adapter is None:
         yield {"event": "failed", "reason": f"unknown channel: {channel}"}
         return
-    try:
-        # 上游 SDK 仅在 hermes 容器 venv 内安装；本地/CI 通常不可用。
-        from gateway.platforms.weixin import qr_login
-    except ImportError as e:
-        # SDK 缺失：降级为 failed 事件（不抛），保证流能优雅结束。
-        yield {"event": "failed", "reason": f"hermes SDK not available: {e}"}
-        return
+    async for ev in adapter.auth_stream(**params):
+        yield ev
 
-    # 无界队列：writer 在任意时刻 put_nowait 都不会阻塞 qr_login 协程。
-    queue: asyncio.Queue = asyncio.Queue()
-    writer = _QRLineWriter(queue)
 
-    async def _run_login():
-        # 在 qr_login 执行期间把 stdout 接管到 writer，使其 print 的二维码
-        # URL 被识别并投递到队列。redirect_stdout 只包住这一个协程的执行，
-        # 主循环（仅读队列、不写 stdout）不与之产生 stdout 竞争。
-        with contextlib.redirect_stdout(writer):
-            return await qr_login("/opt/data", bot_type="3", timeout_seconds=480)
-
-    login_task = asyncio.create_task(_run_login())
-    try:
-        # 主循环：在「队列出现新 QR 行」与「登录任务完成」之间竞速。
-        # 任一就绪即处理：QR 行 → yield qrcode；任务完成 → 退出循环走终态。
-        while True:
-            queue_get = asyncio.ensure_future(queue.get())
-            done, _pending = await asyncio.wait(
-                {queue_get, login_task},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if queue_get in done:
-                # 队列先就绪：拿到一条二维码 URL，立即 yield qrcode 事件。
-                url = queue_get.result()
-                yield {"event": "qrcode", "url": url}
-            else:
-                # 登录任务先完成：取消尚未就绪的 queue.get，跳出循环处理终态。
-                queue_get.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await queue_get
-                break
-
-        # 任务已完成，先把队列里残留的 QR 行（若在任务收尾瞬间入队）排空 yield，
-        # 避免漏发已生成的二维码事件。
-        while not queue.empty():
-            yield {"event": "qrcode", "url": queue.get_nowait()}
-
-        # 取登录结果；qr_login 内部异常在此 re-raise，转成 failed 事件。
-        cred = login_task.result()
-    except Exception as e:  # noqa: BLE001 - 任何登录异常都降级为 failed 事件，不向上抛
-        yield {"event": "failed", "reason": str(e)}
-        return
-
-    if not cred:
-        # 上游返回 None：失败或超时，统一标记为 timeout（与原 CLI 协议一致）。
-        yield {"event": "timeout"}
-        return
-    # 凭证 truthy：登录成功，凭证已由 qr_login 落盘到 /opt/data/weixin/accounts/。
-    yield {"event": "bound"}
+async def channel_login(channel: str):
+    """微信扫码登录 SSE（兼容既有 /oc/channels/{channel}/login 路由）。派发到 adapter.auth_stream。"""
+    async for ev in channel_auth_stream(channel):
+        yield ev
 
 
 async def feishu_register(domain: str = "feishu"):
-    """飞书扫码自动创建的 async 事件流：先 yield qrcode，最后 yield credentials/failed。
-
-    驱动 hermes 引擎 gateway.platforms.feishu 的设备码注册函数：
-      _begin_registration(domain) -> {device_code, qr_url, interval, expire_in}
-      _poll_registration(device_code, interval, expire_in, domain) -> {app_id, app_secret, domain, open_id} | None
-
-    事件序列：
-      - 引擎 SDK 不可用 → {"event":"failed","reason":...}
-      - 正常 → {"event":"qrcode","url":...} 然后
-               {"event":"credentials","app_id":...,"app_secret":...,"domain":...,
-                "bot_name":...,"bot_open_id":...}
-      - 扫码超时/拒绝 → {"event":"failed","reason":"registration timeout or denied"}
-
-    刻意不抛异常：所有失败降级为 failed 事件，让上层 SSE 端点优雅收尾。
-    凭证（含 app_secret）经此 SSE 在 oc-ops↔manager 内网鉴权通道回传，由 manager 落库即加密。
-    """
-    try:
-        from gateway.platforms.feishu import (
-            _begin_registration,
-            _poll_registration,
-            probe_bot,
-        )
-    except ImportError as e:
-        yield {"event": "failed", "reason": f"hermes feishu SDK not available: {e}"}
-        return
-
-    loop = asyncio.get_event_loop()
-    try:
-        begin = await loop.run_in_executor(None, _begin_registration, domain)
-    except Exception as e:  # noqa: BLE001 - 注册启动失败降级为 failed
-        yield {"event": "failed", "reason": f"begin registration failed: {e}"}
-        return
-
-    # 先把二维码 URL 发给前端展示。
-    yield {"event": "qrcode", "url": begin.get("qr_url", "")}
-
-    # 阻塞轮询（在线程池里跑，避免堵事件循环），直到扫码成功/超时。
-    def _poll():
-        return _poll_registration(
-            device_code=begin["device_code"],
-            interval=begin.get("interval", 5),
-            expire_in=begin.get("expire_in", 600),
-            domain=domain,
-        )
-
-    try:
-        result = await loop.run_in_executor(None, _poll)
-    except Exception as e:  # noqa: BLE001
-        yield {"event": "failed", "reason": f"poll registration failed: {e}"}
-        return
-
-    if not result or not result.get("app_id") or not result.get("app_secret"):
-        yield {"event": "failed", "reason": "registration timeout or denied"}
-        return
-
-    # best-effort 探测 bot 名/open_id（失败不影响凭证回传）。
-    bot_name, bot_open_id = None, None
-    try:
-        info = await loop.run_in_executor(
-            None, probe_bot, result["app_id"], result["app_secret"], result.get("domain", domain)
-        )
-        if info:
-            bot_name = info.get("bot_name")
-            bot_open_id = info.get("bot_open_id")
-    except Exception:  # noqa: BLE001 - 探测失败忽略
-        pass
-
-    yield {
-        "event": "credentials",
-        "app_id": result["app_id"],
-        "app_secret": result["app_secret"],
-        "domain": result.get("domain", domain),
-        "bot_name": bot_name,
-        "bot_open_id": bot_open_id,
-    }
+    """飞书扫码注册 SSE（兼容既有 /oc/channels/feishu/register 路由）。派发到 feishu adapter.auth_stream。"""
+    async for ev in channel_auth_stream("feishu", domain=domain):
+        yield ev

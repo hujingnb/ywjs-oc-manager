@@ -592,6 +592,24 @@ async def feishu_register(request):
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
+async def channel_auth(request):
+    """POST /oc/channels/{channel}/auth：通用扫码授权 SSE（按渠道派发 adapter.auth_stream）。
+
+    所有 query 参数透传给渠道 adapter（如 feishu 的 domain）。未来新增渠道只需在
+    ocops.channel 注册 ChannelOps adapter，即可直接用本路由，无需改 server.py。
+    鉴权由 AuthMiddleware 统一处理；channel.channel_auth_stream 自身保证优雅收尾
+    （未知 channel / 失败均降级为 failed 事件不抛异常）。
+    """
+    ch = request.path_params["channel"]
+    params = dict(request.query_params)
+
+    async def gen():
+        async for ev in channel.channel_auth_stream(ch, **params):
+            yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
 # ---------------------------------------------------------------------------
 # 会话（conversation）端点：转发到同 pod hermes api_server /api/sessions/*。
 # manager 仅做带 per-app token 的透传，会话数据不在 oc-ops 落地。
@@ -733,6 +751,8 @@ routes = [
     # /feishu/register 具体路径先于 {channel}/login 等通配路由无冲突（路径段不同）。
     # /feishu/status、/feishu/unbind 复用上方通配路由，无需单独注册。
     Route("/oc/channels/feishu/register", feishu_register, methods=["POST"]),
+    # 通用扫码授权 SSE：未来新增渠道注册 ChannelOps adapter 后直接用本路由，无需改 server.py。
+    Route("/oc/channels/{channel}/auth", channel_auth, methods=["POST"]),
     # skills 端点：list/install/delete/reload。
     # reload（POST /oc/skills/reload）放在带路径参数的 delete（DELETE /oc/skills/{name}）之前，
     # 虽然方法不同不会产生歧义，但排列顺序更易读。
