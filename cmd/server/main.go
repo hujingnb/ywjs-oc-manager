@@ -279,6 +279,13 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		return fmt.Errorf("注册飞书渠道失败: %w", err)
 	}
 
+	// 企业微信渠道：无扫码、凭证经表单同步注入；adapter 只承载连通检查
+	// （PollAuth 查 oc-ops ChannelStatus(work_wechat)/platforms.wecom，走 worker 通用 check 路径）。
+	workWechatAdapter := channel.NewWorkWeChatAdapter(ocopsClient, ocopsBindingLocationResolver{inner: ocopsResolver})
+	if err := channelRegistry.Register(workWechatAdapter); err != nil {
+		return fmt.Errorf("注册企业微信渠道失败: %w", err)
+	}
+
 	// new-api 装配：
 	//   - newapiClient 是顶层 admin 视角；可调创建 user / 充值 / 查日志 / 查 quota；
 	//   - newapiFactory 在 worker handler 跑 job 时把 (app→org→credentials) 翻译成
