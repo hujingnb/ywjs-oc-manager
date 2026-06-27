@@ -154,6 +154,35 @@ export function useBeginFeishuAuth(appId: Ref<string | undefined>) {
   })
 }
 
+// WorkWechatAuthBody 描述企业微信发起绑定的请求体（手填智能机器人凭证）。
+export interface WorkWechatAuthBody {
+  // 企业微信智能机器人 Bot ID。
+  bot_id: string
+  // 机器人 Secret（仅提交，不回显）。
+  secret: string
+}
+
+// useBeginWorkWechatAuth 触发企业微信手填绑定，发起需携带 bot_id+secret body。
+// 复用通用进度轮询（GET /channels/work_wechat/auth）与解绑接口，仅发起入口不同。
+// 成功后失效企业微信进度缓存，让轮询尽快拉到连通态。
+export function useBeginWorkWechatAuth(appId: Ref<string | undefined>) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: WorkWechatAuthBody) => {
+      if (!appId.value) throw new Error(i18n.global.t('common.errors.missingChannelParam'))
+      // apiRequest 接收原始对象 body 并在内部 JSON 序列化、补 Content-Type，故此处直接透传 body。
+      const response = await apiRequest<{ challenge: ChannelChallenge }>(
+        `/api/v1/apps/${appId.value}/channels/work_wechat/auth`,
+        { method: 'POST', body },
+      )
+      return response.challenge
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: progressKey(appId.value, 'work_wechat') })
+    },
+  })
+}
+
 // useUnbindChannel 解绑渠道。
 // 解绑成功后刷新进度缓存，让页面回到未绑定状态。
 export function useUnbindChannel(appId: Ref<string | undefined>, channelType: Ref<string | undefined>) {
