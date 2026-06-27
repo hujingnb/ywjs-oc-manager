@@ -196,7 +196,7 @@ local-build-ops: ## 构建 ops 镜像推 k3d registry（本地联调用）
 # （删集群）保留，首拉成功后续仅做秒级导入。
 LOCAL_PRELOAD_IMAGES := busybox:1.36 mysql:8.0 elasticsearch:8.11.3 calciumion/new-api:latest infiniflow/ragflow:v0.25.6
 
-local-preload: ## 宿主拉取重镜像并 k3d image import 灌入集群（规避节点慢拉导致 rollout 超时；local-up 内部调用）
+local-preload: # 内部：local-up 调用——宿主拉取重镜像并 k3d image import 灌入集群（规避节点慢拉导致 rollout 超时）
 	@for img in $(LOCAL_PRELOAD_IMAGES); do \
 		echo "==> 预载 $$img"; \
 		docker image inspect $$img >/dev/null 2>&1 || docker pull $$img || exit 1; \
