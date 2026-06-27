@@ -85,6 +85,38 @@ def _feishu_status() -> dict:
     return {"channel": "feishu", "bound": False, "platform_state": state or "connecting"}
 
 
+def _wecom_status() -> dict:
+    """读 hermes api_server /health/detailed 的 platforms.wecom 运行态，映射为渠道绑定态。
+
+    与 _feishu_status 同形：引擎平台名是 wecom（非 work_wechat），字段为 state
+    （connected/fatal/…）。对外仍以 platform_state 暴露给 manager 稳定渠道契约。
+      - state == "connected" → bound=True
+      - state == "fatal"     → bound=False，带 error_code/error_message
+      - 其他 → bound=False，pending 态
+    """
+    import json as _json
+    import urllib.request as _u
+
+    req = _u.Request(_API_BASE + "/health/detailed", method="GET")
+    key = _api_server_key()
+    if key:
+        req.add_header("Authorization", "Bearer " + key)
+    try:
+        with _u.urlopen(req, timeout=10) as resp:
+            data = _json.loads(resp.read().decode("utf-8"))
+    except Exception as e:  # noqa: BLE001 - 网络/解析失败统一映射为 INTERNAL
+        raise OpsError("INTERNAL", f"查询 /health/detailed 失败: {e}")
+    we = (data.get("platforms") or {}).get("wecom") or {}
+    state = we.get("state", "")
+    if state == "connected":
+        return {"channel": "work_wechat", "bound": True, "platform_state": state}
+    if state == "fatal":
+        return {"channel": "work_wechat", "bound": False, "platform_state": state,
+                "error_code": we.get("error_code", "") or "",
+                "error_message": we.get("error_message", "") or ""}
+    return {"channel": "work_wechat", "bound": False, "platform_state": state or "connecting"}
+
+
 class _QRLineWriter(io.StringIO):
     """捕获 qr_login print 输出的可写对象。
 
@@ -371,9 +403,32 @@ class FeishuChannelOps(ChannelOps):
         }
 
 
+# ============================================================================
+# work_wechat：env 注入 + health 运行态（无扫码授权流）
+# ============================================================================
+
+class WorkWechatChannelOps(ChannelOps):
+    """企业微信渠道：智能机器人凭证经环境变量注入引擎（manager 直注），运行态走 health。
+
+    无扫码授权流（auth_stream 用基类默认 failed 终态即可）；channel 标识 work_wechat
+    与 manager 侧枚举一致，但内部读引擎 platforms.wecom（引擎平台名是 wecom）。"""
+
+    channel = "work_wechat"
+
+    def status(self, data_root: Path) -> dict:
+        # 企业微信无本地账号文件（凭证经 WECOM_* env 注入），绑定态以引擎运行态为准。
+        return _wecom_status()
+
+    def unbind(self, data_root: Path) -> dict:
+        # env 注入型渠道：oc-ops 侧无本地文件态可删（真正清理由 manager 删 wecom-* key + RolloutRestart），
+        # 此处返回幂等成功即可。
+        return {"channel": "work_wechat", "status": "unbound"}
+
+
 # 启动期注册内置渠道。新增渠道在此追加 register_channel(子类())。
 register_channel(WeixinChannelOps())
 register_channel(FeishuChannelOps())
+register_channel(WorkWechatChannelOps())
 
 
 # ============================================================================
