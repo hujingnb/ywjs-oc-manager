@@ -488,13 +488,12 @@ func (s *ChannelService) Unbind(ctx context.Context, principal auth.Principal, a
 	}); err != nil {
 		return fmt.Errorf("解绑渠道失败: %w", err)
 	}
-	if channelType == domain.ChannelTypeFeishu && s.feishuPatcher != nil {
-		// 飞书解绑是用户即时动作（不走 worker）：删 app Secret 的三把飞书 key 并重启，
-		// 使引擎下次重启不再启用飞书平台。删 key / 重启失败只记日志不阻断——
-		// DB status=unbound_by_user 已是 source of truth，凭证残留也不会被引擎装载。
-		if err := s.feishuPatcher.PatchSecretKeys(ctx, app.ID, nil,
-			[]string{"feishu-app-id", "feishu-app-secret", "feishu-domain"}); err != nil {
-			slog.ErrorContext(ctx, "解绑删飞书 Secret key 失败", "app_id", app.ID, redactlog.Err(err))
+	// 飞书 / 企业微信解绑是用户即时动作（不走 worker）：删 app Secret 对应 key 并重启，
+	// 使引擎下次重启不再启用该平台。删 key / 重启失败只记日志不阻断——
+	// DB status=unbound_by_user 已是 source of truth，凭证残留也不会被引擎装载。
+	if delKeys := unbindSecretKeys(channelType); delKeys != nil && s.feishuPatcher != nil {
+		if err := s.feishuPatcher.PatchSecretKeys(ctx, app.ID, nil, delKeys); err != nil {
+			slog.ErrorContext(ctx, "解绑删渠道 Secret key 失败", "app_id", app.ID, "channel", channelType, redactlog.Err(err))
 		}
 		// RolloutRestart 之前把 running 实例置 restarting：重建 pod 期间 oc-ops 不可用，
 		// 标记过渡态让前端禁用「发起」、reconciler 在 pod 重新 Ready 后收敛回 running。
@@ -516,6 +515,20 @@ func (s *ChannelService) Unbind(ctx context.Context, principal auth.Principal, a
 		}
 	}
 	return nil
+}
+
+// unbindSecretKeys 返回某渠道解绑时需从 app Secret 删除的 key 列表。
+// 飞书和企业微信属于 env 注入型渠道：绑定时写入 k8s Secret，解绑时同步删除，
+// 使引擎下次重启不再装载对应平台凭证。非 env 注入型渠道（如微信文件态）返回 nil。
+func unbindSecretKeys(channelType string) []string {
+	switch channelType {
+	case domain.ChannelTypeFeishu:
+		return []string{"feishu-app-id", "feishu-app-secret", "feishu-domain"}
+	case domain.ChannelTypeWorkWeChat:
+		return []string{"wecom-bot-id", "wecom-secret"}
+	default:
+		return nil
+	}
 }
 
 // loadViewableApp 校验主体是否可读取应用渠道进度。

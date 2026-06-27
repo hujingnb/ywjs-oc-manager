@@ -239,6 +239,30 @@ func TestChannelServiceBeginFeishuAuthInstanceNotReady(t *testing.T) {
 	require.Empty(t, store.jobs, "未就绪不应入队 job")
 }
 
+// TestUnbind_WorkWeChat 覆盖企业微信解绑：置 unbound_by_user + 删 wecom-* Secret key + 置 restarting + 重启。
+// app 初始 running（守卫 running→restarting 通过），断言 patcher 收到两把 key 删除、SetAppStatus=restarting、restarter 触发。
+func TestUnbind_WorkWeChat(t *testing.T) {
+	store := newChannelStub(t)
+	// 模拟已绑定 work_wechat 的 running 实例。
+	store.binding.ChannelType = domain.ChannelTypeWorkWeChat
+	store.app.Status = domain.AppStatusRunning
+	patcher := &fakeFeishuPatcher{}
+	restarter := &fakeRestarter{}
+	svc := NewChannelService(store, channel.NewRegistry())
+	svc.SetFeishuUnbindDeps(patcher, restarter)
+
+	require.NoError(t, svc.Unbind(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, domain.ChannelTypeWorkWeChat))
+	// binding 状态被置 unbound_by_user。
+	require.Equal(t, domain.ChannelStatusUnboundByUser, store.lastStatus)
+	// patcher 收到两把企业微信 key 删除，set 为空。
+	require.ElementsMatch(t, []string{"wecom-bot-id", "wecom-secret"}, patcher.deleted)
+	require.Empty(t, patcher.set)
+	// running 实例置 restarting + 触发 RolloutRestart。
+	require.True(t, store.appStatusSet)
+	require.Equal(t, domain.AppStatusRestarting, store.lastAppStatus)
+	require.True(t, restarter.restarted)
+}
+
 // TestChannelServiceUnbindWechatUnchanged 验证微信解绑不调飞书依赖（patcher/restarter 不触发）。
 func TestChannelServiceUnbindWechatUnchanged(t *testing.T) {
 	store := newChannelStub(t) // 默认 wechat binding
