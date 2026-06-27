@@ -118,7 +118,10 @@
                 </n-button>
               </n-space>
               <p v-if="feishuProgress?.error_message" class="state-text danger">{{ t('apps.channels.errorMsg') }}{{ feishuProgress.error_message }}</p>
-              <p v-if="feishuWaitingForChallenge" class="state-text">{{ t('apps.channels.waitingQr') }}</p>
+              <!-- 扫码后凭证已回传（二维码消费、注入连接中）显示“验证连接中”，未出码时才显示“生成二维码”，
+                   避免飞书扫码后误显示微信导向的“正在生成登录二维码”。 -->
+              <p v-if="feishuConnecting" class="state-text">{{ t('apps.channels.feishuConnecting') }}</p>
+              <p v-else-if="feishuWaitingForChallenge" class="state-text">{{ t('apps.channels.feishuGeneratingQr') }}</p>
               <AuthChallengeRenderer v-if="feishuVisibleChallenge" :challenge="feishuVisibleChallenge" />
             </template>
 
@@ -264,6 +267,16 @@ const feishuProgressChallenge = computed<ChannelChallenge | null>(() => channelC
 const feishuVisibleChallenge = computed(() => feishuProgressChallenge.value ?? (feishuChallenge.value?.qrcode ? feishuChallenge.value : null))
 // feishuWaitingForChallenge 在已发起但二维码尚未就绪时提示“生成中”。
 const feishuWaitingForChallenge = computed(() => shouldShowChallengePending(feishuAuthStarted.value, feishuVisibleChallenge.value, feishuProgress.value?.status))
+// feishuConnecting 区分“扫码后注入连接中”与“尚未出码”：扫码成功后 worker 用凭证 metadata
+// 覆盖二维码（qrcode 消失）、status 仍 pending_auth，此时不应再提示“生成二维码”，而应提示
+// “已扫码，验证连接中”。判据：已发起 + 无可见挑战 + status=pending_auth + metadata 已带回凭证
+// （injected 标记或 app_id，由扫码 credentials 落库写入；app_secret 密文已被 PollAuth 过滤）。
+const feishuConnecting = computed(() => {
+  const p = feishuProgress.value
+  if (!feishuAuthStarted.value || feishuVisibleChallenge.value) return false
+  if (p?.status !== 'pending_auth') return false
+  return p?.metadata?.injected === 'true' || Boolean(p?.metadata?.app_id)
+})
 
 // beginFeishuScan 发起扫码自动创建：仅提交 domain，由 worker 异步建应用并回写二维码。
 async function beginFeishuScan() {
