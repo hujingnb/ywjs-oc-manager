@@ -18,11 +18,11 @@ func TestIsAppTransitionAllowed_LegalTransitions(t *testing.T) {
 		// init 子状态串行：worker 按顺序推进，每一步对应一个明确的副作用阶段。
 		// pulling_runtime_image 替代原 pulling_image + syncing_image 两阶段，
 		// agent 通过 docker proxy 直接从公网 registry 拉取 hermes 镜像。
-		{AppStatusDraft, AppStatusPullingRuntimeImage},               // onboarding 拾取后进入镜像拉取阶段
-		{AppStatusPullingRuntimeImage, AppStatusPreparingRuntime},    // 镜像拉取完成后写运行时配置
-		{AppStatusPreparingRuntime, AppStatusCreatingContainer},      // 运行时准备完成后创建容器
-		{AppStatusCreatingContainer, AppStatusStarting},              // 容器创建完成后进入启动
-		{AppStatusStarting, AppStatusBindingWaiting},                 // 容器健康检查通过后等渠道扫码
+		{AppStatusDraft, AppStatusPullingRuntimeImage},            // onboarding 拾取后进入镜像拉取阶段
+		{AppStatusPullingRuntimeImage, AppStatusPreparingRuntime}, // 镜像拉取完成后写运行时配置
+		{AppStatusPreparingRuntime, AppStatusCreatingContainer},   // 运行时准备完成后创建容器
+		{AppStatusCreatingContainer, AppStatusStarting},           // 容器创建完成后进入启动
+		{AppStatusStarting, AppStatusBindingWaiting},              // 容器健康检查通过后等渠道扫码
 
 		// binding / running 段：渠道绑定与容器运行状态切换。
 		{AppStatusBindingWaiting, AppStatusRunning},       // 渠道扫码成功后进入运行态
@@ -34,15 +34,20 @@ func TestIsAppTransitionAllowed_LegalTransitions(t *testing.T) {
 		{AppStatusStopped, AppStatusRunning},              // 用户重启
 		{AppStatusStopped, AppStatusError},                // 停止状态下底层异常（例如镜像被清理）
 
+		// restarting 段：渠道解绑触发 RolloutRestart 重建 pod 的过渡态。
+		{AppStatusRunning, AppStatusRestarting}, // 解绑置位：running → restarting
+		{AppStatusRestarting, AppStatusRunning}, // pod 重新 Ready：reconciler 收敛回 running
+		{AppStatusRestarting, AppStatusError},   // pod 重启后坏死：reconciler 收敛到 error
+
 		// init 子状态各自失败：全部收敛到 error，由 last_error_status 记录来源阶段。
-		{AppStatusPullingRuntimeImage, AppStatusError},  // agent 拉取镜像失败
-		{AppStatusPreparingRuntime, AppStatusError},     // 写运行时配置失败
-		{AppStatusCreatingContainer, AppStatusError},    // 创建容器失败
-		{AppStatusStarting, AppStatusError},             // 启动 / 健康检查失败
+		{AppStatusPullingRuntimeImage, AppStatusError}, // agent 拉取镜像失败
+		{AppStatusPreparingRuntime, AppStatusError},    // 写运行时配置失败
+		{AppStatusCreatingContainer, AppStatusError},   // 创建容器失败
+		{AppStatusStarting, AppStatusError},            // 启动 / 健康检查失败
 
 		// error 重试 / 软删除：error 是吸入态，离开必须显式触发。
 		{AppStatusError, AppStatusPullingRuntimeImage}, // RequestInitialize 重试入口，回到 worker 第一阶段
-		{AppStatusError, AppStatusDeleted},              // SoftDeleteApp 终态由 IsAppTransitionAllowed 特殊分支兜底
+		{AppStatusError, AppStatusDeleted},             // SoftDeleteApp 终态由 IsAppTransitionAllowed 特殊分支兜底
 	}
 	for _, c := range cases {
 		// 子测试名直接用转移本身，便于定位；失败时一眼看出哪一条未通过校验。
@@ -73,6 +78,10 @@ func TestIsAppTransitionAllowed_IllegalTransitions(t *testing.T) {
 		// 锁住"deleted 终态不可自循环"+ "from==to 守卫顺序"两个约束。
 		// 守卫被改回到 deleted 分支之后会让 (deleted,deleted) 漏掉，这条 case 提供 fail-fast 保护。
 		{"deleted 自环非法", AppStatusDeleted, AppStatusDeleted},
+		// restarting 是窄过渡态，只能去 running / error，不能跳到 binding 段等其它状态。
+		{"restarting 不能 → binding_waiting", AppStatusRestarting, AppStatusBindingWaiting},
+		// 只有 running 能进 restarting；binding_waiting 等非 running 状态不能直接置重启。
+		{"binding_waiting 不能 → restarting", AppStatusBindingWaiting, AppStatusRestarting},
 	}
 	for _, c := range cases {
 		// 子测试 name 描述场景含义，失败时直接看出哪条约束被打破。
@@ -150,6 +159,41 @@ func TestEnsureAPIKeyTransitionFailsForInvalid(t *testing.T) {
 	// pending → active 是常规创建成功路径，必须无错。
 	err = EnsureAPIKeyTransition(APIKeyStatusPending, APIKeyStatusActive)
 	require.NoError(t, err)
+}
+
+// TestAppCanInitiateChannelAuth 验证渠道发起就绪守卫的状态白名单。
+// 仅 pod 在服务的状态（running / binding_waiting / binding_failed）放行；其余拦截。
+func TestAppCanInitiateChannelAuth(t *testing.T) {
+	cases := []struct {
+		status string
+		want   bool
+		reason string // 中文说明覆盖的状态与期望
+	}{
+		{AppStatusRunning, true, "running 实例就绪，可重新绑定 / 新增渠道"},
+		{AppStatusBindingWaiting, true, "binding_waiting 首次 onboarding 等扫码，微信首绑即在此态发起"},
+		{AppStatusBindingFailed, true, "binding_failed 上轮扫码超时，pod 仍在，允许重试"},
+		{AppStatusRestarting, false, "restarting 解绑重启窗口，pod 不可用，拦截"},
+		{AppStatusPullingRuntimeImage, false, "版本升级 / 初始化窗口，pod 未起，拦截"},
+		{AppStatusPreparingRuntime, false, "init 子状态，pod 未起，拦截"},
+		{AppStatusCreatingContainer, false, "init 子状态，pod 未起，拦截"},
+		{AppStatusStarting, false, "init 子状态，pod 未起，拦截"},
+		{AppStatusStopped, false, "stopped pod 已停，发起会 502，拦截"},
+		{AppStatusError, false, "error 实例异常，拦截"},
+		{AppStatusDraft, false, "draft 尚未初始化，拦截"},
+		{AppStatusDeleted, false, "deleted 终态，拦截"},
+	}
+	for _, c := range cases {
+		// 子测试名即状态，失败时定位到具体状态白名单判定。
+		t.Run(c.status, func(t *testing.T) {
+			assert.Equal(t, c.want, AppCanInitiateChannelAuth(c.status), c.reason)
+		})
+	}
+}
+
+// TestIsAppStatus_Restarting 验证 restarting 已纳入合法 app 状态集合（数据库 CHECK 之外的 Go 层校验）。
+func TestIsAppStatus_Restarting(t *testing.T) {
+	// IsAppStatus 应识别新增的 restarting 状态。
+	assert.True(t, IsAppStatus(AppStatusRestarting))
 }
 
 // TestAppTransition_PullingRuntimeImage 验证新增 pulling_runtime_image 状态的合法转移路径。

@@ -30,6 +30,10 @@ const (
 	AppStatusStopped             = "stopped"
 	AppStatusError               = "error"
 	AppStatusDeleted             = "deleted"
+	// AppStatusRestarting 是渠道解绑等触发 pod 重启期间的过渡态：
+	// 解绑会 RolloutRestart 重建 pod（Recreate 策略，~20s 停机），此窗口内 oc-ops 不可用。
+	// 由 reconciler 在 pod 重新 Ready 后收敛回 running；pod 重启后坏死则收敛到 error。
+	AppStatusRestarting = "restarting"
 
 	// APIKeyStatus* 描述 new-api token 生命周期，独立于 app.status。
 	APIKeyStatusPending  = "pending"
@@ -97,6 +101,7 @@ var (
 		AppStatusStopped,
 		AppStatusError,
 		AppStatusDeleted,
+		AppStatusRestarting,
 	)
 
 	validChannelStatuses = set(

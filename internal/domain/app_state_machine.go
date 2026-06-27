@@ -34,7 +34,10 @@
 //   - error → deleted：由 IsAppTransitionAllowed 内置特殊分支兜底，不进 appTransitions map；
 //     deleted 是终态且只能由 error 进入，stopped / running 等都必须先收敛到 error 才能软删；
 //   - deleted 是终态，deleted_at 字段非空即认为已删；
-//   - stopped → running：用户主动启动。
+//   - stopped → running：用户主动启动；
+//   - running → restarting：渠道解绑触发 RolloutRestart 重建 pod 的过渡态；
+//   - restarting → running：reconciler 在 pod 重新 Ready 后收敛回运行态；
+//   - restarting → error：pod 重启后坏死，reconciler 收敛到 error。
 //
 // 维护提醒：状态机如有变化，本文档块必须同步更新；与代码不一致按代码为准。
 package domain
@@ -52,11 +55,11 @@ var appTransitions = map[AppTransition]struct{}{
 	// init 子状态串行推进：worker 完成一个阶段后才能进入下一个。
 	// pulling_runtime_image 替代原 pulling_image + syncing_image 两阶段，
 	// agent 直接通过 docker proxy 从公网 registry 拉取 hermes 镜像。
-	{From: AppStatusDraft, To: AppStatusPullingRuntimeImage}:          {},
+	{From: AppStatusDraft, To: AppStatusPullingRuntimeImage}:            {},
 	{From: AppStatusPullingRuntimeImage, To: AppStatusPreparingRuntime}: {},
-	{From: AppStatusPreparingRuntime, To: AppStatusCreatingContainer}: {},
-	{From: AppStatusCreatingContainer, To: AppStatusStarting}:         {},
-	{From: AppStatusStarting, To: AppStatusBindingWaiting}:            {},
+	{From: AppStatusPreparingRuntime, To: AppStatusCreatingContainer}:   {},
+	{From: AppStatusCreatingContainer, To: AppStatusStarting}:           {},
+	{From: AppStatusStarting, To: AppStatusBindingWaiting}:              {},
 
 	// binding / running 段：渠道绑定与容器运行状态切换。
 	{From: AppStatusBindingWaiting, To: AppStatusRunning}:       {},
@@ -68,11 +71,19 @@ var appTransitions = map[AppTransition]struct{}{
 	{From: AppStatusStopped, To: AppStatusRunning}:              {},
 	{From: AppStatusStopped, To: AppStatusError}:                {},
 
+	// restarting 段：渠道解绑触发 RolloutRestart 重建 pod 的过渡态。
+	// running → restarting：解绑置位，标记 pod 正在重启、oc-ops 暂不可用；
+	// restarting → running：reconciler 在 pod 重新 Ready 后收敛回运行态；
+	// restarting → error：pod 重启后坏死（NotFound/Failed/CrashLoop），reconciler 收敛到 error。
+	{From: AppStatusRunning, To: AppStatusRestarting}: {},
+	{From: AppStatusRestarting, To: AppStatusRunning}: {},
+	{From: AppStatusRestarting, To: AppStatusError}:   {},
+
 	// init 子状态失败都收敛到 error；last_error_status 记录失败阶段以便排障与重试。
-	{From: AppStatusPullingRuntimeImage, To: AppStatusError}:  {},
-	{From: AppStatusPreparingRuntime, To: AppStatusError}:     {},
-	{From: AppStatusCreatingContainer, To: AppStatusError}:    {},
-	{From: AppStatusStarting, To: AppStatusError}:             {},
+	{From: AppStatusPullingRuntimeImage, To: AppStatusError}: {},
+	{From: AppStatusPreparingRuntime, To: AppStatusError}:    {},
+	{From: AppStatusCreatingContainer, To: AppStatusError}:   {},
+	{From: AppStatusStarting, To: AppStatusError}:            {},
 
 	// error 重试入口：RequestInitialize 把状态拨回到 worker 第一阶段重新跑。
 	{From: AppStatusError, To: AppStatusPullingRuntimeImage}: {},
@@ -107,6 +118,29 @@ func EnsureAppTransition(from, to string) error {
 // AppIsTerminal 判断 app 是否进入终态。
 // 非 deleted 的状态都仍可通过状态机回到运行态。
 func AppIsTerminal(status string) bool { return status == AppStatusDeleted }
+
+// AppCanInitiateChannelAuth 判断 app 当前状态是否允许发起渠道登录授权（BeginAuth / BeginFeishuAuth）。
+//
+// 仅当实例 pod 已起且对外可用时才放行，否则发起会打到不可达的 oc-ops 拿到 502，
+// 前端透出 cryptic「ocops: hermes cli failed」像 bug。允许的三类「pod 在服务」状态：
+//   - running：实例就绪，重新绑定 / 新增渠道；
+//   - binding_waiting：首次 onboarding 等扫码（微信首绑发起即在此态，由 channel_login
+//     worker 在 bound 后推进到 running，见 worker/handlers/channel_login.go）；
+//   - binding_failed：上一轮扫码超时，pod 仍在，允许重试。
+//
+// 其余状态 pod 不在服务故拦截：restarting（解绑重启窗口）、4 个 init 子状态
+// （版本升级 / 初始化窗口）、stopped / error / draft / deleted。
+//
+// 说明：这是比「status==running」更宽的判定——严格 running-only 会误杀 binding_waiting 的
+// 首次绑定与 binding_failed 的重试（二者 pod 均在服务），故按「pod 是否在服务」建模。
+func AppCanInitiateChannelAuth(status string) bool {
+	switch status {
+	case AppStatusRunning, AppStatusBindingWaiting, AppStatusBindingFailed:
+		return true
+	default:
+		return false
+	}
+}
 
 // APIKeyTransition 描述 api_key_status 的状态机。
 // api_key 与 app 状态相互独立：app 可以在 api_key error 的同时仍处于 binding_waiting；
