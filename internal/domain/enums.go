@@ -45,6 +45,8 @@ const (
 	ChannelTypeWeChat = "wechat"
 	// ChannelTypeFeishu 是飞书 / Lark 渠道（扫码自动创建 + 手填兜底，WebSocket 长连接）。
 	ChannelTypeFeishu = "feishu"
+	// ChannelTypeWorkWeChat 是企业微信渠道（智能机器人 AI Bot 长连接，手填 bot_id+secret）。
+	ChannelTypeWorkWeChat = "work_wechat"
 
 	// ChannelStatus* 描述渠道绑定流程和用户主动解绑状态。
 	ChannelStatusUnbound       = "unbound"

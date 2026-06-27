@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
@@ -665,4 +666,10 @@ func (s *channelWorkerStore) SetFeishuCredentials(_ context.Context, arg sqlc.Se
 	s.binding.MetadataJson = arg.MetadataJson
 	s.binding.Status = arg.Status
 	return nil
+}
+
+// TestChannelLabelWorker_WorkWeChat 覆盖企业微信渠道的中文标签映射，
+// 保证审计 detail_message 与其它渠道一致地有可读中文。
+func TestChannelLabelWorker_WorkWeChat(t *testing.T) {
+	assert.Equal(t, "企业微信", channelLabelWorker(domain.ChannelTypeWorkWeChat))
 }
