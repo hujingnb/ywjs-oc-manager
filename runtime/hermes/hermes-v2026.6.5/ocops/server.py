@@ -592,21 +592,6 @@ async def feishu_register(request):
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
-async def feishu_probe(request):
-    """POST /oc/channels/feishu/probe：手填模式即时校验凭证，返回 {ok, bot_name, bot_open_id}。
-
-    body 字段：app_id、app_secret、domain（可选，默认 feishu）。
-    feishu_probe 是同步函数，直接调用并包装为 JSONResponse。
-    """
-    body = await request.json()
-    res = channel.feishu_probe(
-        body.get("app_id", ""),
-        body.get("app_secret", ""),
-        body.get("domain", "feishu"),
-    )
-    return JSONResponse(res)
-
-
 # ---------------------------------------------------------------------------
 # 会话（conversation）端点：转发到同 pod hermes api_server /api/sessions/*。
 # manager 仅做带 per-app token 的透传，会话数据不在 oc-ops 落地。
@@ -748,7 +733,6 @@ routes = [
     # /feishu/register 具体路径先于 {channel}/login 等通配路由无冲突（路径段不同）。
     # /feishu/status、/feishu/unbind 复用上方通配路由，无需单独注册。
     Route("/oc/channels/feishu/register", feishu_register, methods=["POST"]),
-    Route("/oc/channels/feishu/probe", feishu_probe, methods=["POST"]),
     # skills 端点：list/install/delete/reload。
     # reload（POST /oc/skills/reload）放在带路径参数的 delete（DELETE /oc/skills/{name}）之前，
     # 虽然方法不同不会产生歧义，但排列顺序更易读。

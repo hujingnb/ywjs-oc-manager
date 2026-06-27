@@ -105,25 +105,6 @@ def _feishu_status() -> dict:
     return {"channel": "feishu", "bound": False, "platform_state": state or "connecting"}
 
 
-def feishu_probe(app_id: str, app_secret: str, domain: str = "feishu") -> dict:
-    """手填模式即时校验飞书凭证：返回 {"ok": bool, "bot_name": str|None, "bot_open_id": str|None}。
-
-    驱动引擎 gateway.platforms.feishu.probe_bot（内部走 /open-apis/bot/v3/info）。
-    SDK 不可用或凭证无效返回 ok=False，不抛异常——校验失败属正常业务结果，不应 500。
-    """
-    try:
-        from gateway.platforms.feishu import probe_bot
-    except ImportError:
-        return {"ok": False, "bot_name": None, "bot_open_id": None}
-    try:
-        info = probe_bot(app_id, app_secret, domain)
-    except Exception:  # noqa: BLE001 - 凭证无效/网络异常一律视为校验未通过
-        info = None
-    if not info:
-        return {"ok": False, "bot_name": None, "bot_open_id": None}
-    return {"ok": True, "bot_name": info.get("bot_name"), "bot_open_id": info.get("bot_open_id")}
-
-
 def channel_unbind(channel: str, data_root: Path) -> dict:
     """解绑渠道：删除账号目录（幂等）；未知 channel 抛 BAD_REQUEST。
 
