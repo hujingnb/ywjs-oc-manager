@@ -312,6 +312,81 @@ func TestChannelServicePollAuthRedactsSecret(t *testing.T) {
 	require.False(t, leaked, "secret 密文不得透传前端")
 }
 
+// TestBeginWorkWechatAuth_Succeeds 覆盖企业微信手填发起：加密落库 + 同步 patch Secret + 重启 +
+// 置 restarting + 入队 check job，返回 pending_auth。
+func TestBeginWorkWechatAuth_Succeeds(t *testing.T) {
+	store := newChannelStub(t)
+	store.app.Status = domain.AppStatusRunning // running 才能置 restarting（守卫 running→restarting 通过）
+	cipher, err := auth.NewCipher([]byte("0123456789abcdef0123456789abcdef"))
+	require.NoError(t, err)
+	patcher := &fakeFeishuPatcher{}
+	restarter := &fakeRestarter{}
+	registry := channel.NewRegistry()
+	registry.MustRegister(channel.NewWorkWeChatAdapter(nil, nil)) // 仅供 Lookup 路由，不触发 ops/resolver
+	svc := NewChannelService(store, registry)
+	svc.SetFeishuUnbindDeps(patcher, restarter)
+	svc.SetCipher(cipher)
+
+	res, err := svc.BeginWorkWechatAuth(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, WorkWechatAuthInput{BotID: "bot-1", Secret: "sec-1"})
+	require.NoError(t, err)
+	// 返回 pending_auth + 渠道类型，并带探测 job ID。
+	require.Equal(t, domain.ChannelStatusPendingAuth, res.Status)
+	require.Equal(t, domain.ChannelTypeWorkWeChat, res.ChannelType)
+	require.NotEmpty(t, res.JobID)
+	// 同步注入：set 含明文 bot_id/secret 两把 key，无删除 key。
+	require.Equal(t, map[string]string{"wecom-bot-id": "bot-1", "wecom-secret": "sec-1"}, patcher.set)
+	require.Empty(t, patcher.deleted)
+	// running 实例置 restarting 后触发 RolloutRestart。
+	require.True(t, store.appStatusSet)
+	require.Equal(t, domain.AppStatusRestarting, store.lastAppStatus)
+	require.True(t, restarter.restarted)
+	// metadata 写入 secret 密文且不等于明文（已加密）。
+	var meta map[string]any
+	require.NoError(t, json.Unmarshal(store.binding.MetadataJson, &meta))
+	require.Equal(t, "bot-1", meta["bot_id"])
+	ciphertext, ok := meta["secret_ciphertext"].(string)
+	require.True(t, ok, "secret_ciphertext 应为字符串密文")
+	require.NotEmpty(t, ciphertext)
+	require.NotEqual(t, "sec-1", ciphertext, "secret 必须加密，不能明文落库")
+	// 入队 channel_check_binding 探测 job。
+	require.Len(t, store.jobs, 1)
+	require.Equal(t, domain.JobTypeChannelCheckBinding, store.jobs[0].Type)
+}
+
+// TestBeginWorkWechatAuth_InstanceNotReady 覆盖 restarting 等不可发起态被守卫拦截。
+func TestBeginWorkWechatAuth_InstanceNotReady(t *testing.T) {
+	store := newChannelStub(t)
+	store.app.Status = domain.AppStatusRestarting // 重启窗口，pod 不可用，不应发起
+	cipher, err := auth.NewCipher([]byte("0123456789abcdef0123456789abcdef"))
+	require.NoError(t, err)
+	registry := channel.NewRegistry()
+	registry.MustRegister(channel.NewWorkWeChatAdapter(nil, nil))
+	svc := NewChannelService(store, registry)
+	svc.SetCipher(cipher)
+
+	_, err = svc.BeginWorkWechatAuth(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, WorkWechatAuthInput{BotID: "bot-1", Secret: "sec-1"})
+	require.ErrorIs(t, err, ErrInstanceNotReady)
+	// 未就绪不写库、不入队。
+	require.False(t, store.upsertCalled)
+	require.False(t, store.appStatusSet)
+	require.Empty(t, store.jobs)
+}
+
+// TestBeginWorkWechatAuth_Forbidden 覆盖无管理权限被拒。
+func TestBeginWorkWechatAuth_Forbidden(t *testing.T) {
+	store := newChannelStub(t)
+	cipher, err := auth.NewCipher([]byte("0123456789abcdef0123456789abcdef"))
+	require.NoError(t, err)
+	registry := channel.NewRegistry()
+	registry.MustRegister(channel.NewWorkWeChatAdapter(nil, nil))
+	svc := NewChannelService(store, registry)
+	svc.SetCipher(cipher)
+
+	// org_member 且非 owner，无管理权限。
+	_, err = svc.BeginWorkWechatAuth(context.Background(), auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testChannelOrg, UserID: "00000000-0000-0000-0000-0000000000ff"}, testChannelAppID, WorkWechatAuthInput{BotID: "bot-1", Secret: "sec-1"})
+	require.ErrorIs(t, err, ErrForbidden)
+}
+
 // fakeFeishuPatcher 记录飞书解绑时对 app Secret 的增删 key，供断言三把飞书 key 被删除。
 type fakeFeishuPatcher struct {
 	deleted []string

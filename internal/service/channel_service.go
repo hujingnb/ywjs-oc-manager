@@ -41,6 +41,9 @@ type ChannelStore interface {
 	UpsertChannelBindingUnbound(ctx context.Context, arg sqlc.UpsertChannelBindingUnboundParams) error
 	// SetFeishuCredentials 写入飞书凭证 metadata 并置状态（扫码发起阶段仅 domain 占位）。
 	SetFeishuCredentials(ctx context.Context, arg sqlc.SetFeishuCredentialsParams) error
+	// SetChannelBindingChallenge 按 (app_id, channel_type) 置 pending_auth + 写 metadata + 清 last_error。
+	// 企业微信手填发起用它落库已加密的 secret metadata。
+	SetChannelBindingChallenge(ctx context.Context, arg sqlc.SetChannelBindingChallengeParams) error
 	// SetAppStatus 裸 UPDATE app.status，无状态机守卫；守卫由调用方在 Go 层负责。
 	// 飞书解绑触发 RolloutRestart 前用它把 running 实例置 restarting（由 *sqlc.Queries 实现）。
 	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) error
@@ -56,8 +59,11 @@ type ChannelService struct {
 	// feishuPatcher / feishuRestarter 用于飞书解绑即时清理：删 app Secret 的 feishu-* key
 	// 并重启 pod，使引擎下次重启不再启用飞书平台。微信解绑不依赖二者。
 	// 经 SetFeishuUnbindDeps 注入；k8s 未启用时留 nil，解绑仅置 DB 状态不报错。
+	// 现同时服务飞书与企业微信解绑/绑定注入（PatchSecretKeys/RestartApp 渠道无关）。
 	feishuPatcher   FeishuSecretPatcher
 	feishuRestarter ChannelRestarter
+	// cipher 用于企业微信手填发起时加密 secret 落 metadata（飞书加密在 worker check，企业微信在 service）。
+	cipher *auth.Cipher
 }
 
 // NewChannelService 创建 service。
@@ -75,6 +81,9 @@ func NewChannelService(store ChannelStore, registry *channel.Registry, notifier 
 func (s *ChannelService) SetFeishuUnbindDeps(p FeishuSecretPatcher, r ChannelRestarter) {
 	s.feishuPatcher, s.feishuRestarter = p, r
 }
+
+// SetCipher 注入加密器，供企业微信手填发起时加密 secret 落库。未注入时 BeginWorkWechatAuth 报错。
+func (s *ChannelService) SetCipher(c *auth.Cipher) { s.cipher = c }
 
 // ChallengeResult 是 BeginAuth 对外返回的视图。
 type ChallengeResult struct {
@@ -297,6 +306,120 @@ func (s *ChannelService) BeginFeishuAuth(ctx context.Context, principal auth.Pri
 		ChannelType: domain.ChannelTypeFeishu,
 		JobID:       jobID,
 	}, nil
+}
+
+// WorkWechatAuthInput 是企业微信手填发起的 service 入参（与 handler 的 WorkWechatChannelAuthRequest 对应）。
+type WorkWechatAuthInput struct {
+	// BotID 是企业微信智能机器人 Bot ID（明文）。
+	BotID string
+	// Secret 是机器人 Secret 明文（service 内加密后落 metadata，明文注入 k8s Secret）。
+	Secret string
+}
+
+// BeginWorkWechatAuth 是企业微信手填发起入口（与微信 BeginAuth / 飞书 BeginFeishuAuth 并列，handler 按渠道分流）。
+// 企业微信无扫码：凭证随请求体同步到达，故此处一次性完成「加密落库 + 同步注入 Secret + 重启 + 置 restarting + 入队连通探测」。
+// 注入/重启复用飞书解绑同款 patcher/restarter（PatchSecretKeys/RestartApp 渠道无关）。
+func (s *ChannelService) BeginWorkWechatAuth(ctx context.Context, principal auth.Principal, appID string, in WorkWechatAuthInput) (ChallengeResult, error) {
+	app, err := s.loadManageableApp(ctx, principal, appID)
+	if err != nil {
+		return ChallengeResult{}, err
+	}
+	// 实例就绪守卫（与微信 / 飞书发起同口径）：pod 不在服务时不发起，返回友好错误，
+	// 不加密、不写库、不注入、不入队，覆盖解绑重启 + 版本升级两个窗口。
+	if !domain.AppCanInitiateChannelAuth(app.Status) {
+		return ChallengeResult{}, ErrInstanceNotReady
+	}
+	if s.registry == nil {
+		return ChallengeResult{}, ErrChannelAdapterMissing
+	}
+	if _, err := s.registry.Lookup(domain.ChannelTypeWorkWeChat); err != nil {
+		return ChallengeResult{}, fmt.Errorf("%w: %s", ErrChannelAdapterMissing, domain.ChannelTypeWorkWeChat)
+	}
+	// cipher 必需：企业微信 secret 必须加密后落 metadata；未注入直接报错而非明文落库。
+	if s.cipher == nil {
+		return ChallengeResult{}, fmt.Errorf("企业微信发起缺少 cipher，无法加密 secret")
+	}
+	// bound 短路（对齐飞书）：已绑定的企业微信 app 再次发起直接返回 bound，不重跑 upsert / 写 metadata / 注入 / 入队。
+	// 首次发起时绑定行可能尚不存在（create-on-demand），ErrNoRows 属正常路径，继续往下走。
+	existing, err := s.store.GetChannelBindingByAppAndType(ctx, sqlc.GetChannelBindingByAppAndTypeParams{AppID: app.ID, ChannelType: domain.ChannelTypeWorkWeChat})
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return ChallengeResult{}, fmt.Errorf("查询企业微信绑定失败: %w", err)
+	}
+	if err == nil && existing.Status == domain.ChannelStatusBound {
+		return ChallengeResult{Status: domain.ChannelStatusBound, ChannelType: domain.ChannelTypeWorkWeChat}, nil
+	}
+	// create-on-demand：企业微信绑定行不在实例创建时预建，发起时按需建立（已存在 no-op）。
+	if err := s.store.UpsertChannelBindingUnbound(ctx, sqlc.UpsertChannelBindingUnboundParams{
+		ID:          newUUID(),
+		AppID:       app.ID,
+		ChannelType: domain.ChannelTypeWorkWeChat,
+	}); err != nil {
+		return ChallengeResult{}, fmt.Errorf("创建企业微信绑定行失败: %w", err)
+	}
+	// 加密 secret：Encrypt 返回 string 密文，与 buildAppSpec 解密读取 secret_ciphertext 喂 Cipher.Decrypt 的格式一致。
+	enc, err := s.cipher.Encrypt([]byte(in.Secret))
+	if err != nil {
+		return ChallengeResult{}, fmt.Errorf("加密企业微信 secret 失败: %w", err)
+	}
+	metaJSON, err := json.Marshal(map[string]any{
+		"bot_id":            in.BotID,
+		"secret_ciphertext": enc,
+	})
+	if err != nil {
+		return ChallengeResult{}, fmt.Errorf("序列化企业微信 metadata 失败: %w", err)
+	}
+	if err := s.store.SetChannelBindingChallenge(ctx, sqlc.SetChannelBindingChallengeParams{
+		MetadataJson: metaJSON,
+		AppID:        app.ID,
+		ChannelType:  domain.ChannelTypeWorkWeChat,
+	}); err != nil {
+		return ChallengeResult{}, fmt.Errorf("写入企业微信凭证失败: %w", err)
+	}
+	// 同步注入 k8s Secret：明文 bot_id/secret 写入 app Secret，引擎重启后装载企业微信平台。
+	if s.feishuPatcher != nil {
+		if err := s.feishuPatcher.PatchSecretKeys(ctx, app.ID, map[string]string{
+			"wecom-bot-id": in.BotID,
+			"wecom-secret": in.Secret,
+		}, nil); err != nil {
+			return ChallengeResult{}, fmt.Errorf("注入企业微信 Secret 失败: %w", err)
+		}
+	}
+	// RolloutRestart 之前把 running 实例置 restarting：重建 pod 期间 oc-ops 不可用，标记过渡态。
+	// 守卫不过（如 binding_waiting）则跳过置位、只记日志，不阻断发起——DB pending_auth 已是 source of truth。
+	if err := domain.EnsureAppTransition(app.Status, domain.AppStatusRestarting); err != nil {
+		slog.InfoContext(ctx, "企业微信发起跳过置 restarting：当前状态不允许", "app_id", app.ID, "status", app.Status)
+	} else if err := s.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{Status: domain.AppStatusRestarting, ID: app.ID}); err != nil {
+		slog.ErrorContext(ctx, "企业微信发起置 restarting 失败", "app_id", app.ID, redactlog.Err(err))
+	}
+	if s.feishuRestarter != nil {
+		if err := s.feishuRestarter.RestartApp(ctx, app.ID); err != nil {
+			slog.ErrorContext(ctx, "企业微信注入后重启失败", "app_id", app.ID, redactlog.Err(err))
+		}
+	}
+	// 入队 channel_check_binding：worker 经 oc-ops 探测 platforms.wecom 连通态并写回绑定结果。
+	payload, err := json.Marshal(map[string]any{
+		"app_id":       app.ID,
+		"channel_type": domain.ChannelTypeWorkWeChat,
+		"requested_by": principal.UserID,
+	})
+	if err != nil {
+		return ChallengeResult{}, fmt.Errorf("序列化企业微信探测任务失败: %w", err)
+	}
+	jobID := newUUID()
+	if err := s.store.CreateJob(ctx, sqlc.CreateJobParams{
+		ID:          jobID,
+		Type:        domain.JobTypeChannelCheckBinding,
+		Priority:    80,
+		RunAfter:    time.Now().Add(5 * time.Second),
+		MaxAttempts: 20,
+		PayloadJson: payload,
+	}); err != nil {
+		return ChallengeResult{}, fmt.Errorf("创建企业微信探测任务失败: %w", err)
+	}
+	if s.notifier != nil {
+		_ = s.notifier.Enqueue(ctx, jobID)
+	}
+	return ChallengeResult{Status: domain.ChannelStatusPendingAuth, ChannelType: domain.ChannelTypeWorkWeChat, JobID: jobID}, nil
 }
 
 // PollAuth 查询登录进度。真实状态推进由 channel_check_binding worker 完成；
