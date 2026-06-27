@@ -198,6 +198,10 @@ type Querier interface {
 	ListRAGFlowStuckRunningDocumentsForHeal(ctx context.Context, arg ListRAGFlowStuckRunningDocumentsForHealParams) ([]ListRAGFlowStuckRunningDocumentsForHealRow, error)
 	ListReadyJobs(ctx context.Context, limit int32) ([]Job, error)
 	ListRechargeRecordsByOrg(ctx context.Context, arg ListRechargeRecordsByOrgParams) ([]RechargeRecord, error)
+	// reconciler 收敛用：列出 status=restarting 的 app id。渠道解绑触发 RolloutRestart 后
+	// 实例置 restarting，pod 重建（Recreate）期间 oc-ops 不可用；reconciler 周期查其 pod 状态，
+	// pod 重新 Ready → 收敛回 running，pod 坏死 → error，重启空窗（Pending）→ 保持 restarting 等下轮。
+	ListRestartingApps(ctx context.Context) ([]string, error)
 	// 列出当前期望运行（k8s Deployment 已创建）的应用，供 app_status_reconciler 周期 poll pod 状态。
 	// running 是常态；binding_waiting 表示 pod 已起但渠道还在登录中，也需要 reconcile。
 	// spec-A2b：去掉 runtime_node_id / container_id（k8s 路径不再写这两列），消费方仅用 id。

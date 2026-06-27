@@ -65,6 +65,10 @@ var ErrInstanceLimitReached = errors.New("已达企业实例数量上限")
 // ErrChannelAdapterMissing 表示 service 调用时未注册对应渠道。
 var ErrChannelAdapterMissing = errors.New("当前渠道未启用")
 
+// ErrInstanceNotReady 表示实例当前未就绪（重启 / 版本升级 / 初始化中），pod 暂不可用，
+// 此时发起渠道授权会打到不可达的 oc-ops，应稍候重试。handler 层映射为 409 Conflict。
+var ErrInstanceNotReady = errors.New("实例尚未就绪，请稍候重试")
+
 // 工作区 -----------------------------------------------------------
 // 来源：原 workspace_service.go
 

@@ -464,6 +464,40 @@ func (q *Queries) ListErrorApps(ctx context.Context) ([]string, error) {
 	return items, nil
 }
 
+const listRestartingApps = `-- name: ListRestartingApps :many
+SELECT id
+FROM apps
+WHERE deleted_at IS NULL
+  AND status = 'restarting'
+ORDER BY id
+`
+
+// reconciler 收敛用：列出 status=restarting 的 app id。渠道解绑触发 RolloutRestart 后
+// 实例置 restarting，pod 重建（Recreate）期间 oc-ops 不可用；reconciler 周期查其 pod 状态，
+// pod 重新 Ready → 收敛回 running，pod 坏死 → error，重启空窗（Pending）→ 保持 restarting 等下轮。
+func (q *Queries) ListRestartingApps(ctx context.Context) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listRestartingApps)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRunningApps = `-- name: ListRunningApps :many
 SELECT id
 FROM apps

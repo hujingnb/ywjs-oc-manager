@@ -41,6 +41,9 @@ type ChannelStore interface {
 	UpsertChannelBindingUnbound(ctx context.Context, arg sqlc.UpsertChannelBindingUnboundParams) error
 	// SetFeishuCredentials 写入飞书凭证 metadata 并置状态（扫码发起阶段仅 domain 占位）。
 	SetFeishuCredentials(ctx context.Context, arg sqlc.SetFeishuCredentialsParams) error
+	// SetAppStatus 裸 UPDATE app.status，无状态机守卫；守卫由调用方在 Go 层负责。
+	// 飞书解绑触发 RolloutRestart 前用它把 running 实例置 restarting（由 *sqlc.Queries 实现）。
+	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) error
 	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) error
 	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) error
 }
@@ -118,6 +121,11 @@ func (s *ChannelService) BeginAuth(ctx context.Context, principal auth.Principal
 	if err != nil {
 		return ChallengeResult{}, err
 	}
+	// 实例就绪守卫：pod 不在服务（restarting 重启窗口 / 版本升级 init 子状态 / stopped 等）时
+	// 发起会打到不可达的 oc-ops 拿到 502，提前返回友好错误，不写库不入队。
+	if !domain.AppCanInitiateChannelAuth(app.Status) {
+		return ChallengeResult{}, ErrInstanceNotReady
+	}
 	if s.registry == nil {
 		return ChallengeResult{}, ErrChannelAdapterMissing
 	}
@@ -173,15 +181,15 @@ func (s *ChannelService) BeginAuth(ctx context.Context, principal auth.Principal
 	}
 	// ActorID / OrgID 由字符串直接转 null.String。
 	if err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-		ID:            newUUID(),
-		ActorID:       null.StringFrom(principal.UserID),
-		ActorRole:     principal.Role,
-		OrgID:         null.StringFrom(app.OrgID),
-		TargetType:    "app",
-		TargetID:      app.ID,
-		Action:        "channel_auth_start",
-		Result:        "succeeded",
-		MetadataJson:  auditMetadata,
+		ID:           newUUID(),
+		ActorID:      null.StringFrom(principal.UserID),
+		ActorRole:    principal.Role,
+		OrgID:        null.StringFrom(app.OrgID),
+		TargetType:   "app",
+		TargetID:     app.ID,
+		Action:       "channel_auth_start",
+		Result:       "succeeded",
+		MetadataJson: auditMetadata,
 		// DetailMessage 已迁移到 metadata.channel_type，此处不再写入冻结中文文案。
 	}); err != nil {
 		return ChallengeResult{}, fmt.Errorf("写入渠道发起审计日志失败: %w", err)
@@ -209,6 +217,11 @@ func (s *ChannelService) BeginFeishuAuth(ctx context.Context, principal auth.Pri
 	app, err := s.loadManageableApp(ctx, principal, appID)
 	if err != nil {
 		return ChallengeResult{}, err
+	}
+	// 实例就绪守卫（与微信 BeginAuth 同口径）：pod 不在服务时不发起，返回友好错误，
+	// 不 create-on-demand、不写 metadata、不入队，覆盖解绑重启 + 版本升级两个窗口。
+	if !domain.AppCanInitiateChannelAuth(app.Status) {
+		return ChallengeResult{}, ErrInstanceNotReady
 	}
 	if s.registry == nil {
 		return ChallengeResult{}, ErrChannelAdapterMissing
@@ -359,6 +372,19 @@ func (s *ChannelService) Unbind(ctx context.Context, principal auth.Principal, a
 		if err := s.feishuPatcher.PatchSecretKeys(ctx, app.ID, nil,
 			[]string{"feishu-app-id", "feishu-app-secret", "feishu-domain"}); err != nil {
 			slog.ErrorContext(ctx, "解绑删飞书 Secret key 失败", "app_id", app.ID, redactlog.Err(err))
+		}
+		// RolloutRestart 之前把 running 实例置 restarting：重建 pod 期间 oc-ops 不可用，
+		// 标记过渡态让前端禁用「发起」、reconciler 在 pod 重新 Ready 后收敛回 running。
+		// 守卫：仅当当前 status==running 才置位（EnsureAppTransition 校验 running→restarting）；
+		// 校验不过（如 binding_waiting / 已 error）则跳过置位、只记日志，不阻断解绑——
+		// DB channel_binding=unbound_by_user 已是 source of truth，置位失败不影响解绑结果。
+		if err := domain.EnsureAppTransition(app.Status, domain.AppStatusRestarting); err != nil {
+			slog.InfoContext(ctx, "解绑跳过置 restarting：当前状态不允许", "app_id", app.ID, "status", app.Status)
+		} else if err := s.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{
+			Status: domain.AppStatusRestarting,
+			ID:     app.ID,
+		}); err != nil {
+			slog.ErrorContext(ctx, "解绑置 restarting 失败", "app_id", app.ID, redactlog.Err(err))
 		}
 		if s.feishuRestarter != nil {
 			if err := s.feishuRestarter.RestartApp(ctx, app.ID); err != nil {

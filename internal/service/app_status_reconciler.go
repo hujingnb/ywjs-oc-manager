@@ -35,6 +35,8 @@ type appStatusStore interface {
 	SetAppRuntimeSnapshot(ctx context.Context, arg sqlc.SetAppRuntimeSnapshotParams) error
 	// ListErrorApps 返回 status=error 的 app id，供兜底恢复「pod 已 Ready 但卡 error」。
 	ListErrorApps(ctx context.Context) ([]string, error)
+	// ListRestartingApps 返回 status=restarting 的 app id，供收敛「解绑触发重启」过渡态。
+	ListRestartingApps(ctx context.Context) ([]string, error)
 	// 以下三个方法供 jobutil.EnsureInitJob 重新入队 app_initialize job（兜底恢复用）。
 	GetLatestAppInitJob(ctx context.Context, appID json.RawMessage) (sqlc.Job, error)
 	RequeueJob(ctx context.Context, id string) error
@@ -119,7 +121,61 @@ func (r *AppStatusReconciler) Tick(ctx context.Context) error {
 
 	// 兜底恢复：error 态但 pod 实际已 Ready 的 app，重新入队 init job 推进回 running。
 	r.recoverReadyButError(ctx)
+	// 收敛 restarting：解绑触发 RolloutRestart 后的过渡态，pod 重新 Ready → running。
+	r.convergeRestarting(ctx)
 	return nil
+}
+
+// convergeRestarting 收敛 status=restarting 的 app（渠道解绑触发 RolloutRestart 重建 pod）：
+//   - pod 重新 Ready → 直接 SetAppStatus(running)。注意：与 error→running 兜底不同，restarting
+//     只是重启没重新初始化，无需 re-enqueue init job，直接置 running 即可。
+//   - pod 确定性坏死（IsTerminalBad：Failed/CrashLoop/重启≥阈值，或 Deployment 真消失的 NotFound）
+//     → SetAppStatus(error)。
+//   - 重启空窗（Recreate 过渡期无 pod，Status 返回 Pending；或 pod 起来了但还没 Ready）
+//     → 不动，等下个 tick。Recreate 旧 pod 先停再起的空窗不会被误判为坏死：Deployment 仍在时
+//     Status 返回 Pending 而非 NotFound（见 k8sorch.Status）。
+//
+// 整段尽力而为：ListRestartingApps / orch.Status / 写库任一步失败都 continue 或返回，等下一轮重试。
+// 关键：先判 Ready 再判坏死——新 pod 启动期可能偶发重启（RestartCount 升高）但最终 Ready，
+// 若先判 IsTerminalBad 会把已恢复的 pod 误推 error。
+func (r *AppStatusReconciler) convergeRestarting(ctx context.Context) {
+	ids, err := r.store.ListRestartingApps(ctx)
+	if err != nil {
+		return
+	}
+	for _, appID := range ids {
+		st, serr := r.orch.Status(ctx, appID)
+		if serr != nil {
+			continue
+		}
+		switch {
+		case st.Ready:
+			// pod 重新 Ready：收敛回 running。
+			r.convergeRestartingApp(ctx, appID, domain.AppStatusRunning)
+		case podIsBad(st):
+			// pod 确定性坏死：收敛到 error。
+			r.convergeRestartingApp(ctx, appID, domain.AppStatusError)
+		default:
+			// 重启空窗（Pending / 未 Ready）：保持 restarting，等下个 tick。
+		}
+	}
+}
+
+// convergeRestartingApp 守卫式把单个 restarting app 收敛到目标状态 to（running 或 error）。
+// 守卫：重新 GetApp 确认当前仍是 restarting（不依赖 ListRestartingApps 的陈旧快照），
+// 再用 EnsureAppTransition 校验 restarting→to 合法后才写——与 running→error 守卫同口径。
+func (r *AppStatusReconciler) convergeRestartingApp(ctx context.Context, appID, to string) {
+	app, gerr := r.store.GetApp(ctx, appID)
+	if gerr != nil {
+		return
+	}
+	if app.Status != domain.AppStatusRestarting {
+		return
+	}
+	if err := domain.EnsureAppTransition(app.Status, to); err != nil {
+		return
+	}
+	_ = r.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{Status: to, ID: appID})
 }
 
 // recoverReadyButError 扫 status=error 的 app，对其中 pod 实际已 Ready 的重新入队 init job，

@@ -55,6 +55,7 @@ func RegisterChannelRoutes(router gin.IRouter, handler *ChannelsHandler) {
 // @Failure      401         {object}  ErrorResponse
 // @Failure      403         {object}  ErrorResponse
 // @Failure      404         {object}  ErrorResponse
+// @Failure      409         {object}  ErrorResponse
 // @Failure      500         {object}  ErrorResponse
 // @Failure      503         {object}  ErrorResponse
 // @Router       /apps/{appId}/channels/{channelType}/auth [post]
@@ -149,6 +150,11 @@ func writeChannelError(c *gin.Context, err error) {
 		apierror.JSON(c, http.StatusNotFound, "NOT_FOUND", apierror.MsgChannelBindingNotFound)
 	case errors.Is(err, service.ErrChannelAdapterMissing):
 		apierror.JSON(c, http.StatusServiceUnavailable, "CHANNEL_ADAPTER_MISSING", apierror.MsgChannelAdapterMissing)
+	case errors.Is(err, service.ErrInstanceNotReady):
+		// 实例重启 / 升级 / 初始化中，pod 暂不可用：映射为 409 Conflict——请求与实例当前
+		// 生命周期状态冲突（与 bootstrap APP_NOT_READY、app_runtime APP_NOT_REINIT 同口径），
+		// 客户端可稍候重试；不用 503 以免误指 manager 自身不可用。
+		apierror.JSON(c, http.StatusConflict, "INSTANCE_NOT_READY", apierror.MsgChannelInstanceNotReady)
 	default:
 		apierror.JSON(c, http.StatusInternalServerError, "INTERNAL", apierror.MsgChannelUnavailable)
 	}

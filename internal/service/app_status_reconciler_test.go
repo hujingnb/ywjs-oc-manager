@@ -40,6 +40,8 @@ type fakeAppStatusStore struct {
 
 	// errorRows 是 ListErrorApps 返回的 error 态 app id 列表（兜底恢复路径用）。
 	errorRows []string
+	// restartingRows 是 ListRestartingApps 返回的 restarting 态 app id 列表（重启收敛路径用）。
+	restartingRows []string
 	// latestInitJob 是 GetLatestAppInitJob 返回的 job；ID 为空时模拟 sql.ErrNoRows（无历史 job）。
 	latestInitJob sqlc.Job
 	// requeuedJobs 记录被 RequeueJob 的 job id；createdJobs 记录被 CreateJob 的新建 job，供兜底断言。
@@ -83,6 +85,11 @@ func (f *fakeAppStatusStore) SetAppRuntimeSnapshot(_ context.Context, arg sqlc.S
 // ListErrorApps 返回预设的 error 态 app id 列表（兜底恢复路径）。
 func (f *fakeAppStatusStore) ListErrorApps(_ context.Context) ([]string, error) {
 	return f.errorRows, nil
+}
+
+// ListRestartingApps 返回预设的 restarting 态 app id 列表（重启收敛路径）。
+func (f *fakeAppStatusStore) ListRestartingApps(_ context.Context) ([]string, error) {
+	return f.restartingRows, nil
 }
 
 // GetLatestAppInitJob：latestInitJob.ID 为空时模拟无历史 job（sql.ErrNoRows），否则返回它。
@@ -136,15 +143,16 @@ func (f *fakeOrch) Status(_ context.Context, appID string) (k8sorch.AppStatus, e
 }
 
 // 以下方法仅为实现 k8sorch.Orchestrator 接口，reconciler 测试不会调用。
-func (f *fakeOrch) EnsureApp(_ context.Context, _ k8sorch.AppSpec) error             { panic("not used") }
+func (f *fakeOrch) EnsureApp(_ context.Context, _ k8sorch.AppSpec) error { panic("not used") }
 func (f *fakeOrch) WaitReady(_ context.Context, _ string, _ time.Duration, _ func(k8sorch.AppStatus)) error {
 	panic("not used")
 }
-func (f *fakeOrch) Scale(_ context.Context, _ string, _ int32) error                 { panic("not used") }
-func (f *fakeOrch) UpdateImage(_ context.Context, _, _ string) error                 { panic("not used") }
-func (f *fakeOrch) Delete(_ context.Context, _ string) error                         { panic("not used") }
+func (f *fakeOrch) Scale(_ context.Context, _ string, _ int32) error { panic("not used") }
+func (f *fakeOrch) UpdateImage(_ context.Context, _, _ string) error { panic("not used") }
+func (f *fakeOrch) Delete(_ context.Context, _ string) error         { panic("not used") }
+
 // RolloutRestart 在 reconciler 测试中不被调用，stub 防御性 panic（与其它未用方法一致）。
-func (f *fakeOrch) RolloutRestart(_ context.Context, _ string) error                 { panic("not used") }
+func (f *fakeOrch) RolloutRestart(_ context.Context, _ string) error { panic("not used") }
 
 // ============================================================
 // 辅助：构造常用 app id 字符串和 App
@@ -492,6 +500,91 @@ func TestReconcile_KeepErrorWhenPodNotReady(t *testing.T) {
 	require.NoError(t, rec.Tick(context.Background()))
 	assert.Empty(t, store.requeuedJobs, "pod 未 Ready 不应 requeue init job")
 	assert.Empty(t, notifier.lastJobID, "pod 未 Ready 不应通知 scheduler")
+}
+
+// ============================================================
+// restarting 收敛：解绑触发重启的过渡态 → running / error / 保持
+// ============================================================
+
+// TestReconcile_RestartingPodReadyConvergesToRunning 验证 restarting + pod 重新 Ready → running。
+// 场景：渠道解绑触发 RolloutRestart，新 pod 已 Ready，reconciler 应直接收敛回 running
+// （不 re-enqueue init job，restarting 只是重启没重新初始化）。
+func TestReconcile_RestartingPodReadyConvergesToRunning(t *testing.T) {
+	store := newFakeAppStatusStore()
+	store.restartingRows = []string{appID1}
+	store.apps[appID1] = appWithStatus(appID1, domain.AppStatusRestarting)
+
+	orch := newFakeOrch()
+	// 新 pod 已 Running 且 Ready。
+	orch.set(appID1, k8sorch.AppStatus{Phase: "Running", Ready: true}, nil)
+
+	rec := NewAppStatusReconciler(store, orch, &fakeNotifier{})
+	require.NoError(t, rec.Tick(context.Background()))
+
+	// 应收敛到 running。
+	require.Len(t, store.statusCalls, 1, "restarting + pod Ready 应收敛回 running")
+	assert.Equal(t, domain.AppStatusRunning, store.statusCalls[0].Status)
+	assert.Equal(t, appID1, store.statusCalls[0].ID)
+	// 不应 re-enqueue init job（restarting 无需重新初始化）。
+	assert.Empty(t, store.requeuedJobs, "restarting 收敛不应 re-enqueue init job")
+	assert.Empty(t, store.createdJobs, "restarting 收敛不应新建 init job")
+}
+
+// TestReconcile_RestartingPodNotReadyStaysRestarting 验证 restarting + pod 尚未就绪（重启空窗）→ 保持 restarting。
+// 场景：Recreate 旧 pod 先停再起的过渡期，Deployment 仍在故 Status 返回 Pending（非 NotFound），
+// reconciler 不应误判坏死，应保持 restarting 等下个 tick。
+func TestReconcile_RestartingPodNotReadyStaysRestarting(t *testing.T) {
+	store := newFakeAppStatusStore()
+	store.restartingRows = []string{appID1}
+	store.apps[appID1] = appWithStatus(appID1, domain.AppStatusRestarting)
+
+	orch := newFakeOrch()
+	// 重启空窗：Deployment 在但 pod 尚未创建，Status 返回 Pending。
+	orch.set(appID1, k8sorch.AppStatus{Phase: "Pending", Ready: false, Message: "pod 尚未创建（调度中或 Recreate 过渡）"}, nil)
+
+	rec := NewAppStatusReconciler(store, orch, &fakeNotifier{})
+	require.NoError(t, rec.Tick(context.Background()))
+
+	// 重启空窗不应变更 status，保持 restarting。
+	assert.Empty(t, store.statusCalls, "重启空窗（Pending）应保持 restarting，不写 status")
+}
+
+// TestReconcile_RestartingPodBadConvergesToError 验证 restarting + pod 坏死 → error。
+// 场景：pod 重启后进入确定性坏态（如 Deployment 真消失 NotFound / Failed），收敛到 error。
+func TestReconcile_RestartingPodBadConvergesToError(t *testing.T) {
+	store := newFakeAppStatusStore()
+	store.restartingRows = []string{appID1}
+	store.apps[appID1] = appWithStatus(appID1, domain.AppStatusRestarting)
+
+	orch := newFakeOrch()
+	// pod 重启后坏死：Phase=NotFound（Deployment 也消失），确定性坏态。
+	orch.set(appID1, k8sorch.AppStatus{Phase: "NotFound", Ready: false}, nil)
+
+	rec := NewAppStatusReconciler(store, orch, &fakeNotifier{})
+	require.NoError(t, rec.Tick(context.Background()))
+
+	// 应收敛到 error。
+	require.Len(t, store.statusCalls, 1, "restarting + pod 坏死 应收敛到 error")
+	assert.Equal(t, domain.AppStatusError, store.statusCalls[0].Status)
+	assert.Equal(t, appID1, store.statusCalls[0].ID)
+}
+
+// TestReconcile_RestartingGuardSkipsWhenStatusChanged 验证守卫：ListRestartingApps 返回的 id
+// 在收敛前已被改成非 restarting（陈旧快照），则不写 status（避免越权迁移）。
+func TestReconcile_RestartingGuardSkipsWhenStatusChanged(t *testing.T) {
+	store := newFakeAppStatusStore()
+	store.restartingRows = []string{appID1}
+	// GetApp 返回的当前状态已是 running（快照陈旧），守卫应阻止再写。
+	store.apps[appID1] = appWithStatus(appID1, domain.AppStatusRunning)
+
+	orch := newFakeOrch()
+	orch.set(appID1, k8sorch.AppStatus{Phase: "Running", Ready: true}, nil)
+
+	rec := NewAppStatusReconciler(store, orch, &fakeNotifier{})
+	require.NoError(t, rec.Tick(context.Background()))
+
+	// 当前已非 restarting，守卫阻止写 status。
+	assert.Empty(t, store.statusCalls, "当前状态已非 restarting，守卫应阻止收敛写入")
 }
 
 // ============================================================

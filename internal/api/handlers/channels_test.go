@@ -139,6 +139,20 @@ func TestChannelsAdapterMissing(t *testing.T) {
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 }
 
+// TestChannelsBeginAuthInstanceNotReady 验证实例未就绪（重启 / 升级中）时映射为 409 Conflict。
+func TestChannelsBeginAuthInstanceNotReady(t *testing.T) {
+	stub := &channelServiceStub{beginErr: service.ErrInstanceNotReady}
+	router := newChannelsTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/apps/app-1/channels/wechat/auth", nil)
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Contains(t, w.Body.String(), "INSTANCE_NOT_READY")
+}
+
 // TestChannelsBeginFeishuAuthScan 验证飞书 scan 模式请求体被正确解析并路由到 BeginFeishuAuth，
 // 微信路径的 BeginAuth 不被调用（双模式分流隔离）。
 func TestChannelsBeginFeishuAuthScan(t *testing.T) {

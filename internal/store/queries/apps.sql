@@ -162,6 +162,16 @@ WHERE deleted_at IS NULL
   AND status = 'error'
 ORDER BY id;
 
+-- name: ListRestartingApps :many
+-- reconciler 收敛用：列出 status=restarting 的 app id。渠道解绑触发 RolloutRestart 后
+-- 实例置 restarting，pod 重建（Recreate）期间 oc-ops 不可用；reconciler 周期查其 pod 状态，
+-- pod 重新 Ready → 收敛回 running，pod 坏死 → error，重启空窗（Pending）→ 保持 restarting 等下轮。
+SELECT id
+FROM apps
+WHERE deleted_at IS NULL
+  AND status = 'restarting'
+ORDER BY id;
+
 -- name: UpdateAppRuntimeImage :exec
 -- phasePullRuntimeImage 成功后写入镜像引用与 sha256。
 UPDATE apps

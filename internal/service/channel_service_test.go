@@ -169,6 +169,76 @@ func TestChannelServiceUnbindFeishuDeletesSecretKeys(t *testing.T) {
 	require.True(t, restarter.restarted)
 }
 
+// TestChannelServiceUnbindFeishuSetsRestartingWhenRunning 验证：飞书解绑时若 app 处于 running，
+// 在 RolloutRestart 前把 app 置 restarting（守卫 running→restarting 通过），重启窗口标记过渡态。
+func TestChannelServiceUnbindFeishuSetsRestartingWhenRunning(t *testing.T) {
+	store := newChannelStub(t)
+	store.binding.ChannelType = domain.ChannelTypeFeishu
+	store.app.Status = domain.AppStatusRunning // 当前运行中，解绑应置 restarting
+	patcher := &fakeFeishuPatcher{}
+	restarter := &fakeRestarter{}
+	svc := NewChannelService(store, channel.NewRegistry())
+	svc.SetFeishuUnbindDeps(patcher, restarter)
+
+	require.NoError(t, svc.Unbind(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, domain.ChannelTypeFeishu))
+	// app 被置 restarting，且发生在重启之前（restarter 仍被触发）。
+	require.True(t, store.appStatusSet, "running 实例解绑应置 app 状态")
+	require.Equal(t, domain.AppStatusRestarting, store.lastAppStatus)
+	require.True(t, restarter.restarted, "置 restarting 后仍应触发 RolloutRestart")
+	require.Equal(t, domain.ChannelStatusUnboundByUser, store.lastStatus)
+}
+
+// TestChannelServiceUnbindFeishuSkipsRestartingWhenNotRunning 验证：飞书解绑时若 app 非 running，
+// 守卫拒绝 running→restarting，跳过置位（只记日志），解绑仍成功、删 key、重启照常。
+func TestChannelServiceUnbindFeishuSkipsRestartingWhenNotRunning(t *testing.T) {
+	store := newChannelStub(t)
+	store.binding.ChannelType = domain.ChannelTypeFeishu
+	store.app.Status = domain.AppStatusBindingWaiting // 非 running，不应置 restarting
+	patcher := &fakeFeishuPatcher{}
+	restarter := &fakeRestarter{}
+	svc := NewChannelService(store, channel.NewRegistry())
+	svc.SetFeishuUnbindDeps(patcher, restarter)
+
+	require.NoError(t, svc.Unbind(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, domain.ChannelTypeFeishu))
+	// 守卫拒绝置位：未写 app 状态，但解绑成功且删 key / 重启不受影响。
+	require.False(t, store.appStatusSet, "非 running 实例解绑不应置 restarting")
+	require.Equal(t, domain.ChannelStatusUnboundByUser, store.lastStatus)
+	require.ElementsMatch(t, []string{"feishu-app-id", "feishu-app-secret", "feishu-domain"}, patcher.deleted)
+	require.True(t, restarter.restarted)
+}
+
+// TestChannelServiceBeginAuthInstanceNotReady 验证：微信发起时 app 处于 restarting（非就绪），
+// 返回 ErrInstanceNotReady，且不写渠道状态、不入队 job。
+func TestChannelServiceBeginAuthInstanceNotReady(t *testing.T) {
+	store := newChannelStub(t)
+	store.app.Status = domain.AppStatusRestarting // 重启窗口，pod 不可用
+	registry := channel.NewRegistry()
+	registry.MustRegister(&fakeAdapter{})
+	svc := NewChannelService(store, registry)
+
+	_, err := svc.BeginAuth(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, domain.ChannelTypeWeChat)
+	require.ErrorIs(t, err, ErrInstanceNotReady)
+	require.False(t, store.statusUpdated, "未就绪不应写渠道状态")
+	require.Empty(t, store.jobs, "未就绪不应入队 job")
+}
+
+// TestChannelServiceBeginFeishuAuthInstanceNotReady 验证：飞书发起时 app 处于 restarting，
+// 返回 ErrInstanceNotReady，且不 create-on-demand、不写 metadata、不入队 job。
+func TestChannelServiceBeginFeishuAuthInstanceNotReady(t *testing.T) {
+	store := newChannelStub(t)
+	store.bindingMissing = true                   // 飞书首发起绑定行尚不存在
+	store.app.Status = domain.AppStatusRestarting // 重启窗口，pod 不可用
+	registry := channel.NewRegistry()
+	registry.MustRegister(channel.NewFeishuAdapter(nil))
+	svc := NewChannelService(store, registry)
+
+	_, err := svc.BeginFeishuAuth(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, FeishuAuthInput{Domain: "feishu"})
+	require.ErrorIs(t, err, ErrInstanceNotReady)
+	require.False(t, store.upsertCalled, "未就绪不应 create-on-demand")
+	require.Empty(t, store.feishuMeta, "未就绪不应写 metadata")
+	require.Empty(t, store.jobs, "未就绪不应入队 job")
+}
+
 // TestChannelServiceUnbindWechatUnchanged 验证微信解绑不调飞书依赖（patcher/restarter 不触发）。
 func TestChannelServiceUnbindWechatUnchanged(t *testing.T) {
 	store := newChannelStub(t) // 默认 wechat binding
