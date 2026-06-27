@@ -127,22 +127,15 @@ export function useBeginChannelAuth(appId: Ref<string | undefined>, channelType:
 }
 
 // FeishuAuthBody 描述飞书发起绑定的请求体。
-// scan（扫码自动创建）仅需 mode + domain；manual（手动填写）额外携带 app_id / app_secret。
-// app_secret 仅在 manual 模式回传后端，前端不做持久化也不回显。
+// 仅扫码自动创建一种模式，只需携带部署域 domain，由 worker 异步建应用并回写二维码。
 export interface FeishuAuthBody {
-  // 接入模式：scan 走扫码自动建应用，manual 走开放平台手填应用凭证。
-  mode: 'scan' | 'manual'
   // 部署域：feishu（国内）/ lark（国际），决定后端调用的开放平台 endpoint。
   domain: string
-  // 手填模式的应用 App ID，scan 模式省略。
-  app_id?: string
-  // 手填模式的应用 App Secret，scan 模式省略；不在前端缓存或回显。
-  app_secret?: string
 }
 
-// useBeginFeishuAuth 触发飞书渠道绑定，区别于通用 useBeginChannelAuth 在于发起需携带双模式 body。
+// useBeginFeishuAuth 触发飞书渠道扫码绑定，区别于通用 useBeginChannelAuth 在于发起需携带 domain body。
 // 复用通用进度轮询（GET /channels/feishu/auth）与解绑接口，仅发起入口不同。
-// 成功后失效飞书进度缓存，让轮询尽快拉到扫码二维码或手填校验结果。
+// 成功后失效飞书进度缓存，让轮询尽快拉到扫码二维码。
 export function useBeginFeishuAuth(appId: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({

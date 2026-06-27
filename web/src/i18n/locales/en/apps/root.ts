@@ -139,23 +139,15 @@ export default {
     channelLineDesc: 'Japan and Southeast Asia users',
     supported: 'Supported',
     unsupported: 'Not supported',
-    // 飞书渠道双模式接入（扫码自动创建 / 手动填写）专用文案。
-    feishuModeLabel: 'Setup mode',
-    feishuModeScan: 'Scan to auto-create',
-    feishuModeManual: 'Manual config',
+    // 飞书渠道扫码自动创建接入专用文案。
     feishuDomainLabel: 'Domain',
     feishuDomainFeishu: 'Feishu (China)',
     feishuDomainLark: 'Lark (Global)',
-    feishuAppId: 'App ID',
-    feishuAppSecret: 'App Secret',
-    feishuSubmit: 'Submit',
     feishuGuideTitle: 'Setup guide',
     feishuBotName: 'Bot name: ',
     feishuDomainCurrent: 'Domain: ',
     feishuScanGuide:
       '1. Choose a domain (Feishu / Lark), then click "Begin login".\n2. Scan the QR code below with the Feishu app and authorize on the open platform.\n3. The bot application is created and configured automatically — keep this page open until binding completes.\n4. When the status turns to "Bound", the channel is connected; @mention the bot in a chat to use the assistant.',
-    feishuManualGuide:
-      '1. Sign in to the Feishu Open Platform (open.feishu.cn) / Lark developer console and create a custom enterprise app.\n2. Get the App ID and App Secret from "Credentials & Basic Info".\n3. Enable the bot capability for the app and publish a version so it takes effect.\n4. Fill the App ID and App Secret into the form above and submit, then wait until the status turns to "Bound".',
     // status 是渠道绑定进度状态的用户可读文案，由 formatChannelStatus 解析为 i18n key 后消费。
     status: {
       unbound: 'Not bound',

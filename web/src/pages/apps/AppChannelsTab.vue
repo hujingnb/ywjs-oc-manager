@@ -77,18 +77,11 @@
           <AuthChallengeRenderer v-if="visibleChallenge" :challenge="visibleChallenge" @rendered="onQrRendered" />
         </template>
 
-        <!-- 飞书渠道详情：模式选择 + 部署域 + 扫码/手填 + 图文指引 + 已绑定详情/解绑。 -->
+        <!-- 飞书渠道详情：部署域 + 扫码自动创建 + 图文指引 + 已绑定详情/解绑。 -->
         <template v-else-if="selectedChannelType === 'feishu'">
           <div class="feishu-panel">
-            <!-- 接入模式与部署域：单选 + 下拉，决定后续走扫码还是手填及调用的开放平台域。 -->
+            <!-- 部署域：下拉决定后端调用的开放平台域（飞书国内 / Lark 国际）。 -->
             <div class="feishu-controls">
-              <label class="feishu-field">
-                <span class="feishu-field-label">{{ t('apps.channels.feishuModeLabel') }}</span>
-                <n-radio-group v-model:value="feishuMode" :disabled="!canManage || feishuBound">
-                  <n-radio-button value="scan">{{ t('apps.channels.feishuModeScan') }}</n-radio-button>
-                  <n-radio-button value="manual">{{ t('apps.channels.feishuModeManual') }}</n-radio-button>
-                </n-radio-group>
-              </label>
               <label class="feishu-field">
                 <span class="feishu-field-label">{{ t('apps.channels.feishuDomainLabel') }}</span>
                 <n-select
@@ -100,7 +93,7 @@
               </label>
             </div>
 
-            <!-- 已绑定详情：展示 bot 信息与部署域，secret 不回显，提供解绑入口。 -->
+            <!-- 已绑定详情：展示 bot 信息与部署域，提供解绑入口。 -->
             <template v-if="feishuBound">
               <div class="feishu-bound">
                 <p v-if="feishuProgress?.channel_name" class="state-text">{{ t('apps.channels.feishuBotName') }}{{ feishuProgress.channel_name }}</p>
@@ -112,65 +105,27 @@
               </n-space>
             </template>
 
-            <!-- 未绑定：按模式展示扫码或手填表单。 -->
+            <!-- 未绑定：扫码自动创建，点发起后轮询二维码并复用 AuthChallengeRenderer 渲染。 -->
             <template v-else>
-              <!-- 扫码自动创建：点发起后轮询二维码并复用 AuthChallengeRenderer 渲染。 -->
-              <template v-if="feishuMode === 'scan'">
-                <n-space :size="8">
-                  <n-button
-                    type="primary"
-                    :disabled="!appId || !canManage"
-                    :loading="feishuBeginning"
-                    @click="beginFeishuScan"
-                  >
-                    {{ t('apps.channels.beginLogin') }}
-                  </n-button>
-                </n-space>
-                <p v-if="feishuProgress?.error_message" class="state-text danger">{{ t('apps.channels.errorMsg') }}{{ feishuProgress.error_message }}</p>
-                <p v-if="feishuWaitingForChallenge" class="state-text">{{ t('apps.channels.waitingQr') }}</p>
-                <AuthChallengeRenderer v-if="feishuVisibleChallenge" :challenge="feishuVisibleChallenge" />
-              </template>
-
-              <!-- 手动填写：输入开放平台应用 App ID / App Secret 后提交校验。 -->
-              <template v-else>
-                <div class="feishu-form">
-                  <label class="feishu-field">
-                    <span class="feishu-field-label">{{ t('apps.channels.feishuAppId') }}</span>
-                    <n-input
-                      v-model:value="feishuAppId"
-                      :disabled="!canManage"
-                      :placeholder="t('apps.channels.feishuAppId')"
-                    />
-                  </label>
-                  <label class="feishu-field">
-                    <span class="feishu-field-label">{{ t('apps.channels.feishuAppSecret') }}</span>
-                    <n-input
-                      v-model:value="feishuAppSecret"
-                      type="password"
-                      show-password-on="click"
-                      :disabled="!canManage"
-                      :placeholder="t('apps.channels.feishuAppSecret')"
-                    />
-                  </label>
-                </div>
-                <n-space :size="8">
-                  <n-button
-                    type="primary"
-                    :disabled="!appId || !canManage || feishuManualInvalid"
-                    :loading="feishuBeginning"
-                    @click="submitFeishuManual"
-                  >
-                    {{ t('apps.channels.feishuSubmit') }}
-                  </n-button>
-                </n-space>
-                <p v-if="feishuProgress?.error_message" class="state-text danger">{{ t('apps.channels.errorMsg') }}{{ feishuProgress.error_message }}</p>
-              </template>
+              <n-space :size="8">
+                <n-button
+                  type="primary"
+                  :disabled="!appId || !canManage"
+                  :loading="feishuBeginning"
+                  @click="beginFeishuScan"
+                >
+                  {{ t('apps.channels.beginLogin') }}
+                </n-button>
+              </n-space>
+              <p v-if="feishuProgress?.error_message" class="state-text danger">{{ t('apps.channels.errorMsg') }}{{ feishuProgress.error_message }}</p>
+              <p v-if="feishuWaitingForChallenge" class="state-text">{{ t('apps.channels.waitingQr') }}</p>
+              <AuthChallengeRenderer v-if="feishuVisibleChallenge" :challenge="feishuVisibleChallenge" />
             </template>
 
-            <!-- 图文指引：按当前模式展示扫码授权或开放平台建应用步骤，默认折叠。 -->
+            <!-- 图文指引：展示扫码授权步骤，默认折叠。 -->
             <n-collapse class="feishu-guide">
               <n-collapse-item :title="t('apps.channels.feishuGuideTitle')" name="guide">
-                <p class="feishu-guide-text">{{ feishuMode === 'scan' ? t('apps.channels.feishuScanGuide') : t('apps.channels.feishuManualGuide') }}</p>
+                <p class="feishu-guide-text">{{ t('apps.channels.feishuScanGuide') }}</p>
               </n-collapse-item>
             </n-collapse>
           </div>
@@ -187,9 +142,6 @@ import {
   NCard,
   NCollapse,
   NCollapseItem,
-  NInput,
-  NRadioButton,
-  NRadioGroup,
   NSelect,
   NSpace,
 } from 'naive-ui'
@@ -266,7 +218,7 @@ const { data: progress } = useChannelProgressQuery(appId, channelTypeRef)
 const beginMutation = useBeginChannelAuth(appId, channelTypeRef)
 const unbindMutation = useUnbindChannel(appId, channelTypeRef)
 
-// ---- 飞书渠道（双模式：扫码自动创建 / 手动填写）----
+// ---- 飞书渠道（扫码自动创建）----
 // feishuProgressType 仅在选中飞书时返回 'feishu'，否则返回 undefined 关闭轮询，
 // 避免停留在微信详情区时仍向飞书进度接口发请求。
 const feishuProgressType = computed<string | undefined>(() => (selectedChannelType.value === 'feishu' ? 'feishu' : undefined))
@@ -276,14 +228,9 @@ const { data: feishuProgress } = useChannelProgressQuery(appId, feishuProgressTy
 const beginFeishuMutation = useBeginFeishuAuth(appId)
 const unbindFeishuMutation = useUnbindChannel(appId, feishuChannelRef)
 
-// feishuMode 决定面板呈现扫码二维码还是手填表单，默认扫码自动创建。
-const feishuMode = ref<'scan' | 'manual'>('scan')
 // feishuDomain 决定后端调用的开放平台域，默认飞书国内。
 const feishuDomain = ref<'feishu' | 'lark'>('feishu')
-// feishuAppId / feishuAppSecret 仅手填模式使用；secret 不回显、不持久化，提交后即从内存清理。
-const feishuAppId = ref('')
-const feishuAppSecret = ref('')
-// feishuBeginning 是飞书发起/提交的本地提交态，覆盖按钮 loading。
+// feishuBeginning 是飞书发起扫码的本地提交态，覆盖按钮 loading。
 const feishuBeginning = ref(false)
 // feishuChallenge 保存发起后立即返回的挑战，轮询进度若带回二维码则优先使用进度结果。
 const feishuChallenge = ref<ChannelChallenge | null>(null)
@@ -302,8 +249,6 @@ const feishuStatusLabel = computed(() => formatChannelStatus(feishuProgress.valu
 const feishuBound = computed(() => feishuProgress.value?.status === 'bound')
 // feishuCanUnbind 受管理权限与绑定态共同约束，真正校验仍由后端兜底。
 const feishuCanUnbind = computed(() => canManage.value && feishuBound.value)
-// feishuManualInvalid 在手填模式下两项凭证任一为空时禁用提交按钮。
-const feishuManualInvalid = computed(() => !feishuAppId.value.trim() || !feishuAppSecret.value.trim())
 // feishuEffectiveDomain 优先从绑定进度的 metadata.domain 读取（刷新页面后仍正确，
 // 避免 lark 实例被本地 ref 默认值 'feishu' 误显示），未绑定或 metadata 无 domain 时
 // 回退到本地 feishuDomain ref（即用户当前在下拉中选择的值）。
@@ -320,32 +265,13 @@ const feishuVisibleChallenge = computed(() => feishuProgressChallenge.value ?? (
 // feishuWaitingForChallenge 在已发起但二维码尚未就绪时提示“生成中”。
 const feishuWaitingForChallenge = computed(() => shouldShowChallengePending(feishuAuthStarted.value, feishuVisibleChallenge.value, feishuProgress.value?.status))
 
-// beginFeishuScan 发起扫码自动创建：仅提交 mode/domain，由 worker 异步建应用并回写二维码。
+// beginFeishuScan 发起扫码自动创建：仅提交 domain，由 worker 异步建应用并回写二维码。
 async function beginFeishuScan() {
   if (!canManage.value) return
   feishuBeginning.value = true
   try {
-    feishuChallenge.value = await beginFeishuMutation.mutateAsync({ mode: 'scan', domain: feishuDomain.value })
+    feishuChallenge.value = await beginFeishuMutation.mutateAsync({ domain: feishuDomain.value })
     feishuAuthStarted.value = true
-  } finally {
-    feishuBeginning.value = false
-  }
-}
-
-// submitFeishuManual 提交手填应用凭证：携带 app_id/app_secret/domain，后端校验并完成绑定。
-async function submitFeishuManual() {
-  if (!canManage.value || feishuManualInvalid.value) return
-  feishuBeginning.value = true
-  try {
-    feishuChallenge.value = await beginFeishuMutation.mutateAsync({
-      mode: 'manual',
-      domain: feishuDomain.value,
-      app_id: feishuAppId.value.trim(),
-      app_secret: feishuAppSecret.value,
-    })
-    feishuAuthStarted.value = true
-    // 提交成功后清空 secret，避免长期驻留内存或被后续误用。
-    feishuAppSecret.value = ''
   } finally {
     feishuBeginning.value = false
   }
@@ -589,7 +515,7 @@ async function unbind() {
   gap: 16px;
 }
 
-/* 控制区把模式单选与部署域下拉横向排布，窄屏自动换行。 */
+/* 控制区排布部署域下拉，窄屏自动换行。 */
 .feishu-controls {
   display: flex;
   flex-wrap: wrap;
@@ -610,13 +536,6 @@ async function unbind() {
 
 .feishu-domain-select {
   min-width: 200px;
-}
-
-/* 手填表单纵向排布，限制最大宽度避免输入框过长。 */
-.feishu-form {
-  display: grid;
-  gap: 12px;
-  max-width: 420px;
 }
 
 /* 已绑定详情用次要文字密排展示 bot 信息与部署域。 */
