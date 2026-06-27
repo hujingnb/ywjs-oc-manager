@@ -416,6 +416,23 @@ func (h *AppInitializeHandler) buildAppSpec(ctx context.Context, app sqlc.App, h
 		}
 	}
 
+	// 已绑定企业微信：解密带出 bot_id+secret，使 RenderSecret 在重建/升级时不丢配置。
+	// 查询失败 / 无行 / 非 bound / 解密失败均静默降级为空——未绑定的 app 不应因此报错。
+	var wecomBotID, wecomSecret string
+	if binding, err := h.store.GetChannelBindingByAppAndType(ctx, sqlc.GetChannelBindingByAppAndTypeParams{
+		AppID: app.ID, ChannelType: domain.ChannelTypeWorkWeChat,
+	}); err == nil && binding.Status == domain.ChannelStatusBound && len(binding.MetadataJson) > 0 {
+		var m struct {
+			BotID            string `json:"bot_id"`
+			SecretCiphertext string `json:"secret_ciphertext"`
+		}
+		if json.Unmarshal(binding.MetadataJson, &m) == nil && m.SecretCiphertext != "" && h.cfg.Cipher != nil {
+			if plain, derr := h.cfg.Cipher.Decrypt(m.SecretCiphertext); derr == nil {
+				wecomBotID, wecomSecret = m.BotID, string(plain)
+			}
+		}
+	}
+
 	return k8sorch.AppSpec{
 		AppID:           app.ID,
 		HermesImage:     hermesImage,
@@ -434,9 +451,11 @@ func (h *AppInitializeHandler) buildAppSpec(ctx context.Context, app sqlc.App, h
 			HTTPSProxy: h.k8sCfg.Proxy.HTTPSProxy,
 			NoProxy:    h.k8sCfg.Proxy.NoProxy,
 		},
-		FeishuAppID:     feishuAppID,
-		FeishuAppSecret: feishuSecret,
-		FeishuDomain:    feishuDomain,
+		FeishuAppID:      feishuAppID,
+		FeishuAppSecret:  feishuSecret,
+		FeishuDomain:     feishuDomain,
+		WorkWeChatBotID:  wecomBotID,
+		WorkWeChatSecret: wecomSecret,
 	}
 }
 

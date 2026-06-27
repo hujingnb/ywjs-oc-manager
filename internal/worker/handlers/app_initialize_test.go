@@ -298,6 +298,48 @@ func TestBuildAppSpecCarriesFeishuCredentials(t *testing.T) {
 	})
 }
 
+// TestBuildAppSpec_WorkWeChatBound 覆盖已绑定企业微信时 buildAppSpec 从 metadata 解密带出
+// bot_id/secret，保证 app 重建/镜像升级时 RenderSecret 不丢企业微信配置。
+func TestBuildAppSpec_WorkWeChatBound(t *testing.T) {
+	cipher := testCipher(t)
+
+	// 已绑定企业微信：解密密文带出 bot_id/secret 明文。
+	t.Run("已绑定企业微信时解密带出 bot_id/secret", func(t *testing.T) {
+		store := newAppInitStub(t)
+		// 用同一把测试 cipher 加密 secret 明文，模拟 bind 时落库的 secret_ciphertext。
+		ct, err := cipher.Encrypt([]byte("sec-1"))
+		require.NoError(t, err)
+		meta, err := json.Marshal(map[string]string{
+			"bot_id":            "bot-1",
+			"secret_ciphertext": ct,
+		})
+		require.NoError(t, err)
+		// 构造一条 bound 状态的企业微信绑定，让 GetChannelBindingByAppAndType 命中。
+		store.channelBindings = map[string]sqlc.ChannelBinding{
+			domain.ChannelTypeWorkWeChat: {
+				AppID:        testAppID,
+				ChannelType:  domain.ChannelTypeWorkWeChat,
+				Status:       domain.ChannelStatusBound,
+				MetadataJson: meta,
+			},
+		}
+		handler := NewAppInitializeHandler(store, &fakeNewAPI{}, AppInitializeConfig{Cipher: cipher})
+		spec := handler.buildAppSpec(context.Background(), store.app, testRuntimeImageRef, "token")
+		assert.Equal(t, "bot-1", spec.WorkWeChatBotID)
+		assert.Equal(t, "sec-1", spec.WorkWeChatSecret)
+	})
+
+	// 未绑定企业微信：GetChannelBindingByAppAndType 返回 sql.ErrNoRows，
+	// 静默降级为空、buildAppSpec 不报错（无 error 返回值，路径不应 panic）。
+	t.Run("未绑定企业微信时字段为空且不报错", func(t *testing.T) {
+		store := newAppInitStub(t) // 未设置 channelBindings → 查询返回 sql.ErrNoRows
+		handler := NewAppInitializeHandler(store, &fakeNewAPI{}, AppInitializeConfig{Cipher: cipher})
+		spec := handler.buildAppSpec(context.Background(), store.app, testRuntimeImageRef, "token")
+		assert.Empty(t, spec.WorkWeChatBotID)
+		assert.Empty(t, spec.WorkWeChatSecret)
+	})
+}
+
 // TestAppInitializeIsIdempotentForBindingWaiting 验证应用初始化保持幂等针对绑定 Waiting 的特殊分支或幂等场景。
 func TestAppInitializeIsIdempotentForBindingWaiting(t *testing.T) {
 	store := newAppInitStub(t)
