@@ -148,6 +148,14 @@ export default {
     feishuDomainCurrent: '部署域：',
     feishuGeneratingQr: '正在生成二维码…',
     feishuConnecting: '已扫码，正在验证并连接…',
+    // 企业微信渠道手填智能机器人凭证接入专用文案（无扫码、无二维码）。
+    workWechatSubmit: '提交并连接',
+    workWechatBotIdLabel: 'Bot ID',
+    workWechatBotIdPlaceholder: '企业微信后台机器人 Bot ID',
+    workWechatSecretLabel: 'Secret',
+    workWechatSecretPlaceholder: '机器人 Secret（仅保存，不回显）',
+    workWechatGuide: '在企业微信「管理后台 → 工作台 → 智能机器人 → 创建 → API 接收消息（长连接）」中获取 Bot ID 与 Secret 后填入。',
+    workWechatBoundHint: '企业微信已连接，机器人正在接收消息。',
     // status 是渠道绑定进度状态的用户可读文案，由 formatChannelStatus 解析为 i18n key 后消费。
     status: {
       unbound: '未绑定',

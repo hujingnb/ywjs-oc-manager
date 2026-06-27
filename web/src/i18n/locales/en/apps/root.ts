@@ -148,6 +148,14 @@ export default {
     feishuDomainCurrent: 'Domain: ',
     feishuGeneratingQr: 'Generating QR code…',
     feishuConnecting: 'Scanned, verifying and connecting…',
+    // 企业微信渠道手填智能机器人凭证接入专用文案（无扫码、无二维码）。
+    workWechatSubmit: 'Submit & connect',
+    workWechatBotIdLabel: 'Bot ID',
+    workWechatBotIdPlaceholder: 'Bot ID from WeCom admin console',
+    workWechatSecretLabel: 'Secret',
+    workWechatSecretPlaceholder: 'Bot Secret (stored only, never shown)',
+    workWechatGuide: 'In WeCom admin console: Workbench → AI Bot → Create → API mode (long connection), then copy the Bot ID and Secret here.',
+    workWechatBoundHint: 'WeCom connected; the bot is receiving messages.',
     // status 是渠道绑定进度状态的用户可读文案，由 formatChannelStatus 解析为 i18n key 后消费。
     status: {
       unbound: 'Not bound',

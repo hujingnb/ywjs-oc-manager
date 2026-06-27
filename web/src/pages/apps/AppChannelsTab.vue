@@ -76,6 +76,19 @@
             </n-button>
             <n-button v-if="feishuCanUnbind" @click="unbindFeishu">{{ t('apps.channels.unbind') }}</n-button>
           </n-space>
+          <!-- 企业微信操作区：手填凭证齐备且实例就绪才可提交，已连接时仅留解绑入口。 -->
+          <n-space v-else-if="selectedChannelType === 'work_wechat'" :size="8">
+            <n-button
+              v-if="!wecomBound"
+              type="primary"
+              :disabled="!appId || !canManage || !instanceReady || !wecomBotId || !wecomSecret"
+              :loading="wecomBeginning"
+              @click="submitWorkWechat"
+            >
+              {{ t('apps.channels.workWechatSubmit') }}
+            </n-button>
+            <n-button v-if="wecomCanUnbind" @click="unbindWorkWechat">{{ t('apps.channels.unbind') }}</n-button>
+          </n-space>
         </div>
 
         <!-- 微信渠道详情：扫码绑定 + 状态提示，沿用既有逻辑，飞书选中时不渲染。 -->
@@ -130,6 +143,33 @@
             </template>
           </div>
         </template>
+
+        <!-- 企业微信渠道详情：已连接给出提示，未连接展示 bot_id + secret 手填表单与精简内联指引（无扫码、无二维码）。 -->
+        <template v-else-if="selectedChannelType === 'work_wechat'">
+          <div class="wecom-panel">
+            <template v-if="wecomBound">
+              <div class="wecom-bound">
+                <p class="state-text">{{ t('apps.channels.workWechatBoundHint') }}</p>
+              </div>
+            </template>
+            <template v-else>
+              <!-- 实例非运行态(重启中/升级中)时提交被禁用，提示原因避免误以为是 bug。 -->
+              <p v-if="canManage && !instanceReady" class="state-text">{{ t('apps.channels.instanceNotReady') }}</p>
+              <div class="wecom-controls">
+                <label class="wecom-field">
+                  <span class="wecom-field-label">{{ t('apps.channels.workWechatBotIdLabel') }}</span>
+                  <n-input v-model:value="wecomBotId" :disabled="!canManage" :placeholder="t('apps.channels.workWechatBotIdPlaceholder')" />
+                </label>
+                <label class="wecom-field">
+                  <span class="wecom-field-label">{{ t('apps.channels.workWechatSecretLabel') }}</span>
+                  <n-input v-model:value="wecomSecret" type="password" show-password-on="click" :disabled="!canManage" :placeholder="t('apps.channels.workWechatSecretPlaceholder')" />
+                </label>
+              </div>
+              <p class="wecom-guide">{{ t('apps.channels.workWechatGuide') }}</p>
+            </template>
+            <p v-if="wecomError" class="state-text danger">{{ t('apps.channels.errorMsg') }}{{ wecomError }}</p>
+          </div>
+        </template>
       </section>
     </div>
   </n-card>
@@ -140,6 +180,7 @@ import { computed, inject, ref, toRef, watch, type Ref } from 'vue'
 import {
   NButton,
   NCard,
+  NInput,
   NSelect,
   NSpace,
 } from 'naive-ui'
@@ -151,6 +192,7 @@ import ChannelLogo, { type ChannelLogoType } from './ChannelLogo.vue'
 import {
   useBeginChannelAuth,
   useBeginFeishuAuth,
+  useBeginWorkWechatAuth,
   useChannelProgressQuery,
   useUnbindChannel,
   channelChallengeFromProgress,
@@ -181,7 +223,7 @@ interface ChannelDisplay {
 // 使用 computed 包裹确保语言切换时渠道名称和描述响应式更新。
 const channels = computed<ReadonlyArray<ChannelDisplay>>(() => [
   { type: 'wechat', name: t('apps.channels.channelWechat'), description: t('apps.channels.channelWechatDesc'), supported: true, statusLabel: t('apps.channels.supported') },
-  { type: 'work_wechat', name: t('apps.channels.channelWorkWechat'), description: t('apps.channels.channelWorkWechatDesc'), supported: false, statusLabel: t('apps.channels.unsupported') },
+  { type: 'work_wechat', name: t('apps.channels.channelWorkWechat'), description: t('apps.channels.channelWorkWechatDesc'), supported: true, statusLabel: t('apps.channels.supported') },
   { type: 'feishu', name: t('apps.channels.channelFeishu'), description: t('apps.channels.channelFeishuDesc'), supported: true, statusLabel: t('apps.channels.supported') },
   { type: 'dingtalk', name: t('apps.channels.channelDingtalk'), description: t('apps.channels.channelDingtalkDesc'), supported: false, statusLabel: t('apps.channels.unsupported') },
   { type: 'telegram', name: t('apps.channels.channelTelegram'), description: t('apps.channels.channelTelegramDesc'), supported: false, statusLabel: t('apps.channels.unsupported') },
@@ -194,9 +236,9 @@ const channels = computed<ReadonlyArray<ChannelDisplay>>(() => [
 const auth = useAuthStore()
 const app = inject<Ref<AppDTO | null>>('app')
 const appId = toRef(props, 'appId')
-// selectedChannelType 是当前详情区展示的已支持渠道；目前可在 wechat / feishu 间切换。
+// selectedChannelType 是当前详情区展示的已支持渠道；目前可在 wechat / feishu / work_wechat 间切换。
 // 暂不支持渠道点击被忽略，不会改变此值，确保详情区只渲染有真实绑定能力的渠道。
-const selectedChannelType = ref<'wechat' | 'feishu'>('wechat')
+const selectedChannelType = ref<'wechat' | 'feishu' | 'work_wechat'>('wechat')
 // channelType / channelTypeRef 固定指向 wechat，供既有微信 hook（进度/发起/解绑）专用，
 // 切换到飞书时微信轮询仍以原契约在后台运行，微信链路逻辑保持零改动。
 const channelType = computed(() => 'wechat')
@@ -204,10 +246,10 @@ const channelTypeRef = computed<string | undefined>(() => 'wechat')
 // activeChannel 跟随 selectedChannelType，让标题、状态与列表高亮反映当前选中渠道。
 const activeChannel = computed(() => channels.value.find(channel => channel.type === selectedChannelType.value) ?? channels.value[0])
 
-// selectChannel 仅接受已支持渠道（wechat / feishu）；暂不支持渠道保持禁用且不切换详情区。
+// selectChannel 仅接受已支持渠道（wechat / feishu / work_wechat）；暂不支持渠道保持禁用且不切换详情区。
 function selectChannel(channel: ChannelDisplay) {
   if (!channel.supported) return
-  if (channel.type === 'wechat' || channel.type === 'feishu') {
+  if (channel.type === 'wechat' || channel.type === 'feishu' || channel.type === 'work_wechat') {
     selectedChannelType.value = channel.type
   }
 }
@@ -293,6 +335,41 @@ async function unbindFeishu() {
   feishuChallenge.value = null
 }
 
+// ---- 企业微信渠道（手填智能机器人凭证）----
+// 比飞书简单：无模式选择、无二维码、无部署域下拉，仅 bot_id + secret 手填表单 + 提交。
+// 企业微信手填表单输入（仅提交时使用，不回显已绑定 secret）。
+const wecomBotId = ref('')
+const wecomSecret = ref('')
+const beginWorkWechat = useBeginWorkWechatAuth(appId)
+const wecomBeginning = computed(() => beginWorkWechat.isPending.value)
+// wecomProgressType 仅在选中企业微信时返回 'work_wechat'，否则返回 undefined 关闭轮询，
+// 与飞书一致，避免停留在其他详情区时仍向企业微信进度接口发请求。
+const wecomProgressType = computed<string | undefined>(() => (selectedChannelType.value === 'work_wechat' ? 'work_wechat' : undefined))
+// wecomChannelRef 固定为 'work_wechat'，供解绑接口构造路径与失效缓存 key 使用。
+const wecomChannelRef = computed<string | undefined>(() => 'work_wechat')
+const { data: wecomProgress } = useChannelProgressQuery(appId, wecomProgressType)
+const unbindWorkWechatMutation = useUnbindChannel(appId, wecomChannelRef)
+// wecomBound 表示企业微信已连接，用于切换已连接提示与解绑按钮。
+const wecomBound = computed(() => wecomProgress.value?.status === 'bound')
+// wecomError 展示最近一次绑定失败原因，便于用户排查凭证错误。
+const wecomError = computed(() => wecomProgress.value?.error_message ?? '')
+// wecomCanUnbind 受管理权限与非未绑定态共同约束，允许在绑定/失败态解绑重试，真正校验由后端兜底。
+const wecomCanUnbind = computed(() => canManage.value && Boolean(wecomProgress.value && wecomProgress.value.status !== 'unbound'))
+
+// submitWorkWechat 提交手填凭证：调发起接口，成功后清空 secret 输入（不滞留明文）。
+async function submitWorkWechat() {
+  if (!canManage.value) return
+  if (!wecomBotId.value || !wecomSecret.value) return
+  await beginWorkWechat.mutateAsync({ bot_id: wecomBotId.value, secret: wecomSecret.value })
+  wecomSecret.value = ''
+}
+
+// unbindWorkWechat 解绑企业微信，等待进度缓存失效后回到未绑定表单展示。
+async function unbindWorkWechat() {
+  if (!canManage.value) return
+  await unbindWorkWechatMutation.mutateAsync()
+}
+
 // beginning 是本地提交态，覆盖 beginMutation 尚未返回挑战内容前的按钮文案。
 const beginning = ref(false)
 // challenge 保存本次发起登录立即返回的挑战，轮询进度若有更新会优先使用 progressChallenge。
@@ -307,11 +384,11 @@ function onQrRendered(qr: string) {
 }
 
 // statusLabel 跟随当前选中渠道展示对应进度状态，微信选中时取值与原逻辑一致。
-const statusLabel = computed(() =>
-  selectedChannelType.value === 'feishu'
-    ? formatChannelStatus(feishuProgress.value?.status)
-    : formatChannelStatus(progress.value?.status),
-)
+const statusLabel = computed(() => {
+  if (selectedChannelType.value === 'feishu') return formatChannelStatus(feishuProgress.value?.status)
+  if (selectedChannelType.value === 'work_wechat') return formatChannelStatus(wecomProgress.value?.status)
+  return formatChannelStatus(progress.value?.status)
+})
 
 // canManage 控制发起登录和解绑按钮，真正权限仍由后端接口再次校验。
 const canManage = computed(() => canManageApp(auth.user, app?.value))
@@ -556,6 +633,44 @@ async function unbind() {
 
 /* 已绑定详情用次要文字密排展示 bot 信息与部署域。 */
 .feishu-bound {
+  display: grid;
+  gap: 4px;
+}
+
+/* 企业微信面板：纵向排布手填表单与精简内联指引，整体与微信/飞书详情区视觉一致。 */
+.wecom-panel {
+  display: grid;
+  gap: 16px;
+}
+
+/* 控制区纵向堆叠 bot_id 与 secret 两个输入框。 */
+.wecom-controls {
+  display: grid;
+  gap: 14px;
+  max-width: 420px;
+}
+
+.wecom-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.wecom-field-label {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+/* 精简内联指引：一句话说明在企业微信后台何处获取凭证，用次要色弱化。 */
+.wecom-guide {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* 已连接提示用次要文字密排。 */
+.wecom-bound {
   display: grid;
   gap: 4px;
 }
