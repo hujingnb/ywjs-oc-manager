@@ -22,6 +22,8 @@ type channelService interface {
 	BeginAuth(ctx context.Context, principal auth.Principal, appID, channelType string) (service.ChallengeResult, error)
 	// BeginFeishuAuth 是飞书专用发起入口（仅扫码自动创建，入参只含 domain）。
 	BeginFeishuAuth(ctx context.Context, principal auth.Principal, appID string, in service.FeishuAuthInput) (service.ChallengeResult, error)
+	// BeginWorkWechatAuth 是企业微信专用发起入口（手填 bot_id+secret，同步注入）。
+	BeginWorkWechatAuth(ctx context.Context, principal auth.Principal, appID string, in service.WorkWechatAuthInput) (service.ChallengeResult, error)
 	PollAuth(ctx context.Context, principal auth.Principal, appID, channelType string) (service.ProgressResult, error)
 	Unbind(ctx context.Context, principal auth.Principal, appID, channelType string) error
 }
@@ -42,7 +44,7 @@ func RegisterChannelRoutes(router gin.IRouter, handler *ChannelsHandler) {
 // BeginAuth 触发渠道登录挑战。
 //
 // @Summary      触发渠道登录挑战
-// @Description  为指定应用和渠道类型发起登录授权流程，返回挑战信息（如二维码 URL）。feishu 渠道需传请求体，其他渠道（如 wechat）无需请求体。
+// @Description  为指定应用和渠道类型发起登录授权流程，返回挑战信息（如二维码 URL）。feishu / work_wechat 渠道需传请求体，其他渠道（如 wechat）无需请求体。
 // @Tags         channels
 // @Accept       json
 // @Produce      json
@@ -73,6 +75,25 @@ func (h *ChannelsHandler) BeginAuth(c *gin.Context) {
 		}
 		result, err := h.service.BeginFeishuAuth(c.Request.Context(), principal, appID, service.FeishuAuthInput{
 			Domain: req.Domain,
+		})
+		if err != nil {
+			writeChannelError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"challenge": result})
+		return
+	}
+
+	// 企业微信走专用入口（读请求体 bot_id+secret，手填同步注入），与微信/飞书分流。
+	if channelType == domain.ChannelTypeWorkWeChat {
+		var req WorkWechatChannelAuthRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgChannelInvalidRequest)
+			return
+		}
+		result, err := h.service.BeginWorkWechatAuth(c.Request.Context(), principal, appID, service.WorkWechatAuthInput{
+			BotID:  req.BotID,
+			Secret: req.Secret,
 		})
 		if err != nil {
 			writeChannelError(c, err)

@@ -153,6 +153,14 @@ type FeishuChannelAuthRequest struct {
 	Domain string `json:"domain" binding:"omitempty,oneof=feishu lark"`
 }
 
+// WorkWechatChannelAuthRequest 是企业微信渠道发起请求体（手填智能机器人凭证）。
+type WorkWechatChannelAuthRequest struct {
+	// BotID 是企业微信智能机器人 Bot ID（必填）。
+	BotID string `json:"bot_id" binding:"required"`
+	// Secret 是机器人 Secret（必填，仅入库密文与注入 Secret，不回显）。
+	Secret string `json:"secret" binding:"required"`
+}
+
 // CreateMemberAppRequest 为已有成员创建新实例的请求体。
 // k8s 模型下不需要指定节点，pod 落点由调度器决定。
 type CreateMemberAppRequest struct {

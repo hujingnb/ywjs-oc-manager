@@ -29,6 +29,13 @@ type channelServiceStub struct {
 	beganFeishu bool
 	// lastFeishuDomain 记录最近一次调用 BeginFeishuAuth 传入的 domain，用于断言请求体解析正确。
 	lastFeishuDomain string
+	// workWechatResult/workWechatErr 是企业微信分流的预置返回值。
+	workWechatResult service.ChallengeResult
+	workWechatErr    error
+	// beganWorkWeChat 记录 BeginWorkWechatAuth 是否被调用，用于断言分流路径。
+	beganWorkWeChat bool
+	// lastWorkWechatIn 记录最近一次调用 BeginWorkWechatAuth 的入参，用于断言请求体解析正确。
+	lastWorkWechatIn service.WorkWechatAuthInput
 }
 
 func (s *channelServiceStub) BeginAuth(_ context.Context, _ auth.Principal, _, _ string) (service.ChallengeResult, error) {
@@ -48,6 +55,13 @@ func (s *channelServiceStub) BeginFeishuAuth(_ context.Context, _ auth.Principal
 	s.beganFeishu = true
 	s.lastFeishuDomain = in.Domain
 	return s.feishuResult, s.feishuErr
+}
+
+// BeginWorkWechatAuth stub 记录调用，用于企业微信分流路径测试。
+func (s *channelServiceStub) BeginWorkWechatAuth(_ context.Context, _ auth.Principal, _ string, in service.WorkWechatAuthInput) (service.ChallengeResult, error) {
+	s.beganWorkWeChat = true
+	s.lastWorkWechatIn = in
+	return s.workWechatResult, s.workWechatErr
 }
 
 // newChannelsTestRouter 构建用于测试的 gin router。
@@ -208,4 +222,45 @@ func TestChannelsBeginWechatUnchanged(t *testing.T) {
 	// 微信路径不触发 BeginFeishuAuth。
 	assert.False(t, stub.beganFeishu)
 	assert.Contains(t, w.Body.String(), "challenge")
+}
+
+// TestBeginAuth_WorkWeChat 覆盖企业微信手填发起：handler 读 bot_id/secret body → 调 BeginWorkWechatAuth。
+func TestBeginAuth_WorkWeChat(t *testing.T) {
+	// fake channelService 记录 BeginWorkWechatAuth 入参，预置成功返回值。
+	stub := &channelServiceStub{workWechatResult: service.ChallengeResult{Status: "pending_auth", ChannelType: "work_wechat"}}
+	router := newChannelsTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	// POST /api/v1/apps/app-1/channels/work_wechat/auth body={"bot_id":"bot-1","secret":"sec-1"}
+	body := strings.NewReader(`{"bot_id":"bot-1","secret":"sec-1"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/apps/app-1/channels/work_wechat/auth", body)
+	req.Header.Set("Content-Type", "application/json")
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router.ServeHTTP(w, req)
+
+	// 断言：200；fake 收到 in.BotID=="bot-1" && in.Secret=="sec-1"。
+	require.Equal(t, http.StatusOK, w.Code)
+	require.True(t, stub.beganWorkWeChat)
+	assert.Equal(t, "bot-1", stub.lastWorkWechatIn.BotID)
+	assert.Equal(t, "sec-1", stub.lastWorkWechatIn.Secret)
+	assert.Contains(t, w.Body.String(), "challenge")
+}
+
+// TestBeginAuth_WorkWeChat_BadBody 覆盖企业微信缺字段（bot_id 或 secret 未填）返回 400 BAD_REQUEST。
+func TestBeginAuth_WorkWeChat_BadBody(t *testing.T) {
+	// body={} 缺必填字段，binding:"required" 应拦截并返回 400。
+	stub := &channelServiceStub{}
+	router := newChannelsTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	body := strings.NewReader(`{}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/apps/app-1/channels/work_wechat/auth", body)
+	req.Header.Set("Content-Type", "application/json")
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router.ServeHTTP(w, req)
+
+	// 缺必填字段应返回 400，且不触发 service 调用。
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
+	assert.False(t, stub.beganWorkWeChat)
 }
