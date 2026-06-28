@@ -17,6 +17,15 @@ RUN set -eux; for f in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sour
         -e "s|security.debian.org|${DEBIAN_MIRROR_HOST}|g" "$f" || true; \
     done
 
+# PyPI 源替换为国内镜像（与上面 apt 用 aliyun 保持一致）。同时作用于两类安装：
+#   - 构建期 `uv pip install`（下面预装 weixin/feishu/discord/edge-tts 等）→ 走 UV_INDEX_URL；
+#   - 运行期引擎 tools.lazy_deps 的 `python -m pip install`（任何未预装的按需依赖）→ 走 PIP_INDEX_URL。
+# 用 ENV 而非仅 ARG：使配置持久到运行容器，让线上出网受限的 pod 内 lazy install 也走国内源，
+# 避免直连 pypi.org 慢/超时（本次「验证连接中」根因即出网慢导致 lazy 安装阻塞数分钟）。
+ARG PYPI_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ENV PIP_INDEX_URL=${PYPI_INDEX_URL} \
+    UV_INDEX_URL=${PYPI_INDEX_URL}
+
 # 系统依赖：hermes install.sh 需要 curl + git；运行时需要 ripgrep + ffmpeg；tini 用作 PID 1；xz-utils 用来解压 node tarball。
 RUN apt-get update && apt-get install -y --no-install-recommends \
       curl ca-certificates git ripgrep ffmpeg tini xz-utils && \
