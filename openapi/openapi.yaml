@@ -66,8 +66,10 @@ components:
     handlers.ConversationChatRequest:
       properties:
         message:
-          description: Message 是文字内容，必填；空白内容由 ShouldBindJSON required tag 拦截。
-          type: string
+          description: |-
+            Message 是消息内容：文字字符串，或多模态 parts 数组
+            [{type:"text",text} | {type:"input_file",file_id,filename,mime}]。
+            文件 part 由 service 富化为带 file_url 的预签名引用后转发 oc-ops。
       required:
       - message
       type: object
@@ -1521,6 +1523,17 @@ components:
           description: Status 是渠道绑定状态，pending_auth 表示后台 job 正在发起登录挑战。
           type: string
       type: object
+    service.ConversationFileUploadResult:
+      properties:
+        file_id:
+          type: string
+        filename:
+          type: string
+        mime:
+          type: string
+        size:
+          type: integer
+      type: object
     service.CreateAppForMemberResult:
       properties:
         app:
@@ -2794,6 +2807,116 @@ paths:
       summary: 流式续聊
       tags:
       - hermes-conversation
+  /apps/{appId}/hermes/conversations/{sid}/files:
+    post:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 会话 ID
+        in: path
+        name: sid
+        required: true
+        schema:
+          type: string
+      - description: 原始文件名（含扩展名）
+        in: query
+        name: filename
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              format: binary
+              type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.ConversationFileUploadResult'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "413":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Request Entity Too Large
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 上传对话文件
+      tags:
+      - hermes-conversations
+  /apps/{appId}/hermes/conversations/{sid}/files/{fileId}:
+    get:
+      parameters:
+      - description: 应用 ID
+        in: path
+        name: appId
+        required: true
+        schema:
+          type: string
+      - description: 会话 ID
+        in: path
+        name: sid
+        required: true
+        schema:
+          type: string
+      - description: 文件 ID
+        in: path
+        name: fileId
+        required: true
+        schema:
+          type: string
+      responses:
+        "302":
+          description: 重定向至 S3 预签名 URL
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 下载对话文件（重定向至预签名 URL）
+      tags:
+      - hermes-conversations
   /apps/{appId}/hermes/conversations/{sid}/messages:
     get:
       parameters:

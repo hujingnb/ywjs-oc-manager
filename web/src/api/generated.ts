@@ -920,6 +920,158 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/apps/{appId}/hermes/conversations/{sid}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 上传对话文件 */
+        post: {
+            parameters: {
+                query: {
+                    /** @description 原始文件名（含扩展名） */
+                    filename: string;
+                };
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description 会话 ID */
+                    sid: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["service.ConversationFileUploadResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Request Entity Too Large */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/apps/{appId}/hermes/conversations/{sid}/files/{fileId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 下载对话文件（重定向至预签名 URL） */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 应用 ID */
+                    appId: string;
+                    /** @description 会话 ID */
+                    sid: string;
+                    /** @description 文件 ID */
+                    fileId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 重定向至 S3 预签名 URL */
+                302: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/apps/{appId}/hermes/conversations/{sid}/messages": {
         parameters: {
             query?: never;
@@ -12243,8 +12395,12 @@ export interface components {
             old_password: string;
         };
         "handlers.ConversationChatRequest": {
-            /** @description Message 是文字内容，必填；空白内容由 ShouldBindJSON required tag 拦截。 */
-            message: string;
+            /**
+             * @description Message 是消息内容：文字字符串，或多模态 parts 数组
+             *     [{type:"text",text} | {type:"input_file",file_id,filename,mime}]。
+             *     文件 part 由 service 富化为带 file_url 的预签名引用后转发 oc-ops。
+             */
+            message: unknown;
         };
         "handlers.CreateAssistantVersionRequest": {
             description?: string;
@@ -13134,6 +13290,12 @@ export interface components {
             qrcode?: string;
             /** @description Status 是渠道绑定状态，pending_auth 表示后台 job 正在发起登录挑战。 */
             status?: string;
+        };
+        "service.ConversationFileUploadResult": {
+            file_id?: string;
+            filename?: string;
+            mime?: string;
+            size?: number;
         };
         "service.CreateAppForMemberResult": {
             app?: components["schemas"]["service.AppResult"];

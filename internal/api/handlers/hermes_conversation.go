@@ -21,8 +21,8 @@ type conversationHandlerService interface {
 	Messages(ctx context.Context, p auth.Principal, appID, sid string) ([]ocops.ConversationMessage, error)
 	CreateSession(ctx context.Context, p auth.Principal, appID, title string) (ocops.ConversationSession, error)
 	DeleteSession(ctx context.Context, p auth.Principal, appID, sid string) error
-	Chat(ctx context.Context, p auth.Principal, appID, sid, message string) (ocops.ConversationChatResult, error)
-	ChatStream(ctx context.Context, p auth.Principal, appID, sid, message string) (<-chan ocops.ConversationStreamEvent, error)
+	Chat(ctx context.Context, p auth.Principal, appID, sid string, message any) (ocops.ConversationChatResult, error)
+	ChatStream(ctx context.Context, p auth.Principal, appID, sid string, message any) (<-chan ocops.ConversationStreamEvent, error)
 	Rename(ctx context.Context, p auth.Principal, appID, sid, title string) (ocops.ConversationSession, error)
 }
 

@@ -62,6 +62,9 @@ type Dependencies struct {
 	HermesKanbanService *service.HermesKanbanService
 	// HermesConversationService 提供实例会话能力；nil 时不注册会话路由。
 	HermesConversationService *service.HermesConversationService
+	// HermesConversationFileService 提供对话文件上传/下载能力；
+	// 仅 S3 启用时非 nil，nil 时不注册文件路由（续聊含文件 part 将被拒）。
+	HermesConversationFileService *service.ConversationFileService
 	// HermesCronService 提供实例定时任务能力；nil 时不注册 cron 路由。
 	HermesCronService *service.HermesCronService
 	// AppSkillService 提供实例级 skill 安装/卸载/更新与对账能力；nil 时不注册 skill 路由。
@@ -227,6 +230,9 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.HermesConversationService != nil {
 		handlers.RegisterHermesConversationRoutes(user, handlers.NewHermesConversationHandler(dep.HermesConversationService))
+	}
+	if dep.HermesConversationFileService != nil {
+		handlers.RegisterHermesConversationFileRoutes(user, handlers.NewHermesConversationFileHandler(dep.HermesConversationFileService))
 	}
 	if dep.HermesCronService != nil {
 		handlers.RegisterHermesCronRoutes(user, handlers.NewHermesCronHandler(dep.HermesCronService))

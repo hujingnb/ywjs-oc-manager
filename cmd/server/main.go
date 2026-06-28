@@ -546,6 +546,25 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	hermesConversationService := service.NewHermesConversationService(ocopsClient, ocopsResolver)
 	hermesCronService := service.NewHermesCronService(ocopsClient, ocopsResolver)
 
+	// 对话文件能力依赖 S3：启用时构造 ConversationFileService 并注入续聊富化解析器，
+	// 同时供路由注册文件上传/下载端点；未启用 S3 时 convFileService 为 nil，文件路由不注册、
+	// 续聊含文件 part 会被 service 层拒绝。
+	var convFileService *service.ConversationFileService
+	if cfg.Storage.S3.Enabled {
+		s3cfg := storage.S3Config{
+			Endpoint:        cfg.Storage.S3.Endpoint,
+			Region:          cfg.Storage.S3.Region,
+			Bucket:          cfg.Storage.S3.Bucket,
+			AccessKeyID:     cfg.Storage.S3.AccessKeyID,
+			SecretAccessKey: cfg.Storage.S3.SecretAccessKey,
+			UsePathStyle:    cfg.Storage.S3.UsePathStyle,
+		}
+		convFileStore := store.NewConversationFileStore(dbStore.Queries)
+		convFileService = service.NewConversationFileService(convFileStore, storage.NewS3ObjectStore(s3cfg), ocopsResolver)
+		// 把文件解析器注入续聊 service：续聊里的 input_file part 经它富化为预签名 file_url。
+		hermesConversationService.SetFileResolver(convFileService)
+	}
+
 	// AppSkillService：实例级 skill 安装/卸载/更新与对账。
 	// - AppLocator 由 ocopsResolver.LocateApp 满足（已在 ocops.go 实现，含 VersionID 字段）。
 	// - AssistantVersionLoader 由 assistantVersionSkillLoader 适配（GetAssistantVersion + decodeSkills）。
@@ -612,39 +631,40 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	server := &http.Server{
 		Addr: cfg.App.HTTPAddr,
 		Handler: api.NewRouter(api.Dependencies{
-			AuthService:                  authService,
-			Captcha:                      captchaService,
-			OrganizationService:          organizationService,
-			ModelCatalogService:          modelCatalogService,
-			MemberService:                memberService,
-			OnboardingService:            onboardingService,
-			AuditService:                 auditService,
-			ChannelService:               channelService,
-			KnowledgeService:             knowledgeService,
-			IndustryKnowledgeUploadToken: cfg.IndustryKnowledge.UploadToken,
-			TransferLimit:                transferLimit,
-			WorkspaceService:             workspaceService,
-			RuntimeOpService:             runtimeOpService,
-			AppService:                   appService,
-			UsageService:                 usageService,
-			RechargeService:              rechargeService,
-			PlatformOverview:             platformOverviewService,
-			AssistantVersionService:      assistantVersionService,
-			PlatformSkillService:         platformSkillService,
-			SkillTicketService:           skillTicketService,
-			SkillTicketMessageService:    skillTicketMessageService,
-			CustomSkillService:           customSkillService,
-			HermesKanbanService:          hermesKanbanService,
-			HermesConversationService:    hermesConversationService,
-			HermesCronService:            hermesCronService,
-			AppSkillService:              appSkillService,
-			SkillLibraryService:          skillLibraryService,
-			BootstrapService:             bootstrapSvc,
-			JobsStore:                    dbStore.Queries,
-			TokenManager:                 tokenManager,
-			JobNotifier:                  redisQueue,
-			AllowedOrigins:               allowedOriginsFromConfig(cfg),
-			DefaultLocale:                cfg.I18n.DefaultLocale,
+			AuthService:                   authService,
+			Captcha:                       captchaService,
+			OrganizationService:           organizationService,
+			ModelCatalogService:           modelCatalogService,
+			MemberService:                 memberService,
+			OnboardingService:             onboardingService,
+			AuditService:                  auditService,
+			ChannelService:                channelService,
+			KnowledgeService:              knowledgeService,
+			IndustryKnowledgeUploadToken:  cfg.IndustryKnowledge.UploadToken,
+			TransferLimit:                 transferLimit,
+			WorkspaceService:              workspaceService,
+			RuntimeOpService:              runtimeOpService,
+			AppService:                    appService,
+			UsageService:                  usageService,
+			RechargeService:               rechargeService,
+			PlatformOverview:              platformOverviewService,
+			AssistantVersionService:       assistantVersionService,
+			PlatformSkillService:          platformSkillService,
+			SkillTicketService:            skillTicketService,
+			SkillTicketMessageService:     skillTicketMessageService,
+			CustomSkillService:            customSkillService,
+			HermesKanbanService:           hermesKanbanService,
+			HermesConversationService:     hermesConversationService,
+			HermesConversationFileService: convFileService,
+			HermesCronService:             hermesCronService,
+			AppSkillService:               appSkillService,
+			SkillLibraryService:           skillLibraryService,
+			BootstrapService:              bootstrapSvc,
+			JobsStore:                     dbStore.Queries,
+			TokenManager:                  tokenManager,
+			JobNotifier:                   redisQueue,
+			AllowedOrigins:                allowedOriginsFromConfig(cfg),
+			DefaultLocale:                 cfg.I18n.DefaultLocale,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

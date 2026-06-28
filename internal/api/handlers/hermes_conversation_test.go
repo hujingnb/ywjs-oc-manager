@@ -20,7 +20,7 @@ import (
 type stubConversationService struct {
 	sessions []ocops.ConversationSession
 	err      error
-	gotMsg   string
+	gotMsg   any
 }
 
 func (s *stubConversationService) ListSessions(_ context.Context, _ auth.Principal, _, _ string, _, _ int) ([]ocops.ConversationSession, error) {
@@ -35,11 +35,11 @@ func (s *stubConversationService) CreateSession(_ context.Context, _ auth.Princi
 func (s *stubConversationService) DeleteSession(_ context.Context, _ auth.Principal, _, _ string) error {
 	return s.err
 }
-func (s *stubConversationService) Chat(_ context.Context, _ auth.Principal, _, _, msg string) (ocops.ConversationChatResult, error) {
+func (s *stubConversationService) Chat(_ context.Context, _ auth.Principal, _, _ string, msg any) (ocops.ConversationChatResult, error) {
 	s.gotMsg = msg
 	return ocops.ConversationChatResult{Message: ocops.ConversationMessage{Role: "assistant", Content: "ok"}}, s.err
 }
-func (s *stubConversationService) ChatStream(_ context.Context, _ auth.Principal, _, _, msg string) (<-chan ocops.ConversationStreamEvent, error) {
+func (s *stubConversationService) ChatStream(_ context.Context, _ auth.Principal, _, _ string, msg any) (<-chan ocops.ConversationStreamEvent, error) {
 	s.gotMsg = msg
 	if s.err != nil {
 		return nil, s.err

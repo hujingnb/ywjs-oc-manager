@@ -502,10 +502,12 @@ type CreateConversationRequest struct {
 	Title string `json:"title"`
 }
 
-// ConversationChatRequest 是续聊请求体。v1 仅文字 Message；图片在后续增强中以 parts 承载。
+// ConversationChatRequest 是续聊请求体。
 type ConversationChatRequest struct {
-	// Message 是文字内容，必填；空白内容由 ShouldBindJSON required tag 拦截。
-	Message string `json:"message" binding:"required"`
+	// Message 是消息内容：文字字符串，或多模态 parts 数组
+	// [{type:"text",text} | {type:"input_file",file_id,filename,mime}]。
+	// 文件 part 由 service 富化为带 file_url 的预签名引用后转发 oc-ops。
+	Message any `json:"message" binding:"required"`
 }
 
 // RenameConversationRequest 是 PATCH /hermes/conversations/:sid 的请求体。

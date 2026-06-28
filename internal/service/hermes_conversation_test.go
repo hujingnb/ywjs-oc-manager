@@ -17,6 +17,7 @@ type fakeConversationOps struct {
 	sessions []ocops.ConversationSession
 	chatOut  ocops.ConversationChatResult
 	gotSID   string
+	lastReq  ocops.ConversationChatReq // 记录最后一次 SessionChat/SessionChatStream 的请求，供富化断言
 }
 
 func (f *fakeConversationOps) ListSessions(_ context.Context, _ ocops.Endpoint, _ string, _, _ int) ([]ocops.ConversationSession, error) {
@@ -32,12 +33,14 @@ func (f *fakeConversationOps) CreateSession(_ context.Context, _ ocops.Endpoint,
 func (f *fakeConversationOps) DeleteSession(_ context.Context, _ ocops.Endpoint, _ string) error {
 	return nil
 }
-func (f *fakeConversationOps) SessionChat(_ context.Context, _ ocops.Endpoint, sid string, _ ocops.ConversationChatReq) (ocops.ConversationChatResult, error) {
+func (f *fakeConversationOps) SessionChat(_ context.Context, _ ocops.Endpoint, sid string, req ocops.ConversationChatReq) (ocops.ConversationChatResult, error) {
 	f.gotSID = sid
+	f.lastReq = req
 	return f.chatOut, nil
 }
-func (f *fakeConversationOps) SessionChatStream(_ context.Context, _ ocops.Endpoint, sid string, _ ocops.ConversationChatReq) (<-chan ocops.ConversationStreamEvent, error) {
+func (f *fakeConversationOps) SessionChatStream(_ context.Context, _ ocops.Endpoint, sid string, req ocops.ConversationChatReq) (<-chan ocops.ConversationStreamEvent, error) {
 	f.gotSID = sid
+	f.lastReq = req
 	// 返回一个预填单条事件后关闭的 channel，供调用方断言
 	ch := make(chan ocops.ConversationStreamEvent, 1)
 	ch <- ocops.ConversationStreamEvent{Event: "assistant.delta", Payload: []byte(`{"delta":"hi"}`)}
@@ -134,5 +137,71 @@ func TestConversationServiceChatStreamEmpty(t *testing.T) {
 	p := auth.Principal{Role: domain.UserRoleOrgMember, OrgID: "o1", UserID: "u1"}
 	// 空白消息应被 service 层拦截，不透传上游
 	_, err := svc.ChatStream(context.Background(), p, "app-1", "s1", "")
+	require.ErrorIs(t, err, ErrConversationBadRequest)
+}
+
+// fileResolverFunc 把函数适配成 ConversationFileResolver 接口，便于在测试中内联注入解析逻辑。
+type fileResolverFunc func(ctx context.Context, appID, sid, fileID string) (string, string, string, error)
+
+// ResolveFileURL 实现 ConversationFileResolver 接口，直接委派内部函数。
+func (f fileResolverFunc) ResolveFileURL(ctx context.Context, appID, sid, fileID string) (string, string, string, error) {
+	return f(ctx, appID, sid, fileID)
+}
+
+// 发送含 input_file part 的多模态消息：service 把 file_id 富化为预签名 file_url 等元数据后转 oc-ops。
+// 覆盖正常路径：文字 part 原样保留，文件 part 被补全 file_url/filename/mime。
+func TestChatEnrichesFileParts(t *testing.T) {
+	ops := &fakeConversationOps{}
+	loc := OcOpsAppLocation{OrgID: "o1", OwnerUserID: "u1", Supported: true, Endpoint: ocops.Endpoint{BaseURL: "http://x"}}
+	svc := NewHermesConversationService(ops, &fakeOcOpsResolver{loc: loc})
+	// 注入解析器：断言收到的 file_id，并返回固定预签名 URL 与元数据
+	svc.SetFileResolver(fileResolverFunc(func(ctx context.Context, appID, sid, fileID string) (string, string, string, error) {
+		assert.Equal(t, "f1", fileID)
+		return "https://s3/x", "a.pdf", "application/pdf", nil
+	}))
+	p := auth.Principal{Role: domain.UserRoleOrgMember, OrgID: "o1", UserID: "u1"}
+	// 多模态消息：第 0 个文字 part + 第 1 个文件 part（仅含 file_id）
+	msg := []any{
+		map[string]any{"type": "text", "text": "看看这个"},
+		map[string]any{"type": "input_file", "file_id": "f1"},
+	}
+	_, err := svc.Chat(context.Background(), p, "app1", "s1", msg)
+	require.NoError(t, err)
+	// 转发给 oc-ops 的 Message 应仍是 parts 数组，文件 part 已被富化
+	parts, ok := ops.lastReq.Message.([]any)
+	require.True(t, ok)
+	fp := parts[1].(map[string]any)
+	assert.Equal(t, "https://s3/x", fp["file_url"])
+	assert.Equal(t, "a.pdf", fp["filename"])
+	assert.Equal(t, "application/pdf", fp["mime"])
+}
+
+// 纯文件、无文字也允许：放宽空消息校验，只要有 input_file part 即视为有内容。
+func TestChatAllowsFileOnly(t *testing.T) {
+	ops := &fakeConversationOps{}
+	loc := OcOpsAppLocation{OrgID: "o1", OwnerUserID: "u1", Supported: true, Endpoint: ocops.Endpoint{BaseURL: "http://x"}}
+	svc := NewHermesConversationService(ops, &fakeOcOpsResolver{loc: loc})
+	svc.SetFileResolver(fileResolverFunc(func(ctx context.Context, a, s, f string) (string, string, string, error) {
+		return "https://s3/x", "a.pdf", "application/pdf", nil
+	}))
+	p := auth.Principal{Role: domain.UserRoleOrgMember, OrgID: "o1", UserID: "u1"}
+	// 仅含一个文件 part、无任何文字，应被接受
+	_, err := svc.Chat(context.Background(), p, "app1", "s1",
+		[]any{map[string]any{"type": "input_file", "file_id": "f1"}})
+	require.NoError(t, err)
+}
+
+// input_file 缺 file_id 时富化拒绝，返回 ErrConversationBadRequest。
+func TestChatRejectsFilePartWithoutID(t *testing.T) {
+	ops := &fakeConversationOps{}
+	loc := OcOpsAppLocation{OrgID: "o1", OwnerUserID: "u1", Supported: true, Endpoint: ocops.Endpoint{BaseURL: "http://x"}}
+	svc := NewHermesConversationService(ops, &fakeOcOpsResolver{loc: loc})
+	svc.SetFileResolver(fileResolverFunc(func(ctx context.Context, a, s, f string) (string, string, string, error) {
+		return "https://s3/x", "a.pdf", "application/pdf", nil
+	}))
+	p := auth.Principal{Role: domain.UserRoleOrgMember, OrgID: "o1", UserID: "u1"}
+	// 文件 part 缺少 file_id，应在富化阶段被拒
+	_, err := svc.Chat(context.Background(), p, "app1", "s1",
+		[]any{map[string]any{"type": "input_file"}})
 	require.ErrorIs(t, err, ErrConversationBadRequest)
 }
