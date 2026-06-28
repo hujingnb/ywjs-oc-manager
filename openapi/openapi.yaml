@@ -1284,6 +1284,12 @@ components:
             RuntimeImageSha256 是 docker inspect 返回的镜像 config digest（sha256:...）。
             仅平台管理员可见；与 RuntimeImageRef 共同标识节点上运行的精确镜像版本。
           type: string
+        runtime_phase:
+          description: |-
+            RuntimePhase 是运行时就绪维度(与 status 正交):ready/starting/restarting/unknown。
+            前端发起闸门 = status allowlist 且 runtime_phase==ready;非 ready 时按 phase 展示
+            正在启动 / 重启中 / 状态确认中。
+          type: string
         status:
           type: string
         version_id:

@@ -13139,6 +13139,12 @@ export interface components {
              *     仅平台管理员可见；与 RuntimeImageRef 共同标识节点上运行的精确镜像版本。
              */
             runtime_image_sha256?: string;
+            /**
+             * @description RuntimePhase 是运行时就绪维度(与 status 正交):ready/starting/restarting/unknown。
+             *     前端发起闸门 = status allowlist 且 runtime_phase==ready;非 ready 时按 phase 展示
+             *     正在启动 / 重启中 / 状态确认中。
+             */
+            runtime_phase?: string;
             status?: string;
             /** @description VersionID 是实例绑定的助手版本 id；空表示未绑定（仅历史数据）。 */
             version_id?: string;

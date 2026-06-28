@@ -96,6 +96,10 @@ type AppResult struct {
 	Name         string `json:"name"`
 	Description  string `json:"description,omitempty"`
 	Status       string `json:"status"`
+	// RuntimePhase 是运行时就绪维度(与 status 正交):ready/starting/restarting/unknown。
+	// 前端发起闸门 = status allowlist 且 runtime_phase==ready;非 ready 时按 phase 展示
+	// 正在启动 / 重启中 / 状态确认中。
+	RuntimePhase string `json:"runtime_phase"`
 	APIKeyStatus string `json:"api_key_status"`
 	// KnowledgeQuotaBytes 是实例知识库累计容量上限，单位字节。
 	KnowledgeQuotaBytes int64 `json:"knowledge_quota_bytes"`
@@ -192,6 +196,7 @@ func toAppResult(app sqlc.App) AppResult {
 		OwnerUserID:         app.OwnerUserID,
 		Name:                app.Name,
 		Status:              app.Status,
+		RuntimePhase:        app.RuntimePhase,
 		APIKeyStatus:        app.ApiKeyStatus,
 		KnowledgeQuotaBytes: app.KnowledgeQuotaBytes,
 	}
