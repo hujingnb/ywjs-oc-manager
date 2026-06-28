@@ -68,7 +68,7 @@ func TestConversationFileUploadSuccess(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "file_id")
 }
 
-// filename 缺失：query 中未提供 filename 参数，handler 应返回 400。
+// filename 缺失：query 中未提供 filename 参数，handler 应返回 400，响应体含 apierror code。
 func TestConversationFileUploadMissingFilename(t *testing.T) {
 	svc := &stubConversationFileService{}
 	w := httptest.NewRecorder()
@@ -78,7 +78,8 @@ func TestConversationFileUploadMissingFilename(t *testing.T) {
 		strings.NewReader("binary-content"))
 	newConvFileTestRouter(svc).ServeHTTP(w, req)
 	require.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "filename required")
+	// 响应体应为 apierror ErrorResponse 格式，包含 code 字段。
+	assert.Contains(t, w.Body.String(), "CONVERSATION_FILE_BAD_REQUEST")
 }
 
 // 上传文件类型不支持：fake svc 返回 ErrConversationFileUnsupported，handler 应映射为 400。

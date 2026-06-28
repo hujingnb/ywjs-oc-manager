@@ -4,12 +4,12 @@ package handlers
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/auth"
 	"oc-manager/internal/service"
 )
@@ -41,22 +41,10 @@ func RegisterHermesConversationFileRoutes(router gin.IRouter, h *HermesConversat
 	g.GET("/:sid/files/:fileId", h.Download)
 }
 
-// writeConversationFileError 将 service 哨兵错误映射为 HTTP 响应。
-// 映射规则：Forbidden→403，NotFound→404，Unsupported→400，TooLarge→413，其余→500。
-// body 统一使用 {"error": "<原始错误消息>"} 格式，保留动态原因方便调试。
+// writeConversationFileError 把对话文件 service 哨兵错误映射为统一 ErrorResponse。
+// 具体规则见 request_errors.go 的 mappedServiceErrorRules（对话文件节）。
 func writeConversationFileError(c *gin.Context, err error) {
-	switch {
-	case errors.Is(err, service.ErrConversationFileForbidden):
-		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
-	case errors.Is(err, service.ErrConversationFileNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-	case errors.Is(err, service.ErrConversationFileUnsupported):
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-	case errors.Is(err, service.ErrConversationFileTooLarge):
-		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": err.Error()})
-	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-	}
+	writeMappedServiceError(c, err, http.StatusInternalServerError, apierror.MsgInternal)
 }
 
 // Upload POST /api/v1/apps/{appId}/hermes/conversations/{sid}/files
@@ -79,7 +67,7 @@ func (h *HermesConversationFileHandler) Upload(c *gin.Context) {
 	// filename 必填：用于推导 MIME、校验扩展名白名单并落库记录原始名称。
 	filename := c.Query("filename")
 	if filename == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "filename required"})
+		apierror.JSON(c, http.StatusBadRequest, "CONVERSATION_FILE_BAD_REQUEST", apierror.MsgConversationFileBadRequest)
 		return
 	}
 

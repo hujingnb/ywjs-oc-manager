@@ -68,6 +68,11 @@ var mappedServiceErrorRules = []serviceErrorRule{
 	validationErrorRule(service.ErrConversationBadRequest, http.StatusBadRequest, "CONVERSATION_BAD_REQUEST"),
 	{target: service.ErrConversationCLI, statusCode: http.StatusBadGateway, code: "CONVERSATION_CLI_ERROR", safe: true},
 	{target: service.ErrConversationOutputInvalid, statusCode: http.StatusBadGateway, code: "CONVERSATION_OUTPUT_INVALID", msgKey: apierror.MsgHermesIncompatible},
+	// 对话文件错误映射。
+	{target: service.ErrConversationFileForbidden, statusCode: http.StatusForbidden, code: "CONVERSATION_FILE_FORBIDDEN", msgKey: apierror.MsgConversationForbidden},
+	{target: service.ErrConversationFileNotFound, statusCode: http.StatusNotFound, code: "CONVERSATION_FILE_NOT_FOUND", msgKey: apierror.MsgNotFound},
+	{target: service.ErrConversationFileUnsupported, statusCode: http.StatusBadRequest, code: "CONVERSATION_FILE_UNSUPPORTED", msgKey: apierror.MsgConversationFileUnsupported},
+	{target: service.ErrConversationFileTooLarge, statusCode: http.StatusRequestEntityTooLarge, code: "CONVERSATION_FILE_TOO_LARGE", msgKey: apierror.MsgConversationFileTooLarge},
 }
 
 // writeBindError 将 Gin 的 JSON 绑定错误转成面向调用方的 400 文案。

@@ -18,13 +18,22 @@ const (
 	MsgConversationEmptyTitle MsgKey = "err.conversation.empty_title"
 	// MsgConversationNoStreaming 服务端不支持流式响应；conversation/kanban 两处 SSE flusher 缺失共用。
 	MsgConversationNoStreaming MsgKey = "err.conversation.no_streaming"
+	// MsgConversationFileBadRequest 文件请求参数无效（如缺少 filename）。
+	MsgConversationFileBadRequest MsgKey = "err.conversation.file_bad_request"
+	// MsgConversationFileUnsupported 文件类型不受支持。
+	MsgConversationFileUnsupported MsgKey = "err.conversation.file_unsupported"
+	// MsgConversationFileTooLarge 文件超出大小上限。
+	MsgConversationFileTooLarge MsgKey = "err.conversation.file_too_large"
 )
 
 // init 把会话 domain 内联错误译文并入中心 catalog。
 func init() {
 	Register(map[MsgKey]map[string]string{
-		MsgConversationEmptyMessage: {"zh": "消息内容不能为空", "en": "The message content must not be empty"},
-		MsgConversationEmptyTitle:   {"zh": "标题不能为空", "en": "The title must not be empty"},
-		MsgConversationNoStreaming:  {"zh": "服务端不支持流式响应", "en": "The server does not support streaming responses"},
+		MsgConversationEmptyMessage:    {"zh": "消息内容不能为空", "en": "The message content must not be empty"},
+		MsgConversationEmptyTitle:      {"zh": "标题不能为空", "en": "The title must not be empty"},
+		MsgConversationNoStreaming:     {"zh": "服务端不支持流式响应", "en": "The server does not support streaming responses"},
+		MsgConversationFileBadRequest:  {"zh": "文件请求参数无效", "en": "Invalid file request parameters"},
+		MsgConversationFileUnsupported: {"zh": "文件类型不受支持", "en": "The file type is not supported"},
+		MsgConversationFileTooLarge:    {"zh": "文件大小超出上限", "en": "The file exceeds the maximum allowed size"},
 	})
 }
