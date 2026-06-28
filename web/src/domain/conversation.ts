@@ -9,9 +9,9 @@ import type { ConversationMessage } from '@/api/conversations'
 
 // hasRenderableContent 判断 content 是否含可展示正文：
 //   - 字符串：去除首尾空白后非空；
-//   - 多模态数组：至少含一个非空 text part 或一个 image_url part；
+//   - 多模态数组：至少含一个非空 text part、一个 image_url part 或一个 input_file part；
 //   - 其它（null/undefined/对象等）：视为无可展示内容。
-// 仅识别会话页实际渲染的 text / image_url 两类 part，与 ConversationMessageView 保持一致。
+// 识别会话页实际渲染的 text / image_url / input_file 三类 part，与 ConversationMessageView 保持一致。
 export function hasRenderableContent(content: unknown): boolean {
   if (typeof content === 'string') return content.trim() !== ''
   if (Array.isArray(content)) {
@@ -20,6 +20,8 @@ export function hasRenderableContent(content: unknown): boolean {
       const part = p as { type?: string; text?: unknown }
       if (part.type === 'text') return typeof part.text === 'string' && part.text.trim() !== ''
       if (part.type === 'image_url') return true
+      // input_file part 是用户上传的文件，有文件即有可展示内容。
+      if (part.type === 'input_file') return true
       return false
     })
   }

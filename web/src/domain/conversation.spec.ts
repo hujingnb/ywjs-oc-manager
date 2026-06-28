@@ -39,6 +39,11 @@ describe('hasRenderableContent', () => {
     expect(hasRenderableContent([{ type: 'tool_use', name: 'search' }])).toBe(false)
   })
 
+  // 含 input_file part 的消息可渲染。
+  it('input_file part 视为可渲染', () => {
+    expect(hasRenderableContent([{ type: 'input_file', file_id: 'f1' }])).toBe(true)
+  })
+
   it('null / undefined / 对象等非串非数组视为无内容', () => {
     // 兜底：无法识别的 content 形态不展示，避免渲染异常。
     expect(hasRenderableContent(null)).toBe(false)

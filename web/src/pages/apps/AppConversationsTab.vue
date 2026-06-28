@@ -66,7 +66,7 @@
           :class="msg.role"
         >
           <span class="role-label">{{ msg.role }}</span>
-          <ConversationMessageView :message="msg" />
+          <ConversationMessageView :message="msg" :app-id="props.appId" :session-id="currentId" />
         </div>
       </div>
 
