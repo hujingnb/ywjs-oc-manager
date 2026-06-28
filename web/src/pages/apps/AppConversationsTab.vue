@@ -55,8 +55,17 @@
       </div>
     </div>
 
-    <!-- 右侧：消息历史 + 输入框 -->
-    <div class="messages-col">
+    <!-- 右侧：消息历史 + 输入框。
+         拖拽上传：拖文件到本区域触发高亮，松手后文件追加到 pendingFiles（与点击选择一致）。
+         仅在已选中会话（currentId 非空）且未发送中（!sending）时才响应拖拽。 -->
+    <div
+      class="messages-col"
+      :class="{ 'drag-active': dragActive }"
+      @dragenter.prevent="onDragEnter"
+      @dragover.prevent="onDragOver"
+      @dragleave.prevent="onDragLeave"
+      @drop.prevent="onDrop"
+    >
       <!-- 消息列表 -->
       <div ref="msgListEl" class="msg-list">
         <div
@@ -165,6 +174,8 @@ const draft = ref('')
 const sending = ref(false)
 // pendingFiles 是用户已选但尚未发送的文件列表，发送时逐个上传后附入消息。
 const pendingFiles = ref<File[]>([])
+// dragActive 标记当前是否有文件正被拖拽到对话区域，为 true 时显示高亮边框。
+const dragActive = ref(false)
 // msgListEl 用于发送后滚动到底部。
 const msgListEl = ref<HTMLElement | null>(null)
 
@@ -184,6 +195,42 @@ function onPickFiles(e: Event) {
 // removePendingFile 从待发文件列表中按下标移除单个文件（对应 tag 关闭按钮）。
 function removePendingFile(i: number) {
   pendingFiles.value.splice(i, 1)
+}
+
+// ─── 拖拽上传 ─────────────────────────────────────────────────────────────────
+// hasFiles 检查拖拽事件的 dataTransfer 是否包含文件类型，用于区分拖链接、拖文本等无关场景。
+function hasFiles(e: DragEvent): boolean {
+  return !!e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')
+}
+
+// onDragEnter 文件拖入对话区域时激活高亮；条件：已选会话且未发送中且携带文件。
+function onDragEnter(e: DragEvent) {
+  if (!currentId.value || sending.value || !hasFiles(e)) return
+  dragActive.value = true
+}
+
+// onDragOver 持续拖拽经过时保持高亮并设置 dropEffect 为 copy，告知系统可放置。
+function onDragOver(e: DragEvent) {
+  if (!currentId.value || sending.value || !hasFiles(e)) return
+  dragActive.value = true
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+}
+
+// onDragLeave 仅当焦点真正离开容器（relatedTarget 不在容器内）才取消高亮，
+// 避免鼠标在子元素间移动时高亮闪烁。
+function onDragLeave(e: DragEvent) {
+  const cur = e.currentTarget
+  const rel = e.relatedTarget
+  if (cur instanceof Node && rel instanceof Node && cur.contains(rel)) return
+  dragActive.value = false
+}
+
+// onDrop 放置时把文件追加到 pendingFiles，与点击「附件」选择文件的行为完全一致。
+function onDrop(e: DragEvent) {
+  dragActive.value = false
+  if (!currentId.value || sending.value) return
+  const files = e.dataTransfer ? Array.from(e.dataTransfer.files) : []
+  if (files.length) pendingFiles.value.push(...files)
 }
 
 // roleLabel 把消息 role 映射为本地化标签：user→用户、assistant→客服（AI 应答方），
@@ -435,6 +482,14 @@ onMounted(loadSessions)
   border-radius: 6px;
   overflow: hidden;
   background: var(--color-surface, #fff);
+}
+
+/* 拖拽进入对话区域时的高亮反馈：品牌色虚线边框 + 极淡背景，不影响布局尺寸。 */
+.messages-col.drag-active {
+  border-color: var(--color-brand, #ff6a00);
+  outline: 2px dashed var(--color-brand, #ff6a00);
+  outline-offset: -2px;
+  background: rgba(255, 106, 0, 0.03);
 }
 
 .msg-list {
