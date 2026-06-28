@@ -4,6 +4,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -120,20 +121,39 @@ func (s *ConversationFileService) Upload(ctx context.Context, p auth.Principal, 
 	if err := validateSessionID(sid); err != nil {
 		return ConversationFileUploadResult{}, err
 	}
-	// 大小校验：超出 100 MiB 拒绝。
-	if size > conversationFileMaxBytes {
+	// 快速拒绝：客户端声明了合法正数 size 且已超限，无需读 body。
+	// 注意：size=-1 表示 chunked/无 Content-Length，不能用此分支拦截，下面 LimitReader 兜底。
+	if size >= 0 && size > conversationFileMaxBytes {
 		return ConversationFileUploadResult{}, ErrConversationFileTooLarge
 	}
-	// 扩展名白名单校验：禁止可执行、脚本等危险类型。
+	// I1 防路径穿越：只取文件名部分，消除 "../" 等跳转，拒绝空 / 纯点 / 纯分隔符结果。
+	// filepath.Base("../../evil.pdf") → "evil.pdf"，filepath.Base("a/b.pdf") → "b.pdf"。
+	filename = filepath.Base(filename)
+	if filename == "." || filename == ".." || filename == "/" || strings.TrimSpace(filename) == "" {
+		return ConversationFileUploadResult{}, fmt.Errorf("%w: 非法文件名", ErrConversationFileUnsupported)
+	}
+	// 扩展名白名单校验：禁止可执行、脚本等危险类型。使用净化后的 filename。
 	ext := strings.ToLower(filepath.Ext(filename))
 	if !allowedConversationFileExts[ext] {
 		return ConversationFileUploadResult{}, fmt.Errorf("%w: %s", ErrConversationFileUnsupported, ext)
 	}
-	// 生成全局唯一文件 ID，构造 S3 对象键。
+	// I2 不信任客户端声明的 Content-Length：用 LimitReader 包裹，多读 1 字节探测超限。
+	// 这样无论 size 为 -1（chunked）还是客户端伪造正数，实际传输量都被强制上限约束。
+	limited := io.LimitReader(body, conversationFileMaxBytes+1)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return ConversationFileUploadResult{}, err
+	}
+	if int64(len(data)) > conversationFileMaxBytes {
+		return ConversationFileUploadResult{}, ErrConversationFileTooLarge
+	}
+	// 以实际读取字节数为准，不信任入参 size。
+	actualSize := int64(len(data))
+	// 生成全局唯一文件 ID，构造 S3 对象键。使用净化后的 filename，防跳出会话前缀。
 	fileID := uuid.NewString()
 	key := storage.ConversationFileKey(appID, sid, fileID, filename)
-	// 上传文件本体到对象存储。
-	if err := s.blob.PutObject(ctx, key, body, size); err != nil {
+	// 上传文件本体到对象存储，使用内存缓冲与实际字节数，确保 ContentLength 精确。
+	if err := s.blob.PutObject(ctx, key, bytes.NewReader(data), actualSize); err != nil {
 		return ConversationFileUploadResult{}, err
 	}
 	// 按扩展名推导 MIME；推导失败退回通用二进制类型。
@@ -141,7 +161,7 @@ func (s *ConversationFileService) Upload(ctx context.Context, p auth.Principal, 
 	if mimeType == "" {
 		mimeType = "application/octet-stream"
 	}
-	// 落库文件记录，建立 file_id → S3 key 的映射。
+	// 落库文件记录，建立 file_id → S3 key 的映射；Size 用实际值，而非客户端声明。
 	rec := ConvFileRecord{
 		ID:        fileID,
 		AppID:     appID,
@@ -149,12 +169,12 @@ func (s *ConversationFileService) Upload(ctx context.Context, p auth.Principal, 
 		S3Key:     key,
 		Filename:  filename,
 		Mime:      mimeType,
-		Size:      size,
+		Size:      actualSize,
 	}
 	if err := s.store.CreateConversationFile(ctx, rec); err != nil {
 		return ConversationFileUploadResult{}, err
 	}
-	return ConversationFileUploadResult{FileID: fileID, Filename: filename, Mime: mimeType, Size: size}, nil
+	return ConversationFileUploadResult{FileID: fileID, Filename: filename, Mime: mimeType, Size: actualSize}, nil
 }
 
 // ResolveFileURL 把 file_id 解析为预签名 GET URL（供 oc-ops 当轮下载使用）。

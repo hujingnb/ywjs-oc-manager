@@ -101,3 +101,32 @@ func TestResolveFileURLWrongOwnerRejected(t *testing.T) {
 	_, _, _, err := svc.ResolveFileURL(context.Background(), "app1", "s1", "f1")
 	require.ErrorIs(t, err, ErrConversationFileNotFound)
 }
+
+// TestUploadConversationFileSanitizesPath 含路径穿越的 filename 被净化为 basename，
+// S3 key 不逃出 apps/<appID>/conversations/<sid>/ 前缀，不含 ".."。
+func TestUploadConversationFileSanitizesPath(t *testing.T) {
+	store := &fakeConvFileStore{}
+	blob := &fakeBlob{}
+	svc := NewConversationFileService(store, blob, fakeConvResolver{})
+	_, err := svc.Upload(context.Background(), convFilePlatformAdmin(), "app1", "s1",
+		"../../../../../evil.pdf", strings.NewReader("x"), 1)
+	require.NoError(t, err)
+	assert.Contains(t, blob.putKey, "apps/app1/conversations/s1/")
+	assert.NotContains(t, blob.putKey, "..")
+	assert.True(t, strings.HasSuffix(blob.putKey, "/evil.pdf"))
+}
+
+// TestUploadConversationFileEnforcesSizeWithoutContentLength 无 Content-Length（size=-1）
+// 时不被误判为超限，且返回结果与落库记录均使用实际字节数而非 -1。
+func TestUploadConversationFileEnforcesSizeWithoutContentLength(t *testing.T) {
+	store := &fakeConvFileStore{}
+	blob := &fakeBlob{}
+	svc := NewConversationFileService(store, blob, fakeConvResolver{})
+	res, err := svc.Upload(context.Background(), convFilePlatformAdmin(), "app1", "s1",
+		"a.pdf", strings.NewReader("PDFDATA"), -1)
+	require.NoError(t, err)
+	// 落库/返回 Size 应为实际字节数 7，而非客户端声明的 -1。
+	assert.Equal(t, int64(7), res.Size)
+	assert.Equal(t, int64(7), store.created.Size)
+	assert.Equal(t, "PDFDATA", blob.putData)
+}
