@@ -468,6 +468,7 @@ func newChannelStub(t *testing.T) *channelStub {
 		OrgID:        mustUUID(t, testChannelOrg),
 		OwnerUserID:  mustUUID(t, testChannelOwner),
 		Status:       domain.AppStatusBindingWaiting,
+		RuntimePhase: domain.RuntimePhaseReady, // 渠道发起守卫双维度：测试 stub 默认置 ready 以通过闸门
 		ApiKeyStatus: domain.APIKeyStatusActive,
 	}
 	binding := sqlc.ChannelBinding{

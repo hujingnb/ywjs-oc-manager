@@ -119,21 +119,21 @@ func EnsureAppTransition(from, to string) error {
 // 非 deleted 的状态都仍可通过状态机回到运行态。
 func AppIsTerminal(status string) bool { return status == AppStatusDeleted }
 
-// AppCanInitiateChannelAuth 判断 app 当前状态是否允许发起渠道登录授权（BeginAuth / BeginFeishuAuth）。
+// AppCanInitiateChannelAuth 判断 app 当前是否允许发起渠道登录授权（BeginAuth / BeginFeishuAuth）。
 //
-// 仅当实例 pod 已起且对外可用时才放行，否则发起会打到不可达的 oc-ops 拿到 502，
-// 前端透出 cryptic「ocops: hermes cli failed」像 bug。允许的三类「pod 在服务」状态：
-//   - running：实例就绪，重新绑定 / 新增渠道；
-//   - binding_waiting：首次 onboarding 等扫码（微信首绑发起即在此态，由 channel_login
-//     worker 在 bound 后推进到 running，见 worker/handlers/channel_login.go）；
-//   - binding_failed：上一轮扫码超时，pod 仍在，允许重试。
+// 双维度守卫：业务态在 allowlist 且运行时态为 ready 才放行——否则发起会打到不可达 / 未就绪的
+// oc-ops 拿到 502，前端透出 cryptic「ocops: hermes cli failed」像 bug。
+//   - status 维度：running（就绪，重绑/新增渠道）、binding_waiting（首次 onboarding 等扫码，
+//     微信首绑发起即在此态）、binding_failed（上轮超时，pod 仍在，允许重试）。
+//   - runtime_phase 维度：必须 == ready（pod 所有关键容器含 oc-ops 都 Ready）。restarting
+//     （解绑/升级/k8s 自发重启窗口）、starting（首次拉起中）、unknown（未探明）一律拦截。
 //
-// 其余状态 pod 不在服务故拦截：restarting（解绑重启窗口）、4 个 init 子状态
-// （版本升级 / 初始化窗口）、stopped / error / draft / deleted。
-//
-// 说明：这是比「status==running」更宽的判定——严格 running-only 会误杀 binding_waiting 的
-// 首次绑定与 binding_failed 的重试（二者 pod 均在服务），故按「pod 是否在服务」建模。
-func AppCanInitiateChannelAuth(status string) bool {
+// 业务态 allowlist 比「status==running」宽：严格 running-only 会误杀 binding_waiting 首绑与
+// binding_failed 重试（二者 pod 均在服务），故按「pod 是否在服务」建模。
+func AppCanInitiateChannelAuth(status, runtimePhase string) bool {
+	if runtimePhase != RuntimePhaseReady {
+		return false
+	}
 	switch status {
 	case AppStatusRunning, AppStatusBindingWaiting, AppStatusBindingFailed:
 		return true

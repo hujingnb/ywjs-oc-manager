@@ -132,7 +132,7 @@ func (s *ChannelService) BeginAuth(ctx context.Context, principal auth.Principal
 	}
 	// 实例就绪守卫：pod 不在服务（restarting 重启窗口 / 版本升级 init 子状态 / stopped 等）时
 	// 发起会打到不可达的 oc-ops 拿到 502，提前返回友好错误，不写库不入队。
-	if !domain.AppCanInitiateChannelAuth(app.Status) {
+	if !domain.AppCanInitiateChannelAuth(app.Status, app.RuntimePhase) {
 		return ChallengeResult{}, ErrInstanceNotReady
 	}
 	if s.registry == nil {
@@ -229,7 +229,7 @@ func (s *ChannelService) BeginFeishuAuth(ctx context.Context, principal auth.Pri
 	}
 	// 实例就绪守卫（与微信 BeginAuth 同口径）：pod 不在服务时不发起，返回友好错误，
 	// 不 create-on-demand、不写 metadata、不入队，覆盖解绑重启 + 版本升级两个窗口。
-	if !domain.AppCanInitiateChannelAuth(app.Status) {
+	if !domain.AppCanInitiateChannelAuth(app.Status, app.RuntimePhase) {
 		return ChallengeResult{}, ErrInstanceNotReady
 	}
 	if s.registry == nil {
@@ -326,7 +326,7 @@ func (s *ChannelService) BeginWorkWechatAuth(ctx context.Context, principal auth
 	}
 	// 实例就绪守卫（与微信 / 飞书发起同口径）：pod 不在服务时不发起，返回友好错误，
 	// 不加密、不写库、不注入、不入队，覆盖解绑重启 + 版本升级两个窗口。
-	if !domain.AppCanInitiateChannelAuth(app.Status) {
+	if !domain.AppCanInitiateChannelAuth(app.Status, app.RuntimePhase) {
 		return ChallengeResult{}, ErrInstanceNotReady
 	}
 	if s.registry == nil {

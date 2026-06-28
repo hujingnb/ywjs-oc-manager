@@ -161,32 +161,28 @@ func TestEnsureAPIKeyTransitionFailsForInvalid(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestAppCanInitiateChannelAuth 验证渠道发起就绪守卫的状态白名单。
-// 仅 pod 在服务的状态（running / binding_waiting / binding_failed）放行；其余拦截。
+// TestAppCanInitiateChannelAuth 验证渠道发起就绪守卫的双维度逻辑：
+// 仅当业务态在 allowlist(running/binding_waiting/binding_failed) 且 runtime_phase==ready
+// 时才放行；任一维度不满足都拒绝。
 func TestAppCanInitiateChannelAuth(t *testing.T) {
 	cases := []struct {
-		status string
-		want   bool
-		reason string // 中文说明覆盖的状态与期望
+		status       string // 业务态
+		runtimePhase string // 运行时态
+		want         bool
+		reason       string
 	}{
-		{AppStatusRunning, true, "running 实例就绪，可重新绑定 / 新增渠道"},
-		{AppStatusBindingWaiting, true, "binding_waiting 首次 onboarding 等扫码，微信首绑即在此态发起"},
-		{AppStatusBindingFailed, true, "binding_failed 上轮扫码超时，pod 仍在，允许重试"},
-		{AppStatusRestarting, false, "restarting 解绑重启窗口，pod 不可用，拦截"},
-		{AppStatusPullingRuntimeImage, false, "版本升级 / 初始化窗口，pod 未起，拦截"},
-		{AppStatusPreparingRuntime, false, "init 子状态，pod 未起，拦截"},
-		{AppStatusCreatingContainer, false, "init 子状态，pod 未起，拦截"},
-		{AppStatusStarting, false, "init 子状态，pod 未起，拦截"},
-		{AppStatusStopped, false, "stopped pod 已停，发起会 502，拦截"},
-		{AppStatusError, false, "error 实例异常，拦截"},
-		{AppStatusDraft, false, "draft 尚未初始化，拦截"},
-		{AppStatusDeleted, false, "deleted 终态，拦截"},
+		{AppStatusRunning, RuntimePhaseReady, true, "running+ready：实例就绪，放行"},
+		{AppStatusBindingWaiting, RuntimePhaseReady, true, "binding_waiting+ready：首次绑定合法发生在此态"},
+		{AppStatusBindingFailed, RuntimePhaseReady, true, "binding_failed+ready：pod 在跑，允许重试"},
+		{AppStatusRunning, RuntimePhaseRestarting, false, "running 但 pod 重启中：oc-ops 不可用，拦"},
+		{AppStatusRunning, RuntimePhaseStarting, false, "running 但 pod 拉起中：未就绪，拦"},
+		{AppStatusRunning, RuntimePhaseUnknown, false, "running 但就绪度未探明：保守不放行"},
+		{AppStatusStopped, RuntimePhaseReady, false, "stopped：业务态不允许发起"},
+		{AppStatusError, RuntimePhaseReady, false, "error：业务态不允许发起"},
+		{AppStatusPullingRuntimeImage, RuntimePhaseUnknown, false, "初始化中：两维都不满足"},
 	}
 	for _, c := range cases {
-		// 子测试名即状态，失败时定位到具体状态白名单判定。
-		t.Run(c.status, func(t *testing.T) {
-			assert.Equal(t, c.want, AppCanInitiateChannelAuth(c.status), c.reason)
-		})
+		assert.Equal(t, c.want, AppCanInitiateChannelAuth(c.status, c.runtimePhase), c.reason)
 	}
 }
 
