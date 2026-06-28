@@ -57,6 +57,9 @@ type AppInitializeStore interface {
 	// 在渲染 AppSpec 时带出已绑定飞书凭证（DB 是 source of truth，Secret 是派生物，
 	// 每次 app 重建 / 镜像升级都从 DB 重新带出，避免配置丢失）。
 	GetChannelBindingByAppAndType(ctx context.Context, arg sqlc.GetChannelBindingByAppAndTypeParams) (sqlc.ChannelBinding, error)
+	// SetAppRuntimePhase 写运行时就绪维度：phaseStart 入口写 starting(供观测)，
+	// pod 就绪进入 binding_waiting 后写 ready(快路径，不必等 reconciler ~15s)。
+	SetAppRuntimePhase(ctx context.Context, arg sqlc.SetAppRuntimePhaseParams) error
 }
 
 // APIKeyClient 是「以业务 user 身份调 token 相关接口」的最小能力集合。
@@ -313,6 +316,14 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		return h.markFailed(ctx, &app, domain.AppStatusStarting, err)
 	}
 
+	// 快路径：pod 已 Ready（WaitReady 通过）且进入 binding_waiting，立即写 runtime_phase=ready，
+	// 不必等 reconciler 下一个 tick（~15s）。使「binding_waiting + ready」双维度即刻放行首次绑定。
+	// 写失败不阻断：reconciler 稳态路径会在 ~15s 内补写。
+	_ = h.store.SetAppRuntimePhase(ctx, sqlc.SetAppRuntimePhaseParams{
+		RuntimePhase: domain.RuntimePhaseReady,
+		ID:           app.ID,
+	})
+
 	// 初始化成功后记录已应用的版本修订与镜像 ref，供前端 version_synced 检测使用。
 	// 写库失败时走 markFailed：把 app 收敛到 status=error 并记录 last_error_status，
 	// 避免行卡在 binding_waiting 而 worker 又把 job 当失败处理。
@@ -378,6 +389,12 @@ func (h *AppInitializeHandler) phaseStart(ctx context.Context, app *sqlc.App) er
 	if h.orch == nil {
 		return nil
 	}
+	// 首次拉起：标 runtime_phase=starting（pod 调度/拉镜像/初始化中，未就绪）。业务态此时是 starting，
+	// 发起闸门本就关闭，此写主要供观测；写失败不阻断等待主流程。
+	_ = h.store.SetAppRuntimePhase(ctx, sqlc.SetAppRuntimePhaseParams{
+		RuntimePhase: domain.RuntimePhaseStarting,
+		ID:           app.ID,
+	})
 	// 心跳：WaitReady 每轮回调时刷新 app.updated_at。等待 pod Ready 期间（拉镜像可能数十分钟）
 	// app 行不会有其它写入，若不心跳，reaper 会因 updated_at 落后阈值误判为孤儿、requeue 正在
 	// 运行的本 job 造成竞争。持续心跳让 reaper 只在 worker 真死（心跳停）时才回收。

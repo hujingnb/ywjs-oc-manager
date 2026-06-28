@@ -479,6 +479,9 @@ type appInitStub struct {
 	// channelBindings 让 GetChannelBindingByAppAndType 在测试中返回受控的渠道绑定行，
 	// 按 channel_type 索引；未设置对应类型时返回 sql.ErrNoRows，模拟「未绑定该渠道」。
 	channelBindings map[string]sqlc.ChannelBinding
+	// runtimePhaseCalls 按顺序记录每次 SetAppRuntimePhase 调用参数，
+	// 用于断言 phaseStart 写 starting、init 成功后写 ready。
+	runtimePhaseCalls []sqlc.SetAppRuntimePhaseParams
 }
 
 // newAppInitStub 构造 appInitStub；ID 字段迁移为 string（MySQL uuid）。
@@ -608,6 +611,13 @@ func (s *appInitStub) SetAppAppliedVersion(_ context.Context, arg sqlc.SetAppApp
 func (s *appInitStub) SetAppRuntimeToken(_ context.Context, arg sqlc.SetAppRuntimeTokenParams) error {
 	s.app.RuntimeTokenHash = arg.RuntimeTokenHash
 	s.app.RuntimeTokenCiphertext = arg.RuntimeTokenCiphertext
+	return nil
+}
+
+// SetAppRuntimePhase 按顺序记录每次调用参数，模拟写 runtime_phase；
+// 末尾元素即最终写入值，供断言 phaseStart 写 starting + init 成功写 ready。
+func (s *appInitStub) SetAppRuntimePhase(_ context.Context, arg sqlc.SetAppRuntimePhaseParams) error {
+	s.runtimePhaseCalls = append(s.runtimePhaseCalls, arg)
 	return nil
 }
 
@@ -1056,6 +1066,40 @@ func TestAppInitialize_StaysBindingWaitingWhenNoChannelBound(t *testing.T) {
 	assert.Equal(t, domain.AppStatusBindingWaiting, store.statusCalls[len(store.statusCalls)-1].Status)
 	// 自愈探测仍应被调用一次。
 	assert.Equal(t, 1, store.hasBoundCalls, "init 完成后应至少查一次渠道绑定快照")
+}
+
+// TestInitialize_WritesRuntimePhaseReady 验证初始化成功(pod Ready、进 binding_waiting)后
+// runtime_phase 被写成 ready，使前端发起闸门(status+runtime_phase 双维度)放行首次绑定。
+// 同时验证 phaseStart 入口(orch 非 nil)先写 starting(供观测)，再由主流程写 ready(快路径)。
+func TestInitialize_WritesRuntimePhaseReady(t *testing.T) {
+	store := newAppInitStub(t)
+	client := &fakeNewAPI{result: newapi.APIKey{ID: 99, Key: "sk-test"}}
+
+	handler := NewAppInitializeHandler(store, client, AppInitializeConfig{
+		Cipher:              testCipher(t),
+		ResolveRuntimeImage: testResolveRuntimeImage,
+	})
+	// 注入 fake orchestrator，使 phaseStart 真实运行(WaitReady 成功)，
+	// 以验证 starting 在 WaitReady 前被写入、ready 在进入 binding_waiting 后被写入。
+	orch := &fakeOrchestrator{}
+	handler.SetOrchestrator(orch, AppInitializeK8sConfig{})
+
+	require.NoError(t, handler.Handle(context.Background(), buildJob(t, testAppID, "")))
+
+	// phaseStart 入口写 starting + 进入 binding_waiting 后写 ready，至少应有两次调用。
+	require.GreaterOrEqual(t, len(store.runtimePhaseCalls), 2,
+		"SetAppRuntimePhase 应至少被调用两次(starting + ready)")
+
+	// 第一次写入应为 starting(phaseStart 入口，pod 拉起中，供观测)。
+	assert.Equal(t, domain.RuntimePhaseStarting, store.runtimePhaseCalls[0].RuntimePhase,
+		"phaseStart 入口首先应写 starting")
+	assert.Equal(t, testAppID, store.runtimePhaseCalls[0].ID, "starting 应写入当前 app")
+
+	// 最后一次写入应为 ready(进入 binding_waiting 后的快路径写入，不必等 reconciler ~15s)。
+	last := store.runtimePhaseCalls[len(store.runtimePhaseCalls)-1]
+	assert.Equal(t, domain.RuntimePhaseReady, last.RuntimePhase,
+		"init 成功进入 binding_waiting 后应写 ready")
+	assert.Equal(t, testAppID, last.ID, "ready 应写入当前 app")
 }
 
 // TestAppInitialize_IdempotentBindingWaitingPromotesWhenChannelBound 验证 Handle 入口
