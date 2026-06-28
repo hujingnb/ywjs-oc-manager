@@ -155,7 +155,9 @@ export default {
     workWechatSecretLabel: 'Secret',
     workWechatSecretPlaceholder: 'Bot Secret (stored only, never shown)',
     workWechatGuide: 'In WeCom admin console: Workbench → AI Bot → Create → API mode (long connection), then copy the Bot ID and Secret here.',
+    workWechatGuideLink: 'View official guide',
     workWechatBoundHint: 'WeCom connected; the bot is receiving messages.',
+    workWechatConnecting: 'Verifying connection',
     // status 是渠道绑定进度状态的用户可读文案，由 formatChannelStatus 解析为 i18n key 后消费。
     status: {
       unbound: 'Not bound',

@@ -155,7 +155,9 @@ export default {
     workWechatSecretLabel: 'Secret',
     workWechatSecretPlaceholder: '机器人 Secret（仅保存，不回显）',
     workWechatGuide: '在企业微信「管理后台 → 工作台 → 智能机器人 → 创建 → API 接收消息（长连接）」中获取 Bot ID 与 Secret 后填入。',
+    workWechatGuideLink: '查看官方文档',
     workWechatBoundHint: '企业微信已连接，机器人正在接收消息。',
+    workWechatConnecting: '验证连接中',
     // status 是渠道绑定进度状态的用户可读文案，由 formatChannelStatus 解析为 i18n key 后消费。
     status: {
       unbound: '未绑定',

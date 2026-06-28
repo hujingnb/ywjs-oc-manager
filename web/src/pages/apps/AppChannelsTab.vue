@@ -165,7 +165,10 @@
                   <n-input v-model:value="wecomSecret" type="password" show-password-on="click" :disabled="!canManage" :placeholder="t('apps.channels.workWechatSecretPlaceholder')" />
                 </label>
               </div>
-              <p class="wecom-guide">{{ t('apps.channels.workWechatGuide') }}</p>
+              <p class="wecom-guide">
+                {{ t('apps.channels.workWechatGuide') }}
+                <a class="wecom-guide-link" :href="WORK_WECHAT_DOC_URL" target="_blank" rel="noopener noreferrer">{{ t('apps.channels.workWechatGuideLink') }}</a>
+              </p>
             </template>
             <p v-if="wecomError" class="state-text danger">{{ t('apps.channels.errorMsg') }}{{ wecomError }}</p>
           </div>
@@ -337,6 +340,9 @@ async function unbindFeishu() {
 
 // ---- 企业微信渠道（手填智能机器人凭证）----
 // 比飞书简单：无模式选择、无二维码、无部署域下拉，仅 bot_id + secret 手填表单 + 提交。
+// WORK_WECHAT_DOC_URL 指向企业微信开发者中心「智能机器人长连接」官方文档，
+// 指引用户在企业微信后台创建机器人并获取 Bot ID / Secret（长连接接入是引擎依赖的接入形态）。
+const WORK_WECHAT_DOC_URL = 'https://developer.work.weixin.qq.com/document/path/101463'
 // 企业微信手填表单输入（仅提交时使用，不回显已绑定 secret）。
 const wecomBotId = ref('')
 const wecomSecret = ref('')
@@ -386,7 +392,12 @@ function onQrRendered(qr: string) {
 // statusLabel 跟随当前选中渠道展示对应进度状态，微信选中时取值与原逻辑一致。
 const statusLabel = computed(() => {
   if (selectedChannelType.value === 'feishu') return formatChannelStatus(feishuProgress.value?.status)
-  if (selectedChannelType.value === 'work_wechat') return formatChannelStatus(wecomProgress.value?.status)
+  if (selectedChannelType.value === 'work_wechat') {
+    // 企业微信无扫码：pending_auth 表示「凭证已提交、正在验证连接」，不能复用微信/飞书共享的
+    // 「等待扫码授权」文案（formatChannelStatus 的 pending_auth 映射），故此处专属覆盖。
+    if (wecomProgress.value?.status === 'pending_auth') return t('apps.channels.workWechatConnecting')
+    return formatChannelStatus(wecomProgress.value?.status)
+  }
   return formatChannelStatus(progress.value?.status)
 })
 
@@ -667,6 +678,16 @@ async function unbind() {
   color: var(--color-text-secondary);
   font-size: 13px;
   line-height: 1.6;
+}
+
+/* 官方文档链接：跟在指引末尾，用主题色提示可点击。 */
+.wecom-guide-link {
+  color: var(--color-primary);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.wecom-guide-link:hover {
+  text-decoration: underline;
 }
 
 /* 已连接提示用次要文字密排。 */
