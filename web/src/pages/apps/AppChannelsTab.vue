@@ -340,9 +340,9 @@ async function unbindFeishu() {
 
 // ---- 企业微信渠道（手填智能机器人凭证）----
 // 比飞书简单：无模式选择、无二维码、无部署域下拉，仅 bot_id + secret 手填表单 + 提交。
-// WORK_WECHAT_DOC_URL 指向企业微信开发者中心「智能机器人长连接」官方文档，
+// WORK_WECHAT_DOC_URL 指向企业微信渠道接入使用指南，
 // 指引用户在企业微信后台创建机器人并获取 Bot ID / Secret（长连接接入是引擎依赖的接入形态）。
-const WORK_WECHAT_DOC_URL = 'https://developer.work.weixin.qq.com/document/path/101463'
+const WORK_WECHAT_DOC_URL = 'https://www.qusiyi.com/wecom-user-guide/131.html'
 // 企业微信手填表单输入（仅提交时使用，不回显已绑定 secret）。
 const wecomBotId = ref('')
 const wecomSecret = ref('')
