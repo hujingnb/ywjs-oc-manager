@@ -94,7 +94,7 @@
         <!-- 微信渠道详情：扫码绑定 + 状态提示，沿用既有逻辑，飞书选中时不渲染。 -->
         <template v-if="selectedChannelType === 'wechat'">
           <!-- 实例非就绪态(error/stopped/restarting 等)时发起被禁用，按真实状态提示原因，避免误以为按钮坏了。 -->
-          <p v-if="canManage && !instanceReady" class="state-text">{{ t('apps.channels.instanceNotReady', { status: instanceStatusLabel }) }}</p>
+          <p v-if="canManage && !instanceReady" class="state-text">{{ instanceNotReadyHint }}</p>
           <p v-if="progress?.bound_identity" class="state-text">{{ t('apps.channels.boundIdentity') }}{{ progress.bound_identity }}</p>
           <p v-if="progress?.error_message" class="state-text danger">{{ t('apps.channels.errorMsg') }}{{ progress.error_message }}</p>
           <p v-if="isWaitingForChallenge" class="state-text">{{ t('apps.channels.waitingQr') }}</p>
@@ -133,7 +133,7 @@
             <!-- 未绑定：扫码自动创建（发起按钮在标题右上），轮询二维码并复用 AuthChallengeRenderer 渲染。 -->
             <template v-else>
               <!-- 实例非就绪态(error/stopped/restarting 等)时发起被禁用，按真实状态提示原因避免误以为是 bug。 -->
-              <p v-if="canManage && !instanceReady" class="state-text">{{ t('apps.channels.instanceNotReady', { status: instanceStatusLabel }) }}</p>
+              <p v-if="canManage && !instanceReady" class="state-text">{{ instanceNotReadyHint }}</p>
               <p v-if="feishuProgress?.error_message" class="state-text danger">{{ t('apps.channels.errorMsg') }}{{ feishuProgress.error_message }}</p>
               <!-- 扫码后凭证已回传（二维码消费、注入连接中）显示“验证连接中”，未出码时才显示“生成二维码”，
                    避免飞书扫码后误显示微信导向的“正在生成登录二维码”。 -->
@@ -155,7 +155,7 @@
             <template v-else>
               <!-- 实例非就绪态(error/stopped/restarting 等)时，输入框与提交按钮一并禁用，
                    并按真实状态提示原因——避免「能填表单却点提交无反应」的失灵错觉。 -->
-              <p v-if="canManage && !instanceReady" class="state-text">{{ t('apps.channels.instanceNotReady', { status: instanceStatusLabel }) }}</p>
+              <p v-if="canManage && !instanceReady" class="state-text">{{ instanceNotReadyHint }}</p>
               <div class="wecom-controls">
                 <label class="wecom-field">
                   <span class="wecom-field-label">{{ t('apps.channels.workWechatBotIdLabel') }}</span>
@@ -406,14 +406,13 @@ const statusLabel = computed(() => {
 // canManage 控制发起登录和解绑按钮，真正权限仍由后端接口再次校验。
 const canManage = computed(() => canManageApp(auth.user, app?.value))
 const canUnbind = computed(() => canManage.value && progress.value?.status === 'bound')
-// instanceReady 闸门：渠道发起依赖实例内 oc-ops 可用。允许集与后端
-// domain.AppCanInitiateChannelAuth 严格一致——running / binding_waiting / binding_failed：
-// 这三态 pod 在跑、oc-ops 可达，且【首次绑定合法地发生在 binding_waiting】
-// （binding_waiting→running 是扫码成功后才迁移），故不能只放行 running。
-// 其余状态（restarting 重启中、pulling_runtime_image 等升级/初始化、stopped/error）
-// pod 用 Recreate 重建或未就绪、oc-ops 短暂不可达，发起会拿到 502/409，统一拦在前端并提示原因。
+// instanceReady 闸门:渠道发起依赖实例内 oc-ops 可用,需业务态在 allowlist 且运行时态 ready。
+// 与后端 domain.AppCanInitiateChannelAuth(status, runtime_phase) 双维度严格一致——pod 重启/
+// 未就绪窗口(runtime_phase != ready)即使 status 仍 running 也拦,避免发起打到未就绪 oc-ops 拿 502。
 const AUTH_READY_STATUSES = new Set(['running', 'binding_waiting', 'binding_failed'])
-const instanceReady = computed(() => AUTH_READY_STATUSES.has(app?.value?.status ?? ''))
+const instanceReady = computed(
+  () => AUTH_READY_STATUSES.has(app?.value?.status ?? '') && app?.value?.runtime_phase === 'ready',
+)
 
 // instanceStatusLabel 把实例当前状态机原值解析为本地化文案（复用 domain/status 映射），
 // 供 instanceNotReady 提示按真实状态展示——避免无论实例 error / stopped / restarting 都
@@ -422,6 +421,20 @@ const instanceReady = computed(() => AUTH_READY_STATUSES.has(app?.value?.status 
 const instanceStatusLabel = computed(() => {
   const view = formatAppStatus(app?.value?.status ?? '')
   return t(view.label, view.params ?? {})
+})
+
+// instanceNotReadyHint 给「不可发起」提示一句完整文案,按真实原因区分:
+// 业务态在 allowlist 但 runtime_phase 非 ready(pod 启动/重启/未探明)→ 给 phase 专属完整句;
+// 业务态本身不允许(stopped/error/初始化中)→ 用 instanceNotReady 模板包裹业务态文案。
+const instanceNotReadyHint = computed(() => {
+  const phase = app?.value?.runtime_phase
+  const status = app?.value?.status ?? ''
+  if (AUTH_READY_STATUSES.has(status)) {
+    if (phase === 'starting') return t('apps.channels.instanceStarting')
+    if (phase === 'restarting') return t('apps.channels.instanceRestarting')
+    if (phase === 'unknown') return t('apps.channels.instanceUnknown')
+  }
+  return t('apps.channels.instanceNotReady', { status: instanceStatusLabel.value })
 })
 
 // progressChallenge 从轮询结果恢复挑战，避免刷新页面后丢失二维码或验证码展示。

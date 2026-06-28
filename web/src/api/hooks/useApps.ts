@@ -51,6 +51,9 @@ export interface AppDTO {
   runtime_image_ref?: string
   // runtime_image_sha256 是 docker inspect 返回的镜像 config digest；仅平台管理员可见。
   runtime_image_sha256?: string
+  // runtime_phase 是运行时就绪维度（与 status 正交）：ready/starting/restarting/unknown。
+  // 渠道发起闸门需 status allowlist 且 runtime_phase===ready；非 ready 时按 phase 细化提示。
+  runtime_phase?: string
 }
 
 // RuntimeOperationResult 是运行时异步操作的提交结果。

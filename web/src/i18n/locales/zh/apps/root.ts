@@ -119,6 +119,9 @@ export default {
     waitingQr: '正在生成登录二维码…',
     qrExpired: '当前二维码已过期，请点击"刷新二维码"重新生成。',
     instanceNotReady: '实例当前为「{status}」，需运行中才能发起渠道绑定，请先恢复实例后重试。',
+    instanceStarting: '实例正在启动，请稍候',
+    instanceRestarting: '实例正在重启，请稍候重试',
+    instanceUnknown: '实例状态确认中，请稍候',
     // 渠道卡片：名称 / 描述 / 支持标签
     channelWechat: '微信',
     channelWechatDesc: '扫码绑定后接收助手消息',
