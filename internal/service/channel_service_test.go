@@ -169,42 +169,70 @@ func TestChannelServiceUnbindFeishuDeletesSecretKeys(t *testing.T) {
 	require.True(t, restarter.restarted)
 }
 
-// TestChannelServiceUnbindFeishuSetsRestartingWhenRunning 验证：飞书解绑时若 app 处于 running，
-// 在 RolloutRestart 前把 app 置 restarting（守卫 running→restarting 通过），重启窗口标记过渡态。
+// TestChannelServiceUnbindFeishuSetsRestartingWhenRunning 验证：飞书解绑时在 RolloutRestart 前
+// 置 runtime_phase=restarting（双轴模型），业务态 status 保持不动。
 func TestChannelServiceUnbindFeishuSetsRestartingWhenRunning(t *testing.T) {
 	store := newChannelStub(t)
 	store.binding.ChannelType = domain.ChannelTypeFeishu
-	store.app.Status = domain.AppStatusRunning // 当前运行中，解绑应置 restarting
+	store.app.Status = domain.AppStatusRunning // 当前运行中，解绑应置 runtime_phase=restarting
 	patcher := &fakeFeishuPatcher{}
 	restarter := &fakeRestarter{}
 	svc := NewChannelService(store, channel.NewRegistry())
 	svc.SetFeishuUnbindDeps(patcher, restarter)
 
 	require.NoError(t, svc.Unbind(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, domain.ChannelTypeFeishu))
-	// app 被置 restarting，且发生在重启之前（restarter 仍被触发）。
-	require.True(t, store.appStatusSet, "running 实例解绑应置 app 状态")
-	require.Equal(t, domain.AppStatusRestarting, store.lastAppStatus)
-	require.True(t, restarter.restarted, "置 restarting 后仍应触发 RolloutRestart")
+	// 双轴模型：runtime_phase 被置 restarting，业务态 status 不动。
+	require.True(t, store.runtimePhaseSet, "running 实例解绑应置 runtime_phase=restarting")
+	require.Equal(t, domain.RuntimePhaseRestarting, store.lastRuntimePhase)
+	require.False(t, store.appStatusSet, "双轴模型:解绑不得写业务态 status")
+	require.True(t, restarter.restarted, "置 runtime_phase=restarting 后仍应触发 RolloutRestart")
 	require.Equal(t, domain.ChannelStatusUnboundByUser, store.lastStatus)
 }
 
-// TestChannelServiceUnbindFeishuSkipsRestartingWhenNotRunning 验证：飞书解绑时若 app 非 running，
-// 守卫拒绝 running→restarting，跳过置位（只记日志），解绑仍成功、删 key、重启照常。
-func TestChannelServiceUnbindFeishuSkipsRestartingWhenNotRunning(t *testing.T) {
+// TestChannelServiceUnbindFeishuAlwaysSetsRuntimePhaseRestarting 验证：飞书解绑时无论 app 当前业务态，
+// 均无条件置 runtime_phase=restarting（双轴模型无业务态守卫），且不改业务态 status，
+// 解绑成功、删 key、重启照常。这里用非 running 的 binding_waiting 态验证「无守卫」语义。
+func TestChannelServiceUnbindFeishuAlwaysSetsRuntimePhaseRestarting(t *testing.T) {
 	store := newChannelStub(t)
 	store.binding.ChannelType = domain.ChannelTypeFeishu
-	store.app.Status = domain.AppStatusBindingWaiting // 非 running，不应置 restarting
+	store.app.Status = domain.AppStatusBindingWaiting // 非 running，业务态 status 保持不动
 	patcher := &fakeFeishuPatcher{}
 	restarter := &fakeRestarter{}
 	svc := NewChannelService(store, channel.NewRegistry())
 	svc.SetFeishuUnbindDeps(patcher, restarter)
 
 	require.NoError(t, svc.Unbind(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, domain.ChannelTypeFeishu))
-	// 守卫拒绝置位：未写 app 状态，但解绑成功且删 key / 重启不受影响。
-	require.False(t, store.appStatusSet, "非 running 实例解绑不应置 restarting")
+	// 双轴模型：runtime_phase 被置 restarting（无业务态守卫，始终写）；业务态 status 不动。
+	require.True(t, store.runtimePhaseSet, "解绑应置 runtime_phase=restarting")
+	require.Equal(t, domain.RuntimePhaseRestarting, store.lastRuntimePhase)
+	require.False(t, store.appStatusSet, "双轴模型:解绑不得写业务态 status")
 	require.Equal(t, domain.ChannelStatusUnboundByUser, store.lastStatus)
 	require.ElementsMatch(t, []string{"feishu-app-id", "feishu-app-secret", "feishu-domain"}, patcher.deleted)
 	require.True(t, restarter.restarted)
+}
+
+// TestUnbind_SetsRuntimePhaseRestarting 验证解绑触发 RolloutRestart 前置 runtime_phase=restarting，
+// 且业务态 status 保持不动(双轴模型:运行时态归 runtime_phase,业务态不再写 restarting)。
+// 覆盖飞书解绑路径（Unbind 方法，running 实例），断言：
+// 1. SetAppRuntimePhase 被调用，值为 restarting；
+// 2. SetAppStatus 未被调用（status 仍为 running）。
+func TestUnbind_SetsRuntimePhaseRestarting(t *testing.T) {
+	store := newChannelStub(t)
+	// 模拟 running 实例持有飞书绑定，即将解绑。
+	store.binding.ChannelType = domain.ChannelTypeFeishu
+	store.app.Status = domain.AppStatusRunning
+	patcher := &fakeFeishuPatcher{}
+	restarter := &fakeRestarter{}
+	svc := NewChannelService(store, channel.NewRegistry())
+	svc.SetFeishuUnbindDeps(patcher, restarter)
+
+	require.NoError(t, svc.Unbind(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, domain.ChannelTypeFeishu))
+	// 双轴断言：runtime_phase 被置 restarting。
+	require.True(t, store.runtimePhaseSet, "解绑应置 runtime_phase=restarting")
+	require.Equal(t, domain.RuntimePhaseRestarting, store.lastRuntimePhase, "runtime_phase 应为 restarting")
+	// 双轴断言：业务态 status 保持不动，不写 restarting。
+	require.False(t, store.appStatusSet, "双轴模型:解绑不得写 status=restarting,业务态保持不动")
+	require.Equal(t, domain.AppStatusRunning, store.app.Status, "解绑后业务态 status 应保持 running 不变")
 }
 
 // TestChannelServiceBeginAuthInstanceNotReady 验证：微信发起时 app 处于 restarting（非就绪），
@@ -239,8 +267,8 @@ func TestChannelServiceBeginFeishuAuthInstanceNotReady(t *testing.T) {
 	require.Empty(t, store.jobs, "未就绪不应入队 job")
 }
 
-// TestUnbind_WorkWeChat 覆盖企业微信解绑：置 unbound_by_user + 删 wecom-* Secret key + 置 restarting + 重启。
-// app 初始 running（守卫 running→restarting 通过），断言 patcher 收到两把 key 删除、SetAppStatus=restarting、restarter 触发。
+// TestUnbind_WorkWeChat 覆盖企业微信解绑：置 unbound_by_user + 删 wecom-* Secret key +
+// 置 runtime_phase=restarting(双轴模型) + 重启。业务态 status 不动。
 func TestUnbind_WorkWeChat(t *testing.T) {
 	store := newChannelStub(t)
 	// 模拟已绑定 work_wechat 的 running 实例。
@@ -257,9 +285,10 @@ func TestUnbind_WorkWeChat(t *testing.T) {
 	// patcher 收到两把企业微信 key 删除，set 为空。
 	require.ElementsMatch(t, []string{"wecom-bot-id", "wecom-secret"}, patcher.deleted)
 	require.Empty(t, patcher.set)
-	// running 实例置 restarting + 触发 RolloutRestart。
-	require.True(t, store.appStatusSet)
-	require.Equal(t, domain.AppStatusRestarting, store.lastAppStatus)
+	// 双轴模型：runtime_phase 置 restarting，业务态 status 不动 + 触发 RolloutRestart。
+	require.True(t, store.runtimePhaseSet)
+	require.Equal(t, domain.RuntimePhaseRestarting, store.lastRuntimePhase)
+	require.False(t, store.appStatusSet, "双轴模型:解绑不得写业务态 status")
 	require.True(t, restarter.restarted)
 }
 
@@ -337,10 +366,10 @@ func TestChannelServicePollAuthRedactsSecret(t *testing.T) {
 }
 
 // TestBeginWorkWechatAuth_Succeeds 覆盖企业微信手填发起：加密落库 + 同步 patch Secret + 重启 +
-// 置 restarting + 入队 check job，返回 pending_auth。
+// 置 runtime_phase=restarting(双轴模型) + 入队 check job，返回 pending_auth。
 func TestBeginWorkWechatAuth_Succeeds(t *testing.T) {
 	store := newChannelStub(t)
-	store.app.Status = domain.AppStatusRunning // running 才能置 restarting（守卫 running→restarting 通过）
+	store.app.Status = domain.AppStatusRunning // running 实例发起，runtime_phase 将被置 restarting
 	cipher, err := auth.NewCipher([]byte("0123456789abcdef0123456789abcdef"))
 	require.NoError(t, err)
 	patcher := &fakeFeishuPatcher{}
@@ -360,9 +389,10 @@ func TestBeginWorkWechatAuth_Succeeds(t *testing.T) {
 	// 同步注入：set 含明文 bot_id/secret 两把 key，无删除 key。
 	require.Equal(t, map[string]string{"wecom-bot-id": "bot-1", "wecom-secret": "sec-1"}, patcher.set)
 	require.Empty(t, patcher.deleted)
-	// running 实例置 restarting 后触发 RolloutRestart。
-	require.True(t, store.appStatusSet)
-	require.Equal(t, domain.AppStatusRestarting, store.lastAppStatus)
+	// 双轴模型：runtime_phase 置 restarting，业务态 status 不动 + 触发 RolloutRestart。
+	require.True(t, store.runtimePhaseSet)
+	require.Equal(t, domain.RuntimePhaseRestarting, store.lastRuntimePhase)
+	require.False(t, store.appStatusSet, "双轴模型:企业微信发起不得写业务态 status")
 	require.True(t, restarter.restarted)
 	// metadata 写入 secret 密文且不等于明文（已加密）。
 	var meta map[string]any
@@ -453,6 +483,10 @@ type channelStub struct {
 	appStatusSet  bool
 	lastAppStatus string
 	appStatusErr  error
+	// runtimePhaseSet / lastRuntimePhase 记录 SetAppRuntimePhase 调用情况，
+	// 供双轴模型断言：解绑置 runtime_phase=restarting、不写业务态 status。
+	runtimePhaseSet  bool
+	lastRuntimePhase string
 	// bindingMissing 为 true 时 GetChannelBindingByAppAndType 返回 ErrNoRows，
 	// 用于模拟飞书 create-on-demand 场景下绑定行尚未建立。
 	bindingMissing bool
@@ -531,6 +565,15 @@ func (s *channelStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParam
 		return s.appStatusErr
 	}
 	s.app.Status = arg.Status
+	return nil
+}
+
+// SetAppRuntimePhase 记录运行时就绪维度写入，供双轴模型断言：解绑置 runtime_phase=restarting，
+// 业务态 status 不动。
+func (s *channelStub) SetAppRuntimePhase(_ context.Context, arg sqlc.SetAppRuntimePhaseParams) error {
+	s.runtimePhaseSet = true
+	s.lastRuntimePhase = arg.RuntimePhase
+	s.app.RuntimePhase = arg.RuntimePhase
 	return nil
 }
 

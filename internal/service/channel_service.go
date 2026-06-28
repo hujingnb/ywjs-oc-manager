@@ -45,8 +45,9 @@ type ChannelStore interface {
 	// 企业微信手填发起用它落库已加密的 secret metadata。
 	SetChannelBindingChallenge(ctx context.Context, arg sqlc.SetChannelBindingChallengeParams) error
 	// SetAppStatus 裸 UPDATE app.status，无状态机守卫；守卫由调用方在 Go 层负责。
-	// 飞书解绑触发 RolloutRestart 前用它把 running 实例置 restarting（由 *sqlc.Queries 实现）。
 	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) error
+	// SetAppRuntimePhase 写运行时就绪维度;解绑 RolloutRestart 前置 restarting(业务态 status 不动)。
+	SetAppRuntimePhase(ctx context.Context, arg sqlc.SetAppRuntimePhaseParams) error
 	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) error
 	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) error
 }
@@ -384,12 +385,15 @@ func (s *ChannelService) BeginWorkWechatAuth(ctx context.Context, principal auth
 			return ChallengeResult{}, fmt.Errorf("注入企业微信 Secret 失败: %w", err)
 		}
 	}
-	// RolloutRestart 之前把 running 实例置 restarting：重建 pod 期间 oc-ops 不可用，标记过渡态。
-	// 守卫不过（如 binding_waiting）则跳过置位、只记日志，不阻断发起——DB pending_auth 已是 source of truth。
-	if err := domain.EnsureAppTransition(app.Status, domain.AppStatusRestarting); err != nil {
-		slog.InfoContext(ctx, "企业微信发起跳过置 restarting：当前状态不允许", "app_id", app.ID, "status", app.Status)
-	} else if err := s.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{Status: domain.AppStatusRestarting, ID: app.ID}); err != nil {
-		slog.ErrorContext(ctx, "企业微信发起置 restarting 失败", "app_id", app.ID, redactlog.Err(err))
+	// 解绑触发 RolloutRestart 重建 pod(Recreate,~20s 停机),期间 oc-ops 不可用。
+	// 双轴模型:置 runtime_phase=restarting 标记运行时不就绪(发起闸门据此关闭),业务态 status
+	// 保持不动;reconciler 在 pod 重新 Ready 后写回 ready。置位失败只记日志、不阻断解绑——
+	// channel_binding=unbound_by_user 才是 source of truth。
+	if err := s.store.SetAppRuntimePhase(ctx, sqlc.SetAppRuntimePhaseParams{
+		RuntimePhase: domain.RuntimePhaseRestarting,
+		ID:           app.ID,
+	}); err != nil {
+		slog.ErrorContext(ctx, "解绑置 runtime_phase=restarting 失败", "app_id", app.ID, redactlog.Err(err))
 	}
 	if s.feishuRestarter != nil {
 		if err := s.feishuRestarter.RestartApp(ctx, app.ID); err != nil {
@@ -495,18 +499,15 @@ func (s *ChannelService) Unbind(ctx context.Context, principal auth.Principal, a
 		if err := s.feishuPatcher.PatchSecretKeys(ctx, app.ID, nil, delKeys); err != nil {
 			slog.ErrorContext(ctx, "解绑删渠道 Secret key 失败", "app_id", app.ID, "channel", channelType, redactlog.Err(err))
 		}
-		// RolloutRestart 之前把 running 实例置 restarting：重建 pod 期间 oc-ops 不可用，
-		// 标记过渡态让前端禁用「发起」、reconciler 在 pod 重新 Ready 后收敛回 running。
-		// 守卫：仅当当前 status==running 才置位（EnsureAppTransition 校验 running→restarting）；
-		// 校验不过（如 binding_waiting / 已 error）则跳过置位、只记日志，不阻断解绑——
-		// DB channel_binding=unbound_by_user 已是 source of truth，置位失败不影响解绑结果。
-		if err := domain.EnsureAppTransition(app.Status, domain.AppStatusRestarting); err != nil {
-			slog.InfoContext(ctx, "解绑跳过置 restarting：当前状态不允许", "app_id", app.ID, "status", app.Status)
-		} else if err := s.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{
-			Status: domain.AppStatusRestarting,
-			ID:     app.ID,
+		// 解绑触发 RolloutRestart 重建 pod(Recreate,~20s 停机),期间 oc-ops 不可用。
+		// 双轴模型:置 runtime_phase=restarting 标记运行时不就绪(发起闸门据此关闭),业务态 status
+		// 保持不动;reconciler 在 pod 重新 Ready 后写回 ready。置位失败只记日志、不阻断解绑——
+		// channel_binding=unbound_by_user 才是 source of truth。
+		if err := s.store.SetAppRuntimePhase(ctx, sqlc.SetAppRuntimePhaseParams{
+			RuntimePhase: domain.RuntimePhaseRestarting,
+			ID:           app.ID,
 		}); err != nil {
-			slog.ErrorContext(ctx, "解绑置 restarting 失败", "app_id", app.ID, redactlog.Err(err))
+			slog.ErrorContext(ctx, "解绑置 runtime_phase=restarting 失败", "app_id", app.ID, redactlog.Err(err))
 		}
 		if s.feishuRestarter != nil {
 			if err := s.feishuRestarter.RestartApp(ctx, app.ID); err != nil {
