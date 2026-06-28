@@ -93,8 +93,8 @@
 
         <!-- 微信渠道详情：扫码绑定 + 状态提示，沿用既有逻辑，飞书选中时不渲染。 -->
         <template v-if="selectedChannelType === 'wechat'">
-          <!-- 实例非运行态(重启中/升级中)时发起被禁用，给出原因提示，避免误以为按钮坏了。 -->
-          <p v-if="canManage && !instanceReady" class="state-text">{{ t('apps.channels.instanceNotReady') }}</p>
+          <!-- 实例非就绪态(error/stopped/restarting 等)时发起被禁用，按真实状态提示原因，避免误以为按钮坏了。 -->
+          <p v-if="canManage && !instanceReady" class="state-text">{{ t('apps.channels.instanceNotReady', { status: instanceStatusLabel }) }}</p>
           <p v-if="progress?.bound_identity" class="state-text">{{ t('apps.channels.boundIdentity') }}{{ progress.bound_identity }}</p>
           <p v-if="progress?.error_message" class="state-text danger">{{ t('apps.channels.errorMsg') }}{{ progress.error_message }}</p>
           <p v-if="isWaitingForChallenge" class="state-text">{{ t('apps.channels.waitingQr') }}</p>
@@ -132,8 +132,8 @@
 
             <!-- 未绑定：扫码自动创建（发起按钮在标题右上），轮询二维码并复用 AuthChallengeRenderer 渲染。 -->
             <template v-else>
-              <!-- 实例非运行态(重启中/升级中)时发起被禁用，提示原因避免误以为是 bug。 -->
-              <p v-if="canManage && !instanceReady" class="state-text">{{ t('apps.channels.instanceNotReady') }}</p>
+              <!-- 实例非就绪态(error/stopped/restarting 等)时发起被禁用，按真实状态提示原因避免误以为是 bug。 -->
+              <p v-if="canManage && !instanceReady" class="state-text">{{ t('apps.channels.instanceNotReady', { status: instanceStatusLabel }) }}</p>
               <p v-if="feishuProgress?.error_message" class="state-text danger">{{ t('apps.channels.errorMsg') }}{{ feishuProgress.error_message }}</p>
               <!-- 扫码后凭证已回传（二维码消费、注入连接中）显示“验证连接中”，未出码时才显示“生成二维码”，
                    避免飞书扫码后误显示微信导向的“正在生成登录二维码”。 -->
@@ -153,16 +153,17 @@
               </div>
             </template>
             <template v-else>
-              <!-- 实例非运行态(重启中/升级中)时提交被禁用，提示原因避免误以为是 bug。 -->
-              <p v-if="canManage && !instanceReady" class="state-text">{{ t('apps.channels.instanceNotReady') }}</p>
+              <!-- 实例非就绪态(error/stopped/restarting 等)时，输入框与提交按钮一并禁用，
+                   并按真实状态提示原因——避免「能填表单却点提交无反应」的失灵错觉。 -->
+              <p v-if="canManage && !instanceReady" class="state-text">{{ t('apps.channels.instanceNotReady', { status: instanceStatusLabel }) }}</p>
               <div class="wecom-controls">
                 <label class="wecom-field">
                   <span class="wecom-field-label">{{ t('apps.channels.workWechatBotIdLabel') }}</span>
-                  <n-input v-model:value="wecomBotId" :disabled="!canManage" :placeholder="t('apps.channels.workWechatBotIdPlaceholder')" />
+                  <n-input v-model:value="wecomBotId" :disabled="!canManage || !instanceReady" :placeholder="t('apps.channels.workWechatBotIdPlaceholder')" />
                 </label>
                 <label class="wecom-field">
                   <span class="wecom-field-label">{{ t('apps.channels.workWechatSecretLabel') }}</span>
-                  <n-input v-model:value="wecomSecret" type="password" show-password-on="click" :disabled="!canManage" :placeholder="t('apps.channels.workWechatSecretPlaceholder')" />
+                  <n-input v-model:value="wecomSecret" type="password" show-password-on="click" :disabled="!canManage || !instanceReady" :placeholder="t('apps.channels.workWechatSecretPlaceholder')" />
                 </label>
               </div>
               <p class="wecom-guide">
@@ -204,6 +205,7 @@ import {
   type ChannelChallenge,
 } from '@/api/hooks/useChannel'
 import { canManageApp } from '@/domain/permissions'
+import { formatAppStatus } from '@/domain/status'
 import { useAuthStore } from '@/stores/auth'
 
 // AppChannelsTab 负责应用渠道登录绑定流程，当前默认处理 wechat 渠道。
@@ -412,6 +414,15 @@ const canUnbind = computed(() => canManage.value && progress.value?.status === '
 // pod 用 Recreate 重建或未就绪、oc-ops 短暂不可达，发起会拿到 502/409，统一拦在前端并提示原因。
 const AUTH_READY_STATUSES = new Set(['running', 'binding_waiting', 'binding_failed'])
 const instanceReady = computed(() => AUTH_READY_STATUSES.has(app?.value?.status ?? ''))
+
+// instanceStatusLabel 把实例当前状态机原值解析为本地化文案（复用 domain/status 映射），
+// 供 instanceNotReady 提示按真实状态展示——避免无论实例 error / stopped / restarting 都
+// 笼统提示「正在重启或升级」，让用户误判提交按钮失灵；formatAppStatus 对未知状态会回退到
+// 带原值的 unknown 文案，故 status 永远非空。
+const instanceStatusLabel = computed(() => {
+  const view = formatAppStatus(app?.value?.status ?? '')
+  return t(view.label, view.params ?? {})
+})
 
 // progressChallenge 从轮询结果恢复挑战，避免刷新页面后丢失二维码或验证码展示。
 const progressChallenge = computed<ChannelChallenge | null>(() => {

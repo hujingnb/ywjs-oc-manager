@@ -118,7 +118,7 @@ export default {
     errorMsg: 'Last error: ',
     waitingQr: 'Generating login QR code…',
     qrExpired: 'The QR code has expired. Click "Refresh QR code" to regenerate.',
-    instanceNotReady: 'Instance is restarting or upgrading, please retry shortly…',
+    instanceNotReady: 'Instance is currently "{status}"; it must be running to start channel binding. Please recover the instance and retry.',
     // Channel card: name / description / support label
     channelWechat: 'WeChat',
     channelWechatDesc: 'Scan to bind and receive assistant messages',
