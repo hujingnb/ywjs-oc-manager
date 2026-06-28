@@ -68,6 +68,24 @@ RUN uv pip install --python /usr/local/lib/hermes-agent/venv/bin/python --no-cac
 RUN uv pip install --python /usr/local/lib/hermes-agent/venv/bin/python --no-cache-dir \
       lark-oapi==1.5.3 websockets
 
+# 显式预装 discord platform 依赖（容器启动即 ready，不允许运行时 lazy install）。
+# gateway 启动期平台发现会 import discord 平台模块，触发 tools.lazy_deps 在运行时
+# pip 安装 discord.py[voice]+brotlicffi；该安装是同步阻塞——线上 pod 出网慢时实测耗
+# 时近 9 分钟，把排在后面的 api_server(8642) 与各消息平台连接全堵在后面，导致此期间
+# oc-ops 查 /health/detailed 连接被拒、渠道绑定长时间卡在「验证连接中」。这些实例并不
+# 使用 discord，预装只为消除启动期 lazy install 的阻塞与出网失败风险（与上面 weixin/
+# feishu 预装同因）。版本号对齐引擎 lazy_deps 声明的 feature 'platform.discord'。
+RUN uv pip install --python /usr/local/lib/hermes-agent/venv/bin/python --no-cache-dir \
+      "discord.py[voice]==2.7.1" brotlicffi==1.2.0.1
+
+# 显式预装 edge-tts（容器启动即 ready，不允许运行时 lazy install）。
+# 与 discord 不同，tts.edge 不在启动期触发，而是首次生成语音回复时才 lazy 安装；
+# 但出网慢时这次按需安装会让首条语音消息延迟数十秒（实测 1~51s），且线上出网受限
+# 时可能失败。预装消除首条语音回复的冷启动延迟。版本号对齐引擎 lazy_deps 声明的
+# feature 'tts.edge'。
+RUN uv pip install --python /usr/local/lib/hermes-agent/venv/bin/python --no-cache-dir \
+      edge-tts==7.2.7
+
 # oc-entrypoint Python 依赖：pyyaml 用于 manifest 解析；pytest 用于镜像构建期自检；
 # jsonschema 校验 manifest/契约。
 # 末尾的构建期自检（python -m pytest）用 system python 跑，因此 ocops server/SSE
