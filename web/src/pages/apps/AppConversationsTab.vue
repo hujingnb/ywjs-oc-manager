@@ -93,8 +93,16 @@
             {{ f.name }}
           </n-tag>
         </div>
-        <!-- 第二行：附件按钮 + 文本框 + 发送按钮 -->
+        <!-- 第二行：文本框在左，附件 + 发送按钮一起靠右 -->
         <div class="composer-row">
+          <n-input
+            v-model:value="draft"
+            type="textarea"
+            :autosize="{ minRows: 2, maxRows: 5 }"
+            :placeholder="t('apps.conversations.placeholder')"
+            :disabled="!currentId || sending"
+            @keydown.enter.exact.prevent="onSend"
+          />
           <!-- 附件选择：用 label 包裹隐藏 input，点击 label 触发文件选择框 -->
           <label
             class="attach-button"
@@ -109,14 +117,6 @@
             />
             {{ t('apps.conversations.attach') }}
           </label>
-          <n-input
-            v-model:value="draft"
-            type="textarea"
-            :autosize="{ minRows: 2, maxRows: 5 }"
-            :placeholder="t('apps.conversations.placeholder')"
-            :disabled="!currentId || sending"
-            @keydown.enter.exact.prevent="onSend"
-          />
           <n-button
             type="primary"
             :disabled="!currentId || sending || (!draft.trim() && pendingFiles.length === 0)"
