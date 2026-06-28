@@ -62,3 +62,10 @@ func KnowledgeUploadKey(uploadID, filename string) string {
 func LibrarySkillKey(source, sourceRef, version, ext string) string {
 	return path.Join("library", source, sourceRef, version+"."+ext)
 }
+
+// ConversationFileKey 返回对话文件对象键
+// "apps/<appID>/conversations/<sessionID>/<fileID>/<filename>"。
+// 位于 AppPrefix 下，随 app 数据被 sidecar 持久化。调用方保证各段为合法路径段。
+func ConversationFileKey(appID, sessionID, fileID, filename string) string {
+	return path.Join("apps", appID, "conversations", sessionID, fileID, filename)
+}

@@ -6,6 +6,12 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestConversationFileKey 校验对话文件对象键拼装：位于 app 前缀下，按 session/fileID/filename 分层。
+func TestConversationFileKey(t *testing.T) {
+	got := ConversationFileKey("app1", "weixin:u1", "f9", "报告.pdf")
+	assert.Equal(t, "apps/app1/conversations/weixin:u1/f9/报告.pdf", got)
+}
+
 // TestKeyConventions 验证各类 S3 key/prefix 拼接符合 spec-B §4 约定。
 func TestKeyConventions(t *testing.T) {
 	// app 根前缀必须以 "/" 结尾，供 STS prefix 通配与 MovePrefix 使用
