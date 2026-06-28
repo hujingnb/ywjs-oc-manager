@@ -1,11 +1,14 @@
 // Package handlers —— conversation_files.go 暴露对话文件上传/下载 HTTP 端点。
-// 上传将文件存入 S3 并落库记录，返回元数据；下载通过预签名 URL 重定向客户端直取。
+// 上传将文件存入 S3 并落库记录，返回元数据；下载由 manager 从 S3 流式回源代理返回，
+// 避免浏览器直接访问集群内 S3 host（无法解析）或跨域问题。
 package handlers
 
 import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -19,8 +22,8 @@ import (
 type conversationFileService interface {
 	// Upload 将文件写入 S3 并落库，返回文件元数据。
 	Upload(ctx context.Context, p auth.Principal, appID, sid, filename string, body io.Reader, size int64) (service.ConversationFileUploadResult, error)
-	// Download 鉴权后生成预签名下载 URL 与原始文件名。
-	Download(ctx context.Context, p auth.Principal, appID, sid, fileID string) (url, filename string, err error)
+	// OpenFile 鉴权后打开文件只读流，供 handler 流式回源代理给浏览器。
+	OpenFile(ctx context.Context, p auth.Principal, appID, sid, fileID string) (rc io.ReadCloser, filename, mime string, size int64, err error)
 }
 
 // HermesConversationFileHandler 处理 /api/v1/apps/:appId/hermes/conversations/:sid/files/* 路由。
@@ -91,19 +94,19 @@ func (h *HermesConversationFileHandler) Upload(c *gin.Context) {
 
 // Download GET /api/v1/apps/{appId}/hermes/conversations/{sid}/files/{fileId}
 //
-// @Summary      下载对话文件（重定向至预签名 URL）
+// @Summary      下载对话文件（manager 流式回源代理）
 // @Tags         hermes-conversations
 // @Security     BearerAuth
 // @Param        appId   path  string  true  "应用 ID"
 // @Param        sid     path  string  true  "会话 ID"
 // @Param        fileId  path  string  true  "文件 ID"
-// @Success      302     "重定向至 S3 预签名 URL"
+// @Success      200     {file}    binary
 // @Failure      403     {object}  ErrorResponse
 // @Failure      404     {object}  ErrorResponse
 // @Failure      500     {object}  ErrorResponse
 // @Router       /apps/{appId}/hermes/conversations/{sid}/files/{fileId} [get]
 func (h *HermesConversationFileHandler) Download(c *gin.Context) {
-	url, _, err := h.svc.Download(
+	rc, filename, mimeType, size, err := h.svc.OpenFile(
 		c.Request.Context(),
 		principalFromCtx(c),
 		c.Param("appId"),
@@ -114,6 +117,18 @@ func (h *HermesConversationFileHandler) Download(c *gin.Context) {
 		writeConversationFileError(c, err)
 		return
 	}
-	// 302 重定向让客户端直接从 S3 取文件，manager 不做中转。
-	c.Redirect(http.StatusFound, url)
+	defer rc.Close()
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	c.Header("Content-Type", mimeType)
+	if size > 0 {
+		c.Header("Content-Length", strconv.FormatInt(size, 10))
+	}
+	// RFC 5987 文件名编码，兼容非 ASCII；同时给浏览器 ASCII fallback。
+	c.Header("Content-Disposition", "attachment; filename*=UTF-8''"+url.PathEscape(filename))
+	if _, err := io.Copy(c.Writer, rc); err != nil {
+		// 响应头已发出，无法再改状态码；记录错误供日志查看。
+		_ = c.Error(err)
+	}
 }

@@ -20,10 +20,12 @@ import (
 type stubConversationFileService struct {
 	// uploadResult 上传成功时返回的元数据。
 	uploadResult service.ConversationFileUploadResult
-	// downloadURL 下载成功时返回的预签名 URL。
-	downloadURL string
-	// downloadFilename 下载成功时返回的原始文件名。
-	downloadFilename string
+	// openFileBody 下载成功时流式返回的内容。
+	openFileBody string
+	// openFileFilename 下载成功时返回的原始文件名。
+	openFileFilename string
+	// openFileMime 下载成功时返回的 MIME 类型。
+	openFileMime string
 	// err 控制两个方法均返回的错误（nil 表示成功路径）。
 	err error
 }
@@ -33,9 +35,13 @@ func (s *stubConversationFileService) Upload(_ context.Context, _ auth.Principal
 	return s.uploadResult, s.err
 }
 
-// Download 返回预设结果，便于测试各类下载场景。
-func (s *stubConversationFileService) Download(_ context.Context, _ auth.Principal, _, _, _ string) (url, filename string, err error) {
-	return s.downloadURL, s.downloadFilename, s.err
+// OpenFile 返回预设文件流，便于测试各类下载场景。
+func (s *stubConversationFileService) OpenFile(_ context.Context, _ auth.Principal, _, _, _ string) (io.ReadCloser, string, string, int64, error) {
+	if s.err != nil {
+		return nil, "", "", 0, s.err
+	}
+	body := s.openFileBody
+	return io.NopCloser(strings.NewReader(body)), s.openFileFilename, s.openFileMime, int64(len(body)), nil
 }
 
 // newConvFileTestRouter 构造注入 fake service 的 gin 测试路由器。
@@ -94,20 +100,23 @@ func TestConversationFileUploadUnsupported(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-// 下载成功：fake svc 返回预签名 URL，handler 应返回 302 且 Location 头为该 URL。
+// 下载成功：handler 应流式回源代理，返回 200 + 文件内容 + Content-Disposition 含文件名。
 func TestConversationFileDownloadSuccess(t *testing.T) {
-	const presignedURL = "https://s3.example.com/files/f1?sig=abc"
 	svc := &stubConversationFileService{
-		downloadURL:      presignedURL,
-		downloadFilename: "doc.pdf",
+		openFileBody:     "BYTES",
+		openFileFilename: "doc.pdf",
+		openFileMime:     "application/pdf",
 	}
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet,
 		"/api/v1/apps/app-1/hermes/conversations/sid-1/files/f1", nil)
 	newConvFileTestRouter(svc).ServeHTTP(w, req)
-	// handler 应以 302 重定向客户端至预签名 URL。
-	require.Equal(t, http.StatusFound, w.Code)
-	assert.Equal(t, presignedURL, w.Header().Get("Location"))
+	// manager 流式代理，浏览器直接收到文件内容。
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "BYTES", w.Body.String())
+	// Content-Disposition 应含原始文件名（URL 编码后）。
+	assert.Contains(t, w.Header().Get("Content-Disposition"), "doc.pdf")
+	assert.Equal(t, "application/pdf", w.Header().Get("Content-Type"))
 }
 
 // 下载文件不存在：fake svc 返回 ErrConversationFileNotFound，handler 应映射为 404。

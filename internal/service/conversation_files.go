@@ -77,12 +77,14 @@ type ConversationFileStore interface {
 	GetConversationFile(ctx context.Context, id string) (ConvFileRecord, error)
 }
 
-// conversationFileBlob 是对象存储的最小操作接口（PutObject + 预签名读）。
+// conversationFileBlob 是对象存储的最小操作接口（PutObject + 预签名读 + 流式读）。
 type conversationFileBlob interface {
 	// PutObject 上传对象到指定键。
 	PutObject(ctx context.Context, key string, r io.Reader, size int64) error
-	// PresignGet 生成指定有效期的预签名 GET URL。
+	// PresignGet 生成指定有效期的预签名 GET URL（发送路径用）。
 	PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error)
+	// OpenObject 打开对象只读流，返回 ReadCloser 与字节数（下载回源代理用）。
+	OpenObject(ctx context.Context, key string) (io.ReadCloser, int64, error)
 }
 
 // ConversationFileUploadResult 是上传成功后返回给调用方的元数据。
@@ -197,17 +199,29 @@ func (s *ConversationFileService) ResolveFileURL(ctx context.Context, appID, sid
 	return u, rec.Filename, rec.Mime, nil
 }
 
-// Download 供历史下载端点：校验读权限与归属，返回预签名 URL（handler 以 302 跳转）。
+// OpenFile 校验读权限与归属后，打开对话文件的只读流，供 handler 流式回源代理给浏览器。
+// 返回的 ReadCloser 由调用方负责 Close。
 // 权限：调用方须满足 CanViewAppConversations（org_member 及以上/platform_admin）。
-func (s *ConversationFileService) Download(ctx context.Context, p auth.Principal, appID, sid, fileID string) (url, filename string, err error) {
+func (s *ConversationFileService) OpenFile(ctx context.Context, p auth.Principal, appID, sid, fileID string) (rc io.ReadCloser, filename, mimeType string, size int64, err error) {
 	loc, err := s.resolver.Resolve(ctx, appID)
 	if err != nil {
-		return "", "", err
+		return nil, "", "", 0, err
 	}
 	// 只读权限即可下载历史文件。
 	if !auth.CanViewAppConversations(p, loc.OrgID, loc.OwnerUserID) {
-		return "", "", ErrConversationFileForbidden
+		return nil, "", "", 0, ErrConversationFileForbidden
 	}
-	u, fn, _, err := s.ResolveFileURL(ctx, appID, sid, fileID)
-	return u, fn, err
+	rec, err := s.store.GetConversationFile(ctx, fileID)
+	if err != nil {
+		return nil, "", "", 0, ErrConversationFileNotFound
+	}
+	// 校验文件必须归属请求的 app 与 session，防止跨实例/跨会话越权引用。
+	if rec.AppID != appID || rec.SessionID != sid {
+		return nil, "", "", 0, ErrConversationFileNotFound
+	}
+	reader, sz, err := s.blob.OpenObject(ctx, rec.S3Key)
+	if err != nil {
+		return nil, "", "", 0, err
+	}
+	return reader, rec.Filename, rec.Mime, sz, nil
 }

@@ -32,7 +32,7 @@ func (f *fakeConvFileStore) GetConversationFile(ctx context.Context, id string) 
 	return r, nil
 }
 
-// fakeBlob 记录 PutObject 并对任意 key 返回固定预签名 URL。
+// fakeBlob 记录 PutObject 并对任意 key 返回固定预签名 URL 或固定对象流。
 type fakeBlob struct{ putKey, putData string }
 
 func (b *fakeBlob) PutObject(ctx context.Context, key string, r io.Reader, size int64) error {
@@ -43,6 +43,12 @@ func (b *fakeBlob) PutObject(ctx context.Context, key string, r io.Reader, size 
 }
 func (b *fakeBlob) PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error) {
 	return "https://s3.example/" + key, nil
+}
+
+// OpenObject 返回固定字节内容，模拟 S3 对象流式读取。
+func (b *fakeBlob) OpenObject(ctx context.Context, key string) (io.ReadCloser, int64, error) {
+	const content = "FILEBYTES"
+	return io.NopCloser(strings.NewReader(content)), int64(len(content)), nil
 }
 
 // fakeConvResolver 返回固定 app 定位（owner/org），供权限判断。
@@ -129,4 +135,31 @@ func TestUploadConversationFileEnforcesSizeWithoutContentLength(t *testing.T) {
 	assert.Equal(t, int64(7), res.Size)
 	assert.Equal(t, int64(7), store.created.Size)
 	assert.Equal(t, "PDFDATA", blob.putData)
+}
+
+// TestOpenFile 校验归属后打开文件流，返回正确元数据与内容。
+func TestOpenFile(t *testing.T) {
+	store := &fakeConvFileStore{getByID: map[string]ConvFileRecord{
+		"f1": {ID: "f1", AppID: "app1", SessionID: "s1", S3Key: "k", Filename: "a.pdf", Mime: "application/pdf"},
+	}}
+	svc := NewConversationFileService(store, &fakeBlob{}, fakeConvResolver{})
+	// platform_admin 有读权限，应成功打开文件流并返回正确元数据。
+	rc, fn, mime, _, err := svc.OpenFile(context.Background(), convFilePlatformAdmin(), "app1", "s1", "f1")
+	require.NoError(t, err)
+	defer rc.Close()
+	data, _ := io.ReadAll(rc)
+	assert.Equal(t, "FILEBYTES", string(data))
+	assert.Equal(t, "a.pdf", fn)
+	assert.Equal(t, "application/pdf", mime)
+}
+
+// TestOpenFileWrongOwnerRejected 文件归属 app/session 不符时拒绝，防越权引用他人文件。
+func TestOpenFileWrongOwnerRejected(t *testing.T) {
+	store := &fakeConvFileStore{getByID: map[string]ConvFileRecord{
+		// 文件实际属于 appX/sX，与请求的 app1/s1 不符。
+		"f1": {ID: "f1", AppID: "appX", SessionID: "sX", S3Key: "k"},
+	}}
+	svc := NewConversationFileService(store, &fakeBlob{}, fakeConvResolver{})
+	_, _, _, _, err := svc.OpenFile(context.Background(), convFilePlatformAdmin(), "app1", "s1", "f1")
+	require.ErrorIs(t, err, ErrConversationFileNotFound)
 }

@@ -2892,8 +2892,12 @@ paths:
         schema:
           type: string
       responses:
-        "302":
-          description: 重定向至 S3 预签名 URL
+        "200":
+          content:
+            application/json:
+              schema:
+                type: file
+          description: OK
         "403":
           content:
             application/json:
@@ -2914,7 +2918,7 @@ paths:
           description: Internal Server Error
       security:
       - BearerAuth: []
-      summary: 下载对话文件（重定向至预签名 URL）
+      summary: 下载对话文件（manager 流式回源代理）
       tags:
       - hermes-conversations
   /apps/{appId}/hermes/conversations/{sid}/messages:

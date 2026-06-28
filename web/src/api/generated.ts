@@ -1011,7 +1011,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 下载对话文件（重定向至预签名 URL） */
+        /** 下载对话文件（manager 流式回源代理） */
         get: {
             parameters: {
                 query?: never;
@@ -1028,12 +1028,14 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description 重定向至 S3 预签名 URL */
-                302: {
+                /** @description OK */
+                200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": Record<string, never>;
+                    };
                 };
                 /** @description Forbidden */
                 403: {
