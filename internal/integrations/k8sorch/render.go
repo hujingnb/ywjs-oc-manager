@@ -166,7 +166,19 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 								{Name: "API_SERVER_KEY", ValueFrom: ctrlTokenEnv.ValueFrom},
 								{Name: "PYTHONPATH", Value: "/usr/local/lib"},
 							}, proxyEnv...),
-							Ports:        []corev1.ContainerPort{{ContainerPort: 8080}},
+							Ports: []corev1.ContainerPort{{ContainerPort: 8080}},
+							// readinessProbe：TCP 探 8080，uvicorn 接受连接即视 oc-ops 服务就绪。
+							// 用 TCPSocket 而非 HTTP /health/detailed——后者会转发 hermes 平台健康检查，
+							// 把 oc-ops 就绪耦合到平台连通(某平台 fatal 会让 oc-ops 永不 Ready)，过严。
+							// TCP 仅表「uvicorn 在 listen」，是「oc-ops API 可达」的解耦最小信号。
+							ReadinessProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{
+									TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt(8080)},
+								},
+								InitialDelaySeconds: 10,
+								PeriodSeconds:       10,
+								FailureThreshold:    6,
+							},
 							VolumeMounts: []corev1.VolumeMount{dataMount},
 						},
 						{
