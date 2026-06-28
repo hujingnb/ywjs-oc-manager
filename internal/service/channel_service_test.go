@@ -235,6 +235,28 @@ func TestUnbind_SetsRuntimePhaseRestarting(t *testing.T) {
 	require.Equal(t, domain.AppStatusRunning, store.app.Status, "解绑后业务态 status 应保持 running 不变")
 }
 
+// TestChannelServiceBeginAuthBlockedByRuntimePhase 验证:业务态 running 但 runtime_phase != ready
+// (pod 重启/未就绪窗口)时,发起渠道授权被双维度守卫拦下返回 ErrInstanceNotReady——锁定双轴新行为。
+// 旧测试(TestChannelServiceBeginAuthInstanceNotReady)用业务态 restarting 驱动;新代码已不写业务态
+// restarting(双轴模型:重启窗口由 runtime_phase=restarting 标记,status 保持 running)。
+// 本用例覆盖「status=running 但 runtime_phase=restarting」这条新的拦截路径。
+func TestChannelServiceBeginAuthBlockedByRuntimePhase(t *testing.T) {
+	store := newChannelStub(t)
+	// 业务态 running（allowlist 内）但 runtime_phase=restarting（pod 重启窗口，oc-ops 不可用）。
+	store.app.Status = domain.AppStatusRunning
+	store.app.RuntimePhase = domain.RuntimePhaseRestarting
+	registry := channel.NewRegistry()
+	registry.MustRegister(&fakeAdapter{})
+	svc := NewChannelService(store, registry)
+
+	_, err := svc.BeginAuth(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, domain.ChannelTypeWeChat)
+	// 双维度守卫应拦截：runtime_phase!=ready → ErrInstanceNotReady。
+	require.ErrorIs(t, err, ErrInstanceNotReady)
+	// 未就绪不应写渠道状态、不入队 job。
+	require.False(t, store.statusUpdated, "runtime_phase=restarting 时不应写渠道状态")
+	require.Empty(t, store.jobs, "runtime_phase=restarting 时不应入队 job")
+}
+
 // TestChannelServiceBeginAuthInstanceNotReady 验证：微信发起时 app 处于 restarting（非就绪），
 // 返回 ErrInstanceNotReady，且不写渠道状态、不入队 job。
 func TestChannelServiceBeginAuthInstanceNotReady(t *testing.T) {

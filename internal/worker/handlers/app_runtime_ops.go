@@ -31,6 +31,9 @@ type AppRuntimeStore interface {
 	// CreateJob 在重启检测到镜像变更后入队 app_initialize job，
 	// 复用初始化阶段重建 k8s 资源并拉取新镜像。
 	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) error
+	// SetAppRuntimePhase 写运行时就绪维度;镜像不变重启 Scale(0) 前置 restarting,
+	// 标记 pod 重建窗口、关闭渠道发起闸门;reconciler 在 pod 重新 Ready 后写回 ready。
+	SetAppRuntimePhase(ctx context.Context, arg sqlc.SetAppRuntimePhaseParams) error
 }
 
 // appOrchestrator 是 k8s 生命周期 handler 消费的窄接口，仅包含运行时操作所需方法。
@@ -136,6 +139,15 @@ func (h *AppStartContainerHandler) Handle(ctx context.Context, job sqlc.Job) err
 	if st.Phase == "NotFound" {
 		return fmt.Errorf("应用 %s 尚未完成初始化，无法启动（k8s Deployment 尚未建立）", payload.AppID)
 	}
+	// 启动前置 runtime_phase=restarting：Scale(1) 后 pod 需要时间 Ready，期间 oc-ops 不可用。
+	// 若此前 app 已停止过、runtime_phase 残留 ready（reconciler 不跟踪 stopped 态），则
+	// SetAppStatus(running) 后渠道发起闸门误开（running+ready）。先置 restarting 关闭闸门，
+	// reconciler 在 pod 真正 Ready 后写回 ready（双轴模型，业务态 status 不在此更改）。
+	// 置位失败只记日志、不阻断启动主流程。
+	if err := h.store.SetAppRuntimePhase(ctx, sqlc.SetAppRuntimePhaseParams{ID: app.ID, RuntimePhase: domain.RuntimePhaseRestarting}); err != nil {
+		slog.ErrorContext(ctx, "启动置 runtime_phase=restarting 失败", "app_id", app.ID, mlog.Err(err))
+	}
+
 	// Scale(1) 等价于"起 pod"，幂等：Deployment 已有 replicas=1 时 k8s 不重建 pod。
 	if err := h.orch.Scale(ctx, payload.AppID, 1); err != nil {
 		return fmt.Errorf("启动应用失败（Scale replicas=1）: %w", err)
@@ -379,6 +391,13 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 		if err := h.objects.DeletePrefix(ctx, stateDBKey); err != nil {
 			return fmt.Errorf("清除 S3 state.db 失败: %w", err)
 		}
+	}
+
+	// 镜像不变重启即将 Scale(0)→Scale(1) 重建 pod，期间 oc-ops 不可用。先置 runtime_phase=restarting
+	// 关闭渠道发起闸门(业务态 status 保持不动,双轴模型),避免重启窗口内发起打到 down 的 pod 拿 502;
+	// reconciler 在新 pod Ready 后写回 ready。置位失败只记日志、不阻断重启主流程。
+	if err := h.store.SetAppRuntimePhase(ctx, sqlc.SetAppRuntimePhaseParams{ID: app.ID, RuntimePhase: domain.RuntimePhaseRestarting}); err != nil {
+		slog.ErrorContext(ctx, "重启置 runtime_phase=restarting 失败", "app_id", app.ID, mlog.Err(err))
 	}
 
 	// Scale(0) 停止 pod（k8s preStop 触发 oc-presync 同步 workspace）。

@@ -205,7 +205,8 @@ type Querier interface {
 	// pod 重新 Ready → 收敛回 running，pod 坏死 → error，重启空窗（Pending）→ 保持 restarting 等下轮。
 	ListRestartingApps(ctx context.Context) ([]string, error)
 	// 列出当前期望运行（k8s Deployment 已创建）的应用，供 app_status_reconciler 周期 poll pod 状态。
-	// running 是常态；binding_waiting 表示 pod 已起但渠道还在登录中，也需要 reconcile。
+	// running 是常态；binding_waiting 表示 pod 已起但渠道还在登录中，也需要 reconcile；
+	// binding_failed 表示上轮扫码超时，pod 仍在（属渠道发起 allowlist，需 reconciler 维护其 runtime_phase）。
 	// spec-A2b：去掉 runtime_node_id / container_id（k8s 路径不再写这两列），消费方仅用 id。
 	ListRunningApps(ctx context.Context) ([]string, error)
 	ListSkillTicketMessages(ctx context.Context, ticketID string) ([]SkillTicketMessage, error)

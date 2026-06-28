@@ -59,6 +59,30 @@ func TestAppStartContainerHandler_HappyPath(t *testing.T) {
 	require.Equal(t, domain.AppStatusRunning, stub.statusUpdates[len(stub.statusUpdates)-1])
 }
 
+// TestAppStartContainerHandler_SetsRestartingBeforeScale 验证 stopped→running 启动路径：
+// SetAppRuntimePhase(restarting) 在 Scale(1) 之前被调用，关闭渠道发起闸门（双轴模型）。
+// 背景：reconciler 不跟踪 stopped 态的 app，重新启动时 runtime_phase 可能残留上次的 ready，
+// 若 SetAppStatus(running) 后闸门误开（running+ready），发起会打到尚未 Ready 的 pod 拿 502。
+// I-1 修复回归锁定测试，与重启路径的 NoImage_SetsRestartingBeforeScale 对称。
+func TestAppStartContainerHandler_SetsRestartingBeforeScale(t *testing.T) {
+	stub := runtimeStub(t)
+	stub.app.RuntimePhase = domain.RuntimePhaseReady // 模拟停止前残留的就绪态
+	// statusPhase="Pending"：Deployment 存在但 replicas=0（已停止态），允许 Scale(1)。
+	orch := &fakeAppOrchestrator{statusPhase: "Pending"}
+	handler := NewAppStartContainerHandler(stub, orch)
+
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStartContainer, testAppID))
+	require.NoError(t, err)
+	// runtime_phase=restarting 必须在 Scale(1) 前写入（首次写即 restarting，关闭发起闸门）。
+	require.NotEmpty(t, stub.runtimePhaseUpdates, "启动路径应写 runtime_phase=restarting")
+	require.Equal(t, domain.RuntimePhaseRestarting, stub.runtimePhaseUpdates[0], "第一次写应为 restarting")
+	// Scale(1) 被调用一次。
+	require.Equal(t, 1, orch.scaleCalls)
+	require.Equal(t, int32(1), orch.lastScaleReplicas)
+	// 最终业务态 status 推进到 running。
+	require.Equal(t, domain.AppStatusRunning, stub.statusUpdates[len(stub.statusUpdates)-1], "启动后业务态应为 running")
+}
+
 // TestAppStartContainerHandler_DeploymentExistsSucceeds 验证
 // k8s 路径：Deployment 已建立（orch.Status 返回 Phase="Pending"，replicas=0 的已停止态）时，
 // Start 应正常 Scale(1)。spec-A2b：container_id 列已删除，Start/Stop 完全依赖 orch.Status.Phase 判定。
@@ -340,6 +364,30 @@ func TestAppRestartContainerHandler_RefresherError_AbortsRestart(t *testing.T) {
 	require.False(t, objects.deletedSessionsPrefix)
 }
 
+// TestAppRestartContainerHandler_NoImage_SetsRestartingBeforeScale 验证镜像不变重启路径：
+// SetAppRuntimePhase(restarting) 在 Scale(0) 之前被调用，关闭渠道发起闸门（双轴模型）；
+// 最终业务态 status 仍更新为 running（Scale(0)→Scale(1) 完成后），runtime_phase 由
+// reconciler 负责写回 ready。
+// I-1 修复回归锁定测试：确保重启窗口不再留 runtime_phase=ready 的死角。
+func TestAppRestartContainerHandler_NoImage_SetsRestartingBeforeScale(t *testing.T) {
+	stub := runtimeStub(t)
+	stub.app.RuntimePhase = domain.RuntimePhaseReady // 模拟重启前处于就绪态
+	orch := &fakeAppOrchestrator{}
+	// 不注入 refresher → 直接走镜像不变路径（Scale(0)→Scale(1)）。
+	handler := NewAppRestartContainerHandler(stub, orch, nil)
+
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
+	require.NoError(t, err)
+
+	// runtime_phase=restarting 必须在 Scale 调用之前写入（runtimePhaseUpdates 先于 scaleHistory）。
+	require.NotEmpty(t, stub.runtimePhaseUpdates, "重启路径应写 runtime_phase=restarting")
+	require.Equal(t, domain.RuntimePhaseRestarting, stub.runtimePhaseUpdates[0], "第一次写应为 restarting")
+	// Scale(0)→Scale(1) 完成，共 2 次 Scale 调用。
+	require.Equal(t, 2, orch.scaleCalls, "重启应调用 Scale(0) 和 Scale(1)")
+	// 最终业务态 status 推进到 running（主流程不受 runtime_phase 写失败阻断）。
+	require.Equal(t, domain.AppStatusRunning, stub.statusUpdates[len(stub.statusUpdates)-1], "重启后业务态应为 running")
+}
+
 // ─────────────────────────────────────────────
 // AppDeleteHandler 单测
 // ─────────────────────────────────────────────
@@ -545,6 +593,9 @@ type runtimeOpStub struct {
 	lastAppliedVersion sqlc.SetAppAppliedVersionParams
 	// createdJobs 记录所有 CreateJob 入参，供断言 restart 镜像变更后入队 app_initialize。
 	createdJobs []sqlc.CreateJobParams
+	// runtimePhaseUpdates 记录所有 SetAppRuntimePhase 调用的 phase 值（按调用顺序），
+	// 供双轴模型断言：重启/启动前置 restarting，不改业务态 status。
+	runtimePhaseUpdates []string
 }
 
 func (s *runtimeOpStub) GetApp(_ context.Context, _ string) (sqlc.App, error) { return s.app, nil }
@@ -573,6 +624,13 @@ func (s *runtimeOpStub) SetAppAppliedVersion(_ context.Context, arg sqlc.SetAppA
 // CreateJob 实现 AppRuntimeStore 接口；记录入参供断言。
 func (s *runtimeOpStub) CreateJob(_ context.Context, arg sqlc.CreateJobParams) error {
 	s.createdJobs = append(s.createdJobs, arg)
+	return nil
+}
+
+// SetAppRuntimePhase 实现 AppRuntimeStore 接口；记录 phase 值（按调用顺序），供双轴模型断言。
+func (s *runtimeOpStub) SetAppRuntimePhase(_ context.Context, arg sqlc.SetAppRuntimePhaseParams) error {
+	s.runtimePhaseUpdates = append(s.runtimePhaseUpdates, arg.RuntimePhase)
+	s.app.RuntimePhase = arg.RuntimePhase
 	return nil
 }
 

@@ -124,7 +124,9 @@ func AppIsTerminal(status string) bool { return status == AppStatusDeleted }
 // 双维度守卫：业务态在 allowlist 且运行时态为 ready 才放行——否则发起会打到不可达 / 未就绪的
 // oc-ops 拿到 502，前端透出 cryptic「ocops: hermes cli failed」像 bug。
 //   - status 维度：running（就绪，重绑/新增渠道）、binding_waiting（首次 onboarding 等扫码，
-//     微信首绑发起即在此态）、binding_failed（上轮超时，pod 仍在，允许重试）。
+//     微信首绑发起即在此态）、binding_failed（上轮超时，pod 仍在，允许重试——但重试的前提是
+//     runtime_phase 已回到 ready，由 reconciler 持续维护；see Fix I-2，binding_failed 已纳入
+//     ListRunningApps 供 reconciler 刷新其 runtime_phase）。
 //   - runtime_phase 维度：必须 == ready（pod 所有关键容器含 oc-ops 都 Ready）。restarting
 //     （解绑/升级/k8s 自发重启窗口）、starting（首次拉起中）、unknown（未探明）一律拦截。
 //
