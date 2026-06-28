@@ -19,8 +19,8 @@ export default {
     // metrics：三列能力卡片
     metrics: {
       agent: {
-        title: '一人一 Agent',
-        desc: '配置独立运行环境、专属任务管理及独享个人知识库',
+        title: '一人一 沙箱',
+        desc: '独立运行环境，多Agent 协作接入工作流，独享个人知识库',
       },
       unified: {
         title: '统一管控',

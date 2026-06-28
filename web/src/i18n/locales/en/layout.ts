@@ -19,8 +19,8 @@ export default {
     // metrics：三列能力卡片
     metrics: {
       agent: {
-        title: 'One Agent per Person',
-        desc: 'Independent runtime environment, dedicated task management, and a personal knowledge base for each user',
+        title: 'One Sandbox per Person',
+        desc: 'Independent runtime environment, multi-agent collaboration plugged into workflows, and a personal knowledge base',
       },
       unified: {
         title: 'Unified Control',
