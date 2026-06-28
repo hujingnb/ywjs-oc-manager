@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { hasRenderableContent, isDialogueMessage } from './conversation'
+import { hasRenderableContent, isDialogueMessage, parseFileMarkers } from './conversation'
 import type { ConversationMessage } from '@/api/conversations'
 
 describe('hasRenderableContent', () => {
@@ -75,5 +75,24 @@ describe('isDialogueMessage', () => {
   it('过滤仅含工具调用、content 为空的 assistant 步骤', () => {
     // 这一步只触发工具调用、无文字，过滤后会留下空气泡，应跳过。
     expect(isDialogueMessage(mk({ role: 'assistant', content: '', tool_calls: [{}] }))).toBe(false)
+  })
+})
+
+describe('parseFileMarkers', () => {
+  // 新格式：剥离注记+标记，返回 fileId 与解码文件名，clean 只剩用户正文。
+  it('parseFileMarkers 剥离注记与新格式标记并解码文件名', () => {
+    const enc = encodeURIComponent('我的 报告.pdf')
+    const text = `[The user sent a document: '我的 报告.pdf'. The file is saved at: /opt/data/cache/documents/x.pdf. Ask the user what they'd like you to do with it.] <oc-file:f1:${enc}>\n\n帮我看看`
+    const r = parseFileMarkers(text)
+    expect(r.files).toEqual([{ fileId: 'f1', filename: '我的 报告.pdf' }])
+    expect(r.clean).toBe('帮我看看')
+    expect(r.clean).not.toContain('/opt/data')
+  })
+
+  // 旧格式（无文件名）兼容。
+  it('parseFileMarkers 兼容旧格式标记', () => {
+    const r = parseFileMarkers('hi <oc-file:f2>')
+    expect(r.files).toEqual([{ fileId: 'f2', filename: '' }])
+    expect(r.clean).toBe('hi')
   })
 })

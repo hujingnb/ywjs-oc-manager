@@ -9,17 +9,15 @@
       <!-- eslint-disable-next-line vue/no-v-html — 内容经 markdown-it(html:false) 转义，原始 HTML 不会被渲染 -->
       <div v-if="isAssistant" class="markdown-body" v-html="renderMarkdown(stringParts.clean)" />
       <p v-else>{{ stringParts.clean }}</p>
-      <!-- 解析出的 <oc-file:id> 标记逐个渲染为文件下载卡片 -->
-      <a
-        v-for="id in stringParts.fileIds"
-        :key="id"
-        class="file-card"
-        :href="markerFileUrl(id)"
-        target="_blank"
-        rel="noopener"
-      >
-        📎 文件
-      </a>
+      <!-- 解析出的 <oc-file:id:enc_filename> 标记逐个渲染为统一文件 chip（图片预览/下载卡片） -->
+      <ConversationFileChip
+        v-for="(f, i) in stringParts.files"
+        :key="`${f.fileId}-${i}`"
+        :app-id="appId"
+        :session-id="sessionId"
+        :file-id="f.fileId"
+        :filename="f.filename"
+      />
     </template>
     <template v-else-if="Array.isArray(message.content)">
       <template v-for="(p, i) in (message.content as any[])" :key="i">
@@ -34,13 +32,14 @@
           alt=""
           class="msg-image"
         />
-        <!-- input_file part：图片类型直接预览，其它类型渲染为可下载文件卡片 -->
-        <template v-else-if="p.type === 'input_file'">
-          <img v-if="isImageFile(p)" :src="fileUrl(p)" alt="" class="msg-image" />
-          <a v-else class="file-card" :href="fileUrl(p)" target="_blank" rel="noopener">
-            📎 {{ p.filename || 'file' }}
-          </a>
-        </template>
+        <!-- input_file part：统一交给 chip 渲染（图片预览 / 下载卡片，均走鉴权 blob） -->
+        <ConversationFileChip
+          v-else-if="p.type === 'input_file'"
+          :app-id="appId"
+          :session-id="sessionId"
+          :file-id="p.file_id"
+          :filename="p.filename"
+        />
       </template>
     </template>
   </div>
@@ -51,9 +50,10 @@ import MarkdownIt from 'markdown-it'
 import { computed } from 'vue'
 
 import type { ConversationMessage } from '@/api/conversations'
-import { conversationFileDownloadUrl } from '@/api/conversations'
+import { parseFileMarkers } from '@/domain/conversation'
+import ConversationFileChip from './ConversationFileChip.vue'
 
-// appId / sessionId 可选，用于构造文件下载 URL；不传时文件卡片 href 为空串（不可点击）。
+// appId / sessionId 可选，传给 chip 用于带鉴权拉取文件；缺任一则 chip 不请求、显示降级卡片。
 const props = defineProps<{ message: ConversationMessage; appId?: string; sessionId?: string }>()
 
 // markdown-it 模块级单例：避免每条消息重建解析器。
@@ -78,40 +78,14 @@ function imageUrl(p: { type: string; image_url?: string | { url?: string } }): s
   return v?.url ?? ''
 }
 
-// parseFileMarkers 从文字里解析所有 <oc-file:id> 标记，返回 fileId 列表与剥离标记后的纯文字。
-// oc-ops 改写历史消息时，会在文字末尾追加 <oc-file:FILEID> 注记。
-function parseFileMarkers(text: string): { fileIds: string[]; clean: string } {
-  const fileIds: string[] = []
-  const clean = text.replace(/<oc-file:([^>]+)>/g, (_m, id) => { fileIds.push(id); return '' }).trim()
-  return { fileIds, clean }
-}
-
-// stringParts 对字符串 content 预处理：提取 <oc-file:id> 标记得到文件 id 列表，并返回剥离后的纯文字。
+// stringParts 对字符串 content 预处理：剥离 oc-ops 注入的「英文注记 + <oc-file:id:enc> 标记」，
+// 返回纯文字 clean 与文件引用列表 files（交给 ConversationFileChip 渲染）。
 // 非字符串 content 时返回空结果，避免无效计算。
 const stringParts = computed(() =>
   typeof props.message.content === 'string'
     ? parseFileMarkers(props.message.content)
-    : { fileIds: [], clean: '' },
+    : { files: [], clean: '' },
 )
-
-// isImageFile 判断 input_file part 是否图片（按 mime 或文件名扩展名）。
-function isImageFile(p: { filename?: string; mime?: string }): boolean {
-  const mime = p.mime ?? ''
-  if (mime.startsWith('image/')) return true
-  return /\.(jpe?g|png|gif|webp|bmp)$/i.test(p.filename ?? '')
-}
-
-// fileUrl 返回 input_file part 的下载/预览 URL；无 appId/sessionId/file_id 时返回空串。
-function fileUrl(p: { file_id?: string }): string {
-  if (!props.appId || !props.sessionId || !p.file_id) return ''
-  return conversationFileDownloadUrl(props.appId, props.sessionId, p.file_id)
-}
-
-// markerFileUrl 返回文字标记里 fileId 对应的下载 URL。
-function markerFileUrl(fileId: string): string {
-  if (!props.appId || !props.sessionId) return ''
-  return conversationFileDownloadUrl(props.appId, props.sessionId, fileId)
-}
 </script>
 
 <style scoped>
@@ -123,27 +97,6 @@ function markerFileUrl(fileId: string): string {
   border-radius: 6px;
   display: block;
   margin-top: 4px;
-}
-
-/* 文件卡片：内联弹性布局，类似附件标签；点击触发下载或跳转预览 */
-.file-card {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  margin-top: 4px;
-  border: 1px solid var(--color-border, #e5e7eb);
-  border-radius: 6px;
-  font-size: 13px;
-  color: var(--color-text-primary, #1f2329);
-  background: var(--color-surface, #fff);
-  text-decoration: none;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.file-card:hover {
-  background: var(--color-bg-hover, #f5f5f5);
 }
 
 /* markdown 渲染区基础排版：v-html 注入的内容不受 scoped 作用域影响，统一用 :deep 选择。

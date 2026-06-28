@@ -1,5 +1,5 @@
 // 实例会话 API：列会话 / 读历史 / 续聊(流式) / 新建 / 删除 / 重命名 / 文件上传下载。
-import { apiRequest, getStoredAccessToken, getCsrfToken } from '@/api/client'
+import { apiRequest, apiDownload, getStoredAccessToken, getCsrfToken } from '@/api/client'
 import { xhrUpload } from '@/api/xhrUpload'
 
 // ConversationSession 对应后端 hermes 会话对象，source 区分来源渠道（web/wechat 等）。
@@ -184,8 +184,35 @@ export async function uploadConversationFile(
   return r.body as ConversationFileMeta
 }
 
-// conversationFileDownloadUrl 返回历史文件的下载/预览 URL（manager 302 跳预签名）。
-// 前端用 <a href> 或 <img src> 直接指向此 URL 即可触发下载或预览。
+// conversationFileDownloadUrl 返回历史文件下载/预览端点的路径（manager 302 跳预签名）。
+// 该端点在 user 组下需 Authorization: Bearer，故不能直接给 <a href>/<img src>（浏览器不带 header 必 401），
+// 仅作为 apiDownload 的 path 使用，由 loadConversationFileObjectUrl / downloadConversationFile 带鉴权拉取。
 export function conversationFileDownloadUrl(appId: string, sid: string, fileId: string): string {
   return `${base(appId)}/${encodeURIComponent(sid)}/files/${encodeURIComponent(fileId)}`
+}
+
+// loadConversationFileObjectUrl 带鉴权拉取文件 blob 并返回 object URL（调用方负责 URL.revokeObjectURL）。
+// 用于 <img> 预览：apiDownload 带 Bearer，manager 302 跳 S3 预签名后由 fetch 自动跟随，S3 无需鉴权。
+export async function loadConversationFileObjectUrl(appId: string, sid: string, fileId: string): Promise<string> {
+  const { blob } = await apiDownload(conversationFileDownloadUrl(appId, sid, fileId))
+  return URL.createObjectURL(blob)
+}
+
+// downloadConversationFile 带鉴权拉取并触发浏览器下载。
+// 文件名优先用服务端 Content-Disposition，其次 fallbackName（marker/part 文件名），最后兜底 'file'。
+export async function downloadConversationFile(
+  appId: string,
+  sid: string,
+  fileId: string,
+  fallbackName?: string,
+): Promise<void> {
+  const { blob, filename } = await apiDownload(conversationFileDownloadUrl(appId, sid, fileId))
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename || fallbackName || 'file'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
 }
