@@ -84,7 +84,7 @@ func (q *Queries) CreateApp(ctx context.Context, arg CreateAppParams) error {
 }
 
 const getActiveAppByOwner = `-- name: GetActiveAppByOwner :one
-SELECT id, org_id, owner_user_id, name, description, status, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, owner_active_key, runtime_token_active_key, knowledge_quota_bytes, locale
+SELECT id, org_id, owner_user_id, name, description, status, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, owner_active_key, runtime_token_active_key, knowledge_quota_bytes, locale, runtime_phase
 FROM apps
 WHERE owner_user_id = ? AND deleted_at IS NULL
 `
@@ -125,12 +125,13 @@ func (q *Queries) GetActiveAppByOwner(ctx context.Context, ownerUserID string) (
 		&i.RuntimeTokenActiveKey,
 		&i.KnowledgeQuotaBytes,
 		&i.Locale,
+		&i.RuntimePhase,
 	)
 	return i, err
 }
 
 const getApp = `-- name: GetApp :one
-SELECT id, org_id, owner_user_id, name, description, status, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, owner_active_key, runtime_token_active_key, knowledge_quota_bytes, locale
+SELECT id, org_id, owner_user_id, name, description, status, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, owner_active_key, runtime_token_active_key, knowledge_quota_bytes, locale, runtime_phase
 FROM apps
 WHERE id = ?
 `
@@ -171,12 +172,13 @@ func (q *Queries) GetApp(ctx context.Context, id string) (App, error) {
 		&i.RuntimeTokenActiveKey,
 		&i.KnowledgeQuotaBytes,
 		&i.Locale,
+		&i.RuntimePhase,
 	)
 	return i, err
 }
 
 const getAppByRuntimeTokenHash = `-- name: GetAppByRuntimeTokenHash :one
-SELECT id, org_id, owner_user_id, name, description, status, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, owner_active_key, runtime_token_active_key, knowledge_quota_bytes, locale
+SELECT id, org_id, owner_user_id, name, description, status, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, owner_active_key, runtime_token_active_key, knowledge_quota_bytes, locale, runtime_phase
 FROM apps
 WHERE runtime_token_hash = ? AND deleted_at IS NULL
 `
@@ -219,12 +221,13 @@ func (q *Queries) GetAppByRuntimeTokenHash(ctx context.Context, runtimeTokenHash
 		&i.RuntimeTokenActiveKey,
 		&i.KnowledgeQuotaBytes,
 		&i.Locale,
+		&i.RuntimePhase,
 	)
 	return i, err
 }
 
 const getAppWithVersion = `-- name: GetAppWithVersion :one
-SELECT apps.id, apps.org_id, apps.owner_user_id, apps.name, apps.description, apps.status, apps.newapi_key_id, apps.newapi_key_ciphertext, apps.api_key_status, apps.runtime_snapshot_json, apps.runtime_snapshot_at, apps.restart_policy_json, apps.health_state_json, apps.progress_current, apps.progress_total, apps.last_error_status, apps.last_error_message, apps.runtime_image_ref, apps.runtime_image_sha256, apps.newapi_key_name, apps.version_id, apps.applied_version_revision, apps.applied_image_ref, apps.runtime_token_hash, apps.runtime_token_ciphertext, apps.created_at, apps.updated_at, apps.deleted_at, apps.owner_active_key, apps.runtime_token_active_key, apps.knowledge_quota_bytes, apps.locale, av.revision AS version_revision, av.image_id AS version_image_id
+SELECT apps.id, apps.org_id, apps.owner_user_id, apps.name, apps.description, apps.status, apps.newapi_key_id, apps.newapi_key_ciphertext, apps.api_key_status, apps.runtime_snapshot_json, apps.runtime_snapshot_at, apps.restart_policy_json, apps.health_state_json, apps.progress_current, apps.progress_total, apps.last_error_status, apps.last_error_message, apps.runtime_image_ref, apps.runtime_image_sha256, apps.newapi_key_name, apps.version_id, apps.applied_version_revision, apps.applied_image_ref, apps.runtime_token_hash, apps.runtime_token_ciphertext, apps.created_at, apps.updated_at, apps.deleted_at, apps.owner_active_key, apps.runtime_token_active_key, apps.knowledge_quota_bytes, apps.locale, apps.runtime_phase, av.revision AS version_revision, av.image_id AS version_image_id
 FROM apps
 JOIN assistant_versions av ON av.id = apps.version_id
 WHERE apps.id = ?
@@ -273,6 +276,7 @@ func (q *Queries) GetAppWithVersion(ctx context.Context, id string) (GetAppWithV
 		&i.App.RuntimeTokenActiveKey,
 		&i.App.KnowledgeQuotaBytes,
 		&i.App.Locale,
+		&i.App.RuntimePhase,
 		&i.VersionRevision,
 		&i.VersionImageID,
 	)
@@ -280,7 +284,7 @@ func (q *Queries) GetAppWithVersion(ctx context.Context, id string) (GetAppWithV
 }
 
 const listAppsByOrg = `-- name: ListAppsByOrg :many
-SELECT id, org_id, owner_user_id, name, description, status, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, owner_active_key, runtime_token_active_key, knowledge_quota_bytes, locale
+SELECT id, org_id, owner_user_id, name, description, status, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, owner_active_key, runtime_token_active_key, knowledge_quota_bytes, locale, runtime_phase
 FROM apps
 WHERE org_id = ? AND deleted_at IS NULL
 ORDER BY created_at DESC, id DESC
@@ -335,6 +339,7 @@ func (q *Queries) ListAppsByOrg(ctx context.Context, arg ListAppsByOrgParams) ([
 			&i.RuntimeTokenActiveKey,
 			&i.KnowledgeQuotaBytes,
 			&i.Locale,
+			&i.RuntimePhase,
 		); err != nil {
 			return nil, err
 		}
@@ -350,7 +355,7 @@ func (q *Queries) ListAppsByOrg(ctx context.Context, arg ListAppsByOrgParams) ([
 }
 
 const listAppsByOrgWithVersion = `-- name: ListAppsByOrgWithVersion :many
-SELECT apps.id, apps.org_id, apps.owner_user_id, apps.name, apps.description, apps.status, apps.newapi_key_id, apps.newapi_key_ciphertext, apps.api_key_status, apps.runtime_snapshot_json, apps.runtime_snapshot_at, apps.restart_policy_json, apps.health_state_json, apps.progress_current, apps.progress_total, apps.last_error_status, apps.last_error_message, apps.runtime_image_ref, apps.runtime_image_sha256, apps.newapi_key_name, apps.version_id, apps.applied_version_revision, apps.applied_image_ref, apps.runtime_token_hash, apps.runtime_token_ciphertext, apps.created_at, apps.updated_at, apps.deleted_at, apps.owner_active_key, apps.runtime_token_active_key, apps.knowledge_quota_bytes, apps.locale, av.revision AS version_revision, av.image_id AS version_image_id
+SELECT apps.id, apps.org_id, apps.owner_user_id, apps.name, apps.description, apps.status, apps.newapi_key_id, apps.newapi_key_ciphertext, apps.api_key_status, apps.runtime_snapshot_json, apps.runtime_snapshot_at, apps.restart_policy_json, apps.health_state_json, apps.progress_current, apps.progress_total, apps.last_error_status, apps.last_error_message, apps.runtime_image_ref, apps.runtime_image_sha256, apps.newapi_key_name, apps.version_id, apps.applied_version_revision, apps.applied_image_ref, apps.runtime_token_hash, apps.runtime_token_ciphertext, apps.created_at, apps.updated_at, apps.deleted_at, apps.owner_active_key, apps.runtime_token_active_key, apps.knowledge_quota_bytes, apps.locale, apps.runtime_phase, av.revision AS version_revision, av.image_id AS version_image_id
 FROM apps
 JOIN assistant_versions av ON av.id = apps.version_id
 WHERE apps.org_id = ? AND apps.deleted_at IS NULL
@@ -413,6 +418,7 @@ func (q *Queries) ListAppsByOrgWithVersion(ctx context.Context, arg ListAppsByOr
 			&i.App.RuntimeTokenActiveKey,
 			&i.App.KnowledgeQuotaBytes,
 			&i.App.Locale,
+			&i.App.RuntimePhase,
 			&i.VersionRevision,
 			&i.VersionImageID,
 		); err != nil {
@@ -720,6 +726,24 @@ type SetAppRestartPolicyParams struct {
 // 管理员 PATCH /apps/:appId/restart-policy 写入；mode/max_per_window/window_seconds 校验在 service 层。
 func (q *Queries) SetAppRestartPolicy(ctx context.Context, arg SetAppRestartPolicyParams) error {
 	_, err := q.db.ExecContext(ctx, setAppRestartPolicy, arg.RestartPolicyJson, arg.ID)
+	return err
+}
+
+const setAppRuntimePhase = `-- name: SetAppRuntimePhase :exec
+UPDATE apps
+SET runtime_phase = ?, updated_at = now()
+WHERE id = ?
+`
+
+type SetAppRuntimePhaseParams struct {
+	RuntimePhase string `db:"runtime_phase" json:"runtime_phase"`
+	ID           string `db:"id" json:"id"`
+}
+
+// 裸 UPDATE runtime_phase(运行时就绪维度,与 status 正交,无状态机守卫,守卫不适用):
+// reconciler 周期写、init worker 首启/就绪写、渠道解绑/升级重启前置 restarting 用。
+func (q *Queries) SetAppRuntimePhase(ctx context.Context, arg SetAppRuntimePhaseParams) error {
+	_, err := q.db.ExecContext(ctx, setAppRuntimePhase, arg.RuntimePhase, arg.ID)
 	return err
 }
 

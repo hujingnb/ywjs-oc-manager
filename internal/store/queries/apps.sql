@@ -95,6 +95,13 @@ SET runtime_snapshot_json = ?,
     updated_at = now()
 WHERE id = ?;
 
+-- name: SetAppRuntimePhase :exec
+-- 裸 UPDATE runtime_phase(运行时就绪维度,与 status 正交,无状态机守卫,守卫不适用):
+-- reconciler 周期写、init worker 首启/就绪写、渠道解绑/升级重启前置 restarting 用。
+UPDATE apps
+SET runtime_phase = ?, updated_at = now()
+WHERE id = ?;
+
 -- name: SetAppRestartPolicy :exec
 -- 管理员 PATCH /apps/:appId/restart-policy 写入；mode/max_per_window/window_seconds 校验在 service 层。
 UPDATE apps

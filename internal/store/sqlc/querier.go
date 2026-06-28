@@ -266,6 +266,9 @@ type Querier interface {
 	SetAppProgress(ctx context.Context, arg SetAppProgressParams) error
 	// 管理员 PATCH /apps/:appId/restart-policy 写入；mode/max_per_window/window_seconds 校验在 service 层。
 	SetAppRestartPolicy(ctx context.Context, arg SetAppRestartPolicyParams) error
+	// 裸 UPDATE runtime_phase(运行时就绪维度,与 status 正交,无状态机守卫,守卫不适用):
+	// reconciler 周期写、init worker 首启/就绪写、渠道解绑/升级重启前置 restarting 用。
+	SetAppRuntimePhase(ctx context.Context, arg SetAppRuntimePhaseParams) error
 	SetAppRuntimeSnapshot(ctx context.Context, arg SetAppRuntimeSnapshotParams) error
 	// 首次写入 per-app control token（三用：bootstrap / oc-kb / oc-ops）；并发重复初始化拿不到行，由 service 读取既有 token。
 	SetAppRuntimeToken(ctx context.Context, arg SetAppRuntimeTokenParams) error

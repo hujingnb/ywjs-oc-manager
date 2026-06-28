@@ -45,6 +45,8 @@ type App struct {
 	KnowledgeQuotaBytes    int64           `db:"knowledge_quota_bytes" json:"knowledge_quota_bytes"`
 	// 应用语言（hermes 对终端用户说话的语言, en/zh）；NULL=用平台默认
 	Locale null.String `db:"locale" json:"locale"`
+	// 运行时就绪维度(与status正交):ready/starting/restarting/unknown
+	RuntimePhase string `db:"runtime_phase" json:"runtime_phase"`
 }
 
 // 实例级 skill 安装清单，自包含快照，运行时唯一来源
