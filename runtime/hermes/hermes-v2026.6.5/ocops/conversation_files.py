@@ -2,13 +2,15 @@
 #
 # manager 发来的消息含 input_file part（带预签名 file_url）。oc-ops 与 hermes 同 pod 共享
 # /opt/data；这里下载文件、用引擎自带 cache_media_bytes 落到 agent 可见缓存路径，再把 part
-# 改写成「文字注记 + <oc-file:file_id> 标记」拼进文字内容。注记里的路径让 agent 用文件工具/
-# vision_analyze 读取；<oc-file:id> 标记供 manager 前端解析渲染历史文件卡片。
+# 改写成「文字注记 + <oc-file:file_id:enc_filename> 标记」拼进文字内容。注记里的路径让
+# agent 用文件工具/vision_analyze 读取；<oc-file:id:enc_filename> 标记供 manager 前端把
+# 整段注记替换为干净文件卡片（enc_filename 为 URL 编码文件名，前端用 decodeURIComponent 还原）。
 #
 # 设计要点：
 # - cache_media_bytes 为引擎模块函数，**延迟 import**（在 _cache_media_bytes 内），便于单测 mock，
 #   且避免在不含 hermes-agent 的环境 import 失败。
 # - 任一文件下载/落盘失败只降级为「不可用」注记，不让整轮 chat 失败。
+import urllib.parse
 import urllib.request
 
 # 下载单文件的超时与大小上限（与 manager 端 100MB 上限呼应，留余量）。
@@ -36,11 +38,17 @@ def _cache_media_bytes(data: bytes, filename: str):
 
 
 def _note_for(part: dict) -> str:
-    """把一个 input_file part 处理成一段文字注记（含 <oc-file:id> 标记）。"""
+    """把一个 input_file part 处理成一段文字注记（含 <oc-file:id:enc_filename> 标记）。
+
+    注记文本是给 LLM 的提示（含 agent 可读路径）；尾部 marker 额外携带 URL 编码的文件名，
+    供 manager 前端把整段注记替换为干净的文件卡片（见前端 parseFileMarkers）。
+    enc_filename 用 urllib.parse.quote(filename, safe='') 编码，safe='' 确保 ':'、'/'、
+    '>' 等在 marker 内有歧义的字符也被转义，前端用 decodeURIComponent 还原。
+    """
     file_id = str(part.get("file_id") or "")
     filename = str(part.get("filename") or "file")
     url = str(part.get("file_url") or "")
-    marker = f"<oc-file:{file_id}>"
+    marker = f"<oc-file:{file_id}:{urllib.parse.quote(filename, safe='')}>"
     if not url:
         return f"[The user attached '{filename}', but it could not be loaded.] {marker}"
     try:
