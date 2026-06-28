@@ -14,4 +14,6 @@ export default {
   delete: 'Delete',
   // Empty state when no sessions exist
   empty: 'No conversations',
+  // Attach file button label
+  attach: 'Attach',
 } as const

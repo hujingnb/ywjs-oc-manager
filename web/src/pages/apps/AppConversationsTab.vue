@@ -72,23 +72,52 @@
 
       <!-- 输入区：仅在选中会话时启用 -->
       <div class="composer">
-        <n-input
-          v-model:value="draft"
-          type="textarea"
-          :autosize="{ minRows: 2, maxRows: 5 }"
-          :placeholder="t('apps.conversations.placeholder')"
-          :disabled="!currentId || sending"
-          @keydown.enter.exact.prevent="onSend"
-        />
-        <n-button
-          type="primary"
-          :disabled="!currentId || sending || !draft.trim()"
-          :loading="sending"
-          data-test="send"
-          @click="onSend"
-        >
-          {{ sending ? t('apps.conversations.sending') : t('apps.conversations.send') }}
-        </n-button>
+        <!-- 待发文件标签区：每个 tag 可关闭移除 -->
+        <div v-if="pendingFiles.length" class="composer-files">
+          <n-tag
+            v-for="(f, i) in pendingFiles"
+            :key="i"
+            closable
+            size="small"
+            @close="removePendingFile(i)"
+          >
+            {{ f.name }}
+          </n-tag>
+        </div>
+        <!-- 第二行：附件按钮 + 文本框 + 发送按钮 -->
+        <div class="composer-row">
+          <!-- 附件选择：用 label 包裹隐藏 input，点击 label 触发文件选择框 -->
+          <label
+            class="attach-button"
+            :class="{ 'attach-button--disabled': !currentId || sending }"
+          >
+            <input
+              class="hidden-input"
+              type="file"
+              multiple
+              :disabled="!currentId || sending"
+              @change="onPickFiles"
+            />
+            {{ t('apps.conversations.attach') }}
+          </label>
+          <n-input
+            v-model:value="draft"
+            type="textarea"
+            :autosize="{ minRows: 2, maxRows: 5 }"
+            :placeholder="t('apps.conversations.placeholder')"
+            :disabled="!currentId || sending"
+            @keydown.enter.exact.prevent="onSend"
+          />
+          <n-button
+            type="primary"
+            :disabled="!currentId || sending || (!draft.trim() && pendingFiles.length === 0)"
+            :loading="sending"
+            data-test="send"
+            @click="onSend"
+          >
+            {{ sending ? t('apps.conversations.sending') : t('apps.conversations.send') }}
+          </n-button>
+        </div>
       </div>
     </div>
 
@@ -116,7 +145,7 @@ import { ref, reactive, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NButton, NInput, NModal, NSpace, NTag, useMessage } from 'naive-ui'
 import * as api from '@/api/conversations'
-import type { ConversationSession } from '@/api/conversations'
+import type { ConversationSession, ConversationPart } from '@/api/conversations'
 import { isDialogueMessage } from '@/domain/conversation'
 import ConversationMessageView from './ConversationMessageView.vue'
 
@@ -134,6 +163,8 @@ const currentId = ref('')
 const draft = ref('')
 // sending 为 true 时表示流式发送进行中，禁用输入和发送按钮。
 const sending = ref(false)
+// pendingFiles 是用户已选但尚未发送的文件列表，发送时逐个上传后附入消息。
+const pendingFiles = ref<File[]>([])
 // msgListEl 用于发送后滚动到底部。
 const msgListEl = ref<HTMLElement | null>(null)
 
@@ -141,6 +172,19 @@ const msgListEl = ref<HTMLElement | null>(null)
 const renameVisible = ref(false)
 const renameTitle = ref('')
 const renameTargetId = ref('')
+
+// onPickFiles 处理 file input change 事件，把新选文件追加到 pendingFiles，并重置 input 值
+// 允许再次选同名文件。
+function onPickFiles(e: Event) {
+  const input = e.target as HTMLInputElement
+  if (input.files) pendingFiles.value.push(...Array.from(input.files))
+  input.value = ''
+}
+
+// removePendingFile 从待发文件列表中按下标移除单个文件（对应 tag 关闭按钮）。
+function removePendingFile(i: number) {
+  pendingFiles.value.splice(i, 1)
+}
 
 // roleLabel 把消息 role 映射为本地化标签：user→用户、assistant→客服（AI 应答方），
 // 其余 role（如 system）原样回显兜底，避免漏配时标签空白。
@@ -219,27 +263,52 @@ async function onDelete(sid: string) {
   }
 }
 
-// onSend 以 SSE 流式发送消息：
-//   1. 立即把用户消息推入列表（乐观更新）；
-//   2. 插入空的 assistant 占位消息；
-//   3. 逐帧把 onDelta 内容追加到占位消息的 content；
-//   4. 完成后重新拉取该会话消息列表以确保一致性。
+// onSend 以 SSE 流式发送消息，支持纯文本与多模态（文件+文字）：
+//   1. 先逐个上传 pendingFiles 拿到 file_id，组 ConversationPart[]；
+//   2. 立即把用户消息推入列表（乐观更新）；
+//   3. 插入空的 assistant 占位消息；
+//   4. 逐帧把 onDelta 内容追加到占位消息的 content；
+//   5. 完成后重新拉取该会话消息列表以确保一致性。
+// 注意：useMessage() 返回的通知 API 已命名为 `message`，发送消息内容使用 `payload` 避免遮蔽。
 async function onSend() {
   const text = draft.value.trim()
-  if (!text || !currentId.value || sending.value) return
+  const files = pendingFiles.value.slice()
+  // 文字与文件都为空时不发送。
+  if ((!text && files.length === 0) || !currentId.value || sending.value) return
 
   sending.value = true
+  // 立即清空草稿与待发文件，让用户感知操作已受理。
   draft.value = ''
+  pendingFiles.value = []
+
+  // 逐个上传文件，拿到 file_id 组装 file parts。
+  let fileParts: ConversationPart[] = []
+  try {
+    for (const f of files) {
+      const meta = await api.uploadConversationFile(props.appId, currentId.value, f)
+      fileParts.push({ type: 'input_file', file_id: meta.file_id, filename: meta.filename, mime: meta.mime })
+    }
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+    sending.value = false
+    return
+  }
+
+  // 有文件时组装多模态 parts；纯文字时保持字符串，与旧行为兼容。
+  const payload: string | ConversationPart[] =
+    fileParts.length > 0
+      ? [...(text ? [{ type: 'text' as const, text }] : []), ...fileParts]
+      : text
 
   // 乐观推入用户消息。
-  messages.value.push({ role: 'user', content: text })
+  messages.value.push({ role: 'user', content: payload })
   // 用 reactive 包裹占位对象，确保 content 字段的变更触发视图更新。
   const asst = reactive<api.ConversationMessage>({ role: 'assistant', content: '' })
   messages.value.push(asst)
   await scrollToBottom()
 
   try {
-    await api.chatStream(props.appId, currentId.value, text, {
+    await api.chatStream(props.appId, currentId.value, payload, {
       onDelta: (d) => {
         asst.content = (asst.content as string) + d
         void scrollToBottom()
@@ -443,7 +512,52 @@ onMounted(loadSessions)
   flex-shrink: 0;
 }
 
-.composer :deep(.n-input) {
+.composer-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 0 6px;
+}
+
+/* 将附件按钮+文本框+发送按钮横向排列 */
+.composer-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.composer-row :deep(.n-input) {
   flex: 1;
+}
+
+/* 附件按钮：label 包裹 hidden file input，点击触发系统文件选择框 */
+.attach-button {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  height: 34px;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--color-text-secondary, #6b7280);
+  white-space: nowrap;
+  flex-shrink: 0;
+  user-select: none;
+  transition: background 0.15s;
+}
+
+.attach-button:hover {
+  background: var(--color-bg-hover, #f5f5f5);
+}
+
+.attach-button--disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* 隐藏 file input 自身；点击包裹的 label 触发弹框 */
+.hidden-input {
+  display: none;
 }
 </style>

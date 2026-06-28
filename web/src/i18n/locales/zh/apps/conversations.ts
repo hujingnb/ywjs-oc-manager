@@ -14,4 +14,6 @@ export default {
   delete: '删除',
   // 无会话时的空状态提示
   empty: '暂无会话',
+  // 附件按钮文案
+  attach: '附件',
 } as const
