@@ -1,5 +1,6 @@
-// 实例会话 API：列会话 / 读历史 / 续聊(流式) / 新建 / 删除 / 重命名。
+// 实例会话 API：列会话 / 读历史 / 续聊(流式) / 新建 / 删除 / 重命名 / 文件上传下载。
 import { apiRequest, getStoredAccessToken, getCsrfToken } from '@/api/client'
+import { xhrUpload } from '@/api/xhrUpload'
 
 // ConversationSession 对应后端 hermes 会话对象，source 区分来源渠道（web/wechat 等）。
 export interface ConversationSession {
@@ -77,7 +78,7 @@ export async function deleteConversation(appId: string, sid: string): Promise<vo
 export async function chatStream(
   appId: string,
   sid: string,
-  message: string,
+  message: string | ConversationPart[],
   cb: {
     onDelta: (d: string) => void
     onDone: () => void
@@ -140,4 +141,51 @@ export async function chatStream(
     }
   }
   cb.onDone()
+}
+
+// ConversationTextPart 文字 part。
+export interface ConversationTextPart {
+  type: 'text'
+  text: string
+}
+
+// ConversationFilePart 是用户发送的文件 part；file_id 来自上传返回，发送时随消息带上。
+export interface ConversationFilePart {
+  type: 'input_file'
+  file_id: string
+  filename: string
+  mime?: string
+}
+
+export type ConversationPart = ConversationTextPart | ConversationFilePart
+
+// ConversationFileMeta 是上传成功返回的文件元数据。
+export interface ConversationFileMeta {
+  file_id: string
+  filename: string
+  mime: string
+  size: number
+}
+
+// uploadConversationFile 上传单个文件到会话，返回 file_id 等元数据。
+// 使用 application/octet-stream 裸字节流上传，filename 通过 query 参数传递给服务端。
+export async function uploadConversationFile(
+  appId: string,
+  sid: string,
+  file: File,
+  onProgress?: (loaded: number, total: number) => void,
+  signal?: AbortSignal,
+): Promise<ConversationFileMeta> {
+  const params = new URLSearchParams({ filename: file.name })
+  const r = await xhrUpload(
+    `${base(appId)}/${encodeURIComponent(sid)}/files?${params.toString()}`,
+    { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file, onProgress, signal },
+  )
+  return r.body as ConversationFileMeta
+}
+
+// conversationFileDownloadUrl 返回历史文件的下载/预览 URL（manager 302 跳预签名）。
+// 前端用 <a href> 或 <img src> 直接指向此 URL 即可触发下载或预览。
+export function conversationFileDownloadUrl(appId: string, sid: string, fileId: string): string {
+  return `${base(appId)}/${encodeURIComponent(sid)}/files/${encodeURIComponent(fileId)}`
 }
