@@ -82,3 +82,15 @@ def test_update_title_unwraps_session_key():
         out = conversation.update_title("api_1", "新名")
     assert out == {"id": "api_1", "title": "新名"}  # 已解包
     assert op.call_args[0][0].method == "PATCH"
+
+
+# chat 转发前对 body["message"] 调 materialize_files：parts 数组被改写成字符串。
+def test_chat_materializes_file_parts():
+    captured = {}
+    def fake_json(method, path, body=None):
+        captured["body"] = body
+        return {"session_id": "s1", "message": {"role": "assistant", "content": "ok"}}
+    with mock.patch.object(conversation, "_json", side_effect=fake_json), \
+         mock.patch("ocops.conversation_files.materialize_files", return_value="材料化后的文字"):
+        conversation.chat("s1", {"message": [{"type": "text", "text": "hi"}]})
+    assert captured["body"]["message"] == "材料化后的文字"

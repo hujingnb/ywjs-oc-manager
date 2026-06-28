@@ -14,6 +14,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from ocops import conversation_files
 from ocops.errors import OpsError
 
 # api_server 容器内回环地址；与 skills.py RELOAD_URL 同一进程。
@@ -104,8 +105,11 @@ def delete_session(session_id: str) -> None:
 
 
 def chat(session_id: str, body: dict) -> dict:
-    """单轮续聊（非流式），body 含 message（文字/图片 parts）。返回 assistant 回复对象。"""
+    """单轮续聊（非流式），body 含 message（文字/文件 parts）。返回 assistant 回复对象。"""
     sid = urllib.parse.quote(session_id, safe="")
+    # 转发前落盘改写：把 input_file parts 下载为临时文件并改写成可被 api_server 理解的文字形式
+    body = dict(body)
+    body["message"] = conversation_files.materialize_files(body.get("message"))
     return _json("POST", f"/api/sessions/{sid}/chat", body)
 
 
@@ -125,6 +129,9 @@ def chat_stream(session_id: str, body: dict):
     规整成单条 `data: {"event","payload"}` 帧（bytes）逐条 yield，供 server 直接转发。
     上游非 2xx / 网络异常映射为 OpsError（由 server 包成 event: error 帧）。"""
     sid = urllib.parse.quote(session_id, safe="")
+    # 转发前落盘改写：把 input_file parts 下载为临时文件并改写成可被 api_server 理解的文字形式
+    body = dict(body)
+    body["message"] = conversation_files.materialize_files(body.get("message"))
     url = _API_BASE + f"/api/sessions/{sid}/chat/stream"
     req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST")
     key = _api_server_key()
