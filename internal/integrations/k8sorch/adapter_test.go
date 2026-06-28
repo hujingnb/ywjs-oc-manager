@@ -97,12 +97,14 @@ func TestStatusPendingWhenDeploymentExistsNoPod(t *testing.T) {
 	assert.False(t, st.Ready, "pod 未起时 Ready 应为 false")
 }
 
-// TestStatusReadyFromPod 验证有 Ready hermes 容器的 pod 归一为 Ready。
+// TestStatusReadyFromPod 验证 hermes 与 oc-ops 均 Ready 的 pod 归一为 Ready。
+// 两个关键业务容器都就绪才代表实例可对外服务（hermes=引擎，oc-ops=渠道登录/对话 sidecar）。
 func TestStatusReadyFromPod(t *testing.T) {
 	cs := fake.NewSimpleClientset(&corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "app-a1-x", Namespace: "oc-apps", Labels: map[string]string{"app": "a1"}},
 		Status: corev1.PodStatus{Phase: corev1.PodRunning, ContainerStatuses: []corev1.ContainerStatus{
 			{Name: "hermes", Ready: true, Image: "registry/hermes:v1"},
+			{Name: "oc-ops", Ready: true}, // oc-ops 也 Ready，pod 才真正可对外服务
 		}},
 	})
 	a := NewKubernetesAdapter(cs, "oc-apps")
@@ -141,11 +143,13 @@ func TestWaitReadyFailsFastOnTerminalBad(t *testing.T) {
 }
 
 // TestWaitReadySucceedsAndHeartbeats 验证 pod Ready 时 WaitReady 成功返回，且每轮回调 onPoll（心跳）。
+// hermes 与 oc-ops 均 Ready，模拟真正可对外服务的 pod，WaitReady 应立即成功。
 func TestWaitReadySucceedsAndHeartbeats(t *testing.T) {
 	cs := fake.NewSimpleClientset(&corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "app-a1-x", Namespace: "oc-apps", Labels: map[string]string{"app": "a1"}},
 		Status: corev1.PodStatus{Phase: corev1.PodRunning, ContainerStatuses: []corev1.ContainerStatus{
 			{Name: "hermes", Ready: true},
+			{Name: "oc-ops", Ready: true}, // oc-ops 也 Ready，pod 整体就绪 WaitReady 才能成功
 		}},
 	})
 	a := NewKubernetesAdapter(cs, "oc-apps")
@@ -190,6 +194,42 @@ func TestIsTerminalBad(t *testing.T) {
 			assert.Equal(t, tc.want, IsTerminalBad(tc.st))
 		})
 	}
+}
+
+// TestStatus_RequiresBothHermesAndOcops 验证：pod 整体就绪需 hermes 与 oc-ops 容器都 Ready。
+// 渠道登录/对话实际打 oc-ops sidecar，仅 hermes Ready 不代表服务可用（oc-ops 未起仍会 502）。
+func TestStatus_RequiresBothHermesAndOcops(t *testing.T) {
+	// Case A：hermes Ready、oc-ops 未就绪 → pod 整体不可用，st.Ready 应为 false。
+	t.Run("hermes_ready_ocops_not_ready", func(t *testing.T) {
+		cs := fake.NewSimpleClientset(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "app-a1-x", Namespace: "oc-apps", Labels: map[string]string{"app": "a1"}},
+			Status: corev1.PodStatus{Phase: corev1.PodRunning, ContainerStatuses: []corev1.ContainerStatus{
+				{Name: "hermes", Ready: true, Image: "registry/hermes:v1"},
+				{Name: "oc-ops", Ready: false}, // oc-ops 未就绪，渠道登录/对话会 502
+			}},
+		})
+		a := NewKubernetesAdapter(cs, "oc-apps")
+		st, err := a.Status(context.Background(), "a1")
+		require.NoError(t, err)
+		// oc-ops 未 Ready → pod 整体不可对外服务，Ready 必须为 false
+		assert.False(t, st.Ready, "oc-ops 未 Ready 时 pod 整体不应标 Ready")
+	})
+
+	// Case B：hermes 与 oc-ops 均 Ready → pod 完全就绪，st.Ready 应为 true。
+	t.Run("both_hermes_and_ocops_ready", func(t *testing.T) {
+		cs := fake.NewSimpleClientset(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "app-a1-x", Namespace: "oc-apps", Labels: map[string]string{"app": "a1"}},
+			Status: corev1.PodStatus{Phase: corev1.PodRunning, ContainerStatuses: []corev1.ContainerStatus{
+				{Name: "hermes", Ready: true, Image: "registry/hermes:v1"},
+				{Name: "oc-ops", Ready: true}, // 两个关键容器都 Ready
+			}},
+		})
+		a := NewKubernetesAdapter(cs, "oc-apps")
+		st, err := a.Status(context.Background(), "a1")
+		require.NoError(t, err)
+		// hermes 与 oc-ops 均 Ready → pod 可对外服务，Ready 应为 true
+		assert.True(t, st.Ready, "hermes 和 oc-ops 均 Ready 时 pod 应标 Ready")
+	})
 }
 
 // TestPatchSecretKeysSetAndDelete 验证按 key 增删 Secret 不影响其他 key（control-token 保留）。

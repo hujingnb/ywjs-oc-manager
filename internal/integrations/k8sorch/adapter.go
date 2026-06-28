@@ -207,16 +207,25 @@ func (a *KubernetesAdapter) Status(ctx context.Context, appID string) (AppStatus
 	st := AppStatus{Phase: string(p.Status.Phase)}
 	raw, _ := json.Marshal(p.Status)
 	st.Raw = raw
+	// pod 整体就绪需关键业务容器都 Ready：hermes(引擎)与 oc-ops(渠道登录/对话 API sidecar)。
+	// 渠道登录实际打 oc-ops，仅 hermes Ready 会漏判 oc-ops 未起的 502 空窗。s3-sync 是数据
+	// 持久化 sidecar、不在请求路径，不纳入就绪判定。RestartCount/ImageRef/Message 仍取 hermes
+	// （主容器，IsTerminalBad 的重启阈值/镜像溯源沿用 hermes 口径）。
+	var hermesReady, ocopsReady bool
 	for _, cs := range p.Status.ContainerStatuses {
-		if cs.Name == "hermes" {
-			st.Ready = cs.Ready
+		switch cs.Name {
+		case "hermes":
+			hermesReady = cs.Ready
 			st.RestartCount = cs.RestartCount
 			st.ImageRef = cs.Image
 			if cs.State.Waiting != nil {
 				st.Message = cs.State.Waiting.Reason
 			}
+		case "oc-ops":
+			ocopsReady = cs.Ready
 		}
 	}
+	st.Ready = hermesReady && ocopsReady
 	return st, nil
 }
 

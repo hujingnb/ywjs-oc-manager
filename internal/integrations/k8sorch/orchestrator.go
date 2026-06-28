@@ -83,7 +83,7 @@ type ResourceLimits struct {
 type AppStatus struct {
 	// Phase 是 pod 相位：Pending/Running/Succeeded/Failed/Unknown/NotFound。
 	Phase string
-	// Ready 表示 hermes 容器是否 Ready。
+	// Ready 表示 hermes 且 oc-ops 容器都 Ready（pod 可对外服务）。
 	Ready bool
 	// RestartCount 是 hermes 容器重启次数。
 	RestartCount int32
