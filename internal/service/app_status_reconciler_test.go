@@ -47,11 +47,14 @@ type fakeAppStatusStore struct {
 	// requeuedJobs 记录被 RequeueJob 的 job id；createdJobs 记录被 CreateJob 的新建 job，供兜底断言。
 	requeuedJobs []string
 	createdJobs  []sqlc.CreateJobParams
+	// runtimePhase 按 app id 记录最后一次 SetAppRuntimePhase 写入的 runtime_phase 值，供 Tick 断言。
+	runtimePhase map[string]string
 }
 
 func newFakeAppStatusStore() *fakeAppStatusStore {
 	return &fakeAppStatusStore{
-		apps: map[string]sqlc.App{},
+		apps:         map[string]sqlc.App{},
+		runtimePhase: map[string]string{},
 	}
 }
 
@@ -80,6 +83,12 @@ func (f *fakeAppStatusStore) SetAppRuntimeSnapshot(_ context.Context, arg sqlc.S
 	f.snapshotCalls = append(f.snapshotCalls, arg)
 	// 若设置了 snapshotErr，模拟 DB 抖动写快照失败。
 	return f.snapshotErr
+}
+
+// SetAppRuntimePhase 记录最新一次写入的 runtime_phase（覆盖同 id 上次记录），供 Tick 断言使用。
+func (f *fakeAppStatusStore) SetAppRuntimePhase(_ context.Context, arg sqlc.SetAppRuntimePhaseParams) error {
+	f.runtimePhase[arg.ID] = arg.RuntimePhase
+	return nil
 }
 
 // ListErrorApps 返回预设的 error 态 app id 列表（兜底恢复路径）。
@@ -585,6 +594,63 @@ func TestReconcile_RestartingGuardSkipsWhenStatusChanged(t *testing.T) {
 
 	// 当前已非 restarting，守卫阻止写 status。
 	assert.Empty(t, store.statusCalls, "当前状态已非 restarting，守卫应阻止收敛写入")
+}
+
+// ============================================================
+// Tick 写 runtime_phase 集成测试
+// ============================================================
+
+// TestTick_WritesRuntimePhase 验证 Tick 对每个 running/binding_waiting app 按 pod 状态写 runtime_phase：
+//   - pod Ready          → runtime_phase = ready
+//   - pod Pending(重建空窗)→ runtime_phase = restarting
+//
+// 两个 app 同一轮 Tick，验证写入均发生、值对应正确的映射。
+func TestTick_WritesRuntimePhase(t *testing.T) {
+	store := newFakeAppStatusStore()
+	// appID1 pod Ready（稳态运行），appID2 pod Pending（Recreate 空窗）。
+	store.rows = []string{appID1, appID2}
+	store.apps[appID1] = appWithStatus(appID1, domain.AppStatusRunning)
+	store.apps[appID2] = appWithStatus(appID2, domain.AppStatusRunning)
+
+	orch := newFakeOrch()
+	// appID1：pod Running 且 Ready，携带 Raw。
+	orch.set(appID1, k8sorch.AppStatus{
+		Phase: "Running",
+		Ready: true,
+		Raw:   []byte(`{"phase":"Running"}`),
+	}, nil)
+	// appID2：pod Pending（Recreate 重建空窗），没有 Raw（无 pod 数据）。
+	orch.set(appID2, k8sorch.AppStatus{
+		Phase: "Pending",
+		Ready: false,
+	}, nil)
+
+	rec := NewAppStatusReconciler(store, orch, &fakeNotifier{})
+	require.NoError(t, rec.Tick(context.Background()))
+
+	// appID1 pod Ready → runtime_phase 应为 ready。
+	assert.Equal(t, domain.RuntimePhaseReady, store.runtimePhase[appID1],
+		"pod Ready 时 runtime_phase 应写 ready")
+	// appID2 pod Pending → runtime_phase 应为 restarting（重建空窗，非坏死）。
+	assert.Equal(t, domain.RuntimePhaseRestarting, store.runtimePhase[appID2],
+		"pod Pending(重建空窗)时 runtime_phase 应写 restarting")
+}
+
+// ============================================================
+// runtimePhaseFor 单元测试（pod 观测态 → runtime_phase 映射）
+// ============================================================
+
+// TestRuntimePhaseFor 验证 pod 观测态 → runtime_phase 的映射(仅对已过初始化、期望在服务的 app)：
+// Ready→ready；确定坏死→unknown(业务态另推 error)；其余未就绪→restarting(发生重启/未就绪)。
+func TestRuntimePhaseFor(t *testing.T) {
+	// pod 两容器都 Ready：可服务。
+	assert.Equal(t, domain.RuntimePhaseReady, runtimePhaseFor(k8sorch.AppStatus{Ready: true}))
+	// CrashLoopBackOff：确定性坏死，runtime_phase=unknown(业务态由 Tick 推 error)。
+	assert.Equal(t, domain.RuntimePhaseUnknown, runtimePhaseFor(k8sorch.AppStatus{Phase: "Running", Message: "CrashLoopBackOff"}))
+	// Deployment 在但无 pod(Recreate 空窗)：未就绪非坏死 → restarting。
+	assert.Equal(t, domain.RuntimePhaseRestarting, runtimePhaseFor(k8sorch.AppStatus{Phase: "Pending"}))
+	// pod Running 但未 Ready(新 pod 起来中)：未就绪非坏死 → restarting。
+	assert.Equal(t, domain.RuntimePhaseRestarting, runtimePhaseFor(k8sorch.AppStatus{Phase: "Running", Ready: false}))
 }
 
 // ============================================================

@@ -33,6 +33,8 @@ type appStatusStore interface {
 	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) error
 	// SetAppRuntimeSnapshot 更新 runtime_snapshot_json 与 runtime_snapshot_at。
 	SetAppRuntimeSnapshot(ctx context.Context, arg sqlc.SetAppRuntimeSnapshotParams) error
+	// SetAppRuntimePhase 裸 UPDATE runtime_phase(运行时就绪维度,与 status 正交)。
+	SetAppRuntimePhase(ctx context.Context, arg sqlc.SetAppRuntimePhaseParams) error
 	// ListErrorApps 返回 status=error 的 app id，供兜底恢复「pod 已 Ready 但卡 error」。
 	ListErrorApps(ctx context.Context) ([]string, error)
 	// ListRestartingApps 返回 status=restarting 的 app id，供收敛「解绑触发重启」过渡态。
@@ -96,6 +98,13 @@ func (r *AppStatusReconciler) Tick(ctx context.Context) error {
 				ID:                  appID,
 			})
 		}
+
+		// 刷新运行时就绪维度(与 status 正交):pod 真就绪→ready,Recreate 空窗/未就绪→restarting,
+		// 坏死→unknown。写失败静默忽略,下一轮重试(与快照同口径,不阻塞业务态守卫)。
+		_ = r.store.SetAppRuntimePhase(ctx, sqlc.SetAppRuntimePhaseParams{
+			RuntimePhase: runtimePhaseFor(st),
+			ID:           appID,
+		})
 
 		// 状态守卫：只有 app 当前确实是 running 状态，且 pod 处于确定性坏态时才推 error。
 		// 必须重新 GetApp 读取最新 status，避免依赖 ListRunningApps 返回的陈旧快照。
@@ -209,4 +218,22 @@ func (r *AppStatusReconciler) recoverReadyButError(ctx context.Context) {
 // 与「拉镜像/调度等瞬态不算坏」的取舍见 IsTerminalBad 的注释。
 func podIsBad(st k8sorch.AppStatus) bool {
 	return k8sorch.IsTerminalBad(st)
+}
+
+// runtimePhaseFor 把 pod 观测态映射到 runtime_phase(运行时就绪维度)。仅对已过初始化、期望
+// 在服务的 app(running/binding_waiting)调用——这类 app 之前已 Ready,故「未就绪且非坏死」
+// 一律视为发生了重启/正在恢复(restarting),给出清晰的全局重启标识。starting 是首次冷启动语义,
+// 由 init worker 在 phaseStart 写,reconciler 不产出。
+//   - Ready                  → ready(可服务)
+//   - 确定性坏死(IsTerminalBad)→ unknown(不可服务;业务态由 Tick 的 running→error 守卫另推 error)
+//   - 其余(Pending 重建空窗 / Running 未 Ready) → restarting
+func runtimePhaseFor(st k8sorch.AppStatus) string {
+	switch {
+	case st.Ready:
+		return domain.RuntimePhaseReady
+	case k8sorch.IsTerminalBad(st):
+		return domain.RuntimePhaseUnknown
+	default:
+		return domain.RuntimePhaseRestarting
+	}
 }
