@@ -57,8 +57,12 @@ spec:
               value: "localhost,127.0.0.1,mysql,redis,minio,elasticsearch,ragflow,manager-api,.svc,.svc.cluster.local,.cluster.local,10.0.0.0/8,172.16.0.0/12"
           ports:
             - containerPort: 3000
+          # 就绪探针用 TCP 端口探测而非 GET /api/status：new-api 的全局限流按来源 IP 计数，
+          # 探针请求与业务请求共用节点 IP（10.42.0.1），高频探测会把 /api/status 打到 429，
+          # 导致 pod 永远 0/1、Service 无就绪端点、agent 连 new-api 报 APIConnectionError。
+          # new-api 进程本身在 3000 端口正常服务，TCP 探测即可准确反映就绪。
           readinessProbe:
-            httpGet: { path: /api/status, port: 3000 }
+            tcpSocket: { port: 3000 }
             initialDelaySeconds: 10
-            periodSeconds: 5
-            failureThreshold: 30
+            periodSeconds: 10
+            failureThreshold: 6
