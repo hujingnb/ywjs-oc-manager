@@ -56,6 +56,7 @@ type Querier interface {
 	CreateAssistantVersion(ctx context.Context, arg CreateAssistantVersionParams) error
 	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) error
 	CreateChannelBinding(ctx context.Context, arg CreateChannelBindingParams) error
+	CreateConversationFile(ctx context.Context, arg CreateConversationFileParams) error
 	// 定制技能相关查询。工单附件三条查询已在 000011 迁移后移除（改用统一消息表 skill_ticket_messages）；
 	// 本文件保留 custom_skills / custom_skill_targets / 交付相关查询。
 	CreateCustomSkill(ctx context.Context, arg CreateCustomSkillParams) error
@@ -100,6 +101,7 @@ type Querier interface {
 	GetAssistantVersionByName(ctx context.Context, name string) (AssistantVersion, error)
 	GetAuditLog(ctx context.Context, id string) (AuditLog, error)
 	GetChannelBindingByAppAndType(ctx context.Context, arg GetChannelBindingByAppAndTypeParams) (ChannelBinding, error)
+	GetConversationFile(ctx context.Context, id string) (ConversationFile, error)
 	GetCustomSkillByNameVersion(ctx context.Context, arg GetCustomSkillByNameVersionParams) (CustomSkill, error)
 	// 按 ID 读取未删除行业知识库，供管理面详情和后续权限校验使用。
 	GetIndustryKnowledgeBase(ctx context.Context, id string) (IndustryKnowledgeBasis, error)

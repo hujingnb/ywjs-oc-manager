@@ -134,6 +134,25 @@ type ChannelBinding struct {
 	AppActiveKey  null.String `db:"app_active_key" json:"app_active_key"`
 }
 
+type ConversationFile struct {
+	// 文件 ID（UUID），即消息 part 与 <oc-file:id> 标记里的 file_id
+	ID string `db:"id" json:"id"`
+	// 所属实例 ID
+	AppID string `db:"app_id" json:"app_id"`
+	// 所属会话 ID（hermes session id，非 UUID）
+	SessionID string `db:"session_id" json:"session_id"`
+	// S3 对象键 apps/<appID>/conversations/<sid>/<fileID>/<filename>
+	S3Key string `db:"s3_key" json:"s3_key"`
+	// 原始文件名（展示与下载用）
+	Filename string `db:"filename" json:"filename"`
+	// MIME 类型
+	Mime string `db:"mime" json:"mime"`
+	// 文件字节数
+	Size int64 `db:"size" json:"size"`
+	// 上传时间
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+}
+
 // 定制技能归档,多版本共存,工单交付产出(Plan 2 启用)
 type CustomSkill struct {
 	// 主键 UUID
