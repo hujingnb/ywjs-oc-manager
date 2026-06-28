@@ -339,6 +339,57 @@ func TestChannelStartLoginFeishuScanSavesQR(t *testing.T) {
 	require.Equal(t, domain.JobTypeChannelCheckBinding, store.jobs[0].Type)
 }
 
+// workerFakeFeishuErrRunner 是 FeishuRegisterRunner 的错误桩：StreamFeishuRegister 直接
+// 返回预置 error（不建流），模拟 oc-ops 非 2xx——典型为 404 ErrNotFound（旧镜像缺
+// /oc/channels/feishu/register 路由）。用于复现「实例未升级」时的失败落库文案。
+type workerFakeFeishuErrRunner struct{ err error }
+
+func (r *workerFakeFeishuErrRunner) StreamFeishuRegister(_ context.Context, _ channel.AuthInput, _ string) (<-chan ocops.FeishuRegisterEvent, error) {
+	return nil, r.err
+}
+
+// TestChannelStartLoginFeishuRuntimeUnsupported 复现并验证：飞书扫码注册时 oc-ops 返回 404
+// （ocops.ErrNotFound，实例镜像过旧、缺 register 路由），落库的 LastError 不再透传裸
+// "ocops: not found"，而是替换为「去总览页面重启实例升级」的引导文案，便于用户自助处理。
+func TestChannelStartLoginFeishuRuntimeUnsupported(t *testing.T) {
+	store := newFeishuWorkerStore(t)
+	registry := channel.NewRegistry()
+	// runner 直接返回 ocops.ErrNotFound，经 FeishuAdapter.BeginAuth 以 %w 包装上抛，
+	// worker 端 errors.Is 仍能识别哨兵错误。
+	registry.MustRegister(channel.NewFeishuAdapter(&workerFakeFeishuErrRunner{err: ocops.ErrNotFound}))
+	handler := NewChannelStartLoginHandler(store, registry, nil)
+
+	err := handler.Handle(context.Background(), feishuStartJob(t, "feishu"))
+	require.Error(t, err)
+	require.Equal(t, domain.ChannelStatusFailed, store.binding.Status)
+	// 前端展示的就是 LastError：应为友好引导文案。
+	require.Equal(t, "当前实例版本过旧，请到总览页面重启实例完成升级后重试", store.binding.LastError.String)
+	// 绝不能把底层 cryptic 错误（含 "ocops"）透传给用户。
+	require.NotContains(t, store.binding.LastError.String, "ocops")
+}
+
+// TestChannelStartLoginRuntimeUnsupportedFriendlyMessage 验证通用渠道（微信/企业微信）启动
+// 登录时 oc-ops 返回 404（ocops.ErrNotFound）：通用 BeginAuth 失败 sink 同样把 LastError
+// 与审计 error_message 替换为「重启实例升级」引导，而非透传 "ocops: not found"。
+func TestChannelStartLoginRuntimeUnsupportedFriendlyMessage(t *testing.T) {
+	store := newChannelWorkerStore(t)
+	registry := channel.NewRegistry()
+	// 通用 adapter 直接返回哨兵 ocops.ErrNotFound（errors.Is 命中）。
+	registry.MustRegister(&workerFakeChannelAdapter{beginErr: ocops.ErrNotFound})
+	handler := NewChannelStartLoginHandler(store, registry, nil)
+
+	err := handler.Handle(context.Background(), sqlc.Job{
+		Type:        domain.JobTypeChannelStartLogin,
+		PayloadJson: []byte(`{"app_id":"` + testChannelWorkerAppID + `","channel_type":"wechat"}`),
+	})
+	require.Error(t, err)
+	require.Equal(t, domain.ChannelStatusFailed, store.binding.Status)
+	require.Equal(t, "当前实例版本过旧，请到总览页面重启实例完成升级后重试", store.binding.LastError.String)
+	// 审计 error_message 同样落友好文案，不含 cryptic ocops 字样。
+	require.Len(t, store.auditLogs, 1)
+	require.NotContains(t, store.auditLogs[0].ErrorMessage.String, "ocops")
+}
+
 // fakeFeishuPatcher 实现 FeishuSecretPatcher，记录被注入的 feishu-* key 与删除项，
 // 供阶段1断言「凭证已 patch 到 app Secret」。
 type fakeFeishuPatcher struct {

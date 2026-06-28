@@ -99,7 +99,7 @@ func (h *ChannelStartLoginHandler) Handle(ctx context.Context, job sqlc.Job) err
 				AppID:       binding.AppID,
 				ChannelType: binding.ChannelType,
 				Status:      domain.ChannelStatusFailed,
-				LastError:   null.StringFrom(redactlog.SafeErrorMessage(err)),
+				LastError:   null.StringFrom(channelStartErrorMessage(err)),
 			})
 			return fmt.Errorf("发起飞书扫码失败: %w", err)
 		}
@@ -128,7 +128,7 @@ func (h *ChannelStartLoginHandler) Handle(ctx context.Context, job sqlc.Job) err
 		Endpoint:    endpoint,
 	})
 	if err != nil {
-		safeMessage := redactlog.SafeErrorMessage(err)
+		safeMessage := channelStartErrorMessage(err)
 		_ = h.store.SetChannelBindingStatus(ctx, sqlc.SetChannelBindingStatusParams{
 			AppID:       binding.AppID,
 			ChannelType: binding.ChannelType,
@@ -666,6 +666,20 @@ func enqueueChannelCheck(ctx context.Context, store ChannelLoginStore, payload c
 		return fmt.Errorf("创建 channel_check_binding 任务失败: %w", err)
 	}
 	return nil
+}
+
+// channelStartErrorMessage 把渠道启动登录（BeginAuth）失败错误归约为前端可读文案。
+//
+// 当 oc-ops 返回 404（errors.Is(err, ocops.ErrNotFound)）时，几乎总是目标实例镜像版本
+// 过旧、缺少对应渠道端点（典型：旧引擎没有飞书 /oc/channels/feishu/register 注册路由），
+// 而非真正的资源不存在；此时把裸 "ocops: not found" 透传给前端会让用户误以为是系统 bug、
+// 无从下手。故统一替换为「重启实例升级」的引导文案，覆盖飞书 / 微信 / 企业微信等所有渠道。
+// 其余错误沿用 redactlog.SafeErrorMessage 做脱敏 + 截断。
+func channelStartErrorMessage(err error) string {
+	if errors.Is(err, ocops.ErrNotFound) {
+		return "当前实例版本过旧，请到总览页面重启实例完成升级后重试"
+	}
+	return redactlog.SafeErrorMessage(err)
 }
 
 // channelLabelWorker 是 worker 包内的渠道枚举到中文映射，与 service.channelLabel 同义。
