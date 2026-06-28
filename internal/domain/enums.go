@@ -35,6 +35,15 @@ const (
 	// 由 reconciler 在 pod 重新 Ready 后收敛回 running；pod 重启后坏死则收敛到 error。
 	AppStatusRestarting = "restarting"
 
+	// RuntimePhase* 描述实例运行时就绪维度，与业务态 AppStatus* 正交：
+	// AppStatus 管业务生命周期(draft→...→running/stopped/error)，RuntimePhase 管 pod
+	// 此刻能否服务。渠道发起闸门 = AppCanInitiateChannelAuth(status, runtime_phase)，两维
+	// 皆满足才放行。坏态归业务态 error(需人工/重试)，瞬态未就绪归 runtime_phase(只需稍候)。
+	RuntimePhaseReady      = "ready"      // pod 所有关键容器(hermes+oc-ops)Ready，可服务(稳态)
+	RuntimePhaseStarting   = "starting"   // 首次拉起中，pod 未就绪，k8s 预期自愈(init worker 写)
+	RuntimePhaseRestarting = "restarting" // 重启窗口(解绑/升级/k8s 自发)，oc-ops 暂不可用
+	RuntimePhaseUnknown    = "unknown"    // 未探明(查询失败 / reconciler 未跑 / 新建未初始化)
+
 	// APIKeyStatus* 描述 new-api token 生命周期，独立于 app.status。
 	APIKeyStatusPending  = "pending"
 	APIKeyStatusActive   = "active"
@@ -116,6 +125,13 @@ var (
 		ChannelStatusDeleted,
 	)
 
+	validRuntimePhases = set(
+		RuntimePhaseReady,
+		RuntimePhaseStarting,
+		RuntimePhaseRestarting,
+		RuntimePhaseUnknown,
+	)
+
 	validJobTypes = set(
 		JobTypeAppInitialize,
 		JobTypeAppStartContainer,
@@ -153,6 +169,12 @@ func IsAppStatus(value string) bool {
 // IsChannelStatus 校验渠道绑定状态是否属于通用渠道状态机。
 func IsChannelStatus(value string) bool {
 	_, ok := validChannelStatuses[value]
+	return ok
+}
+
+// IsRuntimePhase 校验运行时就绪维度取值是否合法。
+func IsRuntimePhase(value string) bool {
+	_, ok := validRuntimePhases[value]
 	return ok
 }
 

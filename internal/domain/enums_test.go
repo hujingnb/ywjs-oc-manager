@@ -4,6 +4,7 @@ package domain
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -46,5 +47,17 @@ func TestEnumValidatorsRejectUnknownValues(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			require.False(t, tt.check(tt.value))
 		})
+	}
+}
+
+// TestIsRuntimePhase 验证运行时就绪维度取值校验：4 个合法值通过、非法值与空串拒绝。
+func TestIsRuntimePhase(t *testing.T) {
+	// 合法取值：ready/starting/restarting/unknown 全部应通过。
+	for _, v := range []string{RuntimePhaseReady, RuntimePhaseStarting, RuntimePhaseRestarting, RuntimePhaseUnknown} {
+		assert.True(t, IsRuntimePhase(v), "合法 runtime_phase 应通过: %s", v)
+	}
+	// 非法取值：业务态字符串与空串都不是合法 runtime_phase。
+	for _, v := range []string{"running", "", "bad"} {
+		assert.False(t, IsRuntimePhase(v), "非法 runtime_phase 应拒绝: %q", v)
 	}
 }
