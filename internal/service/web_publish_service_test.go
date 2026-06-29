@@ -77,6 +77,11 @@ func (f *fakeWPubStore) UpdatePublishedSiteVersion(ctx context.Context, arg sqlc
 	return nil
 }
 
+// ListActiveSites 返回空列表；现有测试不覆盖同步端点，此方法仅满足接口约束。
+func (f *fakeWPubStore) ListActiveSites(_ context.Context) ([]sqlc.ListActiveSitesRow, error) {
+	return nil, nil
+}
+
 // fakeObjStore 实现 publishObjectStore 接口，记录上传的对象与删除的前缀。
 type fakeObjStore struct {
 	// objects 记录已上传的对象 key → 内容。

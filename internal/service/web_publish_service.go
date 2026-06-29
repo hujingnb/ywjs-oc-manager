@@ -44,6 +44,35 @@ type WebPublishStore interface {
 	CreatePublishedSite(ctx context.Context, arg sqlc.CreatePublishedSiteParams) error
 	// UpdatePublishedSiteVersion 原子更新版本指针、前缀、大小、过期时间（原地更新）。
 	UpdatePublishedSiteVersion(ctx context.Context, arg sqlc.UpdatePublishedSiteVersionParams) error
+	// ListActiveSites 返回所有 status='active' 的站点路由摘要，供 site-server 同步。
+	ListActiveSites(ctx context.Context) ([]sqlc.ListActiveSitesRow, error)
+}
+
+// SiteSyncRecord 是同步端点返回的单条记录（字段与 site-server SiteRecord JSON 对齐）。
+type SiteSyncRecord struct {
+	Host     string `json:"host"`
+	SiteID   string `json:"site_id"`
+	S3Prefix string `json:"s3_prefix"`
+	Status   string `json:"status"`
+}
+
+// ListActiveSitesForSync 返回所有 active 站点路由信息，供 site-server 轮询同步。
+func (s *WebPublishService) ListActiveSitesForSync(ctx context.Context) ([]SiteSyncRecord, error) {
+	rows, err := s.store.ListActiveSites(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// 将 DB 行映射到同步契约结构体（字段顺序与 site-server SiteRecord json tag 对齐）。
+	out := make([]SiteSyncRecord, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, SiteSyncRecord{
+			Host:     r.Host,
+			SiteID:   r.ID,
+			S3Prefix: r.S3Prefix,
+			Status:   r.Status,
+		})
+	}
+	return out, nil
 }
 
 // publishObjectStore 是 WebPublishService 需要的对象存储能力子集。

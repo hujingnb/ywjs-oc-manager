@@ -73,6 +73,11 @@ type Dependencies struct {
 	SkillLibraryService *service.SkillLibraryService
 	// WebPublishConfigService 提供平台管理员对企业 web-publish 能力配置/开通/停用路由；nil 时不注册。
 	WebPublishConfigService *service.WebPublishConfigService
+	// WebPublishService 提供 app runtime token 驱动的站点发布与 site-server 同步能力；nil 时不注册同步端点。
+	WebPublishService *service.WebPublishService
+	// SiteSyncToken 是 site-server 轮询 /internal/web-publish/sites 时使用的共享鉴权 token；
+	// 为空时同步端点不注册（防止未配置时意外开放）。
+	SiteSyncToken string
 	// BootstrapService 提供 pod 启动回调（/internal/apps/:id/bootstrap）；nil 时不注册。
 	// /internal 组不挂用户鉴权中间件，由 handler 内联校验 control token。
 	BootstrapService handlers.BootstrapAppService
@@ -146,6 +151,11 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	// /internal 组：pod 启动回调，不挂用户鉴权中间件，由 handler 内联校验 control token。
 	if dep.BootstrapService != nil {
 		handlers.RegisterBootstrapRoutes(router, handlers.NewBootstrapHandler(dep.BootstrapService))
+	}
+	// /internal/web-publish/sites：site-server 轮询同步端点，不走用户 JWT，
+	// 由 handler 内联校验 X-OC-Site-Sync-Token；token 为空时不注册，防止误暴露。
+	if dep.WebPublishService != nil && dep.SiteSyncToken != "" {
+		handlers.RegisterInternalWebPublishRoutes(router, handlers.NewInternalWebPublishHandler(dep.WebPublishService, dep.SiteSyncToken))
 	}
 
 	// 公开前端配置：无需鉴权，登录页据此初始化界面语言。
