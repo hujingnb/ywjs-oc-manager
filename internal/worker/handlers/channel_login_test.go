@@ -278,7 +278,29 @@ func TestChannelCheckBindingHandlerTimesOutAfterDeadline(t *testing.T) {
 	require.Equal(t, domain.ChannelStatusFailed, store.binding.Status)            // 超时置 failed
 	require.True(t, store.binding.LastError.Valid)                                // 写了超时文案
 	require.Contains(t, store.binding.LastError.String, "连接超时")                  // 统一超时引导
+	require.Contains(t, store.binding.LastError.String, "Client ID")             // 钉钉专属自查引导
 	require.Empty(t, store.jobs)                                                  // 不再 re-enqueue
+}
+
+// TestChannelCheckBindingHandlerWorkWechatTimesOut 验证企业微信同样受 deadline 兜底保护：
+// 到点仍未 connected 置 failed，写企业微信专属超时文案（Bot ID/Secret），停止 re-enqueue。
+func TestChannelCheckBindingHandlerWorkWechatTimesOut(t *testing.T) {
+	store := newChannelWorkerStore(t)
+	store.binding.ChannelType = domain.ChannelTypeWorkWeChat // 绑定行为企业微信渠道
+	registry := channel.NewRegistry()
+	registry.MustRegister(&workerFakeChannelAdapter{
+		channelType: domain.ChannelTypeWorkWeChat,
+		progress:    channel.AuthProgress{Status: channel.AuthStatusPending, UpdatedAt: time.Now()},
+	})
+	handler := NewChannelCheckBindingHandler(store, registry, nil)
+
+	deadline := time.Now().Add(-time.Second).Unix() // 已过点
+	payload := fmt.Sprintf(`{"app_id":"%s","channel_type":"work_wechat","check_deadline_unix":%d}`, testChannelWorkerAppID, deadline)
+	err := handler.Handle(context.Background(), sqlc.Job{Type: domain.JobTypeChannelCheckBinding, PayloadJson: []byte(payload)})
+	require.NoError(t, err)
+	require.Equal(t, domain.ChannelStatusFailed, store.binding.Status)   // 超时置 failed
+	require.Contains(t, store.binding.LastError.String, "Bot ID")        // 企业微信专属自查引导
+	require.Empty(t, store.jobs)                                         // 不再 re-enqueue
 }
 
 // TestChannelCheckBindingHandlerFallsBackToResolverWhenAdapterPending 校验：

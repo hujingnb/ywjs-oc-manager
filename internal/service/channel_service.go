@@ -405,6 +405,10 @@ func (s *ChannelService) BeginWorkWechatAuth(ctx context.Context, principal auth
 		"app_id":       app.ID,
 		"channel_type": domain.ChannelTypeWorkWeChat,
 		"requested_by": principal.UserID,
+		// check_deadline_unix：连通探测超时上限（5 分钟）。企业微信引擎虽可能上报 fatal（凭证错），
+		// 但「填了格式正确却无效的 bot_id/secret、机器人未配长连接」等情形可能既不 fatal 也不
+		// connected——此 deadline 作为兜底，到点仍未连上即置 failed，避免无限 pending + 无限 re-enqueue。
+		"check_deadline_unix": time.Now().Add(5 * time.Minute).Unix(),
 	})
 	if err != nil {
 		return ChallengeResult{}, fmt.Errorf("序列化企业微信探测任务失败: %w", err)

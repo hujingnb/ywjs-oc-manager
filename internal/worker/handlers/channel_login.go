@@ -361,12 +361,16 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 }
 
 // channelCheckTimeoutMessage 返回连通探测超时的用户可读文案（写入 binding.last_error，前端展示）。
-// 钉钉给出针对性自查引导（Client ID/Client Secret + Stream 模式）；其余渠道用通用文案。
+// 钉钉 / 企业微信给出针对性自查引导；其余渠道用通用文案。
 func channelCheckTimeoutMessage(channelType string) string {
-	if channelType == domain.ChannelTypeDingTalk {
+	switch channelType {
+	case domain.ChannelTypeDingTalk:
 		return "连接超时，请检查 Client ID / Client Secret 是否正确、机器人是否已在钉钉开放平台启用 Stream 推送模式"
+	case domain.ChannelTypeWorkWeChat:
+		return "连接超时，请检查 Bot ID / Secret 是否正确、智能机器人是否已在企业微信后台配置为 API 长连接模式"
+	default:
+		return "连接超时，请检查渠道凭证是否正确、机器人是否已在对应平台正确配置"
 	}
-	return "连接超时，请检查渠道凭证是否正确、机器人是否已在对应平台正确配置"
 }
 
 // handleFeishuCheck 执行飞书两阶段 check，靠 metadata 的 injected 标记区分阶段：
