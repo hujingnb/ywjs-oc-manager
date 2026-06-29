@@ -228,6 +228,31 @@ func TestWorkWechatOptionalEnv(t *testing.T) {
 	assert.True(t, *envs[0].ValueFrom.SecretKeyRef.Optional)
 }
 
+// TestDingtalkOptionalEnv 验证钉钉两条 optional SecretKeyRef env 名/key/optional 标记正确。
+// 覆盖：未绑定时 Secret 无对应 key 也不报错（optional=true），引擎 getenv 为空 → 钉钉平台不启用。
+func TestDingtalkOptionalEnv(t *testing.T) {
+	envs := dingtalkOptionalEnv("a1")
+	require.Len(t, envs, 2)                               // 钉钉注入两条 env
+	assert.Equal(t, "DINGTALK_CLIENT_ID", envs[0].Name)  // 第一条对应 AppKey
+	assert.Equal(t, "dingtalk-client-id", envs[0].ValueFrom.SecretKeyRef.Key)
+	assert.True(t, *envs[0].ValueFrom.SecretKeyRef.Optional)
+	assert.Equal(t, "DINGTALK_CLIENT_SECRET", envs[1].Name) // 第二条对应 AppSecret
+	assert.Equal(t, "dingtalk-client-secret", envs[1].ValueFrom.SecretKeyRef.Key)
+	assert.True(t, *envs[1].ValueFrom.SecretKeyRef.Optional)
+}
+
+// TestRenderSecret_Dingtalk 验证已绑定钉钉时 client_id/client_secret 明文写入 Secret StringData。
+func TestRenderSecret_Dingtalk(t *testing.T) {
+	sec := RenderSecret(AppSpec{
+		AppID:                "a1",
+		ControlToken:         "tok",
+		DingtalkClientID:     "ding-key",
+		DingtalkClientSecret: "ding-secret",
+	}, "ns")
+	assert.Equal(t, "ding-key", sec.StringData["dingtalk-client-id"])       // Client ID 明文带出
+	assert.Equal(t, "ding-secret", sec.StringData["dingtalk-client-secret"]) // Client Secret 明文带出
+}
+
 // TestRenderDeploymentInjectsFeishuOptionalEnv 验证 hermes 容器永久带三条 optional 飞书 env，
 // 未绑定时 Secret 无对应 key、optional=true 使 env 不注入、引擎不启用飞书平台。
 func TestRenderDeploymentInjectsFeishuOptionalEnv(t *testing.T) {

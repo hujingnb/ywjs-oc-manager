@@ -62,6 +62,10 @@ type AppSpec struct {
 	WorkWeChatBotID string
 	// WorkWeChatSecret 是企业微信机器人 Secret 明文（buildAppSpec 从 DB 密文解密后填入，引擎需明文；未绑定为空）。
 	WorkWeChatSecret string
+	// DingtalkClientID 是钉钉应用 Client ID（即 AppKey，明文，未绑定为空）。
+	DingtalkClientID string
+	// DingtalkClientSecret 是钉钉 Client Secret 明文（即 AppSecret，buildAppSpec 从 DB 密文解密后填入，引擎需明文；未绑定为空）。
+	DingtalkClientSecret string
 }
 
 // ProxyEnv 是注入容器的代理环境变量（HTTP(S)_PROXY/NO_PROXY），留空不注入。

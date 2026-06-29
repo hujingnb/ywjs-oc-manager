@@ -60,6 +60,18 @@ spec:
               key: wecom-secret
               name: app-a1-token
               optional: true
+        - name: DINGTALK_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              key: dingtalk-client-id
+              name: app-a1-token
+              optional: true
+        - name: DINGTALK_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: dingtalk-client-secret
+              name: app-a1-token
+              optional: true
         image: registry/hermes:v1
         name: hermes
         readinessProbe:

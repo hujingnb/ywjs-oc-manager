@@ -39,6 +39,11 @@ func RenderSecret(spec AppSpec, namespace string) *corev1.Secret {
 		data["wecom-bot-id"] = spec.WorkWeChatBotID
 		data["wecom-secret"] = spec.WorkWeChatSecret
 	}
+	// 已绑定钉钉：带出 client_id + client_secret 明文，保证重建/升级不丢配置（DB 是 source of truth）。
+	if spec.DingtalkClientID != "" && spec.DingtalkClientSecret != "" {
+		data["dingtalk-client-id"] = spec.DingtalkClientID
+		data["dingtalk-client-secret"] = spec.DingtalkClientSecret
+	}
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: secretName(spec.AppID), Namespace: namespace, Labels: appLabels(spec.AppID)},
 		Type:       corev1.SecretTypeOpaque,
@@ -125,11 +130,11 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 							// oc-ops 容器注入同一 key（见下）后即可鉴权调用 /api/sessions。
 							// 飞书三条 env 永久注入 hermes 容器；未绑定时 Secret 无对应 key，optional=true 使
 							// env 不注入，引擎 getenv 为空 → 飞书平台不启用。Deployment 模板永不因绑定变化。
-							Env: append(append(append([]corev1.EnvVar{
+							Env: append(append(append(append([]corev1.EnvVar{
 								{Name: "HERMES_HOME", Value: "/opt/data"},
 								{Name: "API_SERVER_ENABLED", Value: "true"},
 								{Name: "API_SERVER_KEY", ValueFrom: ctrlTokenEnv.ValueFrom},
-							}, feishuOptionalEnv(spec.AppID)...), workWechatOptionalEnv(spec.AppID)...), proxyEnv...),
+							}, feishuOptionalEnv(spec.AppID)...), workWechatOptionalEnv(spec.AppID)...), dingtalkOptionalEnv(spec.AppID)...), proxyEnv...),
 							VolumeMounts: []corev1.VolumeMount{inputMountRO, dataMount},
 							Resources:    corev1.ResourceRequirements{Requests: reqs, Limits: lims},
 							// readinessProbe：exec hermes gateway status，验证网关真正就绪。
@@ -247,6 +252,24 @@ func workWechatOptionalEnv(appID string) []corev1.EnvVar {
 	return []corev1.EnvVar{
 		{Name: "WECOM_BOT_ID", ValueFrom: ref("wecom-bot-id")},
 		{Name: "WECOM_SECRET", ValueFrom: ref("wecom-secret")},
+	}
+}
+
+// dingtalkOptionalEnv 返回钉钉两条 optional SecretKeyRef env（DINGTALK_CLIENT_ID / DINGTALK_CLIENT_SECRET），
+// 供 hermes 容器永久挂载。Optional=true：未绑定时 Secret 无对应 key，k8s 不注入该 env
+// （引擎 getenv 为空 → 钉钉平台不启用），Deployment 模板无需随绑定状态变化。
+func dingtalkOptionalEnv(appID string) []corev1.EnvVar {
+	optionalTrue := true
+	ref := func(key string) *corev1.EnvVarSource {
+		return &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: secretName(appID)},
+			Key:                  key,
+			Optional:             &optionalTrue,
+		}}
+	}
+	return []corev1.EnvVar{
+		{Name: "DINGTALK_CLIENT_ID", ValueFrom: ref("dingtalk-client-id")},
+		{Name: "DINGTALK_CLIENT_SECRET", ValueFrom: ref("dingtalk-client-secret")},
 	}
 }
 
