@@ -51,16 +51,18 @@ RUN go mod download
 # 复制全部源码; 通过 .dockerignore 已剔除 web/、docs/、tmp/ 等无关目录
 COPY . .
 
-# 产出四个二进制:
+# 产出五个二进制:
 #   oc-manager  : HTTP API 主进程, 容器默认 CMD
 #   migrate     : 数据库迁移 CLI, 首次部署执行
 #   seed-admin  : 平台管理员初始化, 首次部署执行
 #   seed-e2e    : Playwright e2e fixture 注入（OCM_E2E=1 守门）
-# 四者打入同一镜像, 便于运维只用一个镜像完成启动 / 迁移 / 应急种子操作
-RUN go build -trimpath -ldflags='-s -w' -o /out/oc-manager ./cmd/server \
- && go build -trimpath -ldflags='-s -w' -o /out/migrate    ./cmd/migrate \
- && go build -trimpath -ldflags='-s -w' -o /out/seed-admin ./cmd/seed-admin \
- && go build -trimpath -ldflags='-s -w' -o /out/seed-e2e   ./cmd/seed-e2e
+#   site-server : 公网静态站点服务，按 Host 路由对象存储，独立部署在 oc-apps
+# 五者打入同一镜像, 便于运维只用一个镜像完成启动 / 迁移 / 应急种子操作
+RUN go build -trimpath -ldflags='-s -w' -o /out/oc-manager  ./cmd/server \
+ && go build -trimpath -ldflags='-s -w' -o /out/migrate     ./cmd/migrate \
+ && go build -trimpath -ldflags='-s -w' -o /out/seed-admin  ./cmd/seed-admin \
+ && go build -trimpath -ldflags='-s -w' -o /out/seed-e2e    ./cmd/seed-e2e \
+ && go build -trimpath -ldflags='-s -w' -o /out/site-server ./cmd/site-server
 
 # ---- 运行阶段 -------------------------------------------------------------
 # 原 docker.io/library/alpine:3.22 → 现 ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/alpine:3.22
@@ -77,10 +79,11 @@ RUN sed -i "s|dl-cdn.alpinelinux.org|${ALPINE_MIRROR}|g" /etc/apk/repositories &
     apk add --no-cache ca-certificates tzdata wget && \
     mkdir -p /var/lib/oc-manager/data /etc/manager
 
-COPY --from=builder /out/oc-manager /usr/local/bin/oc-manager
-COPY --from=builder /out/migrate    /usr/local/bin/migrate
-COPY --from=builder /out/seed-admin /usr/local/bin/seed-admin
-COPY --from=builder /out/seed-e2e   /usr/local/bin/seed-e2e
+COPY --from=builder /out/oc-manager  /usr/local/bin/oc-manager
+COPY --from=builder /out/migrate     /usr/local/bin/migrate
+COPY --from=builder /out/seed-admin  /usr/local/bin/seed-admin
+COPY --from=builder /out/seed-e2e    /usr/local/bin/seed-e2e
+COPY --from=builder /out/site-server /usr/local/bin/site-server
 
 # OCM_CONFIG: cmd/server 与 cmd/migrate 都通过该环境变量定位主配置
 # deploy/manage/docker-compose.yml 将 config/manager.yaml 挂载到 /etc/manager/config.yaml

@@ -1,0 +1,139 @@
+# site-server：公网静态站点代理，部署在 oc-apps namespace，复用多 binary 镜像。
+#
+# 前置条件：在 oc-apps namespace 手动创建 Secret "site-server-secrets"，包含以下 key：
+#   s3-access-key-id      — MinIO/S3 访问密钥 ID（本地联调：ocm）
+#   s3-secret-access-key  — MinIO/S3 访问密钥（本地联调：ocmsecret123）
+#   sync-token            — 与 manager 配置 web_publish.site_sync_token 保持一致的共享令牌
+#
+# 示例（本地联调）：
+#   kubectl --context k3d-ocm -n oc-apps create secret generic site-server-secrets \
+#     --from-literal=s3-access-key-id=ocm \
+#     --from-literal=s3-secret-access-key=ocmsecret123 \
+#     --from-literal=sync-token=<与 manager config 一致的值>
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: site-server
+  namespace: oc-apps
+  labels:
+    app: site-server
+    app.kubernetes.io/part-of: oc-manager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: site-server
+  template:
+    metadata:
+      labels:
+        app: site-server
+        app.kubernetes.io/part-of: oc-manager
+    spec:
+      containers:
+        - name: site-server
+          # 与 manager-api 共用同一多 binary 镜像；本地使用 k3d 本地仓库 dev tag
+          image: k3d-ocm-registry.localhost:5000/oc-manager-api:dev
+          imagePullPolicy: Always
+          command: ["/usr/local/bin/site-server"]
+          ports:
+            - containerPort: 80
+          env:
+            # site-server HTTP 监听地址；Service 对外暴露 80
+            - name: SITE_SERVER_LISTEN
+              value: ":80"
+            # 对象存储端点：跨 namespace FQDN（minio Service 在 ocm，oc-apps pod 须用 FQDN 解析）
+            - name: S3_ENDPOINT
+              value: "http://minio.ocm.svc.cluster.local:9000"
+            - name: S3_REGION
+              value: "us-east-1"
+            # bucket 名与 manager storage.s3.bucket 一致
+            - name: S3_BUCKET
+              value: "oc-apps"
+            # MinIO 兼容需要 path-style 寻址
+            - name: S3_USE_PATH_STYLE
+              value: "true"
+            # S3 凭证从 Secret 引用，避免明文落入 manifest
+            - name: S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: site-server-secrets
+                  key: s3-access-key-id
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: site-server-secrets
+                  key: s3-secret-access-key
+            # 站点注册表同步端点：跨 namespace FQDN，manager-api Service 在 ocm namespace
+            - name: MANAGER_SYNC_URL
+              value: "http://manager-api.ocm.svc.cluster.local:8080/internal/web-publish/sites"
+            # 同步令牌须与 manager 配置的 web_publish.site_sync_token 保持一致
+            - name: MANAGER_SYNC_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: site-server-secrets
+                  key: sync-token
+            # 轮询间隔（秒）；本地联调可适当缩短感知速度
+            - name: SYNC_INTERVAL_SECONDS
+              value: "5"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+          readinessProbe:
+            # site-server 为纯 TCP HTTP 服务，无专用 healthz 路由，用 tcpSocket 探活
+            tcpSocket:
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: site-server
+  namespace: oc-apps
+  labels:
+    app: site-server
+spec:
+  selector:
+    app: site-server
+  # Service 名 site-server / port 80 须与 Plan 2 通配 Ingress 后端配置对齐：
+  #   site_server_service: site-server
+  #   site_server_port: 80
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: site-server
+  namespace: oc-apps
+spec:
+  podSelector:
+    matchLabels:
+      app: site-server
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # 允许来自 ingress 控制器入站（本地 k3d traefik 由系统 namespace 发起，此处全放行）
+    - {}
+  egress:
+    # DNS 解析（UDP + TCP 均允许，CoreDNS 默认 53）
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # 对象存储（本地 MinIO S3 API 端口 9000）
+    - ports:
+        - protocol: TCP
+          port: 9000
+    # manager-api 同步端点（8080）
+    - ports:
+        - protocol: TCP
+          port: 8080
