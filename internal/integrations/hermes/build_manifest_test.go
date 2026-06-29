@@ -58,3 +58,18 @@ func TestBuildManifestLanguageYAML(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotContains(t, string(yamlBytes2), "language:", "空 Language 时 YAML 不应含 language 键")
 }
+
+// TestBuildManifestWebPublish 验证 web_publish 三字段齐全时写入、不全时省略（条件注入）。
+func TestBuildManifestWebPublish(t *testing.T) {
+	// 齐全：写入
+	m := BuildManifest(AppInputData{AppID: "a1",
+		WebPublishRuntimeBaseURL: "http://manager/runtime", WebPublishAppToken: "tok", WebPublishBaseDomain: "apps.example.com"})
+	assert.Equal(t, "http://manager/runtime", m.WebPublish.RuntimeBaseURL)
+	assert.Equal(t, "tok", m.WebPublish.AppToken)
+	assert.Equal(t, "apps.example.com", m.WebPublish.BaseDomain)
+
+	// 缺 token：整段省略（omitempty）
+	m2 := BuildManifest(AppInputData{AppID: "a1", WebPublishRuntimeBaseURL: "http://x", WebPublishBaseDomain: "apps.example.com"})
+	assert.Empty(t, m2.WebPublish.AppToken)
+	assert.Empty(t, m2.WebPublish.RuntimeBaseURL)
+}

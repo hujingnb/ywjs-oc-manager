@@ -28,5 +28,13 @@ func BuildManifest(in AppInputData) Manifest {
 			AppToken:       in.KnowledgeAppToken,
 		}
 	}
+	// web_publish 仅在三字段齐全时写入（与 knowledge 同款条件注入）。
+	if in.WebPublishRuntimeBaseURL != "" && in.WebPublishAppToken != "" && in.WebPublishBaseDomain != "" {
+		m.WebPublish = ManifestWebPublish{
+			RuntimeBaseURL: in.WebPublishRuntimeBaseURL,
+			AppToken:       in.WebPublishAppToken,
+			BaseDomain:     in.WebPublishBaseDomain,
+		}
+	}
 	return m
 }

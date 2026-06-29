@@ -28,6 +28,11 @@ type AppInputData struct {
 	// KnowledgeAppToken 是 app 级 runtime token，只能访问当前实例/组织知识库。
 	KnowledgeAppToken string
 
+	// WebPublish* 在企业开通发布能力时注入，触发 oc-publish skill 条件渲染。
+	WebPublishRuntimeBaseURL string
+	WebPublishAppToken       string
+	WebPublishBaseDomain     string
+
 	// PersonaText 版本内置提示词（即 version.SystemPrompt），写入 resources/persona.md。
 	PersonaText string
 	// PlatformRule 平台层规则文本，写入 resources/platform-rules.md。

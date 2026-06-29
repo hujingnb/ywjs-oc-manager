@@ -16,6 +16,8 @@ type Manifest struct {
 	Resources   ManifestResources   `yaml:"resources"`
 	// Knowledge 是 manager runtime API 配置；Hermes 只拿 manager app token，不拿 RAGFlow 凭证。
 	Knowledge ManifestKnowledge `yaml:"knowledge,omitempty"`
+	// WebPublish 是 oc-publish skill 的运行时配置；企业未开通发布能力时整段省略。
+	WebPublish ManifestWebPublish `yaml:"web_publish,omitempty"`
 	// Routing 智能路由映射，键为模型别名，值为实际模型名；空时省略。
 	Routing map[string]string `yaml:"routing,omitempty"`
 }
@@ -59,6 +61,13 @@ type ManifestRules struct {
 type ManifestKnowledge struct {
 	RuntimeBaseURL string `yaml:"runtime_base_url"`
 	AppToken       string `yaml:"app_token"`
+}
+
+// ManifestWebPublish 是 oc-publish skill 的运行时配置（条件注入；企业未开通时整段省略）。
+type ManifestWebPublish struct {
+	RuntimeBaseURL string `yaml:"runtime_base_url"`
+	AppToken       string `yaml:"app_token"`
+	BaseDomain     string `yaml:"base_domain"`
 }
 
 // MarshalManifestYAML 把 Manifest 序列化为 YAML。
