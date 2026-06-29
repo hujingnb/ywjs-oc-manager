@@ -68,6 +68,14 @@ RUN uv pip install --python /usr/local/lib/hermes-agent/venv/bin/python --no-cac
 RUN uv pip install --python /usr/local/lib/hermes-agent/venv/bin/python --no-cache-dir \
       lark-oapi==1.5.3 websockets
 
+# 显式预装 dingtalk platform 必需依赖（容器启动即 ready，不允许运行时 lazy install）。
+# 引擎 gateway/platforms/dingtalk.py 走官方 dingtalk-stream WebSocket 长连接（DINGTALK_CLIENT_ID/
+# DINGTALK_CLIENT_SECRET 启用），依赖 dingtalk-stream(>=0.20)+httpx；未预装会在首次启用时
+# lazy_deps.ensure("platform.dingtalk") 同步阻塞拉取，线上 pod 出网受限时装不上、起不来
+# （与 weixin/feishu/discord 预装同因）。
+RUN uv pip install --python /usr/local/lib/hermes-agent/venv/bin/python --no-cache-dir \
+      "dingtalk-stream>=0.20" httpx
+
 # oc-entrypoint Python 依赖：pyyaml 用于 manifest 解析；pytest 用于镜像构建期自检；
 # jsonschema 校验 manifest/契约。
 # 末尾的构建期自检（python -m pytest）用 system python 跑，因此 ocops server/SSE

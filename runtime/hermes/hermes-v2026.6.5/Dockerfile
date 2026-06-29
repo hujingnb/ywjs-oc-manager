@@ -77,6 +77,14 @@ RUN uv pip install --python /usr/local/lib/hermes-agent/venv/bin/python --no-cac
 RUN uv pip install --python /usr/local/lib/hermes-agent/venv/bin/python --no-cache-dir \
       lark-oapi==1.5.3 websockets
 
+# 显式预装 dingtalk platform 必需依赖（容器启动即 ready，不允许运行时 lazy install）。
+# 引擎 gateway/platforms/dingtalk.py 走官方 dingtalk-stream WebSocket 长连接（DINGTALK_CLIENT_ID/
+# DINGTALK_CLIENT_SECRET 启用），依赖 dingtalk-stream(>=0.20)+httpx；未预装会在首次启用时
+# lazy_deps.ensure("platform.dingtalk") 同步阻塞拉取，线上 pod 出网受限时装不上、起不来
+# （与 weixin/feishu/discord 预装同因）。
+RUN uv pip install --python /usr/local/lib/hermes-agent/venv/bin/python --no-cache-dir \
+      "dingtalk-stream>=0.20" httpx
+
 # 显式预装 discord platform 依赖（容器启动即 ready，不允许运行时 lazy install）。
 # gateway 启动期平台发现会 import discord 平台模块，触发 tools.lazy_deps 在运行时
 # pip 安装 discord.py[voice]+brotlicffi；该安装是同步阻塞——线上 pod 出网慢时实测耗
