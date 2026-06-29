@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"path"
 	"strconv"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	null "github.com/guregu/null/v5"
 
 	"oc-manager/internal/domain"
+	mlog "oc-manager/internal/log"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -138,10 +140,17 @@ func (s *WebPublishService) Publish(ctx context.Context, appToken, slug string, 
 	}
 
 	// ── 步骤2：校验企业 web-publish 能力已就绪 ───────────────────────────────
-	// sql.ErrNoRows 视为未开通（企业尚未配置）。
+	// 只有 sql.ErrNoRows 才视为「未开通」（企业尚未配置）；其他错误（DB 超时/死锁等）
+	// 原样透传，让上层映射 500，避免把底层故障伪装成 403/未开通。
 	cfg, err := s.store.GetWebPublishConfig(ctx, app.OrgID)
-	if errors.Is(err, sql.ErrNoRows) || err != nil || !cfg.Enabled || cfg.ProvisioningStatus != domain.ProvisioningReady {
-		return PublishResult{}, fmt.Errorf("%w: 企业未开通或尚未就绪 web-publish 能力", ErrWebPublishNotProvisioned)
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return PublishResult{}, fmt.Errorf("查询 web-publish 配置失败: %w", err)
+		}
+		return PublishResult{}, ErrWebPublishNotProvisioned
+	}
+	if !cfg.Enabled || cfg.ProvisioningStatus != domain.ProvisioningReady {
+		return PublishResult{}, ErrWebPublishNotProvisioned
 	}
 
 	// ── 步骤3：确定 slug 并校验格式，构造 host ───────────────────────────────
@@ -214,9 +223,9 @@ func (s *WebPublishService) Publish(ctx context.Context, appToken, slug string, 
 		}
 		// 删除旧版本前缀下所有对象（版本指针已切换，旧对象不再被引用）。
 		if err := s.obj.DeletePrefix(ctx, existing.S3Prefix); err != nil {
-			// 删除失败不阻断响应，只记录警告；旧对象会在下次发布时重试清理。
-			// 此处 fmt.Errorf 保留错误信息但不回滚。
-			_ = fmt.Errorf("清理旧版本前缀失败（非致命）: %w", err)
+			// 删除失败不阻断响应（DB 指针已切到新前缀，发布已生效），但必须记一条 warning，
+			// 否则运维无法发现遗留的孤儿前缀。旧对象会在下次发布或巡检时被清理。
+			slog.WarnContext(ctx, "清理旧版本前缀失败", "prefix", existing.S3Prefix, mlog.Err(err))
 		}
 	} else {
 		// 首次发布：插入新站点行。
@@ -279,6 +288,11 @@ func (s *WebPublishService) unpackToPrefix(ctx context.Context, body io.Reader, 
 		cleanName := path.Clean(hdr.Name)
 		if strings.HasPrefix(cleanName, "..") {
 			return 0, fmt.Errorf("非法的归档路径 %q（路径越界）", hdr.Name)
+		}
+		// 拒绝绝对路径（如 /etc/passwd）：拼到 prefix 后会产生双斜杠脏 key，
+		// 且语义上绝对路径不应出现在站点静态资源归档里，直接跳过。
+		if path.IsAbs(cleanName) {
+			continue
 		}
 
 		// 大小上限预检：tar header 中的 Size 字段可能伪造，以实际读取量为准；

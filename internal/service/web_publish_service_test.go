@@ -309,6 +309,54 @@ func TestPublishSlugTakenByOtherApp(t *testing.T) {
 	// 应返回含"已占用"的错误，提示调用方 slug 已被其他实例持有。
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "已占用")
+	// 冲突检查应在解包上传之前完成：不应产生任何对象上传。
+	assert.Empty(t, obj.objects)
+}
+
+// TestPublishSkipsAbsolutePathEntry 测试归档含绝对路径 entry（如 /etc/passwd）时被跳过：
+// 不产生双斜杠脏 key，正常普通文件仍被上传，发布成功。
+func TestPublishSkipsAbsolutePathEntry(t *testing.T) {
+	const orgID = "org-abs"
+	const appID = "app-abs"
+	const token = "test-token-abs"
+
+	store := &fakeWPubStore{
+		appByHash: map[string]sqlc.App{
+			HashAppRuntimeToken(token): {ID: appID, OrgID: orgID},
+		},
+		publishConfig: map[string]sqlc.OrgWebPublishConfig{
+			orgID: makeReadyCfg(orgID),
+		},
+		siteByHost:      map[string]sqlc.PublishedSite{},
+		activeSiteCount: map[string]int64{orgID: 0},
+	}
+	obj := newFakeObjStore()
+
+	svc := NewWebPublishService(store, obj, WebPublishServiceConfig{
+		SlugGen: func() string { return "absslug" },
+		Now:     func() time.Time { return fixedNow },
+	})
+
+	// 归档同时含绝对路径 entry 与正常文件，绝对路径应被跳过。
+	_, err := svc.Publish(context.Background(), token, "", makeTarGz(t, map[string]string{
+		"/etc/passwd": "root:x:0:0",
+		"index.html":  "<html>ok</html>",
+	}))
+	require.NoError(t, err)
+
+	// 不应存在任何以绝对路径拼接而成的脏 key（含 "//" 或以 "etc/passwd" 结尾）。
+	for k := range obj.objects {
+		assert.NotContains(t, k, "//", "不应出现双斜杠脏 key: %s", k)
+		assert.NotContains(t, k, "etc/passwd", "绝对路径 entry 应被跳过: %s", k)
+	}
+	// 正常文件 index.html 应被上传。
+	var found bool
+	for k := range obj.objects {
+		if strings.HasSuffix(k, "index.html") {
+			found = true
+		}
+	}
+	assert.True(t, found, "正常文件 index.html 应已上传")
 }
 
 // TestPublishNotProvisioned 测试企业未开通 web-publish 场景：ProvisioningStatus != ready → 拒绝发布。
