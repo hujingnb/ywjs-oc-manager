@@ -581,6 +581,16 @@ func TestCaptchaDisabledNeedsNothing(t *testing.T) {
 	require.NoError(t, c.Validate())
 }
 
+// TestWebPublishDefaults 覆盖：web_publish 段缺省时填默认（site-server:80 + ACME staging 目录），
+// 避免最小配置启动失败。
+func TestWebPublishDefaults(t *testing.T) {
+	var c Config
+	c.applyDefaults()
+	assert.Equal(t, "site-server", c.WebPublish.SiteServerService) // 默认 backend 名
+	assert.Equal(t, int32(80), c.WebPublish.SiteServerPort)        // 默认 backend 端口
+	assert.NotEmpty(t, c.WebPublish.ACMEDirectoryURL)              // 默认 staging 目录
+}
+
 // 启用验证码时，负数难度或负 TTL 会让出题不可用，启动阶段应 fail-fast。
 func TestLoadRejectsCaptchaInvalidPositiveFields(t *testing.T) {
 	for _, tc := range []struct {

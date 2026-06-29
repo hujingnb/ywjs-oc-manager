@@ -42,6 +42,8 @@ type Config struct {
 	Logging LoggingConfig `yaml:"logging"`
 	// I18n 控制平台默认界面语言；整段可缺省，applyDefaults 回填 en。
 	I18n I18nConfig `yaml:"i18n"`
+	// WebPublish 是企业网站发布能力的平台级配置（基础域名/provider/凭证为 per-org，入库）。
+	WebPublish WebPublishConfig `yaml:"web_publish"`
 }
 
 // I18nConfig 描述平台国际化默认行为。
@@ -252,6 +254,25 @@ func (d *Duration) UnmarshalYAML(value *yaml.Node) error {
 	}
 	d.Duration = parsed
 	return nil
+}
+
+// WebPublishConfig 是 web-publish 能力的平台级配置。
+// 企业级配置（基础域名 / DNS provider / 凭证）落 org_web_publish_config 表，不在此。
+type WebPublishConfig struct {
+	// IngressPublicIP 是平台 ingress 控制器的公网 IP；通配 A 记录 *.base_domain 指向它。
+	IngressPublicIP string `yaml:"ingress_public_ip"`
+	// IngressClassName 是通配 Ingress 的 ingressClassName，跟随环境（本地 traefik / 线上 controller）。
+	IngressClassName string `yaml:"ingress_class_name"`
+	// ACMEEmail 是 ACME 账户注册邮箱（证书到期通知等）。
+	ACMEEmail string `yaml:"acme_email"`
+	// ACMEDirectoryURL 是 ACME 目录 URL；缺省用 Let's Encrypt staging，生产需显式配生产目录。
+	ACMEDirectoryURL string `yaml:"acme_directory_url"`
+	// SiteServerService 是通配 Ingress 的 backend Service 名（Plan 3 部署），缺省 "site-server"。
+	SiteServerService string `yaml:"site_server_service"`
+	// SiteServerPort 是 backend Service 端口，缺省 80。
+	SiteServerPort int32 `yaml:"site_server_port"`
+	// SiteSyncToken 是 site-server 轮询内部同步端点的鉴权 token（与 site-server MANAGER_SYNC_TOKEN 共享）。
+	SiteSyncToken string `yaml:"site_sync_token"`
 }
 
 // KubernetesConfig 是 app pod 编排所需的 k8s 接入参数。

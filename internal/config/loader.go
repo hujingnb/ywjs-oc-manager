@@ -108,6 +108,18 @@ func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.I18n.DefaultLocale) == "" {
 		c.I18n.DefaultLocale = "en"
 	}
+	// web-publish 默认值：site-server backend 名/端口 + ACME staging 目录，让最小配置可启动；
+	// 生产须显式配 ingress 公网 IP / class / 生产 ACME 目录。
+	if c.WebPublish.SiteServerService == "" {
+		c.WebPublish.SiteServerService = "site-server"
+	}
+	if c.WebPublish.SiteServerPort == 0 {
+		c.WebPublish.SiteServerPort = 80
+	}
+	if c.WebPublish.ACMEDirectoryURL == "" {
+		// staging 目录避免本地/测试触发 Let's Encrypt 生产速率限制；生产环境必须覆盖。
+		c.WebPublish.ACMEDirectoryURL = "https://acme-staging-v02.api.letsencrypt.org/directory"
+	}
 	// 验证码启用时填难度与有效期默认（关闭时不使用这两个值）。
 	if c.Captcha.Enabled {
 		if c.Captcha.Difficulty == 0 {
