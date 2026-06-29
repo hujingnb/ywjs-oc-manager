@@ -692,6 +692,8 @@ func channelLabelWorker(channelType string) string {
 		return "飞书"
 	case domain.ChannelTypeWorkWeChat:
 		return "企业微信"
+	case domain.ChannelTypeDingTalk:
+		return "钉钉"
 	default:
 		return channelType
 	}
