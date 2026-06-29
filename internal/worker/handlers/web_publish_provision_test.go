@@ -130,8 +130,59 @@ func TestProvisionCertFails(t *testing.T) {
 	err := h.Handle(context.Background(), provJob())
 	require.Error(t, err)
 
+	// 验证签证书失败时连 TLS Secret 都不该写
+	assert.False(t, cl.tlsApplied, "签证书失败不应写 TLS Secret")
 	// 验证签证书失败时不应建 Ingress
 	assert.False(t, cl.ingApplied, "签证书失败不应建 Ingress")
+
+	// 验证最终 provisioning 状态为 failed
+	assert.Equal(t, domain.ProvisioningFailed, st.provUpdates[len(st.provUpdates)-1].ProvisioningStatus)
+
+	// 验证最终 cert 状态为 failed
+	assert.Equal(t, domain.CertStatusFailed, st.certUpdates[len(st.certUpdates)-1].CertStatus)
+}
+
+// TestProvisionTLSSecretFails 覆盖：签证书成功但写 TLS Secret 失败 → 返回错误、provisioning=failed、cert=failed，
+// 且不应继续建 Ingress（写 Secret 失败时 Ingress 引用的证书还不存在）。
+func TestProvisionTLSSecretFails(t *testing.T) {
+	// 准备测试依赖：签发成功，但写 TLS Secret 注入失败
+	cipher, _ := auth.NewCipher(make([]byte, 32))
+	st := &fakeWPProvStore{cfg: newCfg(cipher)}
+	prov := &fakeProvisioner{ret: acme.Certificate{CertPEM: []byte("C"), KeyPEM: []byte("K"), NotAfter: 1893456000}}
+	cl := &fakeClusterApplier{tlsErr: assert.AnError}
+	h := NewWebPublishProvisionHandler(st, prov, cl, cipher, WebPublishProvisionConfig{IngressPublicIP: "1.2.3.4"})
+
+	// 执行 handler，期望返回错误（供 worker backoff 重试）
+	err := h.Handle(context.Background(), provJob())
+	require.Error(t, err)
+
+	// 验证写 TLS Secret 失败后不应继续建 Ingress
+	assert.False(t, cl.ingApplied, "写 TLS Secret 失败不应建 Ingress")
+
+	// 验证最终 provisioning 状态为 failed
+	assert.Equal(t, domain.ProvisioningFailed, st.provUpdates[len(st.provUpdates)-1].ProvisioningStatus)
+
+	// 验证最终 cert 状态为 failed
+	assert.Equal(t, domain.CertStatusFailed, st.certUpdates[len(st.certUpdates)-1].CertStatus)
+}
+
+// TestProvisionIngressFails 覆盖：签证书与写 TLS Secret 都成功，但建通配 Ingress 失败 →
+// 返回错误、provisioning=failed、cert=failed（此时 tlsApplied=true、ingApplied=true 但返回了错误）。
+func TestProvisionIngressFails(t *testing.T) {
+	// 准备测试依赖：签发与写 Secret 成功，但建 Ingress 注入失败
+	cipher, _ := auth.NewCipher(make([]byte, 32))
+	st := &fakeWPProvStore{cfg: newCfg(cipher)}
+	prov := &fakeProvisioner{ret: acme.Certificate{CertPEM: []byte("C"), KeyPEM: []byte("K"), NotAfter: 1893456000}}
+	cl := &fakeClusterApplier{ingErr: assert.AnError}
+	h := NewWebPublishProvisionHandler(st, prov, cl, cipher, WebPublishProvisionConfig{IngressPublicIP: "1.2.3.4"})
+
+	// 执行 handler，期望返回错误（供 worker backoff 重试）
+	err := h.Handle(context.Background(), provJob())
+	require.Error(t, err)
+
+	// 验证 TLS Secret 已写入、Ingress 也尝试创建（但失败）
+	assert.True(t, cl.tlsApplied, "建 Ingress 前应已写入 TLS Secret")
+	assert.True(t, cl.ingApplied, "应已尝试建通配 Ingress")
 
 	// 验证最终 provisioning 状态为 failed
 	assert.Equal(t, domain.ProvisioningFailed, st.provUpdates[len(st.provUpdates)-1].ProvisioningStatus)

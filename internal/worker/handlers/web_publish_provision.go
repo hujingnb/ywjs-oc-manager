@@ -139,7 +139,9 @@ func (h *WebPublishProvisionHandler) Handle(ctx context.Context, job sqlc.Job) e
 		return fmt.Errorf("读取企业 %s web-publish 配置失败: %w", orgID, err)
 	}
 
-	// 标记证书状态为 issuing，表示本次开通已启动
+	// 标记证书状态为 issuing，表示本次开通已启动。
+	// 此处写库失败只返回 error 交给 worker 重试，刻意不调 fail() 置 failed：
+	// DB 不可用时 fail() 自己也写不进，标 failed 既无意义又会留下不准确状态。
 	if err := h.setCertStatus(ctx, orgID, domain.CertStatusIssuing, 0, false, null.Time{}); err != nil {
 		return err
 	}
@@ -178,13 +180,19 @@ func (h *WebPublishProvisionHandler) Handle(ctx context.Context, job sqlc.Job) e
 		return h.fail(ctx, orgID, cfg.CertSecretName, fmt.Errorf("建通配 Ingress 失败: %w", err))
 	}
 
-	// 全部成功：更新 cert 状态为 issued，记录到期时间与签发时间
-	// 首次签发不设置 cert_last_renewed_at（用 null.Time{}，COALESCE 保留原值）
+	// 全部成功：更新 cert 状态为 issued，记录到期时间与签发时间。
+	// 首次签发不设置 cert_last_renewed_at（用 null.Time{}，COALESCE 保留原值）。
+	//
+	// 注意：到这里通配证书 Secret 与 Ingress 都已真实创建成功，集群已就绪。
+	// 若此处或下面写 ready 的 DB 调用失败，刻意只返回 error 交给 worker 重试，
+	// 绝不调 fail() 置 failed——重试是幂等的（重签 + 重 apply Secret/Ingress 安全），
+	// 最终会把状态收敛到 issued/ready；而若标 failed 会造成「集群已就绪却显示失败」
+	// 的错误观测。这是有意设计，不是漏掉 fail()。
 	if err := h.setCertStatus(ctx, orgID, domain.CertStatusIssued, cert.NotAfter, true, null.Time{}); err != nil {
 		return err
 	}
 
-	// 更新 provisioning 状态为 ready
+	// 更新 provisioning 状态为 ready（同上：写失败只返回 error 重试，不置 failed）
 	if err := h.store.SetWebPublishProvisioning(ctx, sqlc.SetWebPublishProvisioningParams{
 		ProvisioningStatus:  domain.ProvisioningReady,
 		ProvisioningMessage: null.String{},
