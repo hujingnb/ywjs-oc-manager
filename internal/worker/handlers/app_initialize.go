@@ -450,6 +450,23 @@ func (h *AppInitializeHandler) buildAppSpec(ctx context.Context, app sqlc.App, h
 		}
 	}
 
+	// 已绑定钉钉：解密带出 client_id+client_secret，使 RenderSecret 在重建/升级时不丢配置。
+	// 查询失败 / 无行 / 非 bound / 解密失败均静默降级为空——未绑定的 app 不应因此报错。
+	var dingtalkClientID, dingtalkClientSecret string
+	if binding, err := h.store.GetChannelBindingByAppAndType(ctx, sqlc.GetChannelBindingByAppAndTypeParams{
+		AppID: app.ID, ChannelType: domain.ChannelTypeDingTalk,
+	}); err == nil && binding.Status == domain.ChannelStatusBound && len(binding.MetadataJson) > 0 {
+		var m struct {
+			ClientID         string `json:"client_id"`
+			SecretCiphertext string `json:"client_secret_ciphertext"`
+		}
+		if json.Unmarshal(binding.MetadataJson, &m) == nil && m.SecretCiphertext != "" && h.cfg.Cipher != nil {
+			if plain, derr := h.cfg.Cipher.Decrypt(m.SecretCiphertext); derr == nil {
+				dingtalkClientID, dingtalkClientSecret = m.ClientID, string(plain)
+			}
+		}
+	}
+
 	return k8sorch.AppSpec{
 		AppID:           app.ID,
 		HermesImage:     hermesImage,
@@ -471,8 +488,10 @@ func (h *AppInitializeHandler) buildAppSpec(ctx context.Context, app sqlc.App, h
 		FeishuAppID:      feishuAppID,
 		FeishuAppSecret:  feishuSecret,
 		FeishuDomain:     feishuDomain,
-		WorkWeChatBotID:  wecomBotID,
-		WorkWeChatSecret: wecomSecret,
+		WorkWeChatBotID:      wecomBotID,
+		WorkWeChatSecret:     wecomSecret,
+		DingtalkClientID:     dingtalkClientID,
+		DingtalkClientSecret: dingtalkClientSecret,
 	}
 }
 
