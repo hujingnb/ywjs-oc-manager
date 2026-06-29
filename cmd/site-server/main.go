@@ -30,6 +30,22 @@ func main() {
 	}
 	syncURL := os.Getenv("MANAGER_SYNC_URL")
 	syncToken := os.Getenv("MANAGER_SYNC_TOKEN")
+
+	// 必填配置校验（fail-fast）：缺这三项会让服务"看似启动"却永远不可用——
+	// 空 S3 端点/桶无法读取任何对象，空同步 URL 会让每轮同步静默失败、注册表恒空、
+	// 所有请求 404，线上极难诊断。故启动即退出，逼运维补齐配置。
+	if syncURL == "" || s3cfg.Endpoint == "" || s3cfg.Bucket == "" {
+		logger.Error("缺少必填配置",
+			"MANAGER_SYNC_URL", syncURL,
+			"S3_ENDPOINT", s3cfg.Endpoint,
+			"S3_BUCKET", s3cfg.Bucket)
+		os.Exit(1)
+	}
+	// 同步 token 缺失只告警不退出：本地联调的 manager 端点可能未启用鉴权。
+	if syncToken == "" {
+		logger.Warn("MANAGER_SYNC_TOKEN 为空，同步请求将不带鉴权头（仅限无鉴权环境）")
+	}
+
 	interval := 5 * time.Second
 	if v := os.Getenv("SYNC_INTERVAL_SECONDS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
