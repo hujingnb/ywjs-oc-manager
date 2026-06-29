@@ -161,6 +161,16 @@ export default {
     workWechatGuideLink: '查看官方文档',
     workWechatBoundHint: '企业微信已连接，机器人正在接收消息。',
     workWechatConnecting: '验证连接中',
+    // 钉钉渠道手填机器人凭证接入专用文案（无扫码、无二维码；术语用 Client ID/Client Secret 主名并括注 AppKey/AppSecret）。
+    dingtalkSubmit: '提交并连接',
+    dingtalkClientIdLabel: 'Client ID',
+    dingtalkClientIdPlaceholder: '钉钉开放平台「凭证与基础信息」中的 Client ID（即 AppKey）',
+    dingtalkSecretLabel: 'Client Secret',
+    dingtalkSecretPlaceholder: 'Client Secret（即 AppSecret，仅保存，不回显）',
+    dingtalkGuide: '在钉钉开放平台「创建企业内部应用 → 添加机器人 → 消息接收模式选 Stream 模式」后，于「凭证与基础信息」复制 Client ID 与 Client Secret 填入。',
+    dingtalkGuideLink: '查看官方文档',
+    dingtalkBoundHint: '钉钉已连接，机器人正在接收消息。',
+    dingtalkConnecting: '验证连接中',
     // status 是渠道绑定进度状态的用户可读文案，由 formatChannelStatus 解析为 i18n key 后消费。
     status: {
       unbound: '未绑定',

@@ -161,6 +161,16 @@ export default {
     workWechatGuideLink: 'View official guide',
     workWechatBoundHint: 'WeCom connected; the bot is receiving messages.',
     workWechatConnecting: 'Verifying connection',
+    // 钉钉渠道手填机器人凭证接入专用文案（无扫码、无二维码；术语用 Client ID/Client Secret 主名并括注 AppKey/AppSecret）。
+    dingtalkSubmit: 'Submit & connect',
+    dingtalkClientIdLabel: 'Client ID',
+    dingtalkClientIdPlaceholder: 'Client ID (AppKey) from DingTalk console',
+    dingtalkSecretLabel: 'Client Secret',
+    dingtalkSecretPlaceholder: 'Client Secret (AppSecret, stored only, never shown)',
+    dingtalkGuide: 'In DingTalk Open Platform: create an internal app → add a Bot → set message mode to Stream, then copy the Client ID and Client Secret from "Credentials & Basic Info".',
+    dingtalkGuideLink: 'View official guide',
+    dingtalkBoundHint: 'DingTalk connected; the bot is receiving messages.',
+    dingtalkConnecting: 'Verifying connection',
     // status 是渠道绑定进度状态的用户可读文案，由 formatChannelStatus 解析为 i18n key 后消费。
     status: {
       unbound: 'Not bound',
