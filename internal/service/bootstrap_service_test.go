@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -10,16 +11,21 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"oc-manager/internal/auth"
+	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
 )
 
-// fakeBootstrapStore 实现 bootstrapStore，返回预置的 app/org/owner/version/appSkills。
+// fakeBootstrapStore 实现 bootstrapStore，返回预置的 app/org/owner/version/appSkills/webPublishConfig。
 type fakeBootstrapStore struct {
-	app       sqlc.App
-	org       sqlc.Organization
-	owner     sqlc.User
-	version   sqlc.AssistantVersion
-	appSkills []sqlc.AppSkill
+	app             sqlc.App
+	org             sqlc.Organization
+	owner           sqlc.User
+	version         sqlc.AssistantVersion
+	appSkills       []sqlc.AppSkill
+	// webPublishConfig 按 orgID 返回的 OrgWebPublishConfig；零值 Enabled=false 表示未开通。
+	// webPublishErr 为非 nil 时 GetWebPublishConfig 返回该错误（模拟 sql.ErrNoRows 等）。
+	webPublishConfig sqlc.OrgWebPublishConfig
+	webPublishErr    error
 }
 
 // GetApp 按 ID 返回预置 app。
@@ -51,6 +57,14 @@ func (f *fakeBootstrapStore) GetAssistantVersion(_ context.Context, _ string) (s
 // 方法名与 bootstrapStore 接口保持一致（对应 sqlc.Queries.ListAppSkillsByApp）。
 func (f *fakeBootstrapStore) ListAppSkillsByApp(_ context.Context, _ string) ([]sqlc.AppSkill, error) {
 	return f.appSkills, nil
+}
+
+// GetWebPublishConfig 返回预置的 web_publish 配置；webPublishErr 非 nil 时优先返回错误。
+func (f *fakeBootstrapStore) GetWebPublishConfig(_ context.Context, _ string) (sqlc.OrgWebPublishConfig, error) {
+	if f.webPublishErr != nil {
+		return sqlc.OrgWebPublishConfig{}, f.webPublishErr
+	}
+	return f.webPublishConfig, nil
 }
 
 // fakeSkills 实现 bootstrapSkillSource，为任意 relPath 返回固定格式的预签名 URL。
@@ -246,4 +260,117 @@ func TestBootstrapBuildAppNotReady(t *testing.T) {
 	_, err := svc.Build(context.Background(), app)
 	// 缺少 api_key 密文必须返回 ErrAppNotReady，而非其他错误
 	require.ErrorIs(t, err, ErrAppNotReady)
+}
+
+// TestBuildAppInputInjectsWebPublishWhenReady 验证企业已开通且 provisioning_status=ready 时，
+// AppInputData 中三个 WebPublish* 字段被正确注入（base_domain、app_token=controlToken、
+// runtime_base_url=KnowledgeBaseURL），manifest YAML 也应包含对应值。
+func TestBuildAppInputInjectsWebPublishWhenReady(t *testing.T) {
+	cipher := newRuntimeTokenTestCipher(t)
+	app := newBootstrapApp(t, cipher)
+	// stub：web_publish 已开通且 provisioning ready，base_domain 设为 apps.example.com
+	store := &fakeBootstrapStore{
+		app:   app,
+		org:   sqlc.Organization{ID: "o1", Name: "Org"},
+		owner: sqlc.User{ID: "u1", DisplayName: "Owner"},
+		version: sqlc.AssistantVersion{
+			ID:        "v1",
+			MainModel: "gpt-x",
+		},
+		webPublishConfig: sqlc.OrgWebPublishConfig{
+			OrgID:              "o1",
+			Enabled:            true,
+			ProvisioningStatus: domain.ProvisioningReady,
+			BaseDomain:         "apps.example.com",
+		},
+	}
+	svc := NewBootstrapService(store, cipher, newFakeObjectStore(), fakeSkills{}, BootstrapConfig{
+		Endpoint:         "http://minio:9000",
+		Region:           "us-east-1",
+		Bucket:           "oc-apps",
+		AccessKeyID:      "ak",
+		SecretAccessKey:  "sk",
+		NewAPIBaseURL:    "http://new-api:3000",
+		KnowledgeBaseURL: "http://manager/runtime",
+		PlatformPrompt:   "rule",
+		PresignTTL:       time.Minute,
+	})
+
+	res, err := svc.Build(context.Background(), app)
+	require.NoError(t, err)
+
+	// manifest YAML 应包含 base_domain（hermes 条件渲染 web_publish 段的关键字段）
+	assert.Contains(t, res.ManifestYAML, "apps.example.com",
+		"web_publish 开通且 ready 时 manifest 应含 base_domain")
+	// manifest 应包含 app_token（与 knowledge 复用同一 controlToken 明文）
+	assert.Contains(t, res.ManifestYAML, "control-tok",
+		"web_publish 开通且 ready 时 manifest 应含 app_token（controlToken）")
+	// manifest 应包含 runtime_base_url（同 KnowledgeBaseURL）
+	assert.Contains(t, res.ManifestYAML, "http://manager/runtime",
+		"web_publish 开通且 ready 时 manifest 应含 runtime_base_url（=KnowledgeBaseURL）")
+}
+
+// TestBuildAppInputOmitsWebPublishWhenDisabled 验证企业未开通（Enabled=false 或 sql.ErrNoRows）时，
+// AppInputData 的三个 WebPublish* 字段均为空，manifest 不含 web_publish 相关域名。
+func TestBuildAppInputOmitsWebPublishWhenDisabled(t *testing.T) {
+	cipher := newRuntimeTokenTestCipher(t)
+	app := newBootstrapApp(t, cipher)
+
+	// 子测试 1：store 返回 sql.ErrNoRows（企业无记录），三字段应为空
+	t.Run("GetWebPublishConfig 返回 ErrNoRows 时三字段为空", func(t *testing.T) {
+		// 模拟企业 org_web_publish_config 无记录（未开通过）
+		store := &fakeBootstrapStore{
+			app:           app,
+			org:           sqlc.Organization{ID: "o1", Name: "Org"},
+			owner:         sqlc.User{ID: "u1", DisplayName: "Owner"},
+			version:       sqlc.AssistantVersion{ID: "v1", MainModel: "gpt-x"},
+			webPublishErr: sql.ErrNoRows,
+		}
+		svc := NewBootstrapService(store, cipher, newFakeObjectStore(), fakeSkills{}, BootstrapConfig{
+			Endpoint: "http://minio:9000", Region: "us-east-1", Bucket: "oc-apps",
+			AccessKeyID: "ak", SecretAccessKey: "sk",
+			KnowledgeBaseURL: "http://manager/runtime",
+			PresignTTL:       time.Minute,
+		})
+
+		res, err := svc.Build(context.Background(), app)
+		require.NoError(t, err)
+
+		// manifest 不应含 apps.example.com，证明 web_publish 段未注入
+		assert.NotContains(t, res.ManifestYAML, "apps.example.com",
+			"未开通时 manifest 不应含 web_publish base_domain")
+	})
+
+	// 子测试 2：Enabled=false（企业被停用），三字段也应为空
+	t.Run("Enabled=false 时三字段为空", func(t *testing.T) {
+		// 模拟企业 web_publish 配置存在但 Enabled=false（被停用）
+		store := &fakeBootstrapStore{
+			app:   app,
+			org:   sqlc.Organization{ID: "o1", Name: "Org"},
+			owner: sqlc.User{ID: "u1", DisplayName: "Owner"},
+			version: sqlc.AssistantVersion{
+				ID:        "v1",
+				MainModel: "gpt-x",
+			},
+			webPublishConfig: sqlc.OrgWebPublishConfig{
+				OrgID:              "o1",
+				Enabled:            false,
+				ProvisioningStatus: domain.ProvisioningReady,
+				BaseDomain:         "apps.example.com",
+			},
+		}
+		svc := NewBootstrapService(store, cipher, newFakeObjectStore(), fakeSkills{}, BootstrapConfig{
+			Endpoint: "http://minio:9000", Region: "us-east-1", Bucket: "oc-apps",
+			AccessKeyID: "ak", SecretAccessKey: "sk",
+			KnowledgeBaseURL: "http://manager/runtime",
+			PresignTTL:       time.Minute,
+		})
+
+		res, err := svc.Build(context.Background(), app)
+		require.NoError(t, err)
+
+		// Enabled=false 时 manifest 不应含 web_publish base_domain
+		assert.NotContains(t, res.ManifestYAML, "apps.example.com",
+			"Enabled=false 时 manifest 不应含 web_publish base_domain")
+	})
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/guregu/null/v5"
 
 	"oc-manager/internal/auth"
+	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/hermes"
 	"oc-manager/internal/integrations/storage"
 	"oc-manager/internal/store/sqlc"
@@ -88,6 +89,8 @@ type bootstrapStore interface {
 	// ListAppSkillsByApp 返回指定实例的全部 app_skills 行，是运行时 skill 下发的唯一来源。
 	// 方法名与 sqlc.Queries.ListAppSkillsByApp 保持一致，生产传入 dbStore.Queries 可直接满足。
 	ListAppSkillsByApp(ctx context.Context, appID string) ([]sqlc.AppSkill, error)
+	// GetWebPublishConfig 查询企业 web_publish 开通配置；企业未开通时返回 sql.ErrNoRows。
+	GetWebPublishConfig(ctx context.Context, orgID string) (sqlc.OrgWebPublishConfig, error)
 }
 
 // bootstrapSkillSource 提供 skill 预签名 URL（由 S3SkillBlobStore 实现）。
@@ -265,6 +268,15 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 		OrgName:                 org.Name,
 		OwnerName:               owner.DisplayName,
 		Language:                appLanguage,
+	}
+	// web_publish：企业开通且 provisioning ready 时注入，触发 oc-publish skill 条件渲染。
+	// app_token 复用 per-app controlToken（与 knowledge 同），runtime base 同 knowledge base。
+	// 企业未开通（sql.ErrNoRows）或未就绪时三字段留空，hermes 不渲染 web_publish 段。
+	if wp, werr := s.store.GetWebPublishConfig(ctx, app.OrgID); werr == nil &&
+		wp.Enabled && wp.ProvisioningStatus == domain.ProvisioningReady {
+		in.WebPublishRuntimeBaseURL = s.cfg.KnowledgeBaseURL
+		in.WebPublishAppToken = string(controlToken)
+		in.WebPublishBaseDomain = wp.BaseDomain
 	}
 	manifestYAML, persona, platform, err := s.renderer.Render(in)
 	if err != nil {
