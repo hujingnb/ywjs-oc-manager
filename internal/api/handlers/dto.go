@@ -532,3 +532,20 @@ type PublicConfigResponse struct {
 	// SupportedLocales 是平台受支持的界面语言集合，供前端渲染语言选择器。
 	SupportedLocales []string `json:"supported_locales"`
 }
+
+// ===== 企业 web-publish 发布能力配置 web-publish =====
+
+// ConfigureWebPublishRequest 是平台管理员配置企业发布能力的请求体。
+type ConfigureWebPublishRequest struct {
+	// BaseDomain 是企业 web-publish 的根域名（如 apps.example.com），必填。
+	BaseDomain string `json:"base_domain" binding:"required"`
+	// DNSProvider 是 DNS provider 枚举值（如 aliyun），必填；service 层校验白名单。
+	DNSProvider string `json:"dns_provider" binding:"required"`
+	// Credentials 是 provider 凭证明文 map（如 access_key_id / access_key_secret）；
+	// 为空时不更新已有凭证密文，service 端加密后落库，明文不持久化。
+	Credentials map[string]string `json:"credentials"`
+	// SiteTTLDays 是站点 TLS 证书/DNS 记录的 TTL 天数；<=0 时 service 默认填 7。
+	SiteTTLDays int32 `json:"site_ttl_days"`
+	// MaxSites 是企业下最大站点数；<=0 时 service 默认填 20。
+	MaxSites int32 `json:"max_sites"`
+}

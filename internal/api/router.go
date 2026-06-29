@@ -71,6 +71,8 @@ type Dependencies struct {
 	AppSkillService *service.AppSkillService
 	// SkillLibraryService 提供 skill 市场聚合浏览/搜索（平台库 + ClawHub 公共库）；nil 时不注册。
 	SkillLibraryService *service.SkillLibraryService
+	// WebPublishConfigService 提供平台管理员对企业 web-publish 能力配置/开通/停用路由；nil 时不注册。
+	WebPublishConfigService *service.WebPublishConfigService
 	// BootstrapService 提供 pod 启动回调（/internal/apps/:id/bootstrap）；nil 时不注册。
 	// /internal 组不挂用户鉴权中间件，由 handler 内联校验 control token。
 	BootstrapService handlers.BootstrapAppService
@@ -242,6 +244,9 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.SkillLibraryService != nil {
 		handlers.RegisterSkillMarketRoutes(user, handlers.NewSkillMarketHandler(dep.SkillLibraryService))
+	}
+	if dep.WebPublishConfigService != nil {
+		handlers.RegisterWebPublishConfigRoutes(user, handlers.NewWebPublishConfigHandler(dep.WebPublishConfigService))
 	}
 	return router
 }

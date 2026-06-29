@@ -63,6 +63,31 @@ components:
       - new_password
       - old_password
       type: object
+    handlers.ConfigureWebPublishRequest:
+      properties:
+        base_domain:
+          description: BaseDomain 是企业 web-publish 的根域名（如 apps.example.com），必填。
+          type: string
+        credentials:
+          additionalProperties:
+            type: string
+          description: |-
+            Credentials 是 provider 凭证明文 map（如 access_key_id / access_key_secret）；
+            为空时不更新已有凭证密文，service 端加密后落库，明文不持久化。
+          type: object
+        dns_provider:
+          description: DNSProvider 是 DNS provider 枚举值（如 aliyun），必填；service 层校验白名单。
+          type: string
+        max_sites:
+          description: MaxSites 是企业下最大站点数；<=0 时 service 默认填 20。
+          type: integer
+        site_ttl_days:
+          description: SiteTTLDays 是站点 TLS 证书/DNS 记录的 TTL 天数；<=0 时 service 默认填 7。
+          type: integer
+      required:
+      - base_domain
+      - dns_provider
+      type: object
     handlers.ConversationChatRequest:
       properties:
         message:
@@ -9653,6 +9678,131 @@ paths:
       summary: 删除平台库 skill
       tags:
       - platform-skills
+  /platform/organizations/{orgId}/web-publish:
+    put:
+      description: 平台管理员写入企业 web-publish 的 DNS provider、凭证（service 端加密落库）和配额参数
+      parameters:
+      - description: 企业 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.ConfigureWebPublishRequest'
+                description: 配置请求
+                summary: body
+        description: 配置请求
+        required: true
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 配置企业发布能力
+      tags:
+      - web-publish
+  /platform/organizations/{orgId}/web-publish/disable:
+    post:
+      description: 平台管理员停用企业 web-publish：写状态机为 disabled，不派发 job，不删除配置数据
+      parameters:
+      - description: 企业 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 停用企业发布能力
+      tags:
+      - web-publish
+  /platform/organizations/{orgId}/web-publish/enable:
+    post:
+      description: 平台管理员触发企业 web-publish provisioning：写状态机为 provisioning 并派发异步 job
+      parameters:
+      - description: 企业 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 开通企业发布能力
+      tags:
+      - web-publish
   /platform/overview:
     get:
       description: 平台管理员查询全平台的企业、成员、应用数量汇总
