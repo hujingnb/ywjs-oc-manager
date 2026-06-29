@@ -146,6 +146,8 @@ type Querier interface {
 	GetUser(ctx context.Context, id string) (User, error)
 	GetUserByOrgAndUsername(ctx context.Context, arg GetUserByOrgAndUsernameParams) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
+	// 按企业取发布能力配置；不存在返回 sql.ErrNoRows（视为未开通）。
+	GetWebPublishConfig(ctx context.Context, orgID string) (OrgWebPublishConfig, error)
 	// 用于组织创建链路失败时回滚刚刚 INSERT 的孤儿记录。
 	// 正常生命周期不可见此查询；普通"删除"必须走 SoftDeleteOrganization。
 	HardDeleteOrganization(ctx context.Context, id string) error
@@ -226,6 +228,8 @@ type Querier interface {
 	// 市场可见性：返回对某主体(org_id + 是否管理员 + user_id)可见的定制技能(含申请人名与命中受众)。
 	// 同名多行(多版本)由 service 取首条(created_at DESC)为最新。
 	ListVisibleCustomSkills(ctx context.Context, arg ListVisibleCustomSkillsParams) ([]ListVisibleCustomSkillsRow, error)
+	// 平台管理员全局视图：列出所有企业的发布能力配置。
+	ListWebPublishConfigs(ctx context.Context) ([]OrgWebPublishConfig, error)
 	LockJobForUpdate(ctx context.Context, id string) (Job, error)
 	// 任意状态 → error 时同时写入来源状态与错误文本，保留"在哪一步失败"与"为什么失败"语义。
 	// last_error_status 不加 CHECK 约束，值由调用方在 Go 层负责合法性。
@@ -292,6 +296,13 @@ type Querier interface {
 	SetSkillTicketQuote(ctx context.Context, arg SetSkillTicketQuoteParams) error
 	// disabled 时同步写 deleted_at（下线时间戳）；enabled 时清空，让重启用户能恢复。
 	SetUserStatus(ctx context.Context, arg SetUserStatusParams) error
+	// 状态机/巡检更新证书状态：状态 + 到期 + 最近签发时间 + 最近续签时间 + 摘要。
+	// cert_last_renewed_at 用 COALESCE 跳过传 NULL 的场景（首签只更新 issued_at，续签更新 renewed_at）。
+	SetWebPublishCertStatus(ctx context.Context, arg SetWebPublishCertStatusParams) error
+	// 开通/停用：置 enabled 与 provisioning_status（开通时由 service 传 'provisioning'）。
+	SetWebPublishEnabled(ctx context.Context, arg SetWebPublishEnabledParams) error
+	// 状态机更新 provisioning 结果：状态 + 摘要 + 证书 Secret 名。
+	SetWebPublishProvisioning(ctx context.Context, arg SetWebPublishProvisioningParams) error
 	SoftDeleteApp(ctx context.Context, id string) error
 	SoftDeleteAssistantVersion(ctx context.Context, id string) error
 	// 软删除未被助手版本引用的行业知识库；删除后名称可被重新使用。
@@ -333,6 +344,9 @@ type Querier interface {
 	// app_active_key 是 VIRTUAL 生成列（非 deleted 行 = app_id），不能显式赋值，
 	// ON DUPLICATE KEY 命中唯一约束 (app_active_key, channel_type) 时做 no-op。
 	UpsertChannelBindingUnbound(ctx context.Context, arg UpsertChannelBindingUnboundParams) error
+	// 平台管理员配置/改配置：写基础域名 / provider / 凭证密文 / 配额。
+	// 不触碰 provisioning_status 与 cert_* 状态（那由状态机维护），首插时取列默认值。
+	UpsertWebPublishConfig(ctx context.Context, arg UpsertWebPublishConfigParams) error
 }
 
 var _ Querier = (*Queries)(nil)

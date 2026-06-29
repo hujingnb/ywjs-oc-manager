@@ -220,6 +220,44 @@ type Job struct {
 	FinishedAt  null.Time       `db:"finished_at" json:"finished_at"`
 }
 
+// 企业网站发布能力配置与证书托管状态
+type OrgWebPublishConfig struct {
+	// 所属企业 ID（主键即一企业一行）
+	OrgID string `db:"org_id" json:"org_id"`
+	// 能力总开关：1 开通、0 停用
+	Enabled bool `db:"enabled" json:"enabled"`
+	// 企业基础域名，站点为 <slug>.<base_domain>
+	BaseDomain string `db:"base_domain" json:"base_domain"`
+	// DNS provider：alidns/huaweicloud/tencentcloud/cmcccloud
+	DnsProvider string `db:"dns_provider" json:"dns_provider"`
+	// provider 凭证 JSON 的 auth.Cipher 密文（不落明文/不进日志）
+	DnsCredentialsCiphertext null.String `db:"dns_credentials_ciphertext" json:"dns_credentials_ciphertext"`
+	// 站点默认存活天数（发布/续期用）
+	SiteTtlDays int32 `db:"site_ttl_days" json:"site_ttl_days"`
+	// 该企业最多同时存在的已发布站点数
+	MaxSites int32 `db:"max_sites" json:"max_sites"`
+	// 开通进度：disabled/provisioning/ready/failed
+	ProvisioningStatus string `db:"provisioning_status" json:"provisioning_status"`
+	// provisioning 失败原因 / 最近一次结果摘要
+	ProvisioningMessage null.String `db:"provisioning_message" json:"provisioning_message"`
+	// 通配证书 k8s TLS Secret 名（通配 Ingress 引用）
+	CertSecretName string `db:"cert_secret_name" json:"cert_secret_name"`
+	// 证书状态：none/issuing/issued/renewing/failed
+	CertStatus string `db:"cert_status" json:"cert_status"`
+	// 证书到期时间（续期巡检依据）
+	CertNotAfter null.Time `db:"cert_not_after" json:"cert_not_after"`
+	// 最近一次签发成功时间
+	CertLastIssuedAt null.Time `db:"cert_last_issued_at" json:"cert_last_issued_at"`
+	// 最近一次续签成功时间
+	CertLastRenewedAt null.Time `db:"cert_last_renewed_at" json:"cert_last_renewed_at"`
+	// 证书失败原因 / 最近一次结果摘要
+	CertMessage null.String `db:"cert_message" json:"cert_message"`
+	// 创建时间
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	// 更新时间
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
+}
+
 type Organization struct {
 	// 组织 ID
 	ID string `db:"id" json:"id"`

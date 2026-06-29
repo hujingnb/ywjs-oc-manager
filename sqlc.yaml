@@ -21,6 +21,8 @@ sql:
       - internal/migrations/000017_support_work_wechat_channel.up.sql
       - internal/migrations/000018_conversation_files.up.sql
       - internal/migrations/000019_apps_runtime_phase.up.sql
+      - internal/migrations/000020_support_dingtalk_channel.up.sql
+      - internal/migrations/000021_org_web_publish_config.up.sql
     queries: internal/store/queries
     gen:
       go:
