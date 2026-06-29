@@ -117,6 +117,38 @@ def _wecom_status() -> dict:
     return {"channel": "work_wechat", "bound": False, "platform_state": state or "connecting"}
 
 
+def _dingtalk_status() -> dict:
+    """读 hermes api_server /health/detailed 的 platforms.dingtalk 运行态，映射为渠道绑定态。
+
+    与 _wecom_status 同形：引擎平台名即 dingtalk，字段为 state（connected/disconnected/…）。
+    注意：钉钉适配器只 _mark_connected/_mark_disconnected、不写 fatal，故 fatal 分支实际不触发，
+    保留只为与其它渠道同构（凭证错表现为长期非 connected → manager 侧按超时判失败）。
+      - state == "connected" → bound=True
+      - 其他 → bound=False，pending 态
+    """
+    import json as _json
+    import urllib.request as _u
+
+    req = _u.Request(_API_BASE + "/health/detailed", method="GET")
+    key = _api_server_key()
+    if key:
+        req.add_header("Authorization", "Bearer " + key)
+    try:
+        with _u.urlopen(req, timeout=10) as resp:
+            data = _json.loads(resp.read().decode("utf-8"))
+    except Exception as e:  # noqa: BLE001 - 网络/解析失败统一映射为 INTERNAL
+        raise OpsError("INTERNAL", f"查询 /health/detailed 失败: {e}")
+    dt = (data.get("platforms") or {}).get("dingtalk") or {}
+    state = dt.get("state", "")
+    if state == "connected":
+        return {"channel": "dingtalk", "bound": True, "platform_state": state}
+    if state == "fatal":
+        return {"channel": "dingtalk", "bound": False, "platform_state": state,
+                "error_code": dt.get("error_code", "") or "",
+                "error_message": dt.get("error_message", "") or ""}
+    return {"channel": "dingtalk", "bound": False, "platform_state": state or "connecting"}
+
+
 class _QRLineWriter(io.StringIO):
     """捕获 qr_login print 输出的可写对象。
 
@@ -425,10 +457,33 @@ class WorkWechatChannelOps(ChannelOps):
         return {"channel": "work_wechat", "status": "unbound"}
 
 
+# ============================================================================
+# dingtalk：env 注入 + health 运行态（无扫码授权流）
+# ============================================================================
+
+class DingtalkChannelOps(ChannelOps):
+    """钉钉渠道：机器人凭证经环境变量注入引擎（manager 直注 DINGTALK_CLIENT_ID/SECRET），运行态走 health。
+
+    无扫码授权流（auth_stream 用基类默认 failed 终态即可）；channel 标识 dingtalk 与
+    manager 侧枚举一致，内部读引擎 platforms.dingtalk。"""
+
+    channel = "dingtalk"
+
+    def status(self, data_root: Path) -> dict:
+        # 钉钉无本地账号文件（凭证经 DINGTALK_* env 注入），绑定态以引擎运行态为准。
+        return _dingtalk_status()
+
+    def unbind(self, data_root: Path) -> dict:
+        # env 注入型渠道：oc-ops 侧无本地文件态可删（真正清理由 manager 删 dingtalk-* key + RolloutRestart），
+        # 此处返回幂等成功即可。
+        return {"channel": "dingtalk", "status": "unbound"}
+
+
 # 启动期注册内置渠道。新增渠道在此追加 register_channel(子类())。
 register_channel(WeixinChannelOps())
 register_channel(FeishuChannelOps())
 register_channel(WorkWechatChannelOps())
+register_channel(DingtalkChannelOps())
 
 
 # ============================================================================
