@@ -183,6 +183,34 @@ export function useBeginWorkWechatAuth(appId: Ref<string | undefined>) {
   })
 }
 
+// DingtalkAuthBody 描述钉钉发起绑定的请求体（手填机器人凭证，字段名全栈统一 client_id/client_secret）。
+export interface DingtalkAuthBody {
+  // 钉钉应用 Client ID（即 AppKey）。
+  client_id: string
+  // 钉钉 Client Secret（即 AppSecret，仅提交，不回显）。
+  client_secret: string
+}
+
+// useBeginDingtalkAuth 触发钉钉手填绑定，发起需携带 client_id+client_secret body。
+// 复用通用进度轮询（GET /channels/dingtalk/auth）与解绑接口，仅发起入口不同。
+// 成功后失效钉钉进度缓存，让轮询尽快拉到连通态。
+export function useBeginDingtalkAuth(appId: Ref<string | undefined>) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: DingtalkAuthBody) => {
+      if (!appId.value) throw new Error(i18n.global.t('common.errors.missingChannelParam'))
+      const response = await apiRequest<{ challenge: ChannelChallenge }>(
+        `/api/v1/apps/${appId.value}/channels/dingtalk/auth`,
+        { method: 'POST', body },
+      )
+      return response.challenge
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: progressKey(appId.value, 'dingtalk') })
+    },
+  })
+}
+
 // useUnbindChannel 解绑渠道。
 // 解绑成功后刷新进度缓存，让页面回到未绑定状态。
 export function useUnbindChannel(appId: Ref<string | undefined>, channelType: Ref<string | undefined>) {
