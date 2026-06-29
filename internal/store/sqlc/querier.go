@@ -27,6 +27,7 @@ type Querier interface {
 	CountActiveAppsByOrg(ctx context.Context, orgID string) (int64, error)
 	// 平台总览组织计数：剔除 soft-deleted；status='active' 与 'disabled' 都算入册组织。
 	CountActiveOrganizations(ctx context.Context) (int64, error)
+	CountActiveSitesByOrg(ctx context.Context, orgID string) (int64, error)
 	// 平台总览成员计数：仅 active 状态、非 platform_admin。
 	// users 表当前没有 soft-delete 字段，status='disabled' 视为下线。
 	CountActiveUsers(ctx context.Context) (int64, error)
@@ -66,6 +67,7 @@ type Querier interface {
 	CreateJob(ctx context.Context, arg CreateJobParams) error
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) error
 	CreatePlatformSkill(ctx context.Context, arg CreatePlatformSkillParams) error
+	CreatePublishedSite(ctx context.Context, arg CreatePublishedSiteParams) error
 	// 懒创建实例级 dataset 映射；并发首创命中唯一索引时忽略，由 service 读取已有映射且不重复创建远端 dataset。
 	CreateRAGFlowAppDatasetMapping(ctx context.Context, arg CreateRAGFlowAppDatasetMappingParams) error
 	// 缓存 RAGFlow document 元数据，manager 不保存文件主副本。
@@ -124,6 +126,8 @@ type Querier interface {
 	GetOrganizationForUpdate(ctx context.Context, id string) (Organization, error)
 	GetPlatformSkill(ctx context.Context, id string) (PlatformSkill, error)
 	GetPlatformSkillByNameVersion(ctx context.Context, arg GetPlatformSkillByNameVersionParams) (PlatformSkill, error)
+	GetPublishedSiteByHost(ctx context.Context, host string) (PublishedSite, error)
+	GetPublishedSiteByID(ctx context.Context, id string) (PublishedSite, error)
 	// 读取实例知识库 dataset 映射，runtime 写入只能落到该 dataset。
 	GetRAGFlowAppDataset(ctx context.Context, appID null.String) (RagflowDataset, error)
 	// 按 ID 读取 dataset 记录，供 ClaimRAGFlowDatasetCreation 后的读回。
@@ -151,6 +155,7 @@ type Querier interface {
 	// 用于组织创建链路失败时回滚刚刚 INSERT 的孤儿记录。
 	// 正常生命周期不可见此查询；普通"删除"必须走 SoftDeleteOrganization。
 	HardDeleteOrganization(ctx context.Context, id string) error
+	ListActiveSites(ctx context.Context) ([]ListActiveSitesRow, error)
 	// 全量返回活跃组织（deleted_at IS NULL），不分页；
 	// 仅供平台内部聚合使用（如 GetOrgUsageBreakdown），请勿用于用户可见的列表接口。
 	ListAllActiveOrganizations(ctx context.Context) ([]Organization, error)
@@ -180,6 +185,7 @@ type Querier interface {
 	// init job 推进到 running；pod 真坏则保持 error 不动。reaper 只扫 init 子状态、不管 error，
 	// 此查询补上「init 失败成 error 后无法自愈」的洞。
 	ListErrorApps(ctx context.Context) ([]string, error)
+	ListExpiredActiveSites(ctx context.Context) ([]PublishedSite, error)
 	// 分页列出行业知识库，并统计行业 scope 下已缓存的 RAGFlow 文档数量。
 	ListIndustryKnowledgeBases(ctx context.Context, arg ListIndustryKnowledgeBasesParams) ([]ListIndustryKnowledgeBasesRow, error)
 	// 列出助手版本关联的未删除行业知识库，供发布配置和运行时检索范围使用。
@@ -211,6 +217,7 @@ type Querier interface {
 	// binding_failed 表示上轮扫码超时，pod 仍在（属渠道发起 allowlist，需 reconciler 维护其 runtime_phase）。
 	// spec-A2b：去掉 runtime_node_id / container_id（k8s 路径不再写这两列），消费方仅用 id。
 	ListRunningApps(ctx context.Context) ([]string, error)
+	ListSitesByOrg(ctx context.Context, orgID string) ([]PublishedSite, error)
 	ListSkillTicketMessages(ctx context.Context, ticketID string) ([]SkillTicketMessage, error)
 	ListSkillTicketsByRequester(ctx context.Context, requesterUserID string) ([]SkillTicket, error)
 	// reaper 扫描 init 子状态下「连续 N 秒无更新」的孤儿；N 由调用方按秒传入。
@@ -291,6 +298,7 @@ type Querier interface {
 	SetFeishuCredentials(ctx context.Context, arg SetFeishuCredentialsParams) error
 	SetOrganizationNewAPIUser(ctx context.Context, arg SetOrganizationNewAPIUserParams) error
 	SetOrganizationStatus(ctx context.Context, arg SetOrganizationStatusParams) error
+	SetPublishedSiteStatus(ctx context.Context, arg SetPublishedSiteStatusParams) error
 	// 远端 dataset 创建成功后写入 RAGFlow ID，并清理上一轮生命周期错误。
 	SetRAGFlowDatasetActive(ctx context.Context, arg SetRAGFlowDatasetActiveParams) error
 	SetSkillTicketQuote(ctx context.Context, arg SetSkillTicketQuoteParams) error
@@ -333,6 +341,7 @@ type Querier interface {
 	// OOS-2 access_token 自愈用：仅更新 newapi_user_credentials_ciphertext，不动 newapi_user_id。
 	UpdateOrganizationCredentialsCiphertext(ctx context.Context, arg UpdateOrganizationCredentialsCiphertextParams) error
 	UpdateOrganizationProfile(ctx context.Context, arg UpdateOrganizationProfileParams) error
+	UpdatePublishedSiteVersion(ctx context.Context, arg UpdatePublishedSiteVersionParams) error
 	// 回写解析状态、进度和错误；状态值由 service 层从 RAGFlow run 值归一化。
 	UpdateRAGFlowDocumentParseStatus(ctx context.Context, arg UpdateRAGFlowDocumentParseStatusParams) error
 	UpdateSkillTicketStatus(ctx context.Context, arg UpdateSkillTicketStatusParams) error

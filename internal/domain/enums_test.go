@@ -84,3 +84,14 @@ func TestWebPublishCertStatus(t *testing.T) {
 func TestWebPublishJobTypeRegistered(t *testing.T) {
 	assert.True(t, IsJobType(JobTypeWebPublishProvision))
 }
+
+// TestSiteStatus 覆盖：三个合法站点状态通过校验，非法值拒绝，
+// 保证写库前 status 字段取值受 CHECK 约束对齐。
+func TestSiteStatus(t *testing.T) {
+	// 三个合法值：active/disabled/expired 均应通过。
+	for _, s := range []string{SiteStatusActive, SiteStatusDisabled, SiteStatusExpired} {
+		assert.Truef(t, IsSiteStatus(s), "%s 应为合法站点状态", s)
+	}
+	// 非法值：deleted 不属于 published_sites.status 取值集合，应拒绝。
+	assert.False(t, IsSiteStatus("deleted"), "deleted 不是合法站点状态，应拒绝")
+}

@@ -307,6 +307,34 @@ type PlatformSkill struct {
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
+// 已发布静态站点
+type PublishedSite struct {
+	// 站点 ID（siteID，UUID）
+	ID string `db:"id" json:"id"`
+	// 所属企业 ID
+	OrgID string `db:"org_id" json:"org_id"`
+	// 创建并归属该站点的实例 ID（update-in-place 归属校验）
+	AppID string `db:"app_id" json:"app_id"`
+	// 完整访问域名 <slug>.<base_domain>（全局唯一=slug 在企业域内唯一）
+	Host string `db:"host" json:"host"`
+	// 子域 slug
+	Slug string `db:"slug" json:"slug"`
+	// 当前版本标识（如 v1/v2，原子换版指针）
+	CurrentVersion string `db:"current_version" json:"current_version"`
+	// 当前版本对象前缀 published-sites/<id>/<version>/（末尾带 /）
+	S3Prefix string `db:"s3_prefix" json:"s3_prefix"`
+	// 状态：active/disabled/expired
+	Status string `db:"status" json:"status"`
+	// 当前版本总字节数
+	SizeBytes int64 `db:"size_bytes" json:"size_bytes"`
+	// 创建时间
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	// 过期时间（每次发布重置为 now + site_ttl_days）
+	ExpiresAt time.Time `db:"expires_at" json:"expires_at"`
+	// 更新时间
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
+}
+
 type RagflowDataset struct {
 	ID                      string      `db:"id" json:"id"`
 	ScopeType               string      `db:"scope_type" json:"scope_type"`

@@ -88,6 +88,11 @@ const (
 	CertStatusIssued   = "issued"   // 已签发可用
 	CertStatusRenewing = "renewing" // 续签中
 	CertStatusFailed   = "failed"   // 签发/续签失败
+
+	// SiteStatus* 描述已发布站点生命周期，落 published_sites.status。
+	SiteStatusActive   = "active"   // 在线可访问
+	SiteStatusDisabled = "disabled" // 手动下线（site-server 立即 404）
+	SiteStatusExpired  = "expired"  // TTL 到期被 reaper 回收
 )
 
 const (
@@ -166,6 +171,7 @@ var (
 
 	validProvisioningStatuses = set(ProvisioningDisabled, ProvisioningInProgress, ProvisioningReady, ProvisioningFailed)
 	validCertStatuses         = set(CertStatusNone, CertStatusIssuing, CertStatusIssued, CertStatusRenewing, CertStatusFailed)
+	validSiteStatuses         = set(SiteStatusActive, SiteStatusDisabled, SiteStatusExpired)
 )
 
 func set(values ...string) map[string]struct{} {
@@ -215,5 +221,11 @@ func IsProvisioningStatus(value string) bool {
 // IsCertStatus 校验通配证书状态取值是否合法。
 func IsCertStatus(value string) bool {
 	_, ok := validCertStatuses[value]
+	return ok
+}
+
+// IsSiteStatus 校验已发布站点状态取值是否合法。
+func IsSiteStatus(value string) bool {
+	_, ok := validSiteStatuses[value]
 	return ok
 }
