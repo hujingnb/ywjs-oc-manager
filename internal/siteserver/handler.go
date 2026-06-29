@@ -41,7 +41,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if rel == "/" || strings.HasSuffix(r.URL.Path, "/") {
 		rel = path.Join(rel, "index.html")
 	}
-	key := entry.S3Prefix + strings.TrimPrefix(rel, "/")
+	// 防御快照漏配尾斜杠：S3Prefix 约定以 / 结尾，若漏了会静默拼出错误 key，
+	// 这里统一规范化为单个尾斜杠后再拼接。
+	prefix := strings.TrimRight(entry.S3Prefix, "/") + "/"
+	key := prefix + strings.TrimPrefix(rel, "/")
 
 	rc, size, err := h.reader.GetObject(r.Context(), key)
 	if errors.Is(err, ErrObjectNotFound) {
