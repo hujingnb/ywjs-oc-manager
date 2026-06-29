@@ -105,6 +105,50 @@ resources:
     assert m.rule_application_rel == ""
 
 
+def test_load_parses_web_publish(tmp_path: Path) -> None:
+    # 验证 manifest.web_publish 段被解析到 Manifest 的三个 web_publish_* 字段。
+    p = write(tmp_path / "manifest.yaml", """
+app:
+  id: app-x
+  name: x
+  model: m
+web_publish:
+  runtime_base_url: http://manager-api:8080
+  app_token: publish-token
+  base_domain: apps.example.com
+credentials:
+  openai: { api_key: sk-x, base_url: http://x }
+resources:
+  persona: resources/persona.md
+  rules:
+    platform: resources/platform-rules.md
+""")
+    m = load(p)
+    assert m.web_publish_runtime_base_url == "http://manager-api:8080"
+    assert m.web_publish_app_token == "publish-token"
+    assert m.web_publish_base_domain == "apps.example.com"
+
+
+def test_load_web_publish_absent_defaults_empty(tmp_path: Path) -> None:
+    # 验证 manifest 不含 web_publish 段时三个字段缺省空串（条件注入门控：企业未开通即不渲染 oc-publish）。
+    p = write(tmp_path / "manifest.yaml", """
+app:
+  id: app-x
+  name: x
+  model: m
+credentials:
+  openai: { api_key: sk-x, base_url: http://x }
+resources:
+  persona: resources/persona.md
+  rules:
+    platform: resources/platform-rules.md
+""")
+    m = load(p)
+    assert m.web_publish_runtime_base_url == ""
+    assert m.web_publish_app_token == ""
+    assert m.web_publish_base_domain == ""
+
+
 def test_load_v1_without_routing_skills_defaults_empty(tmp_path: Path) -> None:
     # 验证老 v1 manifest（无 routing / skills）解析后 routing={}、skills=[]，保持向后兼容。
     p = write(tmp_path / "manifest.yaml", """

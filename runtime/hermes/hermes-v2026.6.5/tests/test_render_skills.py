@@ -12,8 +12,13 @@ from lib.manifest import Manifest
 from renderer.render_skills import render
 
 
-def _manifest(skills: list[str] | None = None, knowledge: bool = False) -> Manifest:
-    # 构造渲染 skill 所需的最小 Manifest；knowledge=True 时启用 oc-kb skill。
+def _manifest(
+    skills: list[str] | None = None,
+    knowledge: bool = False,
+    web_publish: bool = False,
+) -> Manifest:
+    # 构造渲染 skill 所需的最小 Manifest；knowledge=True 时启用 oc-kb skill，
+    # web_publish=True 时启用 oc-publish skill（runtime_base_url + app_token 都给齐）。
     return Manifest(
         app_id="a", app_name="A", app_model="m",
         openai_api_key="sk", openai_base_url="http://x",
@@ -22,6 +27,8 @@ def _manifest(skills: list[str] | None = None, knowledge: bool = False) -> Manif
         skills=skills or [],
         knowledge_runtime_base_url="http://manager-api:8080" if knowledge else "",
         knowledge_app_token="runtime-token" if knowledge else "",
+        web_publish_runtime_base_url="http://manager-api:8080" if web_publish else "",
+        web_publish_app_token="publish-token" if web_publish else "",
     )
 
 
@@ -66,6 +73,30 @@ def test_render_skips_runtime_knowledge_skill_without_manifest_config(tmp_input:
 
     assert outputs == []
     assert not (tmp_data / "skills" / "oc-kb").exists()
+
+
+def test_renders_oc_publish_when_web_publish_present(tmp_input: Path, tmp_data: Path) -> None:
+    # manifest.web_publish 配置齐全（runtime_base_url + app_token）时生成固定 oc-publish skill：
+    # 写出 SKILL.md（frontmatter name: oc-publish），打 web-publish 标记，但 app token 不写入正文。
+    outputs = render(_manifest(web_publish=True), tmp_input, tmp_data)
+
+    skill_path = tmp_data / "skills" / "oc-publish" / "SKILL.md"
+    assert skill_path.exists()
+    body = skill_path.read_text()
+    assert "name: oc-publish" in body
+    assert "publish-token" not in body
+    assert "skills/oc-publish/SKILL.md" in outputs
+    marker = tmp_data / "skills" / "oc-publish" / ".oc-managed"
+    assert json.loads(marker.read_text())["source"] == "web-publish"
+
+
+def test_skips_oc_publish_when_web_publish_absent(tmp_input: Path, tmp_data: Path) -> None:
+    # 条件注入门控的核心安全特性：manifest 无 web_publish 段时整体不渲染 oc-publish，
+    # 确保发布能力"不对所有人开放"——企业未开通时 Hermes 无从知晓也无法触发发布。
+    outputs = render(_manifest(), tmp_input, tmp_data)
+
+    assert "skills/oc-publish/SKILL.md" not in outputs
+    assert not (tmp_data / "skills" / "oc-publish").exists()
 
 
 def test_render_extracts_version_skill_tar(tmp_input: Path, tmp_data: Path) -> None:
