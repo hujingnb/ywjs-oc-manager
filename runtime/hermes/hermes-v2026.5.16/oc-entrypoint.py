@@ -49,6 +49,7 @@ def main() -> int:
         oclog.emit("load_manifest", "error", str(e))
         return 1
     _configure_knowledge_env(manifest)
+    _configure_web_publish_env(manifest)
 
     # phase 2 load state
     state = read_state(data_root)
@@ -114,6 +115,19 @@ def _configure_knowledge_env(manifest) -> None:
         return
     os.environ.pop("OC_KB_RUNTIME_BASE_URL", None)
     os.environ.pop("OC_KB_APP_TOKEN", None)
+
+
+def _configure_web_publish_env(manifest) -> None:
+    """把 manifest web_publish 配置注入 Hermes 进程环境，供 oc-publish 子命令使用。
+
+    runtime_base_url 或 app_token 任一为空时视为企业未开通发布能力，清除环境变量。
+    """
+    if manifest.web_publish_runtime_base_url and manifest.web_publish_app_token:
+        os.environ["OC_PUBLISH_RUNTIME_BASE_URL"] = manifest.web_publish_runtime_base_url
+        os.environ["OC_PUBLISH_APP_TOKEN"] = manifest.web_publish_app_token
+        return
+    os.environ.pop("OC_PUBLISH_RUNTIME_BASE_URL", None)
+    os.environ.pop("OC_PUBLISH_APP_TOKEN", None)
 
 
 if __name__ == "__main__":

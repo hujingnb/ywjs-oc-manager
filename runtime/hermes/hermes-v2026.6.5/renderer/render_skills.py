@@ -2,6 +2,7 @@
 
 当前来源：
 - manifest.knowledge 存在时生成固定 oc-kb skill，指引 Hermes 通过 manager runtime API 检索/写入知识库；
+- manifest.web_publish 存在时生成固定 oc-publish skill，指引 Hermes 将工作区目录发布为静态站点；
 - manifest.resources.skills 列出的版本 skill tar 解压到 skills/ 下。
 
 每个由 oc-entrypoint 管理的 skill 目录都写入 .oc-managed 标记文件；
@@ -28,11 +29,13 @@ OC_SKILL_MARKER = ".oc-managed"
 
 
 def render(m: Manifest, input_root: Path, data_root: Path) -> List[str]:
-    """渲染 skill：先清理上次 oc-entrypoint 安装的 skill，再渲染 oc-kb 与版本 skill tar。"""
+    """渲染 skill：先清理上次 oc-entrypoint 安装的 skill，再渲染 oc-kb、oc-publish 与版本 skill tar。"""
     skills_root = data_root / "skills"
     _wipe_managed_skills(skills_root)
     outputs: list[str] = []
     outputs.extend(_render_runtime_knowledge_skill(m, skills_root))
+    # web_publish 配置存在时渲染 oc-publish skill，企业未开通时整体跳过。
+    outputs.extend(_render_web_publish_skill(m, skills_root))
     outputs.extend(_extract_version_skills(m.skills or [], input_root, skills_root))
     return outputs
 
@@ -64,6 +67,21 @@ def _render_runtime_knowledge_skill(m: Manifest, skills_root: Path) -> List[str]
     write_text(skill_dir / "SKILL.md", _OC_KB_SKILL_MD)
     _write_marker(skill_dir, "runtime-knowledge")
     return ["skills/oc-kb/SKILL.md"]
+
+
+def _render_web_publish_skill(m: Manifest, skills_root: Path) -> List[str]:
+    """manifest 含 web_publish 配置时生成固定 oc-publish skill；token 只进环境变量，不写入 SKILL.md。
+
+    企业未开通发布能力（runtime_base_url 或 app_token 为空）时直接返回空列表，
+    Hermes 不感知发布能力，避免无 token 时误触发。
+    """
+    if not (m.web_publish_runtime_base_url and m.web_publish_app_token):
+        return []
+    skill_dir = skills_root / "oc-publish"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    write_text(skill_dir / "SKILL.md", _OC_PUBLISH_SKILL_MD)
+    _write_marker(skill_dir, "web-publish")
+    return ["skills/oc-publish/SKILL.md"]
 
 
 def _is_safe_member_path(name: str) -> bool:
@@ -156,4 +174,23 @@ Commands:
 - `oc-kb add relative/path.md` uploads an existing workspace file into the current app knowledge base. Absolute paths, parent directory traversal, and directories are rejected.
 
 Do not call RAGFlow directly and do not ask for RAGFlow credentials. The `oc-kb` command talks only to manager runtime APIs using the app-scoped token injected by the container entrypoint.
+"""
+
+# oc-publish skill 说明文本：仅在 manifest.web_publish 配置存在时渲染，企业未开通时不写入。
+# token 只注入环境变量（OC_PUBLISH_APP_TOKEN），不写入此文件，避免凭证暴露给模型上下文。
+_OC_PUBLISH_SKILL_MD = """---
+name: oc-publish
+description: Publish a local workspace directory as a static site through manager, or update a previously published site in place using the same slug.
+---
+
+# oc-publish
+
+Use this skill when the user wants to publish a static site (HTML/CSS/JS files) from the current workspace to the internet, or to update a previously published site.
+
+Commands:
+
+- `oc-publish ./<dir>` publishes the directory at `<dir>` as a new static site and returns the public URL.
+- `oc-publish ./<dir> --slug <slug>` publishes (or re-publishes) the directory under the given slug. Re-running with the same `--slug` updates the existing site in place.
+
+The `oc-publish` command talks only to manager runtime APIs using the app-scoped token injected by the container entrypoint. Do not construct API requests manually or ask for credentials.
 """

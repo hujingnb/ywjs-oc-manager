@@ -107,6 +107,7 @@ COPY oc-entrypoint.py     /usr/local/bin/oc-entrypoint
 COPY entrypoint_helpers.py /usr/local/lib/entrypoint_helpers.py
 COPY ocops-contract/      /usr/local/lib/ocops/contract/
 COPY oc-kb.py             /usr/local/bin/oc-kb
+COPY oc-publish.py        /usr/local/bin/oc-publish
 COPY healthcheck.sh       /usr/local/bin/oc-healthcheck
 COPY lib/                 /usr/local/lib/oc-entrypoint/lib/
 COPY renderer/            /usr/local/lib/oc-entrypoint/renderer/
@@ -125,7 +126,7 @@ COPY patches/             /usr/local/lib/oc-entrypoint/patches/
 COPY locales/             /usr/local/lib/oc-entrypoint/locales/
 
 RUN chmod +x /usr/local/bin/oc-entrypoint /usr/local/bin/oc-kb \
-            /usr/local/bin/oc-healthcheck
+            /usr/local/bin/oc-publish /usr/local/bin/oc-healthcheck
 
 # 构建期 i18n / 端点补丁按固定顺序执行，任一步骤非零退出即中断 docker build：
 #   1) merge_oc_locales：把 locales/oc_overlay.yaml 的 oc.* 文案合并进上游 en/zh catalog；

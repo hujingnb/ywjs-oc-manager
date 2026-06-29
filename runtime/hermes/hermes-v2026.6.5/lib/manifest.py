@@ -37,6 +37,10 @@ class Manifest:
     # knowledge：manager runtime API 配置；不包含 RAGFlow 凭证。
     knowledge_runtime_base_url: str = ""
     knowledge_app_token: str = ""
+    # web_publish：静态站点发布 API 配置；不含时表示企业未开通发布能力。
+    web_publish_runtime_base_url: str = ""
+    web_publish_app_token: str = ""
+    web_publish_base_domain: str = ""
     # app_language：应用界面语言，由 manager 写入 manifest（"en"/"zh"）；
     # 缺省空串表示未配置，渲染时回落 "en"。
     app_language: str = ""
@@ -66,6 +70,9 @@ def load(path: Union[str, Path]) -> Manifest:
     skills = resources.get("skills") if isinstance(resources, dict) else None
     knowledge = raw.get("knowledge")
     knowledge = knowledge if isinstance(knowledge, dict) else {}
+    # web_publish：可选段，缺失或非 dict 时视为空配置（企业未开通发布能力）。
+    wp = raw.get("web_publish")
+    wp = wp if isinstance(wp, dict) else {}
     # 从 app 节点读取可选字段 language；不存在或为空时缺省空串，渲染侧回落 "en"。
     app_section = raw.get("app") if isinstance(raw.get("app"), dict) else {}
     return Manifest(
@@ -82,5 +89,8 @@ def load(path: Union[str, Path]) -> Manifest:
         skills=[str(s) for s in skills] if isinstance(skills, list) else [],
         knowledge_runtime_base_url=str(knowledge.get("runtime_base_url") or ""),
         knowledge_app_token=str(knowledge.get("app_token") or ""),
+        web_publish_runtime_base_url=str(wp.get("runtime_base_url") or ""),
+        web_publish_app_token=str(wp.get("app_token") or ""),
+        web_publish_base_domain=str(wp.get("base_domain") or ""),
         app_language=str(app_section.get("language") or ""),
     )
