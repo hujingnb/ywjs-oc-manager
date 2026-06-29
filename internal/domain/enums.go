@@ -56,6 +56,8 @@ const (
 	ChannelTypeFeishu = "feishu"
 	// ChannelTypeWorkWeChat 是企业微信渠道（智能机器人 AI Bot 长连接，手填 bot_id+secret）。
 	ChannelTypeWorkWeChat = "work_wechat"
+	// ChannelTypeDingTalk 是钉钉渠道（手填 Client ID/Client Secret，dingtalk-stream 长连接）。
+	ChannelTypeDingTalk = "dingtalk"
 
 	// ChannelStatus* 描述渠道绑定流程和用户主动解绑状态。
 	ChannelStatusUnbound       = "unbound"
