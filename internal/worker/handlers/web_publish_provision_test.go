@@ -49,21 +49,25 @@ func (f *fakeProvisioner) Provision(_ context.Context, in CertProvisionInput) (a
 	return f.ret, f.err
 }
 
-// fakeClusterApplier 模拟 ClusterApplier 接口，记录调用情况供断言。
+// fakeClusterApplier 模拟 ClusterApplier 接口，记录调用情况与收到的资源名供断言。
 type fakeClusterApplier struct {
 	tlsApplied bool
 	ingApplied bool
 	tlsErr     error
 	ingErr     error
+	gotTLSName string                // ApplyTLSSecret 收到的 Secret 名
+	gotIngress WildcardIngressParams // ApplyWildcardIngress 收到的参数
 }
 
-func (f *fakeClusterApplier) ApplyTLSSecret(_ context.Context, _ string, _, _ []byte) error {
+func (f *fakeClusterApplier) ApplyTLSSecret(_ context.Context, name string, _, _ []byte) error {
 	f.tlsApplied = true
+	f.gotTLSName = name
 	return f.tlsErr
 }
 
-func (f *fakeClusterApplier) ApplyWildcardIngress(_ context.Context, _ WildcardIngressParams) error {
+func (f *fakeClusterApplier) ApplyWildcardIngress(_ context.Context, params WildcardIngressParams) error {
 	f.ingApplied = true
+	f.gotIngress = params
 	return f.ingErr
 }
 
@@ -113,7 +117,38 @@ func TestProvisionHappyPath(t *testing.T) {
 
 	// 验证最终 cert 状态为 issued
 	require.NotEmpty(t, st.certUpdates)
-	assert.Equal(t, domain.CertStatusIssued, st.certUpdates[len(st.certUpdates)-1].CertStatus)
+	lastCert := st.certUpdates[len(st.certUpdates)-1]
+	assert.Equal(t, domain.CertStatusIssued, lastCert.CertStatus)
+	// 验证签发成功时写了 cert_last_issued_at（Plan 5 续期追踪依赖此契约）
+	assert.True(t, lastCert.CertLastIssuedAt.Valid, "签发成功应记录 cert_last_issued_at")
+}
+
+// TestProvisionDerivesCertSecretName 覆盖：cfg.CertSecretName 为空时按 base_domain 确定性派生资源名，
+// 避免空名被 k8s 拒绝导致 provisioning 永久失败；并把派生值写回 DB。
+func TestProvisionDerivesCertSecretName(t *testing.T) {
+	// 准备测试依赖：CertSecretName 留空，base_domain=apps.example.com
+	cipher, _ := auth.NewCipher(make([]byte, 32))
+	cfg := newCfg(cipher)
+	cfg.CertSecretName = "" // 模拟首次 provisioning：列默认空串
+	st := &fakeWPProvStore{cfg: cfg}
+	prov := &fakeProvisioner{ret: acme.Certificate{CertPEM: []byte("C"), KeyPEM: []byte("K"), NotAfter: 1893456000}}
+	cl := &fakeClusterApplier{}
+	h := NewWebPublishProvisionHandler(st, prov, cl, cipher, WebPublishProvisionConfig{IngressPublicIP: "1.2.3.4"})
+
+	// 执行 handler，期望无错误
+	require.NoError(t, h.Handle(context.Background(), provJob()))
+
+	// 期望资源名按 base_domain 点替连字符派生
+	const want = "wildcard-apps-example-com"
+
+	// 验证传给 cluster applier 的 TLS Secret 名与 Ingress 名/引用名都是派生值
+	assert.Equal(t, want, cl.gotTLSName, "TLS Secret 名应按 base_domain 派生")
+	assert.Equal(t, want, cl.gotIngress.Name, "Ingress 名应按 base_domain 派生")
+	assert.Equal(t, want, cl.gotIngress.TLSSecretName, "Ingress 引用的 TLS Secret 名应一致")
+
+	// 验证派生值写回 DB（最终 SetWebPublishProvisioning 的 CertSecretName）
+	require.NotEmpty(t, st.provUpdates)
+	assert.Equal(t, want, st.provUpdates[len(st.provUpdates)-1].CertSecretName, "派生的 secret 名应写回 DB")
 }
 
 // TestProvisionCertFails 覆盖：签证书失败 → 返回错误（worker 据此重试）、provisioning=failed、cert=failed，且不建 Ingress。

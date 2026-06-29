@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	null "github.com/guregu/null/v5"
@@ -139,6 +140,16 @@ func (h *WebPublishProvisionHandler) Handle(ctx context.Context, job sqlc.Job) e
 		return fmt.Errorf("读取企业 %s web-publish 配置失败: %w", orgID, err)
 	}
 
+	// 确定通配证书 TLS Secret / Ingress 的资源名。
+	// cert_secret_name 列默认空串，Configure/Enable 路径从不赋值，首次 provisioning 时为空——
+	// 直接传空名给 ApplyTLSSecret/ApplyWildcardIngress 会被 k8s 拒绝并永久卡死。
+	// 这里在 handler 内按企业基础域名确定性派生（k8s 资源名：小写字母数字与连字符），
+	// 重试时同一 baseDomain 派生同名，保证幂等可恢复；成功后再写回 DB。
+	secretName := cfg.CertSecretName
+	if secretName == "" {
+		secretName = "wildcard-" + strings.ReplaceAll(cfg.BaseDomain, ".", "-")
+	}
+
 	// 标记证书状态为 issuing，表示本次开通已启动。
 	// 此处写库失败只返回 error 交给 worker 重试，刻意不调 fail() 置 failed：
 	// DB 不可用时 fail() 自己也写不进，标 failed 既无意义又会留下不准确状态。
@@ -149,7 +160,7 @@ func (h *WebPublishProvisionHandler) Handle(ctx context.Context, job sqlc.Job) e
 	// 解密 DNS 凭证
 	creds, err := h.decryptCredentials(cfg)
 	if err != nil {
-		return h.fail(ctx, orgID, cfg.CertSecretName, fmt.Errorf("解密 DNS 凭证失败: %w", err))
+		return h.fail(ctx, orgID, secretName, fmt.Errorf("解密 DNS 凭证失败: %w", err))
 	}
 
 	// 调用证书签发器
@@ -160,24 +171,24 @@ func (h *WebPublishProvisionHandler) Handle(ctx context.Context, job sqlc.Job) e
 		IngressIP:    h.cfg.IngressPublicIP,
 	})
 	if err != nil {
-		return h.fail(ctx, orgID, cfg.CertSecretName, fmt.Errorf("签发通配证书失败: %w", err))
+		return h.fail(ctx, orgID, secretName, fmt.Errorf("签发通配证书失败: %w", err))
 	}
 
 	// 写入 TLS Secret
-	if err := h.applier.ApplyTLSSecret(ctx, cfg.CertSecretName, cert.CertPEM, cert.KeyPEM); err != nil {
-		return h.fail(ctx, orgID, cfg.CertSecretName, fmt.Errorf("写入 TLS Secret 失败: %w", err))
+	if err := h.applier.ApplyTLSSecret(ctx, secretName, cert.CertPEM, cert.KeyPEM); err != nil {
+		return h.fail(ctx, orgID, secretName, fmt.Errorf("写入 TLS Secret 失败: %w", err))
 	}
 
 	// 建通配 Ingress（名称与证书 secret 同名，保持一致）
 	if err := h.applier.ApplyWildcardIngress(ctx, WildcardIngressParams{
-		Name:             cfg.CertSecretName,
+		Name:             secretName,
 		BaseDomain:       cfg.BaseDomain,
-		TLSSecretName:    cfg.CertSecretName,
+		TLSSecretName:    secretName,
 		IngressClassName: h.cfg.IngressClassName,
 		BackendService:   h.cfg.BackendService,
 		BackendPort:      h.cfg.BackendPort,
 	}); err != nil {
-		return h.fail(ctx, orgID, cfg.CertSecretName, fmt.Errorf("建通配 Ingress 失败: %w", err))
+		return h.fail(ctx, orgID, secretName, fmt.Errorf("建通配 Ingress 失败: %w", err))
 	}
 
 	// 全部成功：更新 cert 状态为 issued，记录到期时间与签发时间。
@@ -192,11 +203,11 @@ func (h *WebPublishProvisionHandler) Handle(ctx context.Context, job sqlc.Job) e
 		return err
 	}
 
-	// 更新 provisioning 状态为 ready（同上：写失败只返回 error 重试，不置 failed）
+	// 更新 provisioning 状态为 ready，并把派生的 secret 名写回 DB（同上：写失败只返回 error 重试，不置 failed）
 	if err := h.store.SetWebPublishProvisioning(ctx, sqlc.SetWebPublishProvisioningParams{
 		ProvisioningStatus:  domain.ProvisioningReady,
 		ProvisioningMessage: null.String{},
-		CertSecretName:      cfg.CertSecretName,
+		CertSecretName:      secretName,
 		OrgID:               orgID,
 	}); err != nil {
 		return fmt.Errorf("更新 provisioning 状态为 ready 失败: %w", err)
