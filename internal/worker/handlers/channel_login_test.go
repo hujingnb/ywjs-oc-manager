@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -235,6 +236,49 @@ func TestChannelCheckBindingHandlerRequeuesPending(t *testing.T) {
 	if len(store.jobs) != 1 || store.jobs[0].Type != domain.JobTypeChannelCheckBinding {
 		t.Fatalf("pending 状态应延迟重查，jobs=%+v", store.jobs)
 	}
+}
+
+// TestChannelCheckBindingHandlerPendingBeforeDeadlineRequeues 验证：设了 check_deadline_unix
+// 的渠道（钉钉），在 deadline 之前仍 pending 时按原逻辑 re-enqueue、不误判超时。
+func TestChannelCheckBindingHandlerPendingBeforeDeadlineRequeues(t *testing.T) {
+	store := newChannelWorkerStore(t)
+	registry := channel.NewRegistry()
+	// deadline 在未来：探测仍 pending 应继续等待重查。
+	registry.MustRegister(&workerFakeChannelAdapter{
+		progress: channel.AuthProgress{Status: channel.AuthStatusPending, UpdatedAt: time.Now()},
+	})
+	handler := NewChannelCheckBindingHandler(store, registry, nil)
+
+	deadline := time.Now().Add(5 * time.Minute).Unix() // 未到点
+	payload := fmt.Sprintf(`{"app_id":"%s","channel_type":"wechat","check_deadline_unix":%d}`, testChannelWorkerAppID, deadline)
+	err := handler.Handle(context.Background(), sqlc.Job{Type: domain.JobTypeChannelCheckBinding, PayloadJson: []byte(payload)})
+	require.NoError(t, err)
+	require.Equal(t, domain.ChannelStatusPendingAuth, store.binding.Status) // 未超时仍 pending
+	require.Len(t, store.jobs, 1)                                           // 继续 re-enqueue
+}
+
+// TestChannelCheckBindingHandlerTimesOutAfterDeadline 验证：设了 check_deadline_unix 的渠道
+// （钉钉——引擎不报 fatal，错误凭证永远停在 pending），到 deadline 仍未 connected 时置 failed、
+// 写超时文案、停止 re-enqueue，避免无限 pending + 无限 job 链。
+func TestChannelCheckBindingHandlerTimesOutAfterDeadline(t *testing.T) {
+	store := newChannelWorkerStore(t)
+	store.binding.ChannelType = domain.ChannelTypeDingTalk // 绑定行为钉钉渠道
+	registry := channel.NewRegistry()
+	// 探测持续 pending（模拟错误凭证一直连不上）；adapter 注册为 dingtalk 渠道。
+	registry.MustRegister(&workerFakeChannelAdapter{
+		channelType: domain.ChannelTypeDingTalk,
+		progress:    channel.AuthProgress{Status: channel.AuthStatusPending, UpdatedAt: time.Now()},
+	})
+	handler := NewChannelCheckBindingHandler(store, registry, nil)
+
+	deadline := time.Now().Add(-time.Second).Unix() // 已过点
+	payload := fmt.Sprintf(`{"app_id":"%s","channel_type":"dingtalk","check_deadline_unix":%d}`, testChannelWorkerAppID, deadline)
+	err := handler.Handle(context.Background(), sqlc.Job{Type: domain.JobTypeChannelCheckBinding, PayloadJson: []byte(payload)})
+	require.NoError(t, err)
+	require.Equal(t, domain.ChannelStatusFailed, store.binding.Status)            // 超时置 failed
+	require.True(t, store.binding.LastError.Valid)                                // 写了超时文案
+	require.Contains(t, store.binding.LastError.String, "连接超时")                  // 统一超时引导
+	require.Empty(t, store.jobs)                                                  // 不再 re-enqueue
 }
 
 // TestChannelCheckBindingHandlerFallsBackToResolverWhenAdapterPending 校验：
@@ -568,11 +612,18 @@ type workerFakeChannelAdapter struct {
 	challenge channel.AuthChallenge
 	progress  channel.AuthProgress
 	beginErr  error
+	// channelType 覆盖 adapter 注册/路由用的渠道标识；留空默认微信（兼容既有用例）。
+	channelType string
 	// gotBeginInput 记录最近一次 BeginAuth 收到的入参，供断言 Endpoint 注入。
 	gotBeginInput channel.AuthInput
 }
 
-func (a *workerFakeChannelAdapter) Type() string { return domain.ChannelTypeWeChat }
+func (a *workerFakeChannelAdapter) Type() string {
+	if a.channelType != "" {
+		return a.channelType
+	}
+	return domain.ChannelTypeWeChat
+}
 func (a *workerFakeChannelAdapter) BeginAuth(_ context.Context, input channel.AuthInput) (channel.AuthChallenge, error) {
 	a.gotBeginInput = input
 	if a.beginErr != nil {

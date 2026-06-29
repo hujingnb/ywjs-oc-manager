@@ -37,7 +37,8 @@ func (a *DingtalkAdapter) BeginAuth(_ context.Context, _ AuthInput) (AuthChallen
 // 关键容错：坐标解析失败 / oc-ops 不可达（解绑重启窗口）/ dev stub 一律返回 Pending，
 // 吞瞬时错误让 worker 通用分支按退避 re-enqueue，不把 check job 判失败。
 // 钉钉引擎只 connected/disconnected、不写 fatal：凭证错表现为长期非 connected，
-// 由 worker 退避达上限后判超时失败（见设计第 5 节），此处仅 connected 给终态。
+// 由 worker 按 BeginDingtalkAuth 设的 check_deadline_unix 到点判超时失败（见设计第 5 节），
+// 此处仅 connected 给终态。
 func (a *DingtalkAdapter) PollAuth(ctx context.Context, input AuthInput) (AuthProgress, error) {
 	now := time.Now()
 	ep, supported, err := a.resolver.Resolve(ctx, input.AppID)
@@ -57,7 +58,8 @@ func (a *DingtalkAdapter) PollAuth(ctx context.Context, input AuthInput) (AuthPr
 		// fatal 分支：钉钉引擎实际不写 fatal，保留只为与其它渠道同构。
 		return AuthProgress{Status: AuthStatusFailed, ErrorMessage: st.ErrorMessage, UpdatedAt: now}, nil
 	default:
-		// connecting / disconnected / 空：连接中或凭证错，继续等（worker 退避达上限判超时）。
+		// connecting / disconnected / 空：连接中或凭证错，继续等。钉钉无 fatal，错误凭证只会
+		// 一直停在这里——由 worker 按 BeginDingtalkAuth 设的 check_deadline_unix 到点判超时失败。
 		return AuthProgress{Status: AuthStatusPending, UpdatedAt: now}, nil
 	}
 }

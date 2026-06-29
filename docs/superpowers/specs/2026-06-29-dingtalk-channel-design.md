@@ -119,7 +119,7 @@ unbound_by_user（用户主动解绑）
 
 钉钉引擎不调 `_mark_fatal`，**无「凭证无效（带原因）」独立终态**。凭证填错、应用未启用 Stream 模式、网络不通等，统一表现为「探测超时未连上」→ `failed`。
 
-- worker 连通探测在退避重试上限内若始终未 `connected`，置 `failed`，`last_error` 写**统一超时文案**：「连接超时，请检查 Client ID / Client Secret 是否正确、机器人是否已在钉钉开放平台启用 Stream 推送模式」。
+- worker 连通探测设**超时上限 deadline**（`BeginDingtalkAuth` 在 check job payload 写 `check_deadline_unix` = 发起后 5 分钟；通用 check 路径每轮 re-enqueue 透传，不随轮询刷新）。到 deadline 仍未 `connected`，置 `failed`，`last_error` 写**统一超时文案**：「连接超时，请检查 Client ID / Client Secret 是否正确、机器人是否已在钉钉开放平台启用 Stream 推送模式」，并停止 re-enqueue（否则错误凭证会无限 pending + 无限 5s job 链）。该 deadline 机制对通用、仅钉钉设置；未设的渠道（微信/企业微信）行为不变。
 - 不新增「凭证无效」专用错误分支（飞书 / 企业微信有，钉钉做不到）。该文案在前端失败态展示，引导用户自查最可能的两个原因。
 
 ### 实例 `restarting` 过渡态（复用飞书 / 企业微信已建）

@@ -520,6 +520,10 @@ func (s *ChannelService) BeginDingtalkAuth(ctx context.Context, principal auth.P
 		"app_id":       app.ID,
 		"channel_type": domain.ChannelTypeDingTalk,
 		"requested_by": principal.UserID,
+		// check_deadline_unix：连通探测超时上限。钉钉引擎不上报 fatal，错误凭证只会一直连不上，
+		// 必须由 manager 侧设上限——到点仍未 connected 则 worker 置 failed（统一超时文案），
+		// 避免无限 pending + 无限 re-enqueue。5 分钟足够覆盖 pod 重启窗口 + dingtalk-stream 建连。
+		"check_deadline_unix": time.Now().Add(5 * time.Minute).Unix(),
 	})
 	if err != nil {
 		return ChallengeResult{}, fmt.Errorf("序列化钉钉探测任务失败: %w", err)

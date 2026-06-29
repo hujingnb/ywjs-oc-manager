@@ -325,6 +325,28 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 				return nil
 			}
 		}
+		// 连通探测超时终态：对设了 deadline 的渠道（钉钉——引擎不上报 fatal，错误凭证只会一直
+		// 连不上，default→Pending 是唯一归宿，否则永久 pending + 每 5s 无限 re-enqueue）。
+		// 到点仍未 connected 即置 failed、写统一超时文案、停止 re-enqueue。未设 deadline 的渠道
+		// （微信/企业微信，CheckDeadlineUnix==0）行为完全不变。
+		if payload.CheckDeadlineUnix > 0 && time.Now().Unix() > payload.CheckDeadlineUnix {
+			timeoutMsg := channelCheckTimeoutMessage(payload.ChannelType)
+			_ = h.store.SetChannelBindingStatus(ctx, sqlc.SetChannelBindingStatusParams{
+				AppID:       binding.AppID,
+				ChannelType: binding.ChannelType,
+				Status:      domain.ChannelStatusFailed,
+				LastError:   null.StringFrom(timeoutMsg),
+			})
+			if err := recordChannelAppAudit(ctx, h.store, app, "channel_bound", "failed", timeoutMsg,
+				fmt.Sprintf("渠道 %s", channelLabelWorker(payload.ChannelType)),
+				map[string]any{
+					"channel_type": payload.ChannelType,
+					"auth_status":  "timeout",
+				}); err != nil {
+				return err
+			}
+			return nil
+		}
 		_ = h.store.SetChannelBindingStatus(ctx, sqlc.SetChannelBindingStatusParams{
 			AppID:       binding.AppID,
 			ChannelType: binding.ChannelType,
@@ -336,6 +358,15 @@ func (h *ChannelCheckBindingHandler) Handle(ctx context.Context, job sqlc.Job) e
 		}
 	}
 	return nil
+}
+
+// channelCheckTimeoutMessage 返回连通探测超时的用户可读文案（写入 binding.last_error，前端展示）。
+// 钉钉给出针对性自查引导（Client ID/Client Secret + Stream 模式）；其余渠道用通用文案。
+func channelCheckTimeoutMessage(channelType string) string {
+	if channelType == domain.ChannelTypeDingTalk {
+		return "连接超时，请检查 Client ID / Client Secret 是否正确、机器人是否已在钉钉开放平台启用 Stream 推送模式"
+	}
+	return "连接超时，请检查渠道凭证是否正确、机器人是否已在对应平台正确配置"
 }
 
 // handleFeishuCheck 执行飞书两阶段 check，靠 metadata 的 injected 标记区分阶段：
@@ -631,6 +662,11 @@ type channelLoginPayload struct {
 	ChannelType string `json:"channel_type"`
 	// Domain 仅飞书使用：feishu | lark，决定 oc-ops 注册走哪个开放平台域。
 	Domain string `json:"domain,omitempty"`
+	// CheckDeadlineUnix 是连通探测的截止 Unix 秒（可选，0 = 不设上限）。
+	// 钉钉等「引擎不上报 fatal、错误凭证只会一直连不上」的渠道，发起时设此 deadline，
+	// 通用 check 路径在到点仍未 connected 时置 failed（超时），避免无限 pending + 无限 re-enqueue。
+	// 该字段在 re-enqueue 时随 payload 透传，不随每轮轮询刷新（故不能用 binding.updated_at 替代）。
+	CheckDeadlineUnix int64 `json:"check_deadline_unix,omitempty"`
 }
 
 func decodeChannelLoginPayload(raw []byte) (channelLoginPayload, error) {
