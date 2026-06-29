@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, provide, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { VueQueryPlugin, QueryClient } from '@tanstack/vue-query'
 
 import { i18n } from '@/i18n'
 import AppChannelsTab from './AppChannelsTab.vue'
@@ -89,7 +90,16 @@ function mountChannelsTab(channelType?: string) {
       provide('app', app)
       return () => h(AppChannelsTab, { appId: 'app-1', channelType })
     },
-  }), { global: { plugins: [i18n] } })
+  }), {
+    global: {
+      plugins: [
+        i18n,
+        // 注入 VueQueryPlugin，使组件 setup 中 useBeginWorkWechatAuth/useBeginDingtalkAuth
+        // 等调用 useQueryClient() 的 hook 能正常初始化；retry:false 避免测试中无效的后台重试。
+        [VueQueryPlugin, { queryClient: new QueryClient({ defaultOptions: { queries: { retry: false } } }) }],
+      ],
+    },
+  })
 }
 
 describe('AppChannelsTab', () => {
@@ -120,24 +130,26 @@ describe('AppChannelsTab', () => {
       expect.stringContaining('Line'),
     ])
 
-    // 当前已支持渠道为微信 + 飞书共 2 个；两者均展示「已支持」且可点击进入详情。
+    // 已支持渠道为微信 + 企业微信 + 飞书 + 钉钉共 4 个；均展示「已支持」且可点击进入详情。
     const supported = wrapper.findAll('.channel-list-item.supported')
-    expect(supported).toHaveLength(2)
+    expect(supported).toHaveLength(4)
     expect(supported.every(item => item.text().includes('已支持'))).toBe(true)
     const supportedText = supported.map(item => item.text()).join('|')
     expect(supportedText).toContain('微信')
+    expect(supportedText).toContain('企业微信')
     expect(supportedText).toContain('飞书')
+    expect(supportedText).toContain('钉钉')
     // 微信 logo 用新的 type 钩子，且为内联 SVG
     expect(wrapper.find('.channel-logo--wechat').exists()).toBe(true)
 
-    // 飞书转为已支持后，其余 7 个渠道仍为灰色不可用入口。
+    // 钉钉转为已支持后，其余 5 个渠道仍为灰色不可用入口。
     const unsupported = wrapper.findAll('.channel-list-item.unsupported')
-    expect(unsupported).toHaveLength(7)
+    expect(unsupported).toHaveLength(5)
     expect(unsupported.every(item => item.attributes('aria-disabled') === 'true')).toBe(true)
     expect(unsupported.every(item => item.attributes('disabled') !== undefined)).toBe(true)
     expect(unsupported.every(item => item.text().includes('暂不支持'))).toBe(true)
-    // 未支持渠道 logo 均带灰度 muted 标记（9 个渠道中微信、飞书已支持，余 7 个置灰）
-    expect(wrapper.findAll('.channel-logo.muted')).toHaveLength(7)
+    // 未支持渠道 logo 均带灰度 muted 标记（9 个渠道中微信、企业微信、飞书、钉钉已支持，余 5 个置灰）
+    expect(wrapper.findAll('.channel-logo.muted')).toHaveLength(5)
     // 抽查 3 个新增渠道的 type 钩子（非全覆盖，discord/slack 由上面 muted 计数间接保障）
     expect(wrapper.find('.channel-logo--telegram').exists()).toBe(true)
     expect(wrapper.find('.channel-logo--whatsapp').exists()).toBe(true)
