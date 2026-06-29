@@ -89,6 +89,19 @@
             </n-button>
             <n-button v-if="wecomCanUnbind" @click="unbindWorkWechat">{{ t('apps.channels.unbind') }}</n-button>
           </n-space>
+          <!-- 钉钉操作区：手填凭证齐备且实例就绪才可提交，已连接时仅留解绑入口。 -->
+          <n-space v-else-if="selectedChannelType === 'dingtalk'" :size="8">
+            <n-button
+              v-if="!dingtalkBound"
+              type="primary"
+              :disabled="!appId || !canManage || !instanceReady || !dingtalkClientId || !dingtalkSecret"
+              :loading="dingtalkBeginning"
+              @click="submitDingtalk"
+            >
+              {{ t('apps.channels.dingtalkSubmit') }}
+            </n-button>
+            <n-button v-if="dingtalkCanUnbind" @click="unbindDingtalk">{{ t('apps.channels.unbind') }}</n-button>
+          </n-space>
         </div>
 
         <!-- 微信渠道详情：扫码绑定 + 状态提示，沿用既有逻辑，飞书选中时不渲染。 -->
@@ -174,6 +187,35 @@
             <p v-if="wecomError" class="state-text danger">{{ t('apps.channels.errorMsg') }}{{ wecomError }}</p>
           </div>
         </template>
+
+        <!-- 钉钉渠道详情：已连接给出提示，未连接展示 client_id + client_secret 手填表单与精简内联指引（无扫码、无二维码）。 -->
+        <template v-else-if="selectedChannelType === 'dingtalk'">
+          <div class="wecom-panel">
+            <template v-if="dingtalkBound">
+              <div class="wecom-bound">
+                <p class="state-text">{{ t('apps.channels.dingtalkBoundHint') }}</p>
+              </div>
+            </template>
+            <template v-else>
+              <p v-if="canManage && !instanceReady" class="state-text">{{ instanceNotReadyHint }}</p>
+              <div class="wecom-controls">
+                <label class="wecom-field">
+                  <span class="wecom-field-label">{{ t('apps.channels.dingtalkClientIdLabel') }}</span>
+                  <n-input v-model:value="dingtalkClientId" :disabled="!canManage || !instanceReady" :placeholder="t('apps.channels.dingtalkClientIdPlaceholder')" />
+                </label>
+                <label class="wecom-field">
+                  <span class="wecom-field-label">{{ t('apps.channels.dingtalkSecretLabel') }}</span>
+                  <n-input v-model:value="dingtalkSecret" type="password" show-password-on="click" :disabled="!canManage || !instanceReady" :placeholder="t('apps.channels.dingtalkSecretPlaceholder')" />
+                </label>
+              </div>
+              <p class="wecom-guide">
+                {{ t('apps.channels.dingtalkGuide') }}
+                <a class="wecom-guide-link" :href="DINGTALK_DOC_URL" target="_blank" rel="noopener noreferrer">{{ t('apps.channels.dingtalkGuideLink') }}</a>
+              </p>
+            </template>
+            <p v-if="dingtalkError" class="state-text danger">{{ t('apps.channels.errorMsg') }}{{ dingtalkError }}</p>
+          </div>
+        </template>
       </section>
     </div>
   </n-card>
@@ -197,6 +239,7 @@ import {
   useBeginChannelAuth,
   useBeginFeishuAuth,
   useBeginWorkWechatAuth,
+  useBeginDingtalkAuth,
   useChannelProgressQuery,
   useUnbindChannel,
   channelChallengeFromProgress,
@@ -230,7 +273,7 @@ const channels = computed<ReadonlyArray<ChannelDisplay>>(() => [
   { type: 'wechat', name: t('apps.channels.channelWechat'), description: t('apps.channels.channelWechatDesc'), supported: true, statusLabel: t('apps.channels.supported') },
   { type: 'work_wechat', name: t('apps.channels.channelWorkWechat'), description: t('apps.channels.channelWorkWechatDesc'), supported: true, statusLabel: t('apps.channels.supported') },
   { type: 'feishu', name: t('apps.channels.channelFeishu'), description: t('apps.channels.channelFeishuDesc'), supported: true, statusLabel: t('apps.channels.supported') },
-  { type: 'dingtalk', name: t('apps.channels.channelDingtalk'), description: t('apps.channels.channelDingtalkDesc'), supported: false, statusLabel: t('apps.channels.unsupported') },
+  { type: 'dingtalk', name: t('apps.channels.channelDingtalk'), description: t('apps.channels.channelDingtalkDesc'), supported: true, statusLabel: t('apps.channels.supported') },
   { type: 'telegram', name: t('apps.channels.channelTelegram'), description: t('apps.channels.channelTelegramDesc'), supported: false, statusLabel: t('apps.channels.unsupported') },
   { type: 'whatsapp', name: t('apps.channels.channelWhatsapp'), description: t('apps.channels.channelWhatsappDesc'), supported: false, statusLabel: t('apps.channels.unsupported') },
   { type: 'discord', name: t('apps.channels.channelDiscord'), description: t('apps.channels.channelDiscordDesc'), supported: false, statusLabel: t('apps.channels.unsupported') },
@@ -241,9 +284,9 @@ const channels = computed<ReadonlyArray<ChannelDisplay>>(() => [
 const auth = useAuthStore()
 const app = inject<Ref<AppDTO | null>>('app')
 const appId = toRef(props, 'appId')
-// selectedChannelType 是当前详情区展示的已支持渠道；目前可在 wechat / feishu / work_wechat 间切换。
+// selectedChannelType 是当前详情区展示的已支持渠道；目前可在 wechat / feishu / work_wechat / dingtalk 间切换。
 // 暂不支持渠道点击被忽略，不会改变此值，确保详情区只渲染有真实绑定能力的渠道。
-const selectedChannelType = ref<'wechat' | 'feishu' | 'work_wechat'>('wechat')
+const selectedChannelType = ref<'wechat' | 'feishu' | 'work_wechat' | 'dingtalk'>('wechat')
 // channelType / channelTypeRef 固定指向 wechat，供既有微信 hook（进度/发起/解绑）专用，
 // 切换到飞书时微信轮询仍以原契约在后台运行，微信链路逻辑保持零改动。
 const channelType = computed(() => 'wechat')
@@ -251,10 +294,10 @@ const channelTypeRef = computed<string | undefined>(() => 'wechat')
 // activeChannel 跟随 selectedChannelType，让标题、状态与列表高亮反映当前选中渠道。
 const activeChannel = computed(() => channels.value.find(channel => channel.type === selectedChannelType.value) ?? channels.value[0])
 
-// selectChannel 仅接受已支持渠道（wechat / feishu / work_wechat）；暂不支持渠道保持禁用且不切换详情区。
+// selectChannel 仅接受已支持渠道（wechat / feishu / work_wechat / dingtalk）；暂不支持渠道保持禁用且不切换详情区。
 function selectChannel(channel: ChannelDisplay) {
   if (!channel.supported) return
-  if (channel.type === 'wechat' || channel.type === 'feishu' || channel.type === 'work_wechat') {
+  if (channel.type === 'wechat' || channel.type === 'feishu' || channel.type === 'work_wechat' || channel.type === 'dingtalk') {
     selectedChannelType.value = channel.type
   }
 }
@@ -378,6 +421,42 @@ async function unbindWorkWechat() {
   await unbindWorkWechatMutation.mutateAsync()
 }
 
+// ---- 钉钉渠道（手填机器人凭证）----
+// 与企业微信同构：无模式选择、无二维码，仅 client_id + client_secret 手填表单 + 提交。
+// DINGTALK_DOC_URL 指向钉钉机器人接入指引（开放平台建企业内部应用 → 启用 Stream 模式 → 复制 Client ID/Secret）。
+const DINGTALK_DOC_URL = 'https://open.dingtalk.com/document/orgapp/the-creation-and-installation-of-the-application-robot-in-the'
+// 钉钉手填表单输入（仅提交时使用，不回显已绑定 secret）。
+const dingtalkClientId = ref('')
+const dingtalkSecret = ref('')
+const beginDingtalk = useBeginDingtalkAuth(appId)
+const dingtalkBeginning = computed(() => beginDingtalk.isPending.value)
+// dingtalkProgressType 仅在选中钉钉时返回 'dingtalk'，否则 undefined 关闭轮询。
+const dingtalkProgressType = computed<string | undefined>(() => (selectedChannelType.value === 'dingtalk' ? 'dingtalk' : undefined))
+// dingtalkChannelRef 固定为 'dingtalk'，供解绑接口构造路径与失效缓存 key 使用。
+const dingtalkChannelRef = computed<string | undefined>(() => 'dingtalk')
+const { data: dingtalkProgress } = useChannelProgressQuery(appId, dingtalkProgressType)
+const unbindDingtalkMutation = useUnbindChannel(appId, dingtalkChannelRef)
+// dingtalkBound 表示钉钉已连接，用于切换已连接提示与解绑按钮。
+const dingtalkBound = computed(() => dingtalkProgress.value?.status === 'bound')
+// dingtalkError 展示最近一次绑定失败原因（钉钉无 fatal，通常为超时文案）。
+const dingtalkError = computed(() => dingtalkProgress.value?.error_message ?? '')
+// dingtalkCanUnbind 受管理权限与非未绑定态共同约束。
+const dingtalkCanUnbind = computed(() => canManage.value && Boolean(dingtalkProgress.value && dingtalkProgress.value.status !== 'unbound'))
+
+// submitDingtalk 提交手填凭证：调发起接口，成功后清空 secret 输入（不滞留明文）。
+async function submitDingtalk() {
+  if (!canManage.value) return
+  if (!dingtalkClientId.value || !dingtalkSecret.value) return
+  await beginDingtalk.mutateAsync({ client_id: dingtalkClientId.value, client_secret: dingtalkSecret.value })
+  dingtalkSecret.value = ''
+}
+
+// unbindDingtalk 解绑钉钉，等待进度缓存失效后回到未绑定表单展示。
+async function unbindDingtalk() {
+  if (!canManage.value) return
+  await unbindDingtalkMutation.mutateAsync()
+}
+
 // beginning 是本地提交态，覆盖 beginMutation 尚未返回挑战内容前的按钮文案。
 const beginning = ref(false)
 // challenge 保存本次发起登录立即返回的挑战，轮询进度若有更新会优先使用 progressChallenge。
@@ -399,6 +478,11 @@ const statusLabel = computed(() => {
     // 「等待扫码授权」文案（formatChannelStatus 的 pending_auth 映射），故此处专属覆盖。
     if (wecomProgress.value?.status === 'pending_auth') return t('apps.channels.workWechatConnecting')
     return formatChannelStatus(wecomProgress.value?.status)
+  }
+  if (selectedChannelType.value === 'dingtalk') {
+    // 钉钉无扫码：pending_auth = 「凭证已提交、正在验证连接」，复用专属文案。
+    if (dingtalkProgress.value?.status === 'pending_auth') return t('apps.channels.dingtalkConnecting')
+    return formatChannelStatus(dingtalkProgress.value?.status)
   }
   return formatChannelStatus(progress.value?.status)
 })
