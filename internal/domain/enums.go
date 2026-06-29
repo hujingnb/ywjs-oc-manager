@@ -74,6 +74,20 @@ const (
 	JobStatusSucceeded = "succeeded"
 	JobStatusFailed    = "failed"
 	JobStatusCanceled  = "canceled"
+
+	// ProvisioningStatus* 描述企业 web-publish 能力开通的一次性 provisioning 进度
+	// （写通配解析 → 签证书 → 建 Ingress）。落 org_web_publish_config.provisioning_status。
+	ProvisioningDisabled   = "disabled"     // 未开通（初始态 / 已停用）
+	ProvisioningInProgress = "provisioning" // 开通中，provisioning job 处理中
+	ProvisioningReady      = "ready"        // 已就绪，可发布站点
+	ProvisioningFailed     = "failed"       // provisioning 失败，可重试
+
+	// CertStatus* 描述通配证书托管状态，落 org_web_publish_config.cert_status，供页面展示。
+	CertStatusNone     = "none"     // 尚未签发
+	CertStatusIssuing  = "issuing"  // 首次签发中
+	CertStatusIssued   = "issued"   // 已签发可用
+	CertStatusRenewing = "renewing" // 续签中
+	CertStatusFailed   = "failed"   // 签发/续签失败
 )
 
 const (
@@ -97,6 +111,8 @@ const (
 	JobTypeNewAPIRestoreKey = "newapi_restore_key"
 	// JobTypeWorkspaceArchiveCleanup 清理超过保留期的应用工作区归档。
 	JobTypeWorkspaceArchiveCleanup = "workspace_archive_cleanup"
+	// JobTypeWebPublishProvision 一次性开通企业 web-publish：通配解析 + 通配证书 + 通配 Ingress。
+	JobTypeWebPublishProvision = "web_publish_provision"
 )
 
 var (
@@ -145,7 +161,11 @@ var (
 		JobTypeNewAPIDisableKey,
 		JobTypeNewAPIRestoreKey,
 		JobTypeWorkspaceArchiveCleanup,
+		JobTypeWebPublishProvision,
 	)
+
+	validProvisioningStatuses = set(ProvisioningDisabled, ProvisioningInProgress, ProvisioningReady, ProvisioningFailed)
+	validCertStatuses         = set(CertStatusNone, CertStatusIssuing, CertStatusIssued, CertStatusRenewing, CertStatusFailed)
 )
 
 func set(values ...string) map[string]struct{} {
@@ -183,5 +203,17 @@ func IsRuntimePhase(value string) bool {
 // IsJobType 校验异步任务类型是否已在调度系统登记。
 func IsJobType(value string) bool {
 	_, ok := validJobTypes[value]
+	return ok
+}
+
+// IsProvisioningStatus 校验 web-publish 能力开通状态取值是否合法。
+func IsProvisioningStatus(value string) bool {
+	_, ok := validProvisioningStatuses[value]
+	return ok
+}
+
+// IsCertStatus 校验通配证书状态取值是否合法。
+func IsCertStatus(value string) bool {
+	_, ok := validCertStatuses[value]
 	return ok
 }

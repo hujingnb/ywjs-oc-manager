@@ -61,3 +61,26 @@ func TestIsRuntimePhase(t *testing.T) {
 		assert.False(t, IsRuntimePhase(v), "非法 runtime_phase 应拒绝: %q", v)
 	}
 }
+
+// TestWebPublishProvisioningStatus 覆盖：四个 provisioning 状态合法，未知值非法，
+// 保证写库前状态机取值受控。
+func TestWebPublishProvisioningStatus(t *testing.T) {
+	for _, s := range []string{ProvisioningDisabled, ProvisioningInProgress, ProvisioningReady, ProvisioningFailed} {
+		assert.Truef(t, IsProvisioningStatus(s), "%s 应合法", s)
+	}
+	assert.False(t, IsProvisioningStatus("done"))
+}
+
+// TestWebPublishCertStatus 覆盖：五个证书状态合法，未知值非法（页面展示与巡检依赖）。
+func TestWebPublishCertStatus(t *testing.T) {
+	for _, s := range []string{CertStatusNone, CertStatusIssuing, CertStatusIssued, CertStatusRenewing, CertStatusFailed} {
+		assert.Truef(t, IsCertStatus(s), "%s 应合法", s)
+	}
+	assert.False(t, IsCertStatus("expired"))
+}
+
+// TestWebPublishJobTypeRegistered 覆盖：新增的 provisioning job type 已登记，
+// 否则 worker dispatch 时会报未注册类型。
+func TestWebPublishJobTypeRegistered(t *testing.T) {
+	assert.True(t, IsJobType(JobTypeWebPublishProvision))
+}
