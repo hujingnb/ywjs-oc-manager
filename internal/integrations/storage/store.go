@@ -5,9 +5,14 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 )
+
+// ErrObjectNotFound 表示请求的对象不存在；GetObject 在 S3 返回 NoSuchKey/404 时返回它，
+// 供 site-server 把缺失对象映射为 HTTP 404。
+var ErrObjectNotFound = errors.New("storage: 对象不存在")
 
 // ObjectInfo 是列举操作返回的单个对象元信息。
 type ObjectInfo struct {

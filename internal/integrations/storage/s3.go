@@ -96,6 +96,28 @@ func (s *S3ObjectStore) ObjectExists(ctx context.Context, key string) (bool, err
 	return false, fmt.Errorf("storage: HeadObject %s 失败: %w", key, err)
 }
 
+// GetObject 流式读取对象内容，返回内容流与字节数。对象不存在返回 ErrObjectNotFound。
+// 调用方负责 Close 返回的 ReadCloser。site-server 用它把静态文件流式回给公网访客。
+func (s *S3ObjectStore) GetObject(ctx context.Context, key string) (io.ReadCloser, int64, error) {
+	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		var nsk *types.NoSuchKey
+		if errors.As(err, &nsk) {
+			return nil, 0, ErrObjectNotFound
+		}
+		// MinIO/部分实现对缺失 key 返回带 404 的 ResponseError 而非 NoSuchKey，一并归一。
+		var respErr *smithyhttp.ResponseError
+		if errors.As(err, &respErr) && respErr.HTTPStatusCode() == 404 {
+			return nil, 0, ErrObjectNotFound
+		}
+		return nil, 0, fmt.Errorf("storage: 读取对象 %s 失败: %w", key, err)
+	}
+	return out.Body, aws.ToInt64(out.ContentLength), nil
+}
+
 // ListObjects 列出 prefix 下全部对象的相对 key（去掉 prefix）与大小（分页直到取完）。
 // 相对 key = 完整对象 key 去掉传入的 prefix 前缀，调用方可据此还原文件层级。
 func (s *S3ObjectStore) ListObjects(ctx context.Context, prefix string) ([]ObjectInfo, error) {
