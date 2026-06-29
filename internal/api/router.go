@@ -148,6 +148,10 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	if dep.KnowledgeService != nil {
 		handlers.RegisterRuntimeKnowledgeRoutes(router, handlers.NewRuntimeKnowledgeHandler(dep.KnowledgeService))
 	}
+	// runtime 发布端点：oc-publish 通过 X-OC-App-Token 上传站点 tar.gz；nil 时不注册。
+	if dep.WebPublishService != nil {
+		handlers.RegisterRuntimeWebPublishRoutes(router, handlers.NewRuntimeWebPublishHandler(dep.WebPublishService))
+	}
 	// /internal 组：pod 启动回调，不挂用户鉴权中间件，由 handler 内联校验 control token。
 	if dep.BootstrapService != nil {
 		handlers.RegisterBootstrapRoutes(router, handlers.NewBootstrapHandler(dep.BootstrapService))
