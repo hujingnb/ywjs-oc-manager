@@ -34,7 +34,7 @@
 
 | 维度 | 微信 wechat | 飞书 feishu | 企业微信 work_wechat | 钉钉 dingtalk（本设计） |
 |---|---|---|---|---|
-| 取凭证 | 个人号扫码（`qr_login`） | 扫码自动创建（`qr_register`）SSE | 用户手填 bot_id+secret | **用户手填 AppKey+AppSecret（无扫码）** |
+| 取凭证 | 个人号扫码（`qr_login`） | 扫码自动创建（`qr_register`）SSE | 用户手填 bot_id+secret | **用户手填 Client ID+Client Secret（即 AppKey/AppSecret，无扫码）** |
 | 凭证落点 | hermes 自落盘文件态 | manager 经手注入 env | manager 经手注入 env | **manager 经手注入 env** |
 | `internal/integrations/channel` adapter | `WeChatAdapter`（SSE） | `FeishuAdapter`（SSE+TakeCredentials） | `WorkWeChatAdapter`（无 SSE；`PollAuth` 查 health） | **`DingTalkAdapter`（无 SSE；`PollAuth` 查 health）** |
 | worker check 路径 | 通用路径 | 飞书特判两阶段 | 通用路径 | **通用路径（复用企业微信那条）** |
@@ -58,10 +58,13 @@
 - **DB 是 source of truth；k8s Secret 是派生注入物。**
 - `internal/domain/enums.go`：现有 `ChannelTypeWeChat` / `ChannelTypeFeishu` / `ChannelTypeWorkWeChat`，新增 `ChannelTypeDingTalk = "dingtalk"`。
 
-### 命名约定（引擎 env 名 vs 钉钉术语）
+### 命名约定（全栈统一 client_id / client_secret，无层间翻译）
 
-- DB metadata / DTO / Secret key 一律用引擎 env 对应的 `client_id` / `client_secret`（与 `DINGTALK_CLIENT_ID` / `DINGTALK_CLIENT_SECRET` 对齐，减少层间翻译）。
-- **前端 UI 用钉钉官方术语 AppKey / AppSecret**（钉钉开放平台界面即此命名），输入后映射到 `client_id` / `client_secret` 字段。i18n 文案中标注「AppKey（即 Client ID）」消歧。
+栈里唯一被强制的命名是引擎环境变量 `DINGTALK_CLIENT_ID` / `DINGTALK_CLIENT_SECRET`（引擎定，改不了）。其余我们控制的层一律对齐它，避免「UI 一套、后端一套」的翻译瑕疵：
+
+- DB metadata / DTO / Secret key / 前端字段 **全部用 `client_id` / `client_secret`**，与 env 一一对应、零层间映射。
+- **前端 UI 主标签也用「Client ID」「Client Secret」**——这正是钉钉开放平台「凭证与基础信息」页当前显示的主名（钉钉已把旧 AppKey/AppSecret 升级为 Client ID/Client Secret，控制台成对标注如「Client Secret（AppSecret）」）。
+- i18n 文案在主标签后括注「（即 AppKey / AppSecret）」，兼容仍看到旧版控制台、或习惯旧叫法的用户，确保对着控制台能正确复制。
 
 ### 现状证据
 
@@ -116,7 +119,7 @@ unbound_by_user（用户主动解绑）
 
 钉钉引擎不调 `_mark_fatal`，**无「凭证无效（带原因）」独立终态**。凭证填错、应用未启用 Stream 模式、网络不通等，统一表现为「探测超时未连上」→ `failed`。
 
-- worker 连通探测在退避重试上限内若始终未 `connected`，置 `failed`，`last_error` 写**统一超时文案**：「连接超时，请检查 AppKey/AppSecret 是否正确、机器人是否已在钉钉开放平台启用 Stream 推送模式」。
+- worker 连通探测在退避重试上限内若始终未 `connected`，置 `failed`，`last_error` 写**统一超时文案**：「连接超时，请检查 Client ID / Client Secret 是否正确、机器人是否已在钉钉开放平台启用 Stream 推送模式」。
 - 不新增「凭证无效」专用错误分支（飞书 / 企业微信有，钉钉做不到）。该文案在前端失败态展示，引导用户自查最可能的两个原因。
 
 ### 实例 `restarting` 过渡态（复用飞书 / 企业微信已建）
@@ -129,7 +132,7 @@ unbound_by_user（用户主动解绑）
 
 凭证随 HTTP body 同步到达，故注入在 service 发起时同步完成，worker 只负责「连通状态检查」走通用 check 路径——与企业微信完全一致。
 
-1. 前端表单提交 → `POST /api/v1/apps/:appId/channels/dingtalk/auth`，请求体携带 `client_id` / `secret`（新增 DTO `DingTalkChannelAuthRequest`，放 `internal/api/handlers/dto.go` 导出大写命名）。
+1. 前端表单提交 → `POST /api/v1/apps/:appId/channels/dingtalk/auth`，请求体携带 `client_id` / `client_secret`（新增 DTO `DingTalkChannelAuthRequest`，放 `internal/api/handlers/dto.go` 导出大写命名；字段名全栈统一，不沿用企业微信 DTO 的 `secret` 简写）。
    - handler（`internal/api/handlers/channels.go`）按 `channel_type` 分流：`dingtalk` 路由到 `BeginDingTalkAuth`（仿企业微信分流）。
 2. **新增 `ChannelService.BeginDingTalkAuth`**（`internal/service/channel_service.go`，克隆 `BeginWorkWechatAuth`）：
    - 权限校验 `CanManageApp`（`internal/auth/authorizer.go`，不在 service 内联角色判断）。
@@ -172,11 +175,11 @@ POST   /api/v1/apps/:appId/channels/dingtalk/unbind   → Unbind
 ## 9. 前端（复用企业微信已就位的通用件）
 
 - `web/src/pages/apps/AppChannelsTab.vue`：把 `dingtalk` 的 `supported` 由 `false` 改 `true`（现为灰显占位）。
-- 渠道交互按 `channel_type` 分流；钉钉走**新表单组件**（无扫码、无模式选择）：**AppKey** + **AppSecret**（password 输入）+ 提交按钮。表单映射到 `client_id` / `client_secret`。
+- 渠道交互按 `channel_type` 分流；钉钉走**新表单组件**（无扫码、无模式选择）：**Client ID**（即 AppKey）+ **Client Secret**（即 AppSecret，password 输入）+ 提交按钮。字段名直接 `client_id` / `client_secret`，与后端 / env 全栈一致。
 - **复用企业微信通用 hook**：`useChannelProgressQuery()`（4s 轮询）、`useUnbindChannel()`；新增 `useBeginDingTalkAuth`（仿 `useBeginWorkWechatAuth`，带配置 body）。
-- 状态展示复用企业微信逻辑（调整 i18n key）：验证中 / 已连接（在线）/ 失败（展示**统一超时文案**，引导自查 AppKey/AppSecret 与 Stream 模式）；`restarting` 期间「发起 / 解绑」按钮按 `instanceReady` 闸门 disabled 并提示「实例重启中，稍后再试」。
+- 状态展示复用企业微信逻辑（调整 i18n key）：验证中 / 已连接（在线）/ 失败（展示**统一超时文案**，引导自查 Client ID / Client Secret 与 Stream 模式）；`restarting` 期间「发起 / 解绑」按钮按 `instanceReady` 闸门 disabled 并提示「实例重启中，稍后再试」。
 - 操作按钮位置遵循现行约定（统一在标题右上）。
-- 已绑定详情：`client_id`（AppKey）展示 + AppSecret 脱敏（不回显明文）+ 重新配置 + 解绑。
+- 已绑定详情：`client_id`（Client ID）展示 + Client Secret 脱敏（不回显明文）+ 重新配置 + 解绑。
 - 轻量内联指引（与企业微信一致风格）：如何在钉钉开放平台创建企业内部应用 → 启用机器人 Stream 推送模式 → 复制 AppKey + AppSecret。倾向精简内联而非重型折叠块。
 - `web/src/pages/apps/ChannelLogo.vue`：新增钉钉 logo / 图标。
 - i18n 中英补全（三件套）：`web/src/i18n/locales/{zh,en}/apps/root.ts`，补 `channelDingTalk` 表单 / 状态 / 超时文案 / 指引。
@@ -224,9 +227,9 @@ POST   /api/v1/apps/:appId/channels/dingtalk/unbind   → Unbind
 | 状态机 | `internal/domain/enums.go`、`app_state_machine.go` | `restarting` 过渡态 + 双轴发起守卫（已建，复用） |
 | service | `internal/service/channel_service.go` | 新增 `BeginDingTalkAuth`（克隆 `BeginWorkWechatAuth`）；解绑复用企业微信链路 + `unbindSecretKeys` 加 dingtalk 分支 |
 | worker | `internal/worker/handlers/channel_login.go` | 复用通用 check 分支（adapter.PollAuth 判 bound），不加 dingtalk 特判；不入 `channel_start_login` |
-| handler/DTO | `internal/api/handlers/channels.go`、`dto.go` | `DingTalkChannelAuthRequest{client_id, secret}` + channel_type 分流 |
+| handler/DTO | `internal/api/handlers/channels.go`、`dto.go` | `DingTalkChannelAuthRequest{client_id, client_secret}` + channel_type 分流 |
 | oc-ops 客户端 | `internal/integrations/ocops/`、`service/ocops.go` | 连通状态查询（已参数化，复用） |
-| 前端 | `web/src/pages/apps/AppChannelsTab.vue`、`api/hooks/useChannel.ts` | `supported:true` + AppKey/AppSecret 表单 + `useBeginDingTalkAuth` + 复用进度/解绑 hook |
+| 前端 | `web/src/pages/apps/AppChannelsTab.vue`、`api/hooks/useChannel.ts` | `supported:true` + Client ID/Client Secret 表单（字段 `client_id`/`client_secret`）+ `useBeginDingTalkAuth` + 复用进度/解绑 hook |
 | 前端 logo | `web/src/pages/apps/ChannelLogo.vue` | 钉钉图标 |
 | i18n | `web/src/i18n/locales/{zh,en}/apps/root.ts` | `channelDingTalk` 表单/状态/超时/指引文案 |
 | 引擎（只读参考，零改动） | 容器内 `gateway/platforms/dingtalk.py`、`config.py`、`base.py`、`api_server.py` | dingtalk 适配器 / env / health（v2026.6.5 / v2026.5.16 已自带） |
