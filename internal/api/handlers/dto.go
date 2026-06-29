@@ -161,6 +161,14 @@ type WorkWechatChannelAuthRequest struct {
 	Secret string `json:"secret" binding:"required"`
 }
 
+// DingtalkChannelAuthRequest 是钉钉渠道发起请求体（手填机器人凭证，字段名全栈统一为 client_id/client_secret）。
+type DingtalkChannelAuthRequest struct {
+	// ClientID 是钉钉应用 Client ID（即 AppKey，必填）。
+	ClientID string `json:"client_id" binding:"required"`
+	// ClientSecret 是钉钉 Client Secret（即 AppSecret，必填，仅入库密文与注入 Secret，不回显）。
+	ClientSecret string `json:"client_secret" binding:"required"`
+}
+
 // CreateMemberAppRequest 为已有成员创建新实例的请求体。
 // k8s 模型下不需要指定节点，pod 落点由调度器决定。
 type CreateMemberAppRequest struct {

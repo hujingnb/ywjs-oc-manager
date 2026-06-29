@@ -24,6 +24,8 @@ type channelService interface {
 	BeginFeishuAuth(ctx context.Context, principal auth.Principal, appID string, in service.FeishuAuthInput) (service.ChallengeResult, error)
 	// BeginWorkWechatAuth 是企业微信专用发起入口（手填 bot_id+secret，同步注入）。
 	BeginWorkWechatAuth(ctx context.Context, principal auth.Principal, appID string, in service.WorkWechatAuthInput) (service.ChallengeResult, error)
+	// BeginDingtalkAuth 是钉钉专用发起入口（手填 client_id+client_secret，同步注入）。
+	BeginDingtalkAuth(ctx context.Context, principal auth.Principal, appID string, in service.DingtalkAuthInput) (service.ChallengeResult, error)
 	PollAuth(ctx context.Context, principal auth.Principal, appID, channelType string) (service.ProgressResult, error)
 	Unbind(ctx context.Context, principal auth.Principal, appID, channelType string) error
 }
@@ -44,7 +46,7 @@ func RegisterChannelRoutes(router gin.IRouter, handler *ChannelsHandler) {
 // BeginAuth 触发渠道登录挑战。
 //
 // @Summary      触发渠道登录挑战
-// @Description  为指定应用和渠道类型发起登录授权流程，返回挑战信息（如二维码 URL）。feishu / work_wechat 渠道需传请求体，其他渠道（如 wechat）无需请求体。
+// @Description  为指定应用和渠道类型发起登录授权流程，返回挑战信息（如二维码 URL）。feishu / work_wechat / dingtalk 渠道需传请求体，其他渠道（如 wechat）无需请求体。
 // @Tags         channels
 // @Accept       json
 // @Produce      json
@@ -94,6 +96,25 @@ func (h *ChannelsHandler) BeginAuth(c *gin.Context) {
 		result, err := h.service.BeginWorkWechatAuth(c.Request.Context(), principal, appID, service.WorkWechatAuthInput{
 			BotID:  req.BotID,
 			Secret: req.Secret,
+		})
+		if err != nil {
+			writeChannelError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"challenge": result})
+		return
+	}
+
+	// 钉钉走专用入口（读请求体 client_id+client_secret，手填同步注入），与微信/飞书/企业微信分流。
+	if channelType == domain.ChannelTypeDingTalk {
+		var req DingtalkChannelAuthRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgChannelInvalidRequest)
+			return
+		}
+		result, err := h.service.BeginDingtalkAuth(c.Request.Context(), principal, appID, service.DingtalkAuthInput{
+			ClientID:     req.ClientID,
+			ClientSecret: req.ClientSecret,
 		})
 		if err != nil {
 			writeChannelError(c, err)

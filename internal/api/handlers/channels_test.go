@@ -36,6 +36,11 @@ type channelServiceStub struct {
 	beganWorkWeChat bool
 	// lastWorkWechatIn 记录最近一次调用 BeginWorkWechatAuth 的入参，用于断言请求体解析正确。
 	lastWorkWechatIn service.WorkWechatAuthInput
+	// dingtalkResult/dingtalkErr 是钉钉分流的预置返回值。
+	dingtalkResult service.ChallengeResult
+	dingtalkErr    error
+	// lastDingtalkInput 记录最近一次调用 BeginDingtalkAuth 的入参，用于断言请求体解析正确。
+	lastDingtalkInput service.DingtalkAuthInput
 }
 
 func (s *channelServiceStub) BeginAuth(_ context.Context, _ auth.Principal, _, _ string) (service.ChallengeResult, error) {
@@ -62,6 +67,12 @@ func (s *channelServiceStub) BeginWorkWechatAuth(_ context.Context, _ auth.Princ
 	s.beganWorkWeChat = true
 	s.lastWorkWechatIn = in
 	return s.workWechatResult, s.workWechatErr
+}
+
+// BeginDingtalkAuth stub 记录入参并返回预置挑战，供 TestBeginAuth_Dingtalk 断言分流。
+func (s *channelServiceStub) BeginDingtalkAuth(_ context.Context, _ auth.Principal, _ string, in service.DingtalkAuthInput) (service.ChallengeResult, error) {
+	s.lastDingtalkInput = in
+	return s.dingtalkResult, s.dingtalkErr
 }
 
 // newChannelsTestRouter 构建用于测试的 gin router。
@@ -263,4 +274,43 @@ func TestBeginAuth_WorkWeChat_BadBody(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
 	assert.False(t, stub.beganWorkWeChat)
+}
+
+// TestBeginAuth_Dingtalk 验证 dingtalk 渠道分流到 BeginDingtalkAuth，正确解析 client_id/client_secret。
+func TestBeginAuth_Dingtalk(t *testing.T) {
+	// fake channelService 记录 BeginDingtalkAuth 入参，预置成功返回值。
+	stub := &channelServiceStub{dingtalkResult: service.ChallengeResult{Status: "pending_auth", ChannelType: "dingtalk"}}
+	router := newChannelsTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	// POST /api/v1/apps/app-1/channels/dingtalk/auth body={"client_id":"ding-key","client_secret":"ding-secret"}
+	body := strings.NewReader(`{"client_id":"ding-key","client_secret":"ding-secret"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/apps/app-1/channels/dingtalk/auth", body)
+	req.Header.Set("Content-Type", "application/json")
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router.ServeHTTP(w, req)
+
+	// 断言：200；stub 收到正确的 ClientID 与 ClientSecret。
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "ding-key", stub.lastDingtalkInput.ClientID)     // 分流入参 ClientID 正确
+	assert.Equal(t, "ding-secret", stub.lastDingtalkInput.ClientSecret) // 分流入参 ClientSecret 正确
+	assert.Contains(t, w.Body.String(), "challenge")
+}
+
+// TestBeginAuth_Dingtalk_BadBody 验证缺必填字段返回 400（binding:"required" 校验）。
+func TestBeginAuth_Dingtalk_BadBody(t *testing.T) {
+	// 缺 client_secret，binding:"required" 应拦截并返回 400，不触发 service 调用。
+	stub := &channelServiceStub{}
+	router := newChannelsTestRouter(t, stub)
+
+	w := httptest.NewRecorder()
+	body := strings.NewReader(`{"client_id":"ding-key"}`) // 缺 client_secret
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/apps/app-1/channels/dingtalk/auth", body)
+	req.Header.Set("Content-Type", "application/json")
+	req = withPrincipal(req, auth.Principal{UserID: "u1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router.ServeHTTP(w, req)
+
+	// 缺必填字段应返回 400。
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "BAD_REQUEST")
 }
