@@ -406,7 +406,7 @@ export interface paths {
         put?: never;
         /**
          * 触发渠道登录挑战
-         * @description 为指定应用和渠道类型发起登录授权流程，返回挑战信息（如二维码 URL）。feishu / work_wechat 渠道需传请求体，其他渠道（如 wechat）无需请求体。
+         * @description 为指定应用和渠道类型发起登录授权流程，返回挑战信息（如二维码 URL）。feishu / work_wechat / dingtalk 渠道需传请求体，其他渠道（如 wechat）无需请求体。
          */
         post: {
             parameters: {
