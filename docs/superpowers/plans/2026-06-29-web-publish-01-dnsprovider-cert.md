@@ -13,7 +13,7 @@
 ## 背景约束（落地前必读）
 
 - **lego 版本**：spec §2/§6 写"lego v5 / v5.2.2"，但 go-acme/lego 公开 module path 历史上是 `github.com/go-acme/lego/v4`。**Task 1 第一步先确认真实可用的 module path 与版本**，并据此统一全 plan 的 import 路径。下文代码按 `/v4` 书写；若 Task 1 确认存在 `/v5`，全局把 `lego/v4` 替换为 `lego/v5` 即可，API 形状一致。
-- **lego 原生 provider 只做 DNS-01 TXT**：lego 的 `challenge.Provider`（`Present`/`CleanUp`）只写 `_acme-challenge` TXT 记录，**不管通配 A 记录**。通配 A 记录（`*.base_domain → ingressIP`）必须用各云厂商 DNS SDK 直接 CRUD。因此 `dnsprovider.Provider` 接口同时暴露「ACME 挑战 provider」与「A 记录 CRUD」两类能力（见 Task 2）。
+- **lego 原生 provider 只做 DNS-01 TXT**：lego 的 `challenge.Provider`（`Present`/`CleanUp`）只写 `_acme-challenge` TXT 记录，**不管通配 A 记录**。通配 A 记录（`*.base_domain → ingressIP`）必须用各云厂商 DNS SDK 直接 CRUD。因此 `dnsprovider.Provider` **内嵌** lego 的 `challenge.Provider`（本身即一个 DNS-01 挑战器，复用 lego 原生 provider 的 Present/CleanUp）并**额外补**两个 A 记录方法（lego 无此能力）（见 Task 2）。
 - **cmcccloud（移动云）**：lego 无原生移动云 provider，需 vendor certimate 的 `pkg/core/certifier/challengers/dns01/cmcccloud` + 其 fork 的 ecloud SDK + go.mod replace（spec §2.1/§6）。本 plan 把 cmcccloud 的 DNS-01 与 A 记录实现都纳入 Task 7，并在该 Task 第一步用 `grep -ri ecloud` 二次确认 lego 确无原生移动云。
 - 仓库无 `vendor/` 目录，go.mod 全是公网 module。vendored cmcccloud 代码落在 `internal/integrations/dnsprovider/cmcccloud/internal/ecloud/`（仓库内目录，不走 go module replace 网络拉取），见 Task 7。
 - 所有新代码、结构体、字段、方法都要中文注释（AGENTS.md「注释」节）；单测每个子用例要相邻中文注释（AGENTS.md「单元测试」节）；断言用 testify `require`/`assert`。
@@ -152,7 +152,8 @@ Expected: 编译失败 `undefined: ProviderType / Credentials / ProviderAlidns .
 //
 // 该层有两类能力，对应 spec §6：
 //  1. ACME DNS-01 挑战：写/删 _acme-challenge TXT 记录，供 lego 签发回调。
-//     由 ChallengeProvider() 返回一个 lego challenge.Provider。
+//     Provider 内嵌 lego 的 challenge.Provider（Present/CleanUp），本身即可直接
+//     作为 lego DNS-01 挑战器使用，无需额外包装方法。
 //  2. 通配解析记录：写/删 *.base_domain → ingressIP 的 A 记录。
 //     lego 原生 provider 不覆盖此能力，故各实现用云厂商 DNS SDK 直接 CRUD。
 //
@@ -197,10 +198,14 @@ func (pt ProviderType) Valid() bool {
 type Credentials map[string]string
 
 // Provider 是统一的 DNS provider 适配接口。一个实例绑定一个基础域名与一组凭证。
+//
+// 内嵌 lego 的 challenge.Provider（Present/CleanUp）：本接口本身就是一个 lego DNS-01
+// 挑战器，acme.Issuer 可直接 client.Challenge.SetDNS01Provider(provider)，省去包装方法
+// 与中间一跳。ali/huawei/tencent 的实现内嵌 lego 原生 provider 即白得 Present/CleanUp；
+// cmcccloud 内嵌 vendored certimate challenger。下面两个 A 记录方法是 lego 不提供、
+// 需各实现用云厂商 SDK 自补的能力。
 type Provider interface {
-	// ChallengeProvider 返回供 lego 做 DNS-01 挑战的 provider（写/删 _acme-challenge TXT）。
-	// acme.Issuer 在签发时把它 SetDNS01Provider 进 lego client。
-	ChallengeProvider() challenge.Provider
+	challenge.Provider
 
 	// EnsureWildcardA 幂等确保存在一条 *.baseDomain → ip 的 A 记录（已存在且值相同则不动）。
 	// baseDomain 不含通配前缀（如 "apps.example.com"），由实现自行拼 "*" 子域。
@@ -292,15 +297,14 @@ package dnsprovider
 
 import (
 	"context"
-
-	"github.com/go-acme/lego/v4/challenge"
 )
 
-// FakeProvider 是 Provider 的内存实现，仅供单测：A 记录存 map，
-// TXT 挑战记录交给内嵌的 fakeChallenge。可注入错误模拟失败路径。
+// FakeProvider 是 Provider 的内存实现，仅供单测：A 记录与 DNS-01 TXT 记录都存 map，
+// 直接实现 lego challenge.Provider 的 Present/CleanUp（接口内嵌后无需独立挑战类型）。
+// 可注入错误模拟失败路径。
 type FakeProvider struct {
 	ARecords  map[string]string // key 为完整通配域名 "*.<baseDomain>"，value 为 IP
-	TXTed     map[string]string // 记录 lego DNS-01 写入的 fqdn→value，供断言
+	TXTed     map[string]string // 记录 lego DNS-01 写入的 domain→keyAuth，供断言
 	EnsureErr error             // 非 nil 时 EnsureWildcardA 直接返回它
 	DeleteErr error             // 非 nil 时 DeleteWildcardA 直接返回它
 }
@@ -310,8 +314,20 @@ func NewFakeProvider() *FakeProvider {
 	return &FakeProvider{ARecords: map[string]string{}, TXTed: map[string]string{}}
 }
 
-// ChallengeProvider 返回写入 FakeProvider.TXTed 的内存挑战 provider。
-func (f *FakeProvider) ChallengeProvider() challenge.Provider { return &fakeChallenge{f: f} }
+// 编译期断言：FakeProvider 必须满足 Provider（含内嵌的 challenge.Provider）。
+var _ Provider = (*FakeProvider)(nil)
+
+// Present 记录 DNS-01 挑战 TXT（lego 在签发时调用）；实现 challenge.Provider。
+func (f *FakeProvider) Present(domain, token, keyAuth string) error {
+	f.TXTed[domain] = keyAuth
+	return nil
+}
+
+// CleanUp 清理挑战 TXT（lego 在签发结束后调用）；实现 challenge.Provider。
+func (f *FakeProvider) CleanUp(domain, token, keyAuth string) error {
+	delete(f.TXTed, domain)
+	return nil
+}
 
 // EnsureWildcardA 写入/覆盖 *.baseDomain 的 A 记录；EnsureErr 非 nil 时返回它。
 func (f *FakeProvider) EnsureWildcardA(_ context.Context, baseDomain, ip string) error {
@@ -328,21 +344,6 @@ func (f *FakeProvider) DeleteWildcardA(_ context.Context, baseDomain string) err
 		return f.DeleteErr
 	}
 	delete(f.ARecords, "*."+baseDomain)
-	return nil
-}
-
-// fakeChallenge 实现 lego challenge.Provider，把挑战记录写进父 FakeProvider.TXTed。
-type fakeChallenge struct{ f *FakeProvider }
-
-// Present 记录 DNS-01 挑战 TXT（lego 在签发时调用）。
-func (c *fakeChallenge) Present(domain, token, keyAuth string) error {
-	c.f.TXTed[domain] = keyAuth
-	return nil
-}
-
-// CleanUp 清理挑战 TXT（lego 在签发结束后调用）。
-func (c *fakeChallenge) CleanUp(domain, token, keyAuth string) error {
-	delete(c.f.TXTed, domain)
 	return nil
 }
 ```
@@ -673,7 +674,8 @@ func (o *legoObtainer) Obtain(_ context.Context, domains []string) (Certificate,
 	if err != nil {
 		return Certificate{}, err
 	}
-	if err := client.Challenge.SetDNS01Provider(o.provider.ChallengeProvider()); err != nil {
+	// Provider 内嵌 challenge.Provider，直接传入即可（无需 .ChallengeProvider() 包装）。
+	if err := client.Challenge.SetDNS01Provider(o.provider); err != nil {
 		return Certificate{}, err
 	}
 	reg, err := client.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: true})
@@ -949,7 +951,8 @@ package alidns
 //  2. A 记录：import 阿里云 alidns SDK（github.com/aliyun/alibaba-cloud-sdk-go/services/alidns
 //     或 alidns20150109），用 AddDomainRecord / DescribeDomainRecords / DeleteDomainRecord
 //     管理 RR="*" 的 A 记录。
-//  3. 把上述两者组装成实现 dnsprovider.Provider 的结构体。
+//  3. 组装成实现 dnsprovider.Provider 的结构体：内嵌步骤 1 的 lego provider 以白得
+//     Present/CleanUp，再自实现 EnsureWildcardA/DeleteWildcardA 调步骤 2 的 SDK。
 ```
 
 > 为保持 plan 可执行且不引入未经验证的 SDK 调用，alidns/huaweicloud/tencentcloud/cmcccloud 的 `newXxx` 在 `factory.go` 中先以「校验必填凭证 key → 暂返回 `fmt.Errorf("alidns provider 待实现：A 记录 SDK 装配")`」占位实现，使工厂单测（Step 2）通过；真实 SDK 装配在本 Task 后续步骤逐个 provider 补全并本地联调。**这是 plan 显式标注的边界，不是占位符遗漏。**
@@ -1000,7 +1003,7 @@ lego 无原生移动云 provider，按 spec §2.1 搬入 certimate 的 cmcccloud
 ## Self-Review
 
 **1. Spec coverage（对应 §6 / §11.1）：**
-- DNS-01 写/删 TXT → `Provider.ChallengeProvider()` + 各实现（Task 2/7）✓
+- DNS-01 写/删 TXT → `Provider` 内嵌 `challenge.Provider`（Present/CleanUp）+ 各实现（Task 2/7）✓
 - 写/删通配 A 记录 → `Provider.EnsureWildcardA/DeleteWildcardA`（Task 2/7）✓
 - 四家 provider（ali/huawei/tencent 用 lego 原生 + cmcccloud vendor）→ Task 7 ✓
 - lego 自建签发主流程 → `acme.Issuer` + `legoObtainer`（Task 5）✓
