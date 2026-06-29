@@ -1939,6 +1939,15 @@ components:
           description: UpdatedAt 是绑定记录最近更新时间，用于前端判断轮询新鲜度。
           type: string
       type: object
+    service.PublishResult:
+      properties:
+        expires_at:
+          description: ExpiresAt 是本次发布后的过期时间（now + site_ttl_days）。
+          type: string
+        url:
+          description: URL 是站点的完整访问地址，格式为 https://<slug>.<base_domain>。
+          type: string
+      type: object
     service.QuotaSeries:
       properties:
         scope:
@@ -10018,6 +10027,58 @@ paths:
       summary: Hermes 检索知识库
       tags:
       - runtime-knowledge
+  /runtime/web-publish:
+    post:
+      description: oc-publish 通过 app runtime token 上传站点 tar.gz，返回对外访问 URL 和到期时间
+      parameters:
+      - description: per-app runtime token
+        in: header
+        name: X-OC-App-Token
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              oneOf:
+              - title: slug
+                type: string
+              - title: file
+                type: file
+          multipart/form-data:
+            schema:
+              type: object
+        description: 站点 slug（缺省由 service 分配或沿用已有站点 slug） | 站点目录 tar.gz
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.PublishResult'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Service Unavailable
+      summary: 发布静态站点
+      tags:
+      - runtime-web-publish
   /skill-market:
     get:
       parameters:

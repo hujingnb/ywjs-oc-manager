@@ -11607,6 +11607,81 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runtime/web-publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 发布静态站点
+         * @description oc-publish 通过 app runtime token 上传站点 tar.gz，返回对外访问 URL 和到期时间
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header: {
+                    /** @description per-app runtime token */
+                    "X-OC-App-Token": string;
+                };
+                path?: never;
+                cookie?: never;
+            };
+            /** @description 站点 slug（缺省由 service 分配或沿用已有站点 slug） | 站点目录 tar.gz */
+            requestBody: {
+                content: {
+                    "application/x-www-form-urlencoded": string | Record<string, never>;
+                    "multipart/form-data": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["service.PublishResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/skill-market": {
         parameters: {
             query?: never;
@@ -13751,6 +13826,12 @@ export interface components {
             status?: string;
             /** @description UpdatedAt 是绑定记录最近更新时间，用于前端判断轮询新鲜度。 */
             updated_at?: string;
+        };
+        "service.PublishResult": {
+            /** @description ExpiresAt 是本次发布后的过期时间（now + site_ttl_days）。 */
+            expires_at?: string;
+            /** @description URL 是站点的完整访问地址，格式为 https://<slug>.<base_domain>。 */
+            url?: string;
         };
         "service.QuotaSeries": {
             /** @description Scope 标识配额序列所属维度，当前为 organization 或 platform。 */

@@ -330,6 +330,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// bootstrapSvc 仅在 S3 启用时赋值（bootstrap 依赖对象存储 + skill 预签名）；
 	// nil 时 router 不注册 /internal 路由，符合最小模式预期。
 	var bootstrapSvc *service.BootstrapService
+	// webPublishService 仅在 S3 启用时赋值（runtime 发布需要对象存储写入/删除能力）；
+	// nil 时 router 的 nil-guard 不注册 runtime 发布端点与 site-server 内部同步端点。
+	var webPublishService *service.WebPublishService
 	// workspaceObjStore 供 WorkspaceService 浏览 app workspace；S3 未启用时为 nil，
 	// Task 14 将完整接入；此处 nil 时 service 层返回 ErrWorkspaceMissing。
 	var workspaceObjStore storage.ObjectStore
@@ -370,6 +373,10 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		// workspace 数据读 S3（spec-A2a），与 bootstrap 共用同一 objStore 实例
 		workspaceObjStore = objStore
 		workspacePresignTTL = cfg.Storage.S3.PresignTTL.Duration
+		// webPublishService：runtime token 驱动的静态站点发布服务，依赖 objStore 执行
+		// tar.gz 解包上传（PutObject）与旧版本清理（DeletePrefix）。
+		// 生产参数（SlugGen / Now / MaxUploadSize）使用 WebPublishServiceConfig 零值触发默认实现。
+		webPublishService = service.NewWebPublishService(dbStore.Queries, objStore, service.WebPublishServiceConfig{})
 	}
 	// libraryBlobs 是平台库 skill 归档的存储后端：
 	// S3 启用时另建一个 ObjectStore 实例（与上方 bootstrap/workspace 用的 objStore 同配置同桶但相互独立，
@@ -698,6 +705,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			AppSkillService:               appSkillService,
 			SkillLibraryService:           skillLibraryService,
 			WebPublishConfigService:       webPublishConfigService,
+			WebPublishService:             webPublishService,
+			SiteSyncToken:                 cfg.WebPublish.SiteSyncToken,
 			BootstrapService:              bootstrapSvc,
 			JobsStore:                     dbStore.Queries,
 			TokenManager:                  tokenManager,
