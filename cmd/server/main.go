@@ -446,6 +446,10 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	organizationService.SetKnowledgeDatasetProvisioner(knowledgeService)
 	platformOverviewService := service.NewPlatformOverviewService(dbStore.Queries)
 
+	// web-publish 配置服务：平台管理员配置/开通/停用企业发布能力。
+	// dbStore.Queries 满足 WebPublishConfigStore；redisQueue 满足 JobNotifier；cipher 来自启动早期初始化。
+	webPublishConfigService := service.NewWebPublishConfigService(dbStore.Queries, redisQueue, cipher)
+
 	registry := handlers.NewRegistry()
 	// app 初始化 handler 走 k8s 路径：编排能力经 SetOrchestrator 注入（见下方），
 	// 构造期只需 store / newapiFactory / 渲染配置。
@@ -540,6 +544,33 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		if err := registry.Register(domain.JobTypeNewAPIRestoreKey, restoreHandler.Handle); err != nil {
 			return fmt.Errorf("注册 newapi_restore_key handler 失败: %w", err)
 		}
+	}
+
+	// web_publish_provision handler：注入 certProvisioner（dnsprovider+acme）和 clusterApplier（k8sorch）。
+	// clusterApplier 在 k8s 启用时从 orch 类型断言取出具体 *KubernetesAdapter；
+	// 未启用时使用 noopClusterApplier（调用时返回明确错误），provisioning job 到达 worker 时
+	// 会 backoff 重试，运维修复 k8s 配置后重启即可恢复——这是预期的降级语义。
+	var webPublishClusterApplier handlers.ClusterApplier = noopClusterApplier{}
+	if ka, ok := orch.(*k8sorch.KubernetesAdapter); ok {
+		webPublishClusterApplier = clusterApplierImpl{adapter: ka}
+	}
+	webPublishProvisionHandler := handlers.NewWebPublishProvisionHandler(
+		dbStore.Queries,
+		certProvisionerImpl{
+			acmeEmail:  cfg.WebPublish.ACMEEmail,
+			acmeDirURL: cfg.WebPublish.ACMEDirectoryURL,
+		},
+		webPublishClusterApplier,
+		cipher,
+		handlers.WebPublishProvisionConfig{
+			IngressPublicIP:  cfg.WebPublish.IngressPublicIP,
+			IngressClassName: cfg.WebPublish.IngressClassName,
+			BackendService:   cfg.WebPublish.SiteServerService,
+			BackendPort:      cfg.WebPublish.SiteServerPort,
+		},
+	)
+	if err := registry.Register(domain.JobTypeWebPublishProvision, webPublishProvisionHandler.Handle); err != nil {
+		return fmt.Errorf("注册 web_publish_provision handler 失败: %w", err)
 	}
 
 	jobWorker := worker.New(dbStore.Queries, redisQueue, registry, worker.Config{WorkerID: cfg.App.HTTPAddr})
@@ -666,6 +697,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			HermesCronService:             hermesCronService,
 			AppSkillService:               appSkillService,
 			SkillLibraryService:           skillLibraryService,
+			WebPublishConfigService:       webPublishConfigService,
 			BootstrapService:              bootstrapSvc,
 			JobsStore:                     dbStore.Queries,
 			TokenManager:                  tokenManager,

@@ -162,3 +162,28 @@ hermes:
 
   # Hermes 容器内访问 manager runtime API 的地址，oc-kb skill 用它检索和写入实例知识库。
   manager_runtime_base_url: "http://manager-api:8080"
+
+web_publish:
+  # 通配 Ingress 对外暴露的公网 IP；DNS *.base_domain A 记录指向此 IP。
+  # 本地联调填 127.0.0.1，生产填真实公网 IP。
+  ingress_public_ip: "127.0.0.1"
+
+  # 通配 Ingress 的 ingressClassName；本地 k3d 用 "traefik"，生产按实际 controller 填写。
+  ingress_class_name: "traefik"
+
+  # ACME 账户注册邮箱（Let's Encrypt 到期提醒等）；必须填写真实可达邮箱。
+  acme_email: "admin@example.com"
+
+  # ACME 目录 URL；staging 仅用于测试（颁发的证书不受浏览器信任），生产需换为正式目录：
+  #   Let's Encrypt 生产: https://acme-v02.api.letsencrypt.org/directory
+  acme_directory_url: "https://acme-staging-v02.api.letsencrypt.org/directory"
+
+  # 通配 Ingress 的 backend Service 名称（Plan 3 site-server 部署时的 k8s Service name）。
+  site_server_service: "site-server"
+
+  # backend Service 端口。
+  site_server_port: 80
+
+  # site-server 轮询内部同步端点的鉴权 token（与 site-server MANAGER_SYNC_TOKEN 共享）。
+  # 留空表示禁用同步鉴权（仅本地测试）；生产必须设置高熵随机字符串。
+  site_sync_token: "CHANGE_ME_SITE_SYNC_TOKEN"
