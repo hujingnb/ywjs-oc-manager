@@ -426,6 +426,121 @@ func (s *ChannelService) BeginWorkWechatAuth(ctx context.Context, principal auth
 	return ChallengeResult{Status: domain.ChannelStatusPendingAuth, ChannelType: domain.ChannelTypeWorkWeChat, JobID: jobID}, nil
 }
 
+// DingtalkAuthInput 是钉钉手填发起的 service 入参（与 handler 的 DingtalkChannelAuthRequest 对应）。
+type DingtalkAuthInput struct {
+	// ClientID 是钉钉应用 Client ID（即 AppKey，明文）。
+	ClientID string
+	// ClientSecret 是钉钉 Client Secret 明文（即 AppSecret，service 内加密后落 metadata，明文注入 k8s Secret）。
+	ClientSecret string
+}
+
+// BeginDingtalkAuth 是钉钉手填发起入口（与企业微信 BeginWorkWechatAuth 同构，handler 按渠道分流）。
+// 钉钉无扫码：凭证随请求体同步到达，故此处一次性完成「加密落库 + 同步注入 Secret + 重启 + 置 restarting + 入队连通探测」。
+// 注入/重启复用飞书/企业微信同款 patcher/restarter（PatchSecretKeys/RestartApp 渠道无关）。
+func (s *ChannelService) BeginDingtalkAuth(ctx context.Context, principal auth.Principal, appID string, in DingtalkAuthInput) (ChallengeResult, error) {
+	app, err := s.loadManageableApp(ctx, principal, appID)
+	if err != nil {
+		return ChallengeResult{}, err
+	}
+	// 实例就绪守卫：pod 不在服务时不发起，不加密、不写库、不注入、不入队，
+	// 覆盖解绑重启 + 版本升级两个窗口（与企业微信守卫同口径）。
+	if !domain.AppCanInitiateChannelAuth(app.Status, app.RuntimePhase) {
+		return ChallengeResult{}, ErrInstanceNotReady
+	}
+	if s.registry == nil {
+		return ChallengeResult{}, ErrChannelAdapterMissing
+	}
+	if _, err := s.registry.Lookup(domain.ChannelTypeDingTalk); err != nil {
+		return ChallengeResult{}, fmt.Errorf("%w: %s", ErrChannelAdapterMissing, domain.ChannelTypeDingTalk)
+	}
+	// cipher 必需：钉钉 client_secret 必须加密后落 metadata；未注入直接报错而非明文落库。
+	if s.cipher == nil {
+		return ChallengeResult{}, fmt.Errorf("钉钉发起缺少 cipher，无法加密 client_secret")
+	}
+	// bound 短路：已绑定的钉钉 app 再次发起直接返回 bound，不重跑 upsert / 写 metadata / 注入 / 入队。
+	// 首次发起时绑定行可能尚不存在（create-on-demand），ErrNoRows 属正常路径，继续往下走。
+	existing, err := s.store.GetChannelBindingByAppAndType(ctx, sqlc.GetChannelBindingByAppAndTypeParams{AppID: app.ID, ChannelType: domain.ChannelTypeDingTalk})
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return ChallengeResult{}, fmt.Errorf("查询钉钉绑定失败: %w", err)
+	}
+	if err == nil && existing.Status == domain.ChannelStatusBound {
+		return ChallengeResult{Status: domain.ChannelStatusBound, ChannelType: domain.ChannelTypeDingTalk}, nil
+	}
+	// create-on-demand：钉钉绑定行不在实例创建时预建，发起时按需建立（已存在 no-op）。
+	if err := s.store.UpsertChannelBindingUnbound(ctx, sqlc.UpsertChannelBindingUnboundParams{
+		ID:          newUUID(),
+		AppID:       app.ID,
+		ChannelType: domain.ChannelTypeDingTalk,
+	}); err != nil {
+		return ChallengeResult{}, fmt.Errorf("创建钉钉绑定行失败: %w", err)
+	}
+	// 加密 client_secret：Encrypt 返回 string 密文，与 buildAppSpec 解密读取 client_secret_ciphertext 喂 Cipher.Decrypt 的格式一致。
+	enc, err := s.cipher.Encrypt([]byte(in.ClientSecret))
+	if err != nil {
+		return ChallengeResult{}, fmt.Errorf("加密钉钉 client_secret 失败: %w", err)
+	}
+	metaJSON, err := json.Marshal(map[string]any{
+		"client_id":                in.ClientID,
+		"client_secret_ciphertext": enc,
+	})
+	if err != nil {
+		return ChallengeResult{}, fmt.Errorf("序列化钉钉 metadata 失败: %w", err)
+	}
+	if err := s.store.SetChannelBindingChallenge(ctx, sqlc.SetChannelBindingChallengeParams{
+		MetadataJson: metaJSON,
+		AppID:        app.ID,
+		ChannelType:  domain.ChannelTypeDingTalk,
+	}); err != nil {
+		return ChallengeResult{}, fmt.Errorf("写入钉钉凭证失败: %w", err)
+	}
+	// 同步注入 k8s Secret：明文 client_id/client_secret 写入 app Secret，引擎重启后装载钉钉平台。
+	if s.feishuPatcher != nil {
+		if err := s.feishuPatcher.PatchSecretKeys(ctx, app.ID, map[string]string{
+			"dingtalk-client-id":     in.ClientID,
+			"dingtalk-client-secret": in.ClientSecret,
+		}, nil); err != nil {
+			return ChallengeResult{}, fmt.Errorf("注入钉钉 Secret 失败: %w", err)
+		}
+	}
+	// 双轴模型：置 runtime_phase=restarting 标记运行时不就绪（发起闸门据此关闭），业务态 status 不动;
+	// reconciler 在 pod 重新 Ready 后写回 ready。置位失败只记日志、不阻断——DB 凭证落库才是关键路径。
+	if err := s.store.SetAppRuntimePhase(ctx, sqlc.SetAppRuntimePhaseParams{
+		RuntimePhase: domain.RuntimePhaseRestarting,
+		ID:           app.ID,
+	}); err != nil {
+		slog.ErrorContext(ctx, "钉钉发起置 runtime_phase=restarting 失败", "app_id", app.ID, redactlog.Err(err))
+	}
+	if s.feishuRestarter != nil {
+		if err := s.feishuRestarter.RestartApp(ctx, app.ID); err != nil {
+			slog.ErrorContext(ctx, "钉钉注入后重启失败", "app_id", app.ID, redactlog.Err(err))
+		}
+	}
+	// 入队 channel_check_binding：worker 经 oc-ops 探测 platforms.dingtalk 连通态并写回绑定结果。
+	payload, err := json.Marshal(map[string]any{
+		"app_id":       app.ID,
+		"channel_type": domain.ChannelTypeDingTalk,
+		"requested_by": principal.UserID,
+	})
+	if err != nil {
+		return ChallengeResult{}, fmt.Errorf("序列化钉钉探测任务失败: %w", err)
+	}
+	jobID := newUUID()
+	if err := s.store.CreateJob(ctx, sqlc.CreateJobParams{
+		ID:          jobID,
+		Type:        domain.JobTypeChannelCheckBinding,
+		Priority:    80,
+		RunAfter:    time.Now().Add(5 * time.Second),
+		MaxAttempts: 20,
+		PayloadJson: payload,
+	}); err != nil {
+		return ChallengeResult{}, fmt.Errorf("创建钉钉探测任务失败: %w", err)
+	}
+	if s.notifier != nil {
+		_ = s.notifier.Enqueue(ctx, jobID)
+	}
+	return ChallengeResult{Status: domain.ChannelStatusPendingAuth, ChannelType: domain.ChannelTypeDingTalk, JobID: jobID}, nil
+}
+
 // PollAuth 查询登录进度。真实状态推进由 channel_check_binding worker 完成；
 // 这里只读取 DB 中的 channel_bindings，保证轮询接口轻量且可恢复。
 func (s *ChannelService) PollAuth(ctx context.Context, principal auth.Principal, appID, channelType string) (ProgressResult, error) {
@@ -527,6 +642,9 @@ func unbindSecretKeys(channelType string) []string {
 		return []string{"feishu-app-id", "feishu-app-secret", "feishu-domain"}
 	case domain.ChannelTypeWorkWeChat:
 		return []string{"wecom-bot-id", "wecom-secret"}
+	case domain.ChannelTypeDingTalk:
+		// 钉钉同 env 注入型：解绑删 dingtalk-client-id/secret，使引擎下次重启不再装载钉钉平台凭证。
+		return []string{"dingtalk-client-id", "dingtalk-client-secret"}
 	default:
 		return nil
 	}

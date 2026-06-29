@@ -463,6 +463,113 @@ func TestBeginWorkWechatAuth_Forbidden(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
+// TestBeginDingtalkAuth_Succeeds 覆盖钉钉手填发起：加密落库 + 同步 patch Secret + 重启 +
+// 置 runtime_phase=restarting(双轴模型) + 入队 check job，返回 pending_auth。
+// 覆盖场景：metadata 写 client_id 明文 + client_secret_ciphertext 密文（非明文）。
+func TestBeginDingtalkAuth_Succeeds(t *testing.T) {
+	store := newChannelStub(t)
+	// 默认 binding_waiting + runtime_phase=ready，通过双维度发起守卫
+	cipher, err := auth.NewCipher([]byte("0123456789abcdef0123456789abcdef"))
+	require.NoError(t, err)
+	patcher := &fakeFeishuPatcher{}
+	restarter := &fakeRestarter{}
+	registry := channel.NewRegistry()
+	registry.MustRegister(channel.NewDingtalkAdapter(nil, nil)) // 供 Lookup 路由，不触发 ops/resolver
+	svc := NewChannelService(store, registry)
+	svc.SetFeishuUnbindDeps(patcher, restarter)
+	svc.SetCipher(cipher)
+
+	res, err := svc.BeginDingtalkAuth(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, DingtalkAuthInput{
+		ClientID:     "ding-key",
+		ClientSecret: "ding-secret",
+	})
+	require.NoError(t, err)
+	// 返回 pending_auth + 渠道类型，并带探测 job ID。
+	require.Equal(t, domain.ChannelStatusPendingAuth, res.Status)
+	require.Equal(t, domain.ChannelTypeDingTalk, res.ChannelType)
+	require.NotEmpty(t, res.JobID)
+	// 同步注入：set 含明文 client_id/client_secret 两把 key，无删除 key。
+	require.Equal(t, map[string]string{"dingtalk-client-id": "ding-key", "dingtalk-client-secret": "ding-secret"}, patcher.set)
+	require.Empty(t, patcher.deleted)
+	// 双轴模型：runtime_phase 置 restarting，业务态 status 不动 + 触发 RolloutRestart。
+	require.True(t, store.runtimePhaseSet)
+	require.Equal(t, domain.RuntimePhaseRestarting, store.lastRuntimePhase)
+	require.False(t, store.appStatusSet, "双轴模型:钉钉发起不得写业务态 status")
+	require.True(t, restarter.restarted)
+	// metadata 写入 client_secret 密文且不等于明文（已加密）。
+	var meta map[string]any
+	require.NoError(t, json.Unmarshal(store.binding.MetadataJson, &meta))
+	require.Equal(t, "ding-key", meta["client_id"])
+	ciphertext, ok := meta["client_secret_ciphertext"].(string)
+	require.True(t, ok, "client_secret_ciphertext 应为字符串密文")
+	require.NotEmpty(t, ciphertext)
+	require.NotEqual(t, "ding-secret", ciphertext, "client_secret 必须加密，不能明文落库")
+	// 入队 channel_check_binding 探测 job。
+	require.Len(t, store.jobs, 1)
+	require.Equal(t, domain.JobTypeChannelCheckBinding, store.jobs[0].Type)
+}
+
+// TestBeginDingtalkAuth_InstanceNotReady 覆盖业务态 restarting 等不可发起态被守卫拦截。
+// 覆盖场景：AppCanInitiateChannelAuth 返回 false → ErrInstanceNotReady，不写库、不入队。
+func TestBeginDingtalkAuth_InstanceNotReady(t *testing.T) {
+	store := newChannelStub(t)
+	store.app.Status = domain.AppStatusRestarting // 重启窗口，pod 不可用，不应发起
+	cipher, err := auth.NewCipher([]byte("0123456789abcdef0123456789abcdef"))
+	require.NoError(t, err)
+	registry := channel.NewRegistry()
+	registry.MustRegister(channel.NewDingtalkAdapter(nil, nil))
+	svc := NewChannelService(store, registry)
+	svc.SetCipher(cipher)
+
+	_, err = svc.BeginDingtalkAuth(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, DingtalkAuthInput{ClientID: "k", ClientSecret: "s"})
+	require.ErrorIs(t, err, ErrInstanceNotReady)
+	// 未就绪不写库、不入队。
+	require.False(t, store.upsertCalled)
+	require.False(t, store.appStatusSet)
+	require.Empty(t, store.jobs)
+}
+
+// TestBeginDingtalkAuth_Forbidden 覆盖无管理权限被拒（org_member 且非 owner）。
+// 覆盖场景：loadManageableApp 校验失败 → ErrForbidden，不触发任何写操作。
+func TestBeginDingtalkAuth_Forbidden(t *testing.T) {
+	store := newChannelStub(t)
+	cipher, err := auth.NewCipher([]byte("0123456789abcdef0123456789abcdef"))
+	require.NoError(t, err)
+	registry := channel.NewRegistry()
+	registry.MustRegister(channel.NewDingtalkAdapter(nil, nil))
+	svc := NewChannelService(store, registry)
+	svc.SetCipher(cipher)
+
+	// org_member 且非 owner，无管理权限。
+	_, err = svc.BeginDingtalkAuth(context.Background(), auth.Principal{Role: domain.UserRoleOrgMember, OrgID: testChannelOrg, UserID: "00000000-0000-0000-0000-0000000000ff"}, testChannelAppID, DingtalkAuthInput{ClientID: "k", ClientSecret: "s"})
+	require.ErrorIs(t, err, ErrForbidden)
+}
+
+// TestUnbind_Dingtalk 覆盖钉钉解绑：置 unbound_by_user + 删 dingtalk-* 两把 key +
+// 置 runtime_phase=restarting(双轴模型) + 重启。业务态 status 不动。
+func TestUnbind_Dingtalk(t *testing.T) {
+	store := newChannelStub(t)
+	// 模拟已绑定 dingtalk 的 running 实例。
+	store.binding.ChannelType = domain.ChannelTypeDingTalk
+	store.app.Status = domain.AppStatusRunning
+	patcher := &fakeFeishuPatcher{}
+	restarter := &fakeRestarter{}
+	svc := NewChannelService(store, channel.NewRegistry())
+	svc.SetFeishuUnbindDeps(patcher, restarter)
+
+	require.NoError(t, svc.Unbind(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, domain.ChannelTypeDingTalk))
+	// binding 状态被置 unbound_by_user。
+	require.Equal(t, domain.ChannelStatusUnboundByUser, store.lastStatus)
+	// patcher 收到两把钉钉 key 删除，set 为空。
+	require.ElementsMatch(t, []string{"dingtalk-client-id", "dingtalk-client-secret"}, patcher.deleted)
+	require.Empty(t, patcher.set)
+	// 双轴模型：runtime_phase 置 restarting，业务态 status 不动 + 触发 RolloutRestart。
+	require.True(t, store.runtimePhaseSet)
+	require.Equal(t, domain.RuntimePhaseRestarting, store.lastRuntimePhase)
+	require.False(t, store.appStatusSet, "双轴模型:解绑不得写业务态 status")
+	require.True(t, restarter.restarted)
+}
+
 // fakeFeishuPatcher 记录飞书解绑时对 app Secret 的增删 key，供断言三把飞书 key 被删除。
 type fakeFeishuPatcher struct {
 	deleted []string
