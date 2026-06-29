@@ -406,11 +406,6 @@ func CanManageAppSkill(p Principal, appOrgID, appOwnerUserID string) bool {
 
 // 定制技能工单 ----------------------------------------------------------
 
-// CanManageWebPublishConfig 报告是否可开通/配置企业 web-publish 能力——仅平台管理员。
-func CanManageWebPublishConfig(p Principal) bool {
-	return p.Role == domain.UserRolePlatformAdmin
-}
-
 // CanSubmitSkillTicket 判断能否提交定制需求工单:企业成员或企业管理员(平台管理员不提需求)。
 func CanSubmitSkillTicket(p Principal) bool {
 	return p.Role == domain.UserRoleOrgAdmin || p.Role == domain.UserRoleOrgMember
@@ -425,4 +420,11 @@ func CanManageSkillTicket(p Principal) bool {
 // 工单对企业内其他人不可见(可见的只有交付出来的 skill)。
 func CanViewSkillTicket(p Principal, ticketRequesterUserID string) bool {
 	return p.Role == domain.UserRolePlatformAdmin || p.UserID == ticketRequesterUserID
+}
+
+// web-publish 能力开通 ----------------------------------------------------------
+
+// CanManageWebPublishConfig 报告是否可开通/配置企业 web-publish 能力——仅平台管理员。
+func CanManageWebPublishConfig(p Principal) bool {
+	return p.Role == domain.UserRolePlatformAdmin
 }

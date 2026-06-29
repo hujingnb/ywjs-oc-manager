@@ -119,6 +119,11 @@ func TestEnableEnqueuesProvisioning(t *testing.T) {
 	assert.Equal(t, domain.JobTypeWebPublishProvision, st.createdJob.Type)
 	assert.NotEmpty(t, st.createdJob.ID, "job ID 应非空")
 
+	// 校验 payload：worker 据 org_id 知道给哪个企业开通，必须正确携带。
+	var payload map[string]string
+	require.NoError(t, json.Unmarshal(st.createdJob.PayloadJson, &payload))
+	assert.Equal(t, "org-1", payload["org_id"])
+
 	// notifier 应收到一次入队通知。
 	assert.Len(t, nt.enqueued, 1, "应向 notifier 入队一次")
 }
@@ -136,7 +141,7 @@ func TestConfigureDeniedForNonPlatformAdmin(t *testing.T) {
 		OrgID:       "org-1",
 		DNSProvider: "alidns",
 	})
-	require.Error(t, err, "非平台管理员不得配置 web-publish")
+	require.ErrorIs(t, err, ErrForbidden, "非平台管理员不得配置 web-publish")
 
 	// 确认 store 未被调用（权限拒绝应在数据库操作前返回）。
 	assert.Nil(t, st.upserted, "权限拒绝后 store 不应被调用")
