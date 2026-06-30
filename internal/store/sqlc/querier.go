@@ -219,7 +219,9 @@ type Querier interface {
 	// binding_failed 表示上轮扫码超时，pod 仍在（属渠道发起 allowlist，需 reconciler 维护其 runtime_phase）。
 	// spec-A2b：去掉 runtime_node_id / container_id（k8s 路径不再写这两列），消费方仅用 id。
 	ListRunningApps(ctx context.Context) ([]string, error)
-	ListSitesByOrg(ctx context.Context, orgID string) ([]PublishedSite, error)
+	// 联查发布者（站点归属实例 app 的 owner 用户），供管理面展示「哪个用户发布的」。
+	// LEFT JOIN：实例/用户即便被软删也不丢站点行，发布者信息回退为 NULL。
+	ListSitesByOrg(ctx context.Context, orgID string) ([]ListSitesByOrgRow, error)
 	ListSkillTicketMessages(ctx context.Context, ticketID string) ([]SkillTicketMessage, error)
 	ListSkillTicketsByRequester(ctx context.Context, requesterUserID string) ([]SkillTicket, error)
 	// reaper 扫描 init 子状态下「连续 N 秒无更新」的孤儿；N 由调用方按秒传入。

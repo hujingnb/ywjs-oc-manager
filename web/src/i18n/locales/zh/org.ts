@@ -149,6 +149,7 @@ export default {
     // table 列表列头文案。
     table: {
       url: '站点地址',
+      owner: '发布者',
       status: '状态',
       expiresAt: '到期时间',
       size: '站点大小',

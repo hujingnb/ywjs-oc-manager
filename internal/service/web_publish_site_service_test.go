@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	null "github.com/guregu/null/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -22,8 +23,8 @@ type fakeSiteStore struct {
 	siteByID map[string]sqlc.PublishedSite
 	// webPublishConfig 按 orgID 返回的 OrgWebPublishConfig。
 	webPublishConfig map[string]sqlc.OrgWebPublishConfig
-	// sitesByOrg 按 orgID 返回的站点列表。
-	sitesByOrg map[string][]sqlc.PublishedSite
+	// sitesByOrg 按 orgID 返回的站点列表（含发布者用户信息）。
+	sitesByOrg map[string][]sqlc.ListSitesByOrgRow
 
 	// 记录调用参数，供断言使用。
 	statusCalls []sqlc.SetPublishedSiteStatusParams
@@ -40,8 +41,8 @@ func (f *fakeSiteStore) GetPublishedSiteByID(ctx context.Context, id string) (sq
 	return site, nil
 }
 
-// ListSitesByOrg 返回企业下所有站点列表。
-func (f *fakeSiteStore) ListSitesByOrg(ctx context.Context, orgID string) ([]sqlc.PublishedSite, error) {
+// ListSitesByOrg 返回企业下所有站点列表（含发布者用户信息）。
+func (f *fakeSiteStore) ListSitesByOrg(ctx context.Context, orgID string) ([]sqlc.ListSitesByOrgRow, error) {
 	return f.sitesByOrg[orgID], nil
 }
 
@@ -205,4 +206,38 @@ func TestRenewExtendsExpiry(t *testing.T) {
 	expectedExpiry := fixedSiteNow.Add(time.Duration(ttlDays) * 24 * time.Hour)
 	assert.Equal(t, expectedExpiry, store.renewCalls[0].ExpiresAt)
 	assert.Equal(t, siteID, store.renewCalls[0].ID)
+}
+
+// TestListByOrgMapsOwner 验证站点列表把发布者用户信息（display_name/username）映射到 SiteResult；
+// 发布者用户/实例已软删（owner 字段为 NULL）时回退为空串，不报错。
+func TestListByOrgMapsOwner(t *testing.T) {
+	const orgID = "org-1"
+	// 第一条有发布者；第二条 owner 字段为 NULL（实例/用户已软删），应回退为空串。
+	store := &fakeSiteStore{
+		sitesByOrg: map[string][]sqlc.ListSitesByOrgRow{
+			orgID: {
+				{
+					PublishedSite:    sqlc.PublishedSite{ID: "s1", OrgID: orgID, Host: "a.example.com", Status: "active"},
+					OwnerDisplayName: null.StringFrom("张三"),
+					OwnerUsername:    null.StringFrom("zhangsan"),
+				},
+				{
+					PublishedSite: sqlc.PublishedSite{ID: "s2", OrgID: orgID, Host: "b.example.com", Status: "active"},
+					// owner 字段保持 null.String 零值（无效），模拟 LEFT JOIN 未命中。
+				},
+			},
+		},
+	}
+	svc := NewWebPublishSiteService(store, &fakeSiteObj{}, nil)
+
+	// 平台管理员可查看任意企业站点列表。
+	res, err := svc.ListByOrg(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, orgID)
+	require.NoError(t, err)
+	require.Len(t, res, 2)
+	// 第一条带发布者用户信息。
+	assert.Equal(t, "张三", res[0].OwnerDisplayName)
+	assert.Equal(t, "zhangsan", res[0].OwnerUsername)
+	// 第二条 owner 为空（软删兜底），不报错、字段为空串。
+	assert.Empty(t, res[1].OwnerDisplayName)
+	assert.Empty(t, res[1].OwnerUsername)
 }

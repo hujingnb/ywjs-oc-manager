@@ -14259,6 +14259,13 @@ export interface components {
             host?: string;
             /** @description ID 是站点唯一标识。 */
             id?: string;
+            /**
+             * @description OwnerDisplayName 是发布该站点的用户显示名（站点归属实例 app 的 owner）；
+             *     实例/用户已软删等情况下可能为空。
+             */
+            owner_display_name?: string;
+            /** @description OwnerUsername 是发布者登录名，作为显示名为空时的回退展示。 */
+            owner_username?: string;
             /** @description SizeBytes 是当前版本所有静态资源的字节总和。 */
             size_bytes?: number;
             /** @description Slug 是站点的 DNS label 部分。 */

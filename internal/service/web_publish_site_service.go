@@ -19,8 +19,8 @@ import (
 // WebPublishSiteStore 是 WebPublishSiteService 需要的最小存储能力抽象。
 // 仅包含本服务实际调用的方法，避免强依赖具体 Queries 类型。
 type WebPublishSiteStore interface {
-	// ListSitesByOrg 返回企业下所有已发布站点，按 updated_at 倒序。
-	ListSitesByOrg(ctx context.Context, orgID string) ([]sqlc.PublishedSite, error)
+	// ListSitesByOrg 返回企业下所有已发布站点（含发布者用户信息），按 updated_at 倒序。
+	ListSitesByOrg(ctx context.Context, orgID string) ([]sqlc.ListSitesByOrgRow, error)
 	// GetPublishedSiteByID 按站点 ID 查记录；不存在返回 sql.ErrNoRows。
 	GetPublishedSiteByID(ctx context.Context, id string) (sqlc.PublishedSite, error)
 	// GetWebPublishConfig 按企业 ID 查 web-publish 配置；不存在返回 sql.ErrNoRows。
@@ -56,6 +56,11 @@ type SiteResult struct {
 	CreatedAt time.Time `json:"created_at"`
 	// ExpiresAt 是站点当前到期时间。
 	ExpiresAt time.Time `json:"expires_at"`
+	// OwnerDisplayName 是发布该站点的用户显示名（站点归属实例 app 的 owner）；
+	// 实例/用户已软删等情况下可能为空。
+	OwnerDisplayName string `json:"owner_display_name"`
+	// OwnerUsername 是发布者登录名，作为显示名为空时的回退展示。
+	OwnerUsername string `json:"owner_username"`
 }
 
 // WebPublishSiteService 提供站点列表/下线/续期管理能力。
@@ -87,15 +92,15 @@ func (s *WebPublishSiteService) ListByOrg(ctx context.Context, p auth.Principal,
 		return nil, ErrForbidden
 	}
 
-	sites, err := s.store.ListSitesByOrg(ctx, orgID)
+	rows, err := s.store.ListSitesByOrg(ctx, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("查询企业站点列表失败: %w", err)
 	}
 
-	// 将 DB 行映射为 SiteResult 视图结构。
-	results := make([]SiteResult, 0, len(sites))
-	for _, site := range sites {
-		results = append(results, toSiteResult(site))
+	// 将 DB 行映射为 SiteResult 视图结构（带发布者用户信息）。
+	results := make([]SiteResult, 0, len(rows))
+	for _, row := range rows {
+		results = append(results, toSiteResult(row.PublishedSite, row.OwnerDisplayName.String, row.OwnerUsername.String))
 	}
 	return results, nil
 }
@@ -177,16 +182,18 @@ func siteRootPrefix(siteID string) string {
 	return fmt.Sprintf("published-sites/%s/", siteID)
 }
 
-// toSiteResult 将 sqlc.PublishedSite DB 行映射为 SiteResult 视图结构。
-func toSiteResult(site sqlc.PublishedSite) SiteResult {
+// toSiteResult 将 sqlc.PublishedSite DB 行 + 发布者用户信息映射为 SiteResult 视图结构。
+func toSiteResult(site sqlc.PublishedSite, ownerDisplayName, ownerUsername string) SiteResult {
 	return SiteResult{
-		ID:        site.ID,
-		Host:      site.Host,
-		URL:       "https://" + site.Host,
-		Slug:      site.Slug,
-		Status:    site.Status,
-		SizeBytes: site.SizeBytes,
-		CreatedAt: site.CreatedAt,
-		ExpiresAt: site.ExpiresAt,
+		ID:               site.ID,
+		Host:             site.Host,
+		URL:              "https://" + site.Host,
+		Slug:             site.Slug,
+		Status:           site.Status,
+		SizeBytes:        site.SizeBytes,
+		CreatedAt:        site.CreatedAt,
+		ExpiresAt:        site.ExpiresAt,
+		OwnerDisplayName: ownerDisplayName,
+		OwnerUsername:    ownerUsername,
 	}
 }

@@ -119,6 +119,12 @@ const columns = computed(() => [
     text: r => r.url ?? r.id,
     onClick: r => { if (r.url) window.open(r.url, '_blank', 'noopener,noreferrer') },
   }),
+  // 发布者列：显示发布该站点的用户（显示名优先，回退登录名，再回退占位符）。
+  {
+    title: t('org.publishedSites.table.owner'),
+    key: 'owner',
+    render: (r: SiteResult) => r.owner_display_name || r.owner_username || '—',
+  },
   // 状态列：active/disabled/expired 映射到不同颜色的徽章。
   statusColumn<SiteResult>(
     t('org.publishedSites.table.status'),

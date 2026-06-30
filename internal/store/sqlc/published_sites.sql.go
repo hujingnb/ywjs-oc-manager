@@ -8,6 +8,8 @@ package sqlc
 import (
 	"context"
 	"time"
+
+	null "github.com/guregu/null/v5"
 )
 
 const countActiveSitesByOrg = `-- name: CountActiveSitesByOrg :one
@@ -182,31 +184,46 @@ func (q *Queries) ListExpiredActiveSites(ctx context.Context) ([]PublishedSite, 
 }
 
 const listSitesByOrg = `-- name: ListSitesByOrg :many
-SELECT id, org_id, app_id, host, slug, current_version, s3_prefix, status, size_bytes, created_at, expires_at, updated_at FROM published_sites WHERE org_id = ? ORDER BY updated_at DESC
+SELECT ps.id, ps.org_id, ps.app_id, ps.host, ps.slug, ps.current_version, ps.s3_prefix, ps.status, ps.size_bytes, ps.created_at, ps.expires_at, ps.updated_at, u.display_name AS owner_display_name, u.username AS owner_username
+FROM published_sites ps
+LEFT JOIN apps a ON a.id = ps.app_id
+LEFT JOIN users u ON u.id = a.owner_user_id
+WHERE ps.org_id = ?
+ORDER BY ps.updated_at DESC
 `
 
-func (q *Queries) ListSitesByOrg(ctx context.Context, orgID string) ([]PublishedSite, error) {
+type ListSitesByOrgRow struct {
+	PublishedSite    PublishedSite `db:"published_site" json:"published_site"`
+	OwnerDisplayName null.String   `db:"owner_display_name" json:"owner_display_name"`
+	OwnerUsername    null.String   `db:"owner_username" json:"owner_username"`
+}
+
+// 联查发布者（站点归属实例 app 的 owner 用户），供管理面展示「哪个用户发布的」。
+// LEFT JOIN：实例/用户即便被软删也不丢站点行，发布者信息回退为 NULL。
+func (q *Queries) ListSitesByOrg(ctx context.Context, orgID string) ([]ListSitesByOrgRow, error) {
 	rows, err := q.db.QueryContext(ctx, listSitesByOrg, orgID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []PublishedSite{}
+	items := []ListSitesByOrgRow{}
 	for rows.Next() {
-		var i PublishedSite
+		var i ListSitesByOrgRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.OrgID,
-			&i.AppID,
-			&i.Host,
-			&i.Slug,
-			&i.CurrentVersion,
-			&i.S3Prefix,
-			&i.Status,
-			&i.SizeBytes,
-			&i.CreatedAt,
-			&i.ExpiresAt,
-			&i.UpdatedAt,
+			&i.PublishedSite.ID,
+			&i.PublishedSite.OrgID,
+			&i.PublishedSite.AppID,
+			&i.PublishedSite.Host,
+			&i.PublishedSite.Slug,
+			&i.PublishedSite.CurrentVersion,
+			&i.PublishedSite.S3Prefix,
+			&i.PublishedSite.Status,
+			&i.PublishedSite.SizeBytes,
+			&i.PublishedSite.CreatedAt,
+			&i.PublishedSite.ExpiresAt,
+			&i.PublishedSite.UpdatedAt,
+			&i.OwnerDisplayName,
+			&i.OwnerUsername,
 		); err != nil {
 			return nil, err
 		}

@@ -149,6 +149,7 @@ export default {
     // table: column headers for the sites list.
     table: {
       url: 'Site URL',
+      owner: 'Publisher',
       status: 'Status',
       expiresAt: 'Expires At',
       size: 'Size',
