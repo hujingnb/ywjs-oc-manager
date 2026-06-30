@@ -73,6 +73,9 @@ var mappedServiceErrorRules = []serviceErrorRule{
 	{target: service.ErrConversationFileNotFound, statusCode: http.StatusNotFound, code: "CONVERSATION_FILE_NOT_FOUND", msgKey: apierror.MsgNotFound},
 	{target: service.ErrConversationFileUnsupported, statusCode: http.StatusBadRequest, code: "CONVERSATION_FILE_UNSUPPORTED", msgKey: apierror.MsgConversationFileUnsupported},
 	{target: service.ErrConversationFileTooLarge, statusCode: http.StatusRequestEntityTooLarge, code: "CONVERSATION_FILE_TOO_LARGE", msgKey: apierror.MsgConversationFileTooLarge},
+	// web-publish 未开通：企业 web-publish 能力未就绪时返回 403 而非 500，
+	// 便于前端与客户端区分「权限/配置未完成」和「服务内部错误」两类场景。
+	{target: service.ErrWebPublishNotProvisioned, statusCode: http.StatusForbidden, code: "WEB_PUBLISH_NOT_PROVISIONED", msgKey: apierror.MsgWebPublishNotProvisioned},
 }
 
 // writeBindError 将 Gin 的 JSON 绑定错误转成面向调用方的 400 文案。

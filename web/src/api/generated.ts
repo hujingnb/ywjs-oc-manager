@@ -10692,6 +10692,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/organizations/{orgId}/published-sites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 企业站点列表
+         * @description 按企业 ID 列出所有已发布站点（active/disabled/expired），需 CanViewOrg 权限
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 企业 ID */
+                    orgId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.SiteResult"][];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/organizations/{orgId}/recharge": {
         parameters: {
             query?: never;
@@ -10863,6 +10934,75 @@ export interface paths {
                 };
                 /** @description Bad Gateway */
                 502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/organizations/{orgId}/web-publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查询企业 web-publish 配置
+         * @description 返回企业 web-publish 配置及证书状态（凭证密文不出现在响应中）；需 CanViewOrg 权限
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 企业 ID */
+                    orgId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["service.WebPublishConfigResult"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -11112,6 +11252,73 @@ export interface paths {
             };
         };
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform/organizations/{orgId}/web-publish/cert/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 手动重试证书签发
+         * @description 平台管理员触发手动重试 web-publish provisioning job（适用于证书签发/续签失败场景）
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 企业 ID */
+                    orgId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -11396,6 +11603,158 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/published-sites/{siteId}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 手动下线站点
+         * @description 将站点状态置为 disabled，并删除整站对象存储前缀；需 CanManageOrg 权限
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 站点 ID */
+                    siteId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/published-sites/{siteId}/renew": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 手动续期站点
+         * @description 按企业 site_ttl_days 延后站点过期时间并置回 active；需 CanManageOrg 权限
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 站点 ID */
+                    siteId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -13880,6 +14239,24 @@ export interface components {
             /** @description k8s 路径的运行状态直接来自 apps.status；no_container 表示容器尚未创建。 */
             status?: string;
         };
+        "service.SiteResult": {
+            /** @description CreatedAt 是站点首次发布时间。 */
+            created_at?: string;
+            /** @description ExpiresAt 是站点当前到期时间。 */
+            expires_at?: string;
+            /** @description Host 是完整主机名（slug.base_domain）。 */
+            host?: string;
+            /** @description ID 是站点唯一标识。 */
+            id?: string;
+            /** @description SizeBytes 是当前版本所有静态资源的字节总和。 */
+            size_bytes?: number;
+            /** @description Slug 是站点的 DNS label 部分。 */
+            slug?: string;
+            /** @description Status 是站点当前状态（active/disabled/expired）。 */
+            status?: string;
+            /** @description URL 是站点完整访问地址（https://Host）。 */
+            url?: string;
+        };
         "service.SkillEntry": {
             /** @description Audience 仅 custom 来源：命中的可见范围（all_org|org_admins|requester_only），前端渲染范围徽章，其它来源留空。 */
             audience?: string;
@@ -13947,6 +14324,36 @@ export interface components {
         "service.TokenPair": {
             access_token?: string;
             refresh_token?: string;
+        };
+        "service.WebPublishConfigResult": {
+            /** @description BaseDomain 是企业 web-publish 根域名（如 apps.example.com）。 */
+            base_domain?: string;
+            /** @description CertLastIssuedAt 是最近一次首签成功时间；尚未首签时为 nil。 */
+            cert_last_issued_at?: string;
+            /** @description CertLastRenewedAt 是最近一次续签成功时间；从未续签时为 nil。 */
+            cert_last_renewed_at?: string;
+            /** @description CertMessage 是证书签发失败时的错误摘要，正常时为空串。 */
+            cert_message?: string;
+            /** @description CertNotAfter 是证书到期时间；尚未签发时为 nil。 */
+            cert_not_after?: string;
+            /** @description CertStatus 是通配证书的当前状态（none/issuing/renewing/issued/failed）。 */
+            cert_status?: string;
+            /** @description DNSProvider 是 DNS 服务商标识，如 alidns/tencentcloud。 */
+            dns_provider?: string;
+            /** @description Enabled 表示 web-publish 能力是否已由平台管理员开启。 */
+            enabled?: boolean;
+            /** @description MaxSites 是企业下最大站点数配额。 */
+            max_sites?: number;
+            /** @description OrgID 是企业 ID。 */
+            org_id?: string;
+            /** @description ProvisioningMessage 是开通失败时的错误摘要，正常时为空串。 */
+            provisioning_message?: string;
+            /** @description ProvisioningStatus 是当前开通流程状态（provisioning/ready/failed/disabled 等）。 */
+            provisioning_status?: string;
+            /** @description SiteTTLDays 是站点存活天数配额。 */
+            site_ttl_days?: number;
+            /** @description WildcardDomain 是通配域名，值为 "*." + BaseDomain。 */
+            wildcard_domain?: string;
         };
         "service.WorkspaceEntryResult": {
             is_dir?: boolean;

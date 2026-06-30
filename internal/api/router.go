@@ -73,6 +73,8 @@ type Dependencies struct {
 	SkillLibraryService *service.SkillLibraryService
 	// WebPublishConfigService 提供平台管理员对企业 web-publish 能力配置/开通/停用路由；nil 时不注册。
 	WebPublishConfigService *service.WebPublishConfigService
+	// WebPublishSiteService 提供站点列表/下线/续期管理面路由；nil 时不注册。
+	WebPublishSiteService *service.WebPublishSiteService
 	// WebPublishService 提供 app runtime token 驱动的站点发布与 site-server 同步能力；nil 时不注册同步端点。
 	WebPublishService *service.WebPublishService
 	// SiteSyncToken 是 site-server 轮询 /internal/web-publish/sites 时使用的共享鉴权 token；
@@ -261,6 +263,10 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.WebPublishConfigService != nil {
 		handlers.RegisterWebPublishConfigRoutes(user, handlers.NewWebPublishConfigHandler(dep.WebPublishConfigService))
+	}
+	// 站点管理面路由：WebPublishSiteService（必须）+ WebPublishConfigService（用于 GetConfig/RetryProvision）需同时非 nil。
+	if dep.WebPublishSiteService != nil && dep.WebPublishConfigService != nil {
+		handlers.RegisterWebPublishSiteRoutes(user, handlers.NewWebPublishSitesHandler(dep.WebPublishSiteService, dep.WebPublishConfigService))
 	}
 	return router
 }

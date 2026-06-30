@@ -2038,6 +2038,33 @@ components:
           description: k8s 路径的运行状态直接来自 apps.status；no_container 表示容器尚未创建。
           type: string
       type: object
+    service.SiteResult:
+      properties:
+        created_at:
+          description: CreatedAt 是站点首次发布时间。
+          type: string
+        expires_at:
+          description: ExpiresAt 是站点当前到期时间。
+          type: string
+        host:
+          description: Host 是完整主机名（slug.base_domain）。
+          type: string
+        id:
+          description: ID 是站点唯一标识。
+          type: string
+        size_bytes:
+          description: SizeBytes 是当前版本所有静态资源的字节总和。
+          type: integer
+        slug:
+          description: Slug 是站点的 DNS label 部分。
+          type: string
+        status:
+          description: Status 是站点当前状态（active/disabled/expired）。
+          type: string
+        url:
+          description: URL 是站点完整访问地址（https://Host）。
+          type: string
+      type: object
     service.SkillEntry:
       properties:
         audience:
@@ -2165,6 +2192,52 @@ components:
         access_token:
           type: string
         refresh_token:
+          type: string
+      type: object
+    service.WebPublishConfigResult:
+      properties:
+        base_domain:
+          description: BaseDomain 是企业 web-publish 根域名（如 apps.example.com）。
+          type: string
+        cert_last_issued_at:
+          description: CertLastIssuedAt 是最近一次首签成功时间；尚未首签时为 nil。
+          type: string
+        cert_last_renewed_at:
+          description: CertLastRenewedAt 是最近一次续签成功时间；从未续签时为 nil。
+          type: string
+        cert_message:
+          description: CertMessage 是证书签发失败时的错误摘要，正常时为空串。
+          type: string
+        cert_not_after:
+          description: CertNotAfter 是证书到期时间；尚未签发时为 nil。
+          type: string
+        cert_status:
+          description: CertStatus 是通配证书的当前状态（none/issuing/renewing/issued/failed）。
+          type: string
+        dns_provider:
+          description: DNSProvider 是 DNS 服务商标识，如 alidns/tencentcloud。
+          type: string
+        enabled:
+          description: Enabled 表示 web-publish 能力是否已由平台管理员开启。
+          type: boolean
+        max_sites:
+          description: MaxSites 是企业下最大站点数配额。
+          type: integer
+        org_id:
+          description: OrgID 是企业 ID。
+          type: string
+        provisioning_message:
+          description: ProvisioningMessage 是开通失败时的错误摘要，正常时为空串。
+          type: string
+        provisioning_status:
+          description: ProvisioningStatus 是当前开通流程状态（provisioning/ready/failed/disabled
+            等）。
+          type: string
+        site_ttl_days:
+          description: SiteTTLDays 是站点存活天数配额。
+          type: integer
+        wildcard_domain:
+          description: WildcardDomain 是通配域名，值为 "*." + BaseDomain。
           type: string
       type: object
     service.WorkspaceEntryResult:
@@ -9452,6 +9525,50 @@ paths:
       summary: 成员 onboarding（事务创建）
       tags:
       - members
+  /organizations/{orgId}/published-sites:
+    get:
+      description: 按企业 ID 列出所有已发布站点（active/disabled/expired），需 CanViewOrg 权限
+      parameters:
+      - description: 企业 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.SiteResult'
+                  type: array
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 企业站点列表
+      tags:
+      - web-publish
   /organizations/{orgId}/recharge:
     post:
       description: 平台管理员为指定企业充值额度；企业须已关联 new-api 账户
@@ -9583,6 +9700,46 @@ paths:
       summary: 企业充值历史列表
       tags:
       - recharge
+  /organizations/{orgId}/web-publish:
+    get:
+      description: 返回企业 web-publish 配置及证书状态（凭证密文不出现在响应中）；需 CanViewOrg 权限
+      parameters:
+      - description: 企业 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.WebPublishConfigResult'
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 查询企业 web-publish 配置
+      tags:
+      - web-publish
   /platform-skills:
     get:
       responses:
@@ -9738,6 +9895,42 @@ paths:
       security:
       - BearerAuth: []
       summary: 配置企业发布能力
+      tags:
+      - web-publish
+  /platform/organizations/{orgId}/web-publish/cert/retry:
+    post:
+      description: 平台管理员触发手动重试 web-publish provisioning job（适用于证书签发/续签失败场景）
+      parameters:
+      - description: 企业 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 手动重试证书签发
       tags:
       - web-publish
   /platform/organizations/{orgId}/web-publish/disable:
@@ -9899,6 +10092,90 @@ paths:
       summary: 各企业用量分布
       tags:
       - usage
+  /published-sites/{siteId}/disable:
+    post:
+      description: 将站点状态置为 disabled，并删除整站对象存储前缀；需 CanManageOrg 权限
+      parameters:
+      - description: 站点 ID
+        in: path
+        name: siteId
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 手动下线站点
+      tags:
+      - web-publish
+  /published-sites/{siteId}/renew:
+    post:
+      description: 按企业 site_ttl_days 延后站点过期时间并置回 active；需 CanManageOrg 权限
+      parameters:
+      - description: 站点 ID
+        in: path
+        name: siteId
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 手动续期站点
+      tags:
+      - web-publish
   /runtime-images:
     get:
       responses:
