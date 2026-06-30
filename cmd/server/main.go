@@ -379,8 +379,11 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		workspacePresignTTL = cfg.Storage.S3.PresignTTL.Duration
 		// webPublishService：runtime token 驱动的静态站点发布服务，依赖 objStore 执行
 		// tar.gz 解包上传（PutObject）与旧版本清理（DeletePrefix）。
-		// 生产参数（SlugGen / Now / MaxUploadSize）使用 WebPublishServiceConfig 零值触发默认实现。
-		webPublishService = service.NewWebPublishService(dbStore.Queries, objStore, service.WebPublishServiceConfig{})
+		// SlugGen / Now / MaxUploadSize 留零值触发默认实现；SitePrefix 取配置（缺省 published-sites/）
+		// 决定站点对象在对象存储中的顶层目录，便于与 app 数据共用 bucket 时按目录隔离。
+		webPublishService = service.NewWebPublishService(dbStore.Queries, objStore, service.WebPublishServiceConfig{
+			SitePrefix: cfg.WebPublish.S3Prefix,
+		})
 		// webPublishSiteService：管理面站点列表/下线/续期，依赖同一 objStore 执行整站前缀删除。
 		// now 传 nil，service 内部使用 time.Now。
 		webPublishSiteService = service.NewWebPublishSiteService(dbStore.Queries, objStore, nil)

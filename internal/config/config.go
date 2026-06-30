@@ -271,6 +271,10 @@ type WebPublishConfig struct {
 	SiteServerService string `yaml:"site_server_service"`
 	// SiteServerPort 是 backend Service 端口，缺省 80。
 	SiteServerPort int32 `yaml:"site_server_port"`
+	// S3Prefix 是已发布站点对象在对象存储中的顶层目录前缀（须以 / 结尾），缺省 "published-sites/"。
+	// 与 app 数据共用同一 bucket 时用它按目录隔离 web-publish 数据。该前缀写入 published_sites.s3_prefix
+	// 并下发 site-server，manager 删除/回收与 site-server 读取都据此，故只需在此一处配置。
+	S3Prefix string `yaml:"s3_prefix"`
 	// SiteSyncToken 是 site-server 轮询内部同步端点的鉴权 token（与 site-server MANAGER_SYNC_TOKEN 共享）。
 	SiteSyncToken string `yaml:"site_sync_token"`
 	// DevSelfSignedCert 仅供本地/dev 联调：为 true 时用自签通配证书 provisioner 取代真实

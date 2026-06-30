@@ -1,7 +1,7 @@
 // Package service - WebPublishService 负责 app runtime token 发布静态站点的核心逻辑。
-// 入口为 Publish：验证 token → 校验企业开通状态 → slug 归属与配额检查 →
-// 解包 tar.gz 到新版本前缀（防 zip-slip + 大小上限）→ 原子切版本指针 + 重置 TTL → 删旧版本前缀。
-// 首发与更新对调用方一致返回 {URL, ExpiresAt}。
+// 入口为 Publish：验证 token → 校验企业开通状态 → 分配随机唯一子域 + 配额检查 →
+// 解包 tar.gz 到 <sitePrefix><siteID>/v1/ 前缀（防 zip-slip + 大小上限）→ 插入站点记录 + 设置 TTL。
+// 每次发布都是全新随机站点（不指定名字、不原地更新），返回 {URL, ExpiresAt}。
 package service
 
 import (
@@ -91,6 +91,11 @@ type WebPublishServiceConfig struct {
 	Now func() time.Time
 	// MaxUploadSize 限制单次上传解压的最大字节数（所有文件之和）；默认 200MB。
 	MaxUploadSize int64
+	// SitePrefix 是站点对象在对象存储中的顶层目录前缀（须以 / 结尾），默认 "published-sites/"。
+	// 用于在与 app 数据共用的 bucket 中按目录隔离 web-publish 数据。该前缀会被写入
+	// published_sites.s3_prefix 并经同步端点下发，manager 删除/回收与 site-server 读取都据此，
+	// 三方天然一致——所以前缀只在 manager 配置一处，site-server 无需感知。
+	SitePrefix string
 }
 
 // PublishResult 是 Publish 方法的成功返回值，对首发和更新场景统一。
@@ -107,27 +112,30 @@ type PublishResult struct {
 //   - 版本指针（CurrentVersion/S3Prefix）在 DB 更新后才删旧前缀，顺序保证原子性；
 //   - 解包过程防 zip-slip（路径 Clean 后拒绝 ../ 越界），并有全局大小上限。
 type WebPublishService struct {
-	store  WebPublishStore
-	obj    publishObjectStore
-	slugFn func() string
-	nowFn  func() time.Time
+	store   WebPublishStore
+	obj     publishObjectStore
+	slugFn  func() string
+	nowFn   func() time.Time
 	maxSize int64
+	// sitePrefix 站点对象顶层目录前缀（以 / 结尾），构造 newPrefix 时拼在最前。
+	sitePrefix string
 }
 
 // NewWebPublishService 创建 WebPublishService。
 // cfg 中未设置的函数字段将使用默认实现（生产安全）。
 func NewWebPublishService(store WebPublishStore, obj publishObjectStore, cfg WebPublishServiceConfig) *WebPublishService {
 	s := &WebPublishService{
-		store:   store,
-		obj:     obj,
-		slugFn:  cfg.SlugGen,
-		nowFn:   cfg.Now,
-		maxSize: cfg.MaxUploadSize,
+		store:      store,
+		obj:        obj,
+		slugFn:     cfg.SlugGen,
+		nowFn:      cfg.Now,
+		maxSize:    cfg.MaxUploadSize,
+		sitePrefix: cfg.SitePrefix,
 	}
 	// 补充默认值：SlugGen 使用 UUID 前 8 位去横线，保证生成结果是合法 DNS label。
 	if s.slugFn == nil {
 		s.slugFn = func() string {
-			id := newUUID()                         // e.g. "550e8400-e29b-41d4-a716-446655440000"
+			id := newUUID()                          // e.g. "550e8400-e29b-41d4-a716-446655440000"
 			clean := strings.ReplaceAll(id, "-", "") // 去除横线
 			if len(clean) > 8 {
 				return clean[:8]
@@ -142,6 +150,12 @@ func NewWebPublishService(store WebPublishStore, obj publishObjectStore, cfg Web
 	// 默认最大上传大小 200MB。
 	if s.maxSize <= 0 {
 		s.maxSize = 200 * 1024 * 1024
+	}
+	// 默认站点存储前缀 "published-sites/"；规整为非空且以 / 结尾，避免拼出无前缀或缺斜杠的脏 key。
+	if s.sitePrefix == "" {
+		s.sitePrefix = "published-sites/"
+	} else if !strings.HasSuffix(s.sitePrefix, "/") {
+		s.sitePrefix += "/"
 	}
 	return s
 }
@@ -196,10 +210,10 @@ func (s *WebPublishService) Publish(ctx context.Context, appToken string, body i
 	}
 
 	// ── 步骤4：确定站点 ID 与对象存储前缀 ────────────────────────────────────
-	// 每个站点都是新建，版本固定 v1；前缀格式：published-sites/<siteID>/v1/（末尾带 /）。
+	// 每个站点都是新建，版本固定 v1；前缀格式：<sitePrefix><siteID>/v1/（sitePrefix 已规整为以 / 结尾）。
 	siteID := newUUID()
 	const version = "v1"
-	newPrefix := fmt.Sprintf("published-sites/%s/%s/", siteID, version)
+	newPrefix := fmt.Sprintf("%s%s/%s/", s.sitePrefix, siteID, version)
 
 	// ── 步骤5：解包 tar.gz 并上传到前缀 ──────────────────────────────────────
 	// 防 zip-slip：对每个 tar entry 的 name 做 path.Clean，拒绝 ../ 越界。
@@ -324,4 +338,3 @@ func (s *WebPublishService) allocateRandomHost(ctx context.Context, baseDomain s
 	}
 	return "", "", fmt.Errorf("分配随机站点名失败，请重试")
 }
-

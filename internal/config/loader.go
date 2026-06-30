@@ -116,6 +116,9 @@ func (c *Config) applyDefaults() {
 	if c.WebPublish.SiteServerPort == 0 {
 		c.WebPublish.SiteServerPort = 80
 	}
+	if c.WebPublish.S3Prefix == "" {
+		c.WebPublish.S3Prefix = "published-sites/"
+	}
 	if c.WebPublish.ACMEDirectoryURL == "" {
 		// staging 目录避免本地/测试触发 Let's Encrypt 生产速率限制；生产环境必须覆盖。
 		c.WebPublish.ACMEDirectoryURL = "https://acme-staging-v02.api.letsencrypt.org/directory"

@@ -233,6 +233,40 @@ func TestPublishFirstTime(t *testing.T) {
 	assert.True(t, found, "index.html 应已上传至对象存储")
 }
 
+// TestPublishUsesConfiguredSitePrefix 验证 SitePrefix 配置生效：站点对象前缀以配置前缀打头，
+// 且漏配尾斜杠时被自动补齐（构造 <prefix>/<siteID>/v1/，按目录隔离 web-publish 数据）。
+func TestPublishUsesConfiguredSitePrefix(t *testing.T) {
+	const orgID = "org-1"
+	const appID = "app-1"
+	const token = "test-token-prefix"
+
+	store := &fakeWPubStore{
+		appByHash:       map[string]sqlc.App{HashAppRuntimeToken(token): {ID: appID, OrgID: orgID}},
+		publishConfig:   map[string]sqlc.OrgWebPublishConfig{orgID: makeReadyCfg(orgID)},
+		siteByHost:      map[string]sqlc.PublishedSite{},
+		activeSiteCount: map[string]int64{orgID: 0},
+	}
+	obj := newFakeObjStore()
+	// 故意传不带尾斜杠的前缀，验证会被规整为 "web-publish/"。
+	svc := NewWebPublishService(store, obj, WebPublishServiceConfig{
+		SlugGen:    func() string { return "rand123" },
+		Now:        func() time.Time { return fixedNow },
+		SitePrefix: "web-publish",
+	})
+
+	_, err := svc.Publish(context.Background(), token, makeTarGz(t, map[string]string{"index.html": "<html>p</html>"}))
+	require.NoError(t, err)
+
+	require.Len(t, store.createdSites, 1)
+	// 落库前缀须以配置前缀（已补尾斜杠）打头，形如 web-publish/<siteID>/v1/。
+	assert.True(t, strings.HasPrefix(store.createdSites[0].S3Prefix, "web-publish/"), "前缀应以配置的 web-publish/ 打头，实际 %q", store.createdSites[0].S3Prefix)
+	assert.True(t, strings.HasSuffix(store.createdSites[0].S3Prefix, "/v1/"))
+	// 上传的对象 key 也落在该前缀目录下。
+	for k := range obj.objects {
+		assert.True(t, strings.HasPrefix(k, "web-publish/"), "对象 key 应在 web-publish/ 目录下，实际 %q", k)
+	}
+}
+
 // TestPublishAlwaysCreatesNewRandomSite 回归测试：每次发布都创建全新随机站点，不做原地更新。
 // 连续两次发布应得到两个不同的随机 slug、两条独立的 CreatePublishedSite 记录（互不覆盖）。
 func TestPublishAlwaysCreatesNewRandomSite(t *testing.T) {
