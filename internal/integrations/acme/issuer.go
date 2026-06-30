@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-acme/lego/v5/certcrypto"
 	"github.com/go-acme/lego/v5/certificate"
+	"github.com/go-acme/lego/v5/challenge/dns01"
 	"github.com/go-acme/lego/v5/lego"
 	"github.com/go-acme/lego/v5/registration"
 )
@@ -101,7 +102,14 @@ func (o *legoObtainer) Obtain(ctx context.Context, domains []string) (Certificat
 
 	// 4. 设置 DNS-01 挑战器：provider 内嵌 lego challenge.Provider，可直接传入。
 	// SetDNS01Provider(p challenge.Provider, opts ...dns01.ChallengeOption) error
-	if err := client.Challenge.SetDNS01Provider(o.provider); err != nil {
+	//
+	// DisableRecursiveNSsPropagationRequirement：关闭「递归 NS 传播预检」。集群内 manager pod 的
+	// recursive resolver 是 CoreDNS，看不到刚写到公网 alidns 的 _acme-challenge TXT（缓存/不对外递归），
+	// 会让预检一直超时（NS 10.233.0.10:53 did not return the expected TXT record）。关掉后预检仅以
+	// 「直接查询域名权威 NS」为判据——权威 NS 即 alidns，已有该记录，可靠；且 LE 最终也按权威校验，安全。
+	if err := client.Challenge.SetDNS01Provider(o.provider,
+		dns01.DisableRecursiveNSsPropagationRequirement(),
+	); err != nil {
 		return Certificate{}, fmt.Errorf("acme: 设置 DNS-01 provider 失败: %w", err)
 	}
 
