@@ -225,3 +225,38 @@ func TestProvisionIngressFails(t *testing.T) {
 	// 验证最终 cert 状态为 failed
 	assert.Equal(t, domain.CertStatusFailed, st.certUpdates[len(st.certUpdates)-1].CertStatus)
 }
+
+// TestProvisionRenewalPath 覆盖续签场景：cfg.CertStatus=issued 时，handle 过程中
+// cert 状态应先经过 renewing，最终置 issued，且成功时写 cert_last_renewed_at 而非 cert_last_issued_at。
+func TestProvisionRenewalPath(t *testing.T) {
+	// 准备依赖：cfg.CertStatus = issued，模拟已签发过的配置触发续签
+	cipher, _ := auth.NewCipher(make([]byte, 32))
+	cfg := newCfg(cipher)
+	cfg.CertStatus = domain.CertStatusIssued // 已签发 → 本次为续签
+
+	st := &fakeWPProvStore{cfg: cfg}
+	// 模拟签发成功，NotAfter 为 2030-01-01 00:00:00 UTC
+	prov := &fakeProvisioner{ret: acme.Certificate{CertPEM: []byte("C"), KeyPEM: []byte("K"), NotAfter: 1893456000}}
+	cl := &fakeClusterApplier{}
+	h := NewWebPublishProvisionHandler(st, prov, cl, cipher, WebPublishProvisionConfig{IngressPublicIP: "1.2.3.4"})
+
+	// 执行 handler，期望无错误
+	require.NoError(t, h.Handle(context.Background(), provJob()))
+
+	// 验证中间状态：第一次 cert 更新应为 renewing（续签进行中），而非 issuing
+	require.NotEmpty(t, st.certUpdates, "应至少有一次 cert 状态更新")
+	assert.Equal(t, domain.CertStatusRenewing, st.certUpdates[0].CertStatus,
+		"续签路径进行中状态应为 renewing")
+
+	// 验证最终 cert 状态为 issued
+	lastCert := st.certUpdates[len(st.certUpdates)-1]
+	assert.Equal(t, domain.CertStatusIssued, lastCert.CertStatus, "续签完成后应置 issued")
+
+	// 续签成功时应写 cert_last_renewed_at，不写 cert_last_issued_at
+	assert.True(t, lastCert.CertLastRenewedAt.Valid, "续签成功应记录 cert_last_renewed_at")
+	assert.False(t, lastCert.CertLastIssuedAt.Valid, "续签不应覆盖 cert_last_issued_at（COALESCE 保留原值）")
+
+	// 验证最终 provisioning 状态为 ready
+	require.NotEmpty(t, st.provUpdates)
+	assert.Equal(t, domain.ProvisioningReady, st.provUpdates[len(st.provUpdates)-1].ProvisioningStatus)
+}

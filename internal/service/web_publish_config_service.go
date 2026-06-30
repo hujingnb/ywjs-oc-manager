@@ -17,6 +17,39 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
+// WebPublishConfigResult 是 Get 返回的脱敏配置视图。
+// 凭证密文绝不出现在此结构体中；证书状态字段供前端展示当前续签进度。
+type WebPublishConfigResult struct {
+	// OrgID 是企业 ID。
+	OrgID string `json:"org_id"`
+	// Enabled 表示 web-publish 能力是否已由平台管理员开启。
+	Enabled bool `json:"enabled"`
+	// BaseDomain 是企业 web-publish 根域名（如 apps.example.com）。
+	BaseDomain string `json:"base_domain"`
+	// WildcardDomain 是通配域名，值为 "*." + BaseDomain。
+	WildcardDomain string `json:"wildcard_domain"`
+	// DNSProvider 是 DNS 服务商标识，如 alidns/tencentcloud。
+	DNSProvider string `json:"dns_provider"`
+	// SiteTTLDays 是站点存活天数配额。
+	SiteTTLDays int32 `json:"site_ttl_days"`
+	// MaxSites 是企业下最大站点数配额。
+	MaxSites int32 `json:"max_sites"`
+	// ProvisioningStatus 是当前开通流程状态（provisioning/ready/failed/disabled 等）。
+	ProvisioningStatus string `json:"provisioning_status"`
+	// ProvisioningMessage 是开通失败时的错误摘要，正常时为空串。
+	ProvisioningMessage string `json:"provisioning_message,omitempty"`
+	// CertStatus 是通配证书的当前状态（none/issuing/renewing/issued/failed）。
+	CertStatus string `json:"cert_status"`
+	// CertNotAfter 是证书到期时间；尚未签发时为 nil。
+	CertNotAfter *time.Time `json:"cert_not_after,omitempty"`
+	// CertLastIssuedAt 是最近一次首签成功时间；尚未首签时为 nil。
+	CertLastIssuedAt *time.Time `json:"cert_last_issued_at,omitempty"`
+	// CertLastRenewedAt 是最近一次续签成功时间；从未续签时为 nil。
+	CertLastRenewedAt *time.Time `json:"cert_last_renewed_at,omitempty"`
+	// CertMessage 是证书签发失败时的错误摘要，正常时为空串。
+	CertMessage string `json:"cert_message,omitempty"`
+}
+
 // WebPublishConfigStore 抽象 WebPublishConfigService 需要的存储查询能力。
 // 故意最小化接口，只包含本服务实际调用的方法，避免强依赖具体 Queries 类型。
 type WebPublishConfigStore interface {
@@ -128,8 +161,7 @@ func (s *WebPublishConfigService) Configure(ctx context.Context, p auth.Principa
 // 流程：
 //  1. 权限检查；
 //  2. 调用 SetWebPublishEnabled（enabled=true, provisioning_status=provisioning）；
-//  3. 创建 web_publish_provision 异步 job（payload 含 org_id，priority 100，最多尝试 5 次）；
-//  4. 即时 notifier.Enqueue——失败非致命（scheduler 周期兜底），仅忽略错误。
+//  3. 通过 enqueueProvision 创建并通知 provisioning job。
 func (s *WebPublishConfigService) Enable(ctx context.Context, p auth.Principal, orgID string) error {
 	// 权限检查：仅平台管理员可开通 web-publish。
 	if !auth.CanManageWebPublishConfig(p) {
@@ -145,6 +177,13 @@ func (s *WebPublishConfigService) Enable(ctx context.Context, p auth.Principal, 
 		return fmt.Errorf("设置开通状态失败: %w", err)
 	}
 
+	return s.enqueueProvision(ctx, orgID)
+}
+
+// enqueueProvision 构造并持久化一个 web_publish_provision 异步 job，
+// 然后即时通知 worker 入队（失败非致命，scheduler 周期扫库兜底）。
+// 被 Enable、RetryProvision 与 EnqueueProvision 复用，避免重复代码。
+func (s *WebPublishConfigService) enqueueProvision(ctx context.Context, orgID string) error {
 	// 构造 provisioning job payload：包含 org_id 供 worker 查配置并执行 DNS + 证书 + Ingress 开通。
 	payload, err := json.Marshal(map[string]string{"org_id": orgID})
 	if err != nil {
@@ -169,6 +208,63 @@ func (s *WebPublishConfigService) Enable(ctx context.Context, p auth.Principal, 
 		_ = s.notifier.Enqueue(ctx, jobID)
 	}
 	return nil
+}
+
+// EnqueueProvision 为指定企业入队一个 web_publish_provision job，供续签巡检器调用。
+// 不做权限检查——调用方（CertRenewalChecker）为内部系统组件，已在上层保证合法性。
+func (s *WebPublishConfigService) EnqueueProvision(ctx context.Context, orgID string) error {
+	return s.enqueueProvision(ctx, orgID)
+}
+
+// RetryProvision 为指定企业手动重试 provision，仅平台管理员可调用。
+// 用于证书签发/续签失败后由平台管理员触发手动重试，不修改 provisioning/enabled 状态。
+func (s *WebPublishConfigService) RetryProvision(ctx context.Context, p auth.Principal, orgID string) error {
+	// 权限检查：仅平台管理员可触发手动重试。
+	if !auth.CanManageWebPublishConfig(p) {
+		return ErrForbidden
+	}
+	return s.enqueueProvision(ctx, orgID)
+}
+
+// Get 查询企业 web-publish 配置的脱敏视图，仅拥有 CanViewOrg 权限的主体可调用。
+// 脱敏原则：DNS 凭证密文不出现在返回结果中；证书状态字段全量返回供前端展示。
+func (s *WebPublishConfigService) Get(ctx context.Context, p auth.Principal, orgID string) (WebPublishConfigResult, error) {
+	// 权限检查：平台管理员或归属企业的成员均可查看配置状态。
+	if !auth.CanViewOrg(p, orgID) {
+		return WebPublishConfigResult{}, ErrForbidden
+	}
+
+	// 从存储层读取企业配置（不存在时返回 sql.ErrNoRows，透传给调用方）。
+	cfg, err := s.store.GetWebPublishConfig(ctx, orgID)
+	if err != nil {
+		return WebPublishConfigResult{}, fmt.Errorf("查询企业 %s web-publish 配置失败: %w", orgID, err)
+	}
+
+	// 将 null.Time 映射为 *time.Time：Valid=true 时返回时间指针，否则返回 nil。
+	nullTimePtr := func(t null.Time) *time.Time {
+		if !t.Valid {
+			return nil
+		}
+		v := t.Time
+		return &v
+	}
+
+	return WebPublishConfigResult{
+		OrgID:               cfg.OrgID,
+		Enabled:             cfg.Enabled,
+		BaseDomain:          cfg.BaseDomain,
+		WildcardDomain:      "*." + cfg.BaseDomain,
+		DNSProvider:         cfg.DnsProvider,
+		SiteTTLDays:         cfg.SiteTtlDays,
+		MaxSites:            cfg.MaxSites,
+		ProvisioningStatus:  cfg.ProvisioningStatus,
+		ProvisioningMessage: cfg.ProvisioningMessage.String,
+		CertStatus:          cfg.CertStatus,
+		CertNotAfter:        nullTimePtr(cfg.CertNotAfter),
+		CertLastIssuedAt:    nullTimePtr(cfg.CertLastIssuedAt),
+		CertLastRenewedAt:   nullTimePtr(cfg.CertLastRenewedAt),
+		CertMessage:         cfg.CertMessage.String,
+	}, nil
 }
 
 // Disable 停用企业 web-publish 能力，仅平台管理员可调用。

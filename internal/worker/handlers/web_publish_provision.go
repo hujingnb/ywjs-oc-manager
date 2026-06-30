@@ -150,10 +150,19 @@ func (h *WebPublishProvisionHandler) Handle(ctx context.Context, job sqlc.Job) e
 		secretName = "wildcard-" + strings.ReplaceAll(cfg.BaseDomain, ".", "-")
 	}
 
-	// 标记证书状态为 issuing，表示本次开通已启动。
+	// 判断本次是首签还是续签：
+	// 若 cfg.CertStatus 已是 issued，说明证书之前签发过，本次为续签（renewing）；
+	// 否则（none/issuing/failed 等）为首次签发（issuing）。
+	isRenewal := cfg.CertStatus == domain.CertStatusIssued
+	inProgressStatus := domain.CertStatusIssuing
+	if isRenewal {
+		inProgressStatus = domain.CertStatusRenewing
+	}
+
+	// 标记证书状态为 issuing/renewing，表示本次开通/续签已启动。
 	// 此处写库失败只返回 error 交给 worker 重试，刻意不调 fail() 置 failed：
 	// DB 不可用时 fail() 自己也写不进，标 failed 既无意义又会留下不准确状态。
-	if err := h.setCertStatus(ctx, orgID, domain.CertStatusIssuing, 0, false, null.Time{}); err != nil {
+	if err := h.setCertStatus(ctx, orgID, inProgressStatus, 0, false, false, null.Time{}); err != nil {
 		return err
 	}
 
@@ -191,15 +200,16 @@ func (h *WebPublishProvisionHandler) Handle(ctx context.Context, job sqlc.Job) e
 		return h.fail(ctx, orgID, secretName, fmt.Errorf("建通配 Ingress 失败: %w", err))
 	}
 
-	// 全部成功：更新 cert 状态为 issued，记录到期时间与签发时间。
-	// 首次签发不设置 cert_last_renewed_at（用 null.Time{}，COALESCE 保留原值）。
+	// 全部成功：更新 cert 状态为 issued，记录到期时间与签发/续签时间。
+	// 首签记录 cert_last_issued_at；续签记录 cert_last_renewed_at。
+	// 未传入的时间戳字段用 null.Time{}，SQL COALESCE 会保留原值（不覆盖）。
 	//
 	// 注意：到这里通配证书 Secret 与 Ingress 都已真实创建成功，集群已就绪。
 	// 若此处或下面写 ready 的 DB 调用失败，刻意只返回 error 交给 worker 重试，
 	// 绝不调 fail() 置 failed——重试是幂等的（重签 + 重 apply Secret/Ingress 安全），
 	// 最终会把状态收敛到 issued/ready；而若标 failed 会造成「集群已就绪却显示失败」
 	// 的错误观测。这是有意设计，不是漏掉 fail()。
-	if err := h.setCertStatus(ctx, orgID, domain.CertStatusIssued, cert.NotAfter, true, null.Time{}); err != nil {
+	if err := h.setCertStatus(ctx, orgID, domain.CertStatusIssued, cert.NotAfter, !isRenewal, isRenewal, null.Time{}); err != nil {
 		return err
 	}
 
@@ -240,14 +250,18 @@ func (h *WebPublishProvisionHandler) fail(ctx context.Context, orgID, certSecret
 }
 
 // setCertStatus 更新证书状态与相关时间字段。
-// 当 recordIssuedAt=true 时写入 cert_last_issued_at=now()；
-// 首次签发传 null.Time{} 给 CertLastRenewedAt，COALESCE 会保留原值（通常为 NULL）。
+//
+// recordIssuedAt=true 时写 cert_last_issued_at=now()（首签成功路径）；
+// recordRenewedAt=true 时写 cert_last_renewed_at=now()（续签成功路径）；
+// 两者均为 false 时（进行中状态）两个时间戳字段传 null.Time{}，SQL COALESCE 保留原值。
+// renewedAt 参数保留供外部直接传入续签时间（当前均传 null.Time{}，由 recordRenewedAt 控制 now()）。
 func (h *WebPublishProvisionHandler) setCertStatus(
 	ctx context.Context,
 	orgID string,
 	status string,
 	notAfterUnix int64,
 	recordIssuedAt bool,
+	recordRenewedAt bool,
 	renewedAt null.Time,
 ) error {
 	params := sqlc.SetWebPublishCertStatusParams{
@@ -256,14 +270,19 @@ func (h *WebPublishProvisionHandler) setCertStatus(
 		OrgID:             orgID,
 	}
 
-	// 仅在 notAfterUnix>0 时写证书到期时间，issuing 阶段无需写
+	// 仅在 notAfterUnix>0 时写证书到期时间，issuing/renewing 阶段无需写
 	if notAfterUnix > 0 {
 		params.CertNotAfter = null.TimeFrom(time.Unix(notAfterUnix, 0).UTC())
 	}
 
-	// 签发成功时记录最近签发时间
+	// 首签成功时记录最近签发时间
 	if recordIssuedAt {
 		params.CertLastIssuedAt = null.TimeFrom(time.Now().UTC())
+	}
+
+	// 续签成功时记录最近续签时间（COALESCE 保留原有 cert_last_issued_at 不变）
+	if recordRenewedAt {
+		params.CertLastRenewedAt = null.TimeFrom(time.Now().UTC())
 	}
 
 	if err := h.store.SetWebPublishCertStatus(ctx, params); err != nil {
