@@ -234,10 +234,11 @@ func TestAppStopContainerHandler_StatusError_PropagatesError(t *testing.T) {
 // hermes 重新启动后从 bootstrap 获取最新配置，sessions 被清除后 snapshot 最新 SOUL.md。
 func TestAppRestartContainerHandler_ImageUnchanged_DeletesSessionsThenScales(t *testing.T) {
 	stub := runtimeStub(t)
-	stub.app.RuntimeImageRef = "hermes-v1:same"
+	// 用 applied_image_ref 驱动「镜像未变」判定（与生产一致：runtime_image_ref 在 k8s 路径恒空）。
+	stub.app.AppliedImageRef = "hermes-v1:same"
 	orch := &fakeAppOrchestrator{}
 	objects := &fakeObjectStore{}
-	// refresher 返回与当前一致的镜像，触发镜像不变路径。
+	// refresher 返回与已应用一致的镜像，触发镜像不变路径。
 	refresher := &fakeInputRefresher{
 		returnResult: AppInputRefreshResult{VersionRevision: 3, ImageRef: "hermes-v1:same"},
 	}
@@ -253,10 +254,9 @@ func TestAppRestartContainerHandler_ImageUnchanged_DeletesSessionsThenScales(t *
 	assert.NotContains(t, objects.deletedPrefixes, storage.AppPrefix(testAppID)+"memories/")
 	assert.NotContains(t, objects.deletedPrefixes, storage.AppPrefix(testAppID)+"MEMORY.md")
 	assert.NotContains(t, objects.deletedPrefixes, storage.AppPrefix(testAppID)+"USER.md")
-	// Scale(0) 然后 Scale(1)：重建 pod。
-	require.Equal(t, 2, orch.scaleCalls)
-	require.Equal(t, int32(0), orch.scaleHistory[0])
-	require.Equal(t, int32(1), orch.scaleHistory[1])
+	// 镜像不变重启走 RolloutRestart（稳定重建 pod），不再用 Scale(0)→Scale(1)。
+	require.Equal(t, 1, orch.rolloutRestartCalls, "镜像不变重启应调用一次 RolloutRestart")
+	require.Equal(t, 0, orch.scaleCalls, "镜像不变重启不再用 Scale 重建")
 	// 状态更新为 running。
 	require.Equal(t, domain.AppStatusRunning, stub.statusUpdates[len(stub.statusUpdates)-1])
 	// SetAppAppliedVersion 被调用，记录版本信息。
@@ -270,7 +270,8 @@ func TestAppRestartContainerHandler_ImageUnchanged_DeletesSessionsThenScales(t *
 // k8s UpdateImage 触发 Deployment Recreate，不需要 manager 手动 Scale。
 func TestAppRestartContainerHandler_ImageChanged_CallsUpdateImage(t *testing.T) {
 	stub := runtimeStub(t)
-	stub.app.RuntimeImageRef = "hermes-v1:old"
+	// 上次已应用镜像为 old，refresher 解析出 new → 触发镜像变更分支（与 runtime_image_ref 无关）。
+	stub.app.AppliedImageRef = "hermes-v1:old"
 	orch := &fakeAppOrchestrator{}
 	objects := &fakeObjectStore{}
 	// refresher 返回新镜像 ref，触发镜像变更分支。
@@ -319,8 +320,9 @@ func TestAppRestartContainerHandler_NoRefresher_ScalesDirectly(t *testing.T) {
 
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
 	require.NoError(t, err)
-	// 无 refresher 时仍执行 Scale(0→1)。
-	require.Equal(t, 2, orch.scaleCalls)
+	// 无 refresher 时仍走镜像不变路径，用 RolloutRestart 重建 pod。
+	require.Equal(t, 1, orch.rolloutRestartCalls)
+	require.Equal(t, 0, orch.scaleCalls)
 	// UpdateImage 不被调用。
 	require.Equal(t, 0, orch.updateImageCalls)
 	// S3 objects 被清除（objects != nil 时总执行）。
@@ -341,8 +343,9 @@ func TestAppRestartContainerHandler_NoObjectStore_SkipsS3Cleanup(t *testing.T) {
 
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
 	require.NoError(t, err)
-	// Scale(0→1) 仍正常执行。
-	require.Equal(t, 2, orch.scaleCalls)
+	// 无 S3 时仍正常 RolloutRestart 重建 pod。
+	require.Equal(t, 1, orch.rolloutRestartCalls)
+	require.Equal(t, 0, orch.scaleCalls)
 	require.Equal(t, domain.AppStatusRunning, stub.statusUpdates[len(stub.statusUpdates)-1])
 }
 
@@ -373,17 +376,17 @@ func TestAppRestartContainerHandler_NoImage_SetsRestartingBeforeScale(t *testing
 	stub := runtimeStub(t)
 	stub.app.RuntimePhase = domain.RuntimePhaseReady // 模拟重启前处于就绪态
 	orch := &fakeAppOrchestrator{}
-	// 不注入 refresher → 直接走镜像不变路径（Scale(0)→Scale(1)）。
+	// 不注入 refresher → 直接走镜像不变路径（RolloutRestart）。
 	handler := NewAppRestartContainerHandler(stub, orch, nil)
 
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
 	require.NoError(t, err)
 
-	// runtime_phase=restarting 必须在 Scale 调用之前写入（runtimePhaseUpdates 先于 scaleHistory）。
+	// runtime_phase=restarting 必须在重建之前写入，关闭渠道发起闸门（双轴模型）。
 	require.NotEmpty(t, stub.runtimePhaseUpdates, "重启路径应写 runtime_phase=restarting")
 	require.Equal(t, domain.RuntimePhaseRestarting, stub.runtimePhaseUpdates[0], "第一次写应为 restarting")
-	// Scale(0)→Scale(1) 完成，共 2 次 Scale 调用。
-	require.Equal(t, 2, orch.scaleCalls, "重启应调用 Scale(0) 和 Scale(1)")
+	// 镜像不变重启用 RolloutRestart 重建 pod。
+	require.Equal(t, 1, orch.rolloutRestartCalls, "重启应调用 RolloutRestart")
 	// 最终业务态 status 推进到 running（主流程不受 runtime_phase 写失败阻断）。
 	require.Equal(t, domain.AppStatusRunning, stub.statusUpdates[len(stub.statusUpdates)-1], "重启后业务态应为 running")
 }
@@ -648,6 +651,9 @@ type fakeAppOrchestrator struct {
 	// Delete 相关
 	deleteCalls int
 	deleteErr   error
+	// RolloutRestart 相关：镜像不变重启走 RolloutRestart（注解触发 Recreate，稳定重建 pod）。
+	rolloutRestartCalls int
+	rolloutRestartErr   error
 	// Status 相关：statusPhase 控制返回的 Phase（空串时默认 "Running"，非 NotFound）；
 	// statusErr 控制是否返回错误（模拟 k8s apiserver 不可达）。
 	statusPhase string
@@ -686,9 +692,10 @@ func (f *fakeAppOrchestrator) Status(_ context.Context, _ string) (k8sorch.AppSt
 	return k8sorch.AppStatus{Phase: phase}, nil
 }
 
-// RolloutRestart 空实现：满足 appOrchestrator 接口，测试中暂无需断言滚动重启调用。
+// RolloutRestart 记录调用次数，供镜像不变重启路径断言（写 restartedAt 注解触发 Recreate）。
 func (f *fakeAppOrchestrator) RolloutRestart(_ context.Context, _ string) error {
-	return nil
+	f.rolloutRestartCalls++
+	return f.rolloutRestartErr
 }
 
 // fakeObjectStore 是 storage.ObjectStore 的最小测试桩，仅实现 MovePrefix / DeletePrefix。

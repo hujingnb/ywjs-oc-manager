@@ -332,10 +332,13 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 		return fmt.Errorf("编排器未配置（k8s.enabled 未启用？），无法重启应用 %s", payload.AppID)
 	}
 
-	// 镜像变更重建分支：refresher 解析出的镜像 ref 与当前 apps.runtime_image_ref 不一致时，
+	// 镜像变更重建分支：refresher 解析出的镜像 ref 与「上次已应用的镜像 applied_image_ref」不一致时，
 	// 调 UpdateImage 触发 Deployment Recreate——k8s 自动停旧 pod 起新 pod，拉取新镜像。
 	// 委托给 app_initialize 路径写回 applied 版本（避免复制初始化逻辑）。
-	if h.inputRefresher != nil && refreshResult.ImageRef != "" && refreshResult.ImageRef != app.RuntimeImageRef {
+	// 用 applied_image_ref（与 version_synced 同源、由 init/重启写入）而非 runtime_image_ref：
+	// k8s 路径下 runtime_image_ref 恒为空，会把「镜像未变」误判为「已变」而走 UpdateImage(相同镜像→不重建)，
+	// 导致镜像不变的重启（改语言 / 发布能力等）根本不重建 pod、不重新 bootstrap。
+	if h.inputRefresher != nil && refreshResult.ImageRef != "" && refreshResult.ImageRef != app.AppliedImageRef {
 		// UpdateImage patch Deployment 镜像，触发 Recreate 策略：k8s 自动停旧 pod 起新 pod。
 		// 幂等：若上一次 UpdateImage 成功但 handler 在 SetAppStatus 前崩溃，重入时再次
 		// UpdateImage 是幂等的（已是新镜像，Deployment 不会重建）。
@@ -400,13 +403,12 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 		slog.ErrorContext(ctx, "重启置 runtime_phase=restarting 失败", "app_id", app.ID, mlog.Err(err))
 	}
 
-	// Scale(0) 停止 pod（k8s preStop 触发 oc-presync 同步 workspace）。
-	if err := h.orch.Scale(ctx, payload.AppID, 0); err != nil {
-		return fmt.Errorf("重启前停止应用失败（Scale replicas=0）: %w", err)
-	}
-	// Scale(1) 重新起 pod，hermes 启动时从 bootstrap 获取配置（含最新版本数据）。
-	if err := h.orch.Scale(ctx, payload.AppID, 1); err != nil {
-		return fmt.Errorf("重启应用失败（Scale replicas=1）: %w", err)
+	// 镜像不变重启用 RolloutRestart（写 restartedAt 注解，Recreate 策略下稳定地停旧 pod 起新 pod）。
+	// 不用 Scale(0)→Scale(1)：相邻两次 replicas 补丁可能被 Deployment 控制器在一个同步周期内合并，
+	// 控制器只看到最终 replicas=1、旧 pod 仍在跑而不重建，导致重启不生效、新配置/能力不重新 bootstrap。
+	// 新 pod 启动时 oc-entrypoint 重新拉 bootstrap（含最新版本数据与已开通的发布能力）。
+	if err := h.orch.RolloutRestart(ctx, payload.AppID); err != nil {
+		return fmt.Errorf("重启应用失败（RolloutRestart）: %w", err)
 	}
 	if err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusRunning}); err != nil {
 		return fmt.Errorf("更新应用状态失败: %w", err)
