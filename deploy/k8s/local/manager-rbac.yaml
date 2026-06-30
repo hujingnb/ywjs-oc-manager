@@ -20,6 +20,11 @@ rules:
   - apiGroups: [""]
     resources: ["services", "secrets", "configmaps"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # web-publish 企业开通：在 oc-apps 写通配证书 TLS Secret（上面 secrets 已含）并建通配 Ingress。
+  # ingresses 在 networking.k8s.io API 组，须单列授权，否则 provisioning 建 Ingress 被 RBAC 拒。
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch"]
