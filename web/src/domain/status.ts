@@ -107,3 +107,33 @@ export function formatMemberStatus(status: string): StatusView {
 export function formatMemberRole(role: string): string {
   return memberRoleLabels[role] ?? role
 }
+
+// siteStatusViews 覆盖已发布站点状态（active/disabled/expired）。
+// label 为 i18n 键（domain.siteStatus.*），由 StatusBadge 通过 t() 展示当前语言文案。
+const siteStatusViews: Record<string, Omit<StatusView, 'params'>> = {
+  active:   { label: 'domain.siteStatus.active',   tone: 'success' },
+  disabled: { label: 'domain.siteStatus.disabled', tone: 'neutral' },
+  expired:  { label: 'domain.siteStatus.expired',  tone: 'warning' },
+}
+
+// formatSiteStatus 将站点状态映射为 i18n 标签键和视觉语义。
+// 未识别状态返回 label='domain.siteStatus.unknown' + params.status=原始值。
+export function formatSiteStatus(status: string): StatusView {
+  return siteStatusViews[status] ?? { label: 'domain.siteStatus.unknown', tone: 'warning', params: { status } }
+}
+
+// certStatusViews 覆盖 web-publish 通配证书状态（none/issuing/renewing/issued/failed）。
+// label 为 i18n 键（domain.certStatus.*）。
+const certStatusViews: Record<string, Omit<StatusView, 'params'>> = {
+  none:     { label: 'domain.certStatus.none',     tone: 'neutral' },
+  issuing:  { label: 'domain.certStatus.issuing',  tone: 'warning' },
+  renewing: { label: 'domain.certStatus.renewing', tone: 'warning' },
+  issued:   { label: 'domain.certStatus.issued',   tone: 'success' },
+  failed:   { label: 'domain.certStatus.failed',   tone: 'danger' },
+}
+
+// formatCertStatus 将证书状态映射为 i18n 标签键和视觉语义。
+// 未识别状态返回 label='domain.certStatus.unknown' + params.status=原始值。
+export function formatCertStatus(status: string): StatusView {
+  return certStatusViews[status] ?? { label: 'domain.certStatus.unknown', tone: 'warning', params: { status } }
+}
