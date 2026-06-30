@@ -93,6 +93,9 @@ type Dependencies struct {
 	AllowedOrigins []string
 	// DefaultLocale 是平台默认界面语言（来自 config i18n.default_locale），经公开配置端点下发给前端。
 	DefaultLocale string
+	// WebPublishDevMode 透传 config.WebPublish.DevSelfSignedCert，经公开配置端点下发给前端，
+	// 供前端决定是否在 web-publish DNS provider 下拉中展示「本地调试(local)」选项。
+	WebPublishDevMode bool
 }
 
 // NewRouter 创建 Manager API 的 HTTP 路由。
@@ -169,7 +172,7 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	if defaultLocale == "" {
 		defaultLocale = "en"
 	}
-	handlers.RegisterPublicConfigRoutes(router, handlers.NewConfigHandler(defaultLocale, service.SupportedLocales))
+	handlers.RegisterPublicConfigRoutes(router, handlers.NewConfigHandler(defaultLocale, service.SupportedLocales, dep.WebPublishDevMode))
 
 	// ── user：RequireUserAuth 注入 principal，所有业务路由挂载在此组 ──
 	user := router.Group("")

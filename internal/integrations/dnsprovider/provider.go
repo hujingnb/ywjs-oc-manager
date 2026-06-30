@@ -29,12 +29,17 @@ const (
 	ProviderTencentcloud ProviderType = "tencentcloud"
 	// ProviderCmcccloud 中国移动云 DNS（lego 无原生，vendor certimate 实现）。
 	ProviderCmcccloud ProviderType = "cmcccloud"
+	// ProviderLocal 本地调试占位 provider：仅当平台开启 dev_self_signed_cert 时可选用，
+	// 配合自签证书 provisioner 走完整开通流程（不真实调用任何云 DNS API）。
+	// 是否允许选用由 service 层结合 dev 开关二次校验；factory.New 不构造它（dev 走自签 provisioner 旁路）。
+	ProviderLocal ProviderType = "local"
 )
 
 // Valid 报告 pt 是否为受支持的 provider，用于落库前与签发前校验，挡住脏数据。
+// ProviderLocal 也视为合法取值（已知枚举），但其「仅 dev 模式可用」由 service 层另行 gate。
 func (pt ProviderType) Valid() bool {
 	switch pt {
-	case ProviderAlidns, ProviderHuaweicloud, ProviderTencentcloud, ProviderCmcccloud:
+	case ProviderAlidns, ProviderHuaweicloud, ProviderTencentcloud, ProviderCmcccloud, ProviderLocal:
 		return true
 	default:
 		return false

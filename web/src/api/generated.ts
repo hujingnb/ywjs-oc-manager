@@ -13313,6 +13313,11 @@ export interface components {
             default_locale?: string;
             /** @description SupportedLocales 是平台受支持的界面语言集合，供前端渲染语言选择器。 */
             supported_locales?: string[];
+            /**
+             * @description WebPublishDevMode 表示平台是否开启 web-publish 本地/dev 自签模式（config.WebPublish.DevSelfSignedCert）。
+             *     仅供前端决定是否在 DNS provider 下拉中展示「本地调试(local)」选项；生产恒为 false。
+             */
+            web_publish_dev_mode?: boolean;
         };
         "handlers.RechargeRequest": {
             /** @description CreditAmount 是充值额度，必须为正数，service 层会同步写入 new-api。 */

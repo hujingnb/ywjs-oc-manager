@@ -17,7 +17,7 @@ import (
 func TestConfigHandler_Public(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	handlers.RegisterPublicConfigRoutes(r, handlers.NewConfigHandler("en", []string{"en", "zh"}))
+	handlers.RegisterPublicConfigRoutes(r, handlers.NewConfigHandler("en", []string{"en", "zh"}, false))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/config", nil)
 	w := httptest.NewRecorder()

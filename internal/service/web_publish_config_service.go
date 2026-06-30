@@ -101,12 +101,16 @@ type WebPublishConfigService struct {
 	store    WebPublishConfigStore
 	notifier JobNotifier // JobNotifier 接口复用自 runtime_operation_service.go
 	cipher   *auth.Cipher
+	// devSelfSignedCert 反映平台是否开启本地/dev 自签证书模式（来自 config.WebPublish.DevSelfSignedCert）。
+	// 仅当其为 true 时，才允许选用 dnsprovider.ProviderLocal（本地调试占位 provider）。生产恒为 false。
+	devSelfSignedCert bool
 }
 
 // NewWebPublishConfigService 创建 WebPublishConfigService。
 // cipher 必须已用 32 字节 master_key 初始化，用于加密 DNS 凭证。
-func NewWebPublishConfigService(store WebPublishConfigStore, notifier JobNotifier, cipher *auth.Cipher) *WebPublishConfigService {
-	return &WebPublishConfigService{store: store, notifier: notifier, cipher: cipher}
+// devSelfSignedCert 透传平台 dev 自签开关，用于 gate 「local」provider 的可用性。
+func NewWebPublishConfigService(store WebPublishConfigStore, notifier JobNotifier, cipher *auth.Cipher, devSelfSignedCert bool) *WebPublishConfigService {
+	return &WebPublishConfigService{store: store, notifier: notifier, cipher: cipher, devSelfSignedCert: devSelfSignedCert}
 }
 
 // Configure 写入企业 web-publish 基础配置，仅平台管理员可调用。
@@ -118,14 +122,34 @@ func NewWebPublishConfigService(store WebPublishConfigStore, notifier JobNotifie
 //  4. SiteTTLDays / MaxSites 补默认值；
 //  5. 调用 UpsertWebPublishConfig（ON DUPLICATE KEY UPDATE，不触动 provisioning/cert 状态机）。
 func (s *WebPublishConfigService) Configure(ctx context.Context, p auth.Principal, in WebPublishConfigInput) error {
-	// 权限检查：仅平台管理员可配置 web-publish。
-	if !auth.CanManageWebPublishConfig(p) {
+	// 权限检查：平台管理员可配置任意企业；企业管理员仅可配置自己所属企业。
+	if !auth.CanConfigureWebPublish(p, in.OrgID) {
 		return ErrForbidden
+	}
+	// 企业管理员（非平台管理员）只能在平台管理员「已开通」之后才配置：
+	// 读取现有配置，要求 enabled=true，否则视为越权（防止绕过开通闸自行初始化/在停用态改配置）。
+	// 平台管理员不受此限（含首次创建配置行）。
+	if !auth.CanManageWebPublishConfig(p) {
+		cfg, err := s.store.GetWebPublishConfig(ctx, in.OrgID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrForbidden
+			}
+			return fmt.Errorf("查询企业 %s web-publish 配置失败: %w", in.OrgID, err)
+		}
+		if !cfg.Enabled {
+			return ErrForbidden
+		}
 	}
 
 	// 校验 DNS provider 是否在已知枚举白名单内，防止写入非法值。
 	if !dnsprovider.ProviderType(in.DNSProvider).Valid() {
 		return fmt.Errorf("不支持的 DNS provider: %s", in.DNSProvider)
+	}
+	// 「local」是仅供本地 dev 调试的占位 provider：只有平台开启 dev_self_signed_cert 时才允许选用，
+	// 否则（生产）拒绝，避免误选导致真实签发链路（factory.New 不支持 local）失败。
+	if dnsprovider.ProviderType(in.DNSProvider) == dnsprovider.ProviderLocal && !s.devSelfSignedCert {
+		return fmt.Errorf("DNS provider %q 仅在本地 dev 自签模式下可用", in.DNSProvider)
 	}
 
 	// 凭证加密：明文 map → JSON → AES-GCM 密文 → base64 字符串 → null.String。

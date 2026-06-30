@@ -531,6 +531,9 @@ type PublicConfigResponse struct {
 	DefaultLocale string `json:"default_locale"`
 	// SupportedLocales 是平台受支持的界面语言集合，供前端渲染语言选择器。
 	SupportedLocales []string `json:"supported_locales"`
+	// WebPublishDevMode 表示平台是否开启 web-publish 本地/dev 自签模式（config.WebPublish.DevSelfSignedCert）。
+	// 仅供前端决定是否在 DNS provider 下拉中展示「本地调试(local)」选项；生产恒为 false。
+	WebPublishDevMode bool `json:"web_publish_dev_mode"`
 }
 
 // ===== 企业 web-publish 发布能力配置 web-publish =====

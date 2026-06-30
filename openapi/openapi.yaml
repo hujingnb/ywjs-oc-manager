@@ -529,6 +529,11 @@ components:
             type: string
           type: array
           uniqueItems: false
+        web_publish_dev_mode:
+          description: |-
+            WebPublishDevMode 表示平台是否开启 web-publish 本地/dev 自签模式（config.WebPublish.DevSelfSignedCert）。
+            仅供前端决定是否在 DNS provider 下拉中展示「本地调试(local)」选项；生产恒为 false。
+          type: boolean
       type: object
     handlers.RechargeRequest:
       properties:

@@ -70,8 +70,9 @@ export const router = createRouter({
         { path: 'platform/custom-skills', component: CustomSkillTicketsPage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'platform/organizations/:orgId/recharge', component: RechargePage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'platform/permissions', component: PermissionsPage, meta: { allowedRoles: PLATFORM_ONLY } },
-        // platform/web-publish-config：平台管理员开通企业 web-publish 能力的配置页。
-        { path: 'platform/web-publish-config', component: WebPublishConfigPage, meta: { allowedRoles: PLATFORM_ONLY } },
+        // platform/web-publish-config：web-publish 配置页。平台管理员可开通/停用/跨企业配置；
+        // 企业管理员可配置「自己企业且平台已开通」的 web-publish（页面按角色自适应，开通/停用仍仅平台管理员）。
+        { path: 'platform/web-publish-config', component: WebPublishConfigPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },
         { path: 'members', component: MembersPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },
         // published-sites：企业已发布站点列表 + 证书状态面板；平台管理员可跨企业查看并重试证书。
         { path: 'published-sites', component: PublishedSitesPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },

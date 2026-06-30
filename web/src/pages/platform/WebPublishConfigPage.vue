@@ -4,11 +4,12 @@
     <n-card :bordered="true">
       <template #header>
         <div>
-          <p class="eyebrow">Platform · Web Publish</p>
+          <p class="eyebrow">{{ isPlatformAdmin ? 'Platform · Web Publish' : 'Web Publish' }}</p>
           <h2 style="margin: 0">{{ t('platform.webPublishConfig.title') }}</h2>
         </div>
       </template>
-      <n-form-item :label="t('platform.webPublishConfig.labelOrg')" label-placement="top">
+      <!-- 平台管理员：企业选择器，可跨企业切换 -->
+      <n-form-item v-if="isPlatformAdmin" :label="t('platform.webPublishConfig.labelOrg')" label-placement="top">
         <n-select
           v-model:value="selectedOrgId"
           :loading="orgsLoading"
@@ -19,6 +20,10 @@
           style="max-width: 400px"
         />
       </n-form-item>
+      <!-- 企业管理员：锁定本企业，无选择器；展示当前通配域名作为作用范围提示 -->
+      <p v-else class="state-text">
+        {{ t('platform.webPublishConfig.labelOrg') }}：本企业<span v-if="webPublishConfig?.wildcard_domain"> · {{ webPublishConfig.wildcard_domain }}</span>
+      </p>
     </n-card>
 
     <!-- 以下区块仅在选中企业后展示 -->
@@ -145,8 +150,8 @@
         </n-form>
       </n-card>
 
-      <!-- 开通 / 停用操作卡片 -->
-      <n-card :bordered="true">
+      <!-- 开通 / 停用操作卡片：基础设施层闸门，仅平台管理员可见可操作 -->
+      <n-card v-if="isPlatformAdmin" :bordered="true">
         <template #header>
           <h3 style="margin: 0">{{ t('platform.webPublishConfig.enableDisableTitle') }}</h3>
         </template>
@@ -198,8 +203,8 @@
         </p>
       </n-card>
 
-      <!-- 证书状态面板：复用 WebPublishCertPanel，canRetry=true 允许平台管理员重试 -->
-      <WebPublishCertPanel :org-id="selectedOrgId" :can-retry="true" />
+      <!-- 证书状态面板：复用 WebPublishCertPanel；仅平台管理员可重试签发，企业管理员只读 -->
+      <WebPublishCertPanel :org-id="selectedOrgId" :can-retry="isPlatformAdmin" />
     </template>
 
     <!-- 停用二次确认弹框 -->
@@ -217,7 +222,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   NButton, NCard, NForm, NFormItem, NGrid, NGridItem, NInput, NInputNumber,
@@ -233,14 +238,21 @@ import {
 } from '@/api/hooks/useWebPublish'
 import WebPublishCertPanel from '@/components/WebPublishCertPanel.vue'
 import type { ConfigureWebPublishRequest } from '@/api/hooks/useWebPublish'
+import { useAuthStore } from '@/stores/auth'
+import { useQuery } from '@tanstack/vue-query'
+import { apiRequest } from '@/api/client'
 
-// WebPublishConfigPage 是平台管理员专属页，用于开通和配置企业 web-publish 能力。
-// 企业选择使用下拉选择器（in-page selector），与 RechargePage 使用路由参数 :orgId 不同，
-// 此页需跨企业快速切换，使用在页面选择器更符合操作习惯。
+// WebPublishConfigPage：web-publish 配置页，按角色自适应。
+// - 平台管理员：可跨企业选择，配置 + 开通/停用 + 重试签发；
+// - 企业管理员：仅管理「自己企业且平台已开通」的配置（无企业选择器、无开通/停用、证书只读）。
 const { t } = useI18n()
 
-// 企业列表：平台管理员视角，仅平台管理员有权访问。
-const { data: organizations, isLoading: orgsLoading } = useOrganizationsQuery()
+const auth = useAuthStore()
+// isPlatformAdmin 决定页面形态：选择器/开通停用/证书重试均仅平台管理员可见。
+const isPlatformAdmin = computed(() => auth.isPlatformAdmin)
+
+// 企业列表：仅平台管理员有权访问，企业管理员不拉取（避免 403）。
+const { data: organizations, isLoading: orgsLoading } = useOrganizationsQuery(() => isPlatformAdmin.value)
 
 // orgOptions 将企业列表转为 NSelect 选项；含企业名和 code 便于快速识别。
 const orgOptions = computed(() =>
@@ -250,8 +262,10 @@ const orgOptions = computed(() =>
   }))
 )
 
-// selectedOrgId 保存当前选中的企业 ID，是页面后续所有查询和操作的驱动源。
-const selectedOrgId = ref<string | undefined>(undefined)
+// selectedOrgId 保存当前作用企业 ID。平台管理员通过选择器选择；企业管理员锁定为自己所属企业。
+const selectedOrgId = ref<string | undefined>(
+  auth.isPlatformAdmin ? undefined : (auth.user?.org_id ?? undefined),
+)
 
 // selectedOrgIdRef 包装为满足 hooks 参数签名的响应式引用。
 const selectedOrgIdRef = computed(() => selectedOrgId.value)
@@ -266,12 +280,28 @@ const enableMutation = useEnableWebPublish(selectedOrgIdRef)
 const disableMutation = useDisableWebPublish(selectedOrgIdRef)
 
 // DNS provider 枚举选项：与后端白名单 alidns/huaweicloud/tencentcloud/cmcccloud 对齐。
-const dnsProviderOptions = [
-  { label: '阿里云 DNS (alidns)', value: 'alidns' },
-  { label: '华为云 DNS (huaweicloud)', value: 'huaweicloud' },
-  { label: '腾讯云 DNS (tencentcloud)', value: 'tencentcloud' },
-  { label: '移动云 DNS (cmcccloud)', value: 'cmcccloud' },
-]
+// webPublishDevMode 来自公开配置端点（platform config.WebPublish.DevSelfSignedCert）：
+// 仅当平台开启本地/dev 自签模式时，下方 provider 下拉才追加「本地调试(local)」选项。
+const publicConfigQuery = useQuery({
+  queryKey: ['public-config'],
+  queryFn: () => apiRequest<{ web_publish_dev_mode?: boolean }>('/api/v1/config', { withAuth: false }),
+})
+const webPublishDevMode = computed(() => Boolean(publicConfigQuery.data.value?.web_publish_dev_mode))
+
+// DNS provider 枚举选项：与后端白名单对齐 alidns/huaweicloud/tencentcloud/cmcccloud；
+// dev 模式额外提供「本地调试(local)」占位 provider，配合自签证书在本地一键开通（生产不出现）。
+const dnsProviderOptions = computed(() => {
+  const base = [
+    { label: '阿里云 DNS (alidns)', value: 'alidns' },
+    { label: '华为云 DNS (huaweicloud)', value: 'huaweicloud' },
+    { label: '腾讯云 DNS (tencentcloud)', value: 'tencentcloud' },
+    { label: '移动云 DNS (cmcccloud)', value: 'cmcccloud' },
+  ]
+  if (webPublishDevMode.value) {
+    base.push({ label: '本地调试 (local)', value: 'local' })
+  }
+  return base
+})
 
 // form 是配置表单的响应式状态，提交后不回填凭证（凭证为 write-only）。
 const form = reactive({
@@ -295,6 +325,16 @@ const credentials = reactive({
   // region：华为云 DNS 额外必需字段，其他 provider 不传。
   region: '',
 })
+
+// 配置加载后回填可编辑字段，让管理员看到并续编当前配置（凭证为 write-only，绝不回填）。
+// immediate + watch 兼顾切换企业（平台管理员）与首次加载（企业管理员锁定本企业）。
+watch(webPublishConfig, (cfg) => {
+  if (!cfg) return
+  form.base_domain = cfg.base_domain ?? ''
+  form.dns_provider = cfg.dns_provider ?? ''
+  if (cfg.site_ttl_days) form.site_ttl_days = cfg.site_ttl_days
+  if (cfg.max_sites) form.max_sites = cfg.max_sites
+}, { immediate: true })
 
 // canSubmitConfig 要求根域名和 provider 非空，才允许提交。
 const canSubmitConfig = computed(() =>

@@ -462,7 +462,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 
 	// web-publish 配置服务：平台管理员配置/开通/停用企业发布能力。
 	// dbStore.Queries 满足 WebPublishConfigStore；redisQueue 满足 JobNotifier；cipher 来自启动早期初始化。
-	webPublishConfigService := service.NewWebPublishConfigService(dbStore.Queries, redisQueue, cipher)
+	webPublishConfigService := service.NewWebPublishConfigService(dbStore.Queries, redisQueue, cipher, cfg.WebPublish.DevSelfSignedCert)
 
 	registry := handlers.NewRegistry()
 	// app 初始化 handler 走 k8s 路径：编排能力经 SetOrchestrator 注入（见下方），
@@ -728,6 +728,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			JobNotifier:                   redisQueue,
 			AllowedOrigins:                allowedOriginsFromConfig(cfg),
 			DefaultLocale:                 cfg.I18n.DefaultLocale,
+			WebPublishDevMode:             cfg.WebPublish.DevSelfSignedCert,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

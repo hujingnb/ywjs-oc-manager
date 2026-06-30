@@ -181,6 +181,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useOwnApp } from '@/composables/useOwnApp'
 import { useAdminPerspective, type AdminPerspective } from '@/composables/useAdminPerspective'
 import { useSkillTicketBadgeQuery } from '@/api/hooks/useSkillTickets'
+import { useWebPublishConfigQuery } from '@/api/hooks/useWebPublish'
 
 // DashboardLayout 负责已登录后台的导航外壳、环境标识和退出入口。
 // 具体页面权限仍由路由和页面级查询控制，这里只隐藏不适合当前角色的导航项。
@@ -243,6 +244,12 @@ const isOrgAdmin = computed(() => auth.isOrgAdmin)
 // ticketBadge 提供「定制技能」菜单待处理工单角标数；该端点仅平台管理员有权，
 // 角标也仅在平台管理员菜单分支渲染，非平台管理员视角下不会读取此值。
 const ticketBadge = useSkillTicketBadgeQuery(isPlatformAdmin)
+
+// 企业管理员自管 web-publish 入口的显隐依据：查本企业配置，仅当平台管理员已开通（enabled）才显示菜单。
+// 仅 org_admin 触发查询（ownOrgId 为空时 query 暂停），平台管理员/成员不拉取。
+const ownOrgId = computed(() => (isOrgAdmin.value ? auth.user?.org_id ?? undefined : undefined))
+const { data: ownWebPublishConfig } = useWebPublishConfigQuery(ownOrgId)
+const webPublishEnabledForOrg = computed(() => Boolean(ownWebPublishConfig.value?.enabled))
 // pendingTicketCount 是待处理工单数；查询未就绪时为 0（不显示角标）。
 const pendingTicketCount = computed(() => ticketBadge.data.value ?? 0)
 
@@ -328,6 +335,11 @@ const menuOptions = computed<MenuOption[]>(() => {
     // 已发布站点入口：与 members/audit 同属组织管理视角，org_admin 与 platform_admin 可见，
     // 路由 allowedRoles 为 ORG_ADMIN_ABOVE，普通成员不展示。
     items.push({ key: '/published-sites', label: t('layout.nav.publishedSites'), icon: () => h(Globe, { size: 18 }) })
+    // Web 发布配置（企业管理员自管入口）：仅当本企业已被平台管理员开通时才显示。
+    // 平台管理员的同名入口在上方平台分支已加；此处只为 org_admin 在已开通后提供自管菜单。
+    if (isOrgAdmin.value && webPublishEnabledForOrg.value) {
+      items.push({ key: '/platform/web-publish-config', label: t('layout.nav.webPublishConfig'), icon: () => h(Globe, { size: 18 }) })
+    }
   }
   items.push(
     { key: memberAppPath.value, label: t('layout.nav.instance'), icon: () => h(Bot, { size: 18 }) },

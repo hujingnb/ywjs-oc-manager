@@ -424,7 +424,20 @@ func CanViewSkillTicket(p Principal, ticketRequesterUserID string) bool {
 
 // web-publish 能力开通 ----------------------------------------------------------
 
-// CanManageWebPublishConfig 报告是否可开通/配置企业 web-publish 能力——仅平台管理员。
+// CanManageWebPublishConfig 报告是否可「开通 / 停用 / 重试签发」企业 web-publish 能力——仅平台管理员。
+// 这是基础设施层闸门（涉及 DNS provisioning 与证书签发），始终保留给平台管理员。
 func CanManageWebPublishConfig(p Principal) bool {
 	return p.Role == domain.UserRolePlatformAdmin
+}
+
+// CanConfigureWebPublish 报告主体能否配置「指定企业」的 web-publish 基础设置
+// （基础域名 / DNS provider / 凭证 / 配额 / TTL）。平台管理员可配置任意企业；
+// 企业管理员仅可配置自己所属企业。是否「已被平台管理员开通」由 service 层结合配置状态
+// 二次校验（未开通时企业管理员不得配置），以落地「平台开通后企业管理员才可自管」的产品约束。
+// 开通 / 停用 / 重试签发仍仅限平台管理员（见 CanManageWebPublishConfig）。
+func CanConfigureWebPublish(p Principal, orgID string) bool {
+	if p.Role == domain.UserRolePlatformAdmin {
+		return true
+	}
+	return p.Role == domain.UserRoleOrgAdmin && p.OrgID == orgID
 }
