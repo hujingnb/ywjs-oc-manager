@@ -253,7 +253,9 @@ func (h *WebPublishProvisionHandler) fail(ctx context.Context, orgID, certSecret
 //
 // recordIssuedAt=true 时写 cert_last_issued_at=now()（首签成功路径）；
 // recordRenewedAt=true 时写 cert_last_renewed_at=now()（续签成功路径）；
-// 两者均为 false 时（进行中状态）两个时间戳字段传 null.Time{}，SQL COALESCE 保留原值。
+// 两者均为 false 时（进行中状态）两个时间戳字段保持 null.Time{}。
+// SQL 对两个时间戳列均用 COALESCE(?, 列)：传 null.Time{} 时保留原值不被清空，
+// 故续签只写 renewed_at 不会抹掉原始首签时间 cert_last_issued_at。
 // renewedAt 参数保留供外部直接传入续签时间（当前均传 null.Time{}，由 recordRenewedAt 控制 now()）。
 func (h *WebPublishProvisionHandler) setCertStatus(
 	ctx context.Context,

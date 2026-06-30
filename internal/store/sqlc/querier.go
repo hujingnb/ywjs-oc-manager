@@ -309,7 +309,9 @@ type Querier interface {
 	// disabled 时同步写 deleted_at（下线时间戳）；enabled 时清空，让重启用户能恢复。
 	SetUserStatus(ctx context.Context, arg SetUserStatusParams) error
 	// 状态机/巡检更新证书状态：状态 + 到期 + 最近签发时间 + 最近续签时间 + 摘要。
-	// cert_last_renewed_at 用 COALESCE 跳过传 NULL 的场景（首签只更新 issued_at，续签更新 renewed_at）。
+	// cert_last_issued_at 与 cert_last_renewed_at 均用 COALESCE 跳过传 NULL 的场景：
+	// 首签只传 issued_at（renewed_at=NULL，保留原值）；续签只传 renewed_at（issued_at=NULL，保留原始首签时间）。
+	// 否则续签传 NULL 会把原始首签时间戳清空（cert_last_issued_at 失去意义）。
 	SetWebPublishCertStatus(ctx context.Context, arg SetWebPublishCertStatusParams) error
 	// 开通/停用：置 enabled 与 provisioning_status（开通时由 service 传 'provisioning'）。
 	SetWebPublishEnabled(ctx context.Context, arg SetWebPublishEnabledParams) error

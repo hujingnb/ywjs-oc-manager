@@ -206,6 +206,20 @@ func TestGetReturnsCertStatusDesensitized(t *testing.T) {
 		"SHOULD_NOT_APPEAR", "凭证密文不应出现在任何返回字段")
 }
 
+// TestGetDeniedForOutsider 覆盖：非本企业成员调用 Get 应返回 ErrForbidden，
+// 验证权限拒绝在读取配置前生效。
+func TestGetDeniedForOutsider(t *testing.T) {
+	cipher, _ := auth.NewCipher(make([]byte, 32))
+	// 预置一条配置，确保即便被读取也能验证脱敏；但本用例应在读取前被拒。
+	st := &fakeWPStore{cfg: sqlc.OrgWebPublishConfig{OrgID: "org-1", BaseDomain: "apps.example.com"}}
+	svc := NewWebPublishConfigService(st, &fakeWPNotifier{}, cipher)
+
+	// 以归属 org-OTHER 的成员身份查看 org-1 配置，CanViewOrg 应拒绝。
+	outsider := auth.Principal{Role: domain.UserRoleOrgMember, OrgID: "org-OTHER"}
+	_, err := svc.Get(context.Background(), outsider, "org-1")
+	require.ErrorIs(t, err, ErrForbidden, "非本企业成员不得查看 web-publish 配置")
+}
+
 // TestRetryProvisionDeniedForNonAdmin 覆盖：非平台管理员调用 RetryProvision 应返回 ErrForbidden，
 // 且 store 不应收到任何 CreateJob 调用。
 func TestRetryProvisionDeniedForNonAdmin(t *testing.T) {

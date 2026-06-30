@@ -140,7 +140,7 @@ func (q *Queries) ListWebPublishConfigs(ctx context.Context) ([]OrgWebPublishCon
 
 const setWebPublishCertStatus = `-- name: SetWebPublishCertStatus :exec
 UPDATE org_web_publish_config
-SET cert_status = ?, cert_not_after = ?, cert_last_issued_at = ?, cert_last_renewed_at = COALESCE(?, cert_last_renewed_at), cert_message = ?, updated_at = now()
+SET cert_status = ?, cert_not_after = ?, cert_last_issued_at = COALESCE(?, cert_last_issued_at), cert_last_renewed_at = COALESCE(?, cert_last_renewed_at), cert_message = ?, updated_at = now()
 WHERE org_id = ?
 `
 
@@ -154,7 +154,9 @@ type SetWebPublishCertStatusParams struct {
 }
 
 // 状态机/巡检更新证书状态：状态 + 到期 + 最近签发时间 + 最近续签时间 + 摘要。
-// cert_last_renewed_at 用 COALESCE 跳过传 NULL 的场景（首签只更新 issued_at，续签更新 renewed_at）。
+// cert_last_issued_at 与 cert_last_renewed_at 均用 COALESCE 跳过传 NULL 的场景：
+// 首签只传 issued_at（renewed_at=NULL，保留原值）；续签只传 renewed_at（issued_at=NULL，保留原始首签时间）。
+// 否则续签传 NULL 会把原始首签时间戳清空（cert_last_issued_at 失去意义）。
 func (q *Queries) SetWebPublishCertStatus(ctx context.Context, arg SetWebPublishCertStatusParams) error {
 	_, err := q.db.ExecContext(ctx, setWebPublishCertStatus,
 		arg.CertStatus,

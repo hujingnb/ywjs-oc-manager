@@ -10,6 +10,7 @@ import (
 
 	null "github.com/guregu/null/v5"
 
+	mlog "oc-manager/internal/log"
 	ocredis "oc-manager/internal/redis"
 	"oc-manager/internal/store/sqlc"
 )
@@ -69,9 +70,10 @@ func (c *CertRenewalChecker) CheckOnce(ctx context.Context) error {
 	}
 
 	for _, cfg := range rows {
-		// 单个入队失败不中断整轮巡检，下轮 tick 重试
+		// 单个入队失败不中断整轮巡检，下轮 tick 重试；
+		// 记 Warn 留痕，避免续签失败在生产环境无迹可循。
 		if err := c.enqueuer.EnqueueProvision(ctx, cfg.OrgID); err != nil {
-			// 当前无 logger 依赖，错误静默跳过；Loop 层可扩展日志记录
+			slog.WarnContext(ctx, "入队证书续签失败", "org_id", cfg.OrgID, mlog.Err(err))
 			continue
 		}
 	}
