@@ -113,6 +113,13 @@ export type LogsPage = RawLogsPage & { items: LogEntry[] }
 // QuotaSeries 是 org / platform 维度用量查询的响应类型（items 为 QuotaDate 数组）。
 export type QuotaSeries = RawQuotaSeries & { items: QuotaDate[] }
 
+// ===== Web Publish 相关 =====
+// SiteResult：已发布站点，id/status 在列表展示和状态操作中必须存在。
+export type SiteResult = WithRequired<Schemas['service.SiteResult'], 'id' | 'status'>
+
+// WebPublishConfigResult：企业 web-publish 配置及证书状态，org_id 必须存在。
+export type WebPublishConfigResult = WithRequired<Schemas['service.WebPublishConfigResult'], 'org_id'>
+
 // ===== Skill 相关 =====
 // PlatformSkill：平台库 skill，id/name/version 必须存在（删除/更新依赖 id，列表展示依赖 name/version）。
 export type PlatformSkill = WithRequired<Schemas['service.PlatformSkillResult'], 'id' | 'name' | 'version'>
