@@ -48,7 +48,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { NButton, NCollapse, NCollapseItem, NModal, NProgress } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 
@@ -93,6 +93,32 @@ function onClose(): void {
     store.reset()
   }
 }
+
+// 自动关闭：上传全部完成且无失败 / 无取消时，短暂展示成功汇总后自动卸载弹窗，省去用户手动点「关闭」。
+// 一旦存在失败或取消项，则保留弹窗让用户查看失败详情，不自动关闭。
+const AUTO_CLOSE_DELAY_MS = 1200
+let autoCloseTimer: ReturnType<typeof setTimeout> | null = null
+watch(
+  // 监听是否仍在上传：从 true → false 即表示本次会话刚刚结束，此刻才决策是否自动关闭。
+  () => store.isUploading,
+  (uploading, prevUploading) => {
+    // 清理可能存在的旧计时器，避免上一次会话的延迟关闭误伤新会话。
+    if (autoCloseTimer) {
+      clearTimeout(autoCloseTimer)
+      autoCloseTimer = null
+    }
+    // 仅在「由上传中切换为已结束」且会话仍存在、全部成功（无失败、无取消）时安排自动关闭。
+    if (prevUploading && !uploading && store.session && counts.value.failed === 0 && counts.value.cancelled === 0) {
+      autoCloseTimer = setTimeout(() => {
+        autoCloseTimer = null
+        // 二次确认仍处于已结束状态，防止用户在延迟窗口内又发起了新上传被误关。
+        if (!store.isUploading) {
+          store.reset()
+        }
+      }, AUTO_CLOSE_DELAY_MS)
+    }
+  },
+)
 
 // formatBytes 与既有页面一致的字节格式化，避免引入 lodash 这类大依赖。
 function formatBytes(n: number): string {
