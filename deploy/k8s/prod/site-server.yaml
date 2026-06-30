@@ -1,15 +1,24 @@
 # site-server：公网静态站点代理，部署在 oc-apps namespace，复用多 binary 镜像。
 #
-# 前置条件：在 oc-apps namespace 手动创建 Secret "site-server-secrets"，包含以下 key：
+# 前置条件：在 oc-apps namespace 创建 Secret "site-server-secrets"，包含全部 S3 连接配置与令牌
+# （连接信息也统一收进 Secret，manifest 不再内联 __FILL__ 占位）。所需 key：
+#   s3-endpoint           — 对象存储端点（与 manager storage.s3.endpoint 一致）
+#   s3-region             — 区域（MinIO 等区域无关可填 us-east-1）
+#   s3-bucket             — bucket 名（与 manager storage.s3.bucket 一致）
+#   s3-use-path-style     — 是否 path-style 寻址（"true"/"false"，MinIO/部分自建填 true）
 #   s3-access-key-id      — 对象存储访问密钥 ID
 #   s3-secret-access-key  — 对象存储访问密钥
 #   sync-token            — 与 manager 配置 web_publish.site_sync_token 保持一致的共享令牌
 #
-# 示例：
+# 模板见 deploy/k8s/prod/secret.example.yaml 的 site-server-secrets 段；或手动创建：
 #   kubectl -n oc-apps create secret generic site-server-secrets \
-#     --from-literal=s3-access-key-id=<值> \
-#     --from-literal=s3-secret-access-key=<值> \
+#     --from-literal=s3-endpoint=<值> --from-literal=s3-region=<值> \
+#     --from-literal=s3-bucket=<值> --from-literal=s3-use-path-style=true \
+#     --from-literal=s3-access-key-id=<值> --from-literal=s3-secret-access-key=<值> \
 #     --from-literal=sync-token=<与 manager config 一致的值>
+#
+# 说明：站点对象的存储前缀（默认 published-sites/）由 manager 配置 web_publish.s3_prefix 决定，
+# 写入站点记录并经同步端点下发，site-server 按记录里的 s3_prefix 读取，无需在此配置前缀。
 #
 # 注意：镜像 tag 须与当次部署的 manager-api 镜像 tag 保持同步更新（同一 CI 产物）。
 apiVersion: apps/v1
@@ -47,19 +56,28 @@ spec:
             # site-server HTTP 监听地址；Service 对外暴露 80
             - name: SITE_SERVER_LISTEN
               value: ":80"
-            # 生产对象存储端点：外部托管 S3 兼容服务，通过 secret.example.yaml 中
-            # __FILL_S3_ENDPOINT__ 填写，此处引用 manager 同款凭证（按需替换为独立凭证）
+            # S3 连接配置（端点/区域/bucket/寻址方式）与凭证统一从 site-server-secrets 引用，
+            # 不在 manifest 内联，便于按环境替换且避免明文落库。
             - name: S3_ENDPOINT
-              value: "__FILL_S3_ENDPOINT__"
+              valueFrom:
+                secretKeyRef:
+                  name: site-server-secrets
+                  key: s3-endpoint
             - name: S3_REGION
-              value: "us-east-1"
-            # bucket 名与 manager storage.s3.bucket 一致
+              valueFrom:
+                secretKeyRef:
+                  name: site-server-secrets
+                  key: s3-region
             - name: S3_BUCKET
-              value: "__FILL_S3_BUCKET__"
-            # 外部 S3 兼容服务视实际寻址方式而定；AWS/阿里云 OSS 虚拟主机寻址填 false
+              valueFrom:
+                secretKeyRef:
+                  name: site-server-secrets
+                  key: s3-bucket
             - name: S3_USE_PATH_STYLE
-              value: "true"
-            # S3 凭证从 Secret 引用，避免明文落入 manifest
+              valueFrom:
+                secretKeyRef:
+                  name: site-server-secrets
+                  key: s3-use-path-style
             - name: S3_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
