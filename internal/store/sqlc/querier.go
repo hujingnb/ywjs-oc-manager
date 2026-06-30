@@ -295,6 +295,9 @@ type Querier interface {
 	// 清零后 applied_version_revision=0 永远不等于任何真实版本 revision（从 1 起），
 	// 实例切换后必然进入需重启态，直到重启重新写入 applied_*。
 	SetAppVersion(ctx context.Context, arg SetAppVersionParams) error
+	// bootstrap 渲染时记录本次是否注入了 web-publish 发布能力，用于「能力已开通需重启」检测。
+	// 不更新 updated_at：bootstrap 每次 pod 启动都会调用，避免无意义地刷新 updated_at。
+	SetAppWebPublishApplied(ctx context.Context, arg SetAppWebPublishAppliedParams) error
 	SetChannelBindingChallenge(ctx context.Context, arg SetChannelBindingChallengeParams) error
 	SetChannelBindingStatus(ctx context.Context, arg SetChannelBindingStatusParams) error
 	// 写入飞书凭证 metadata（app_id 明文 + secret 密文 + domain + bot 信息 + injected 标记）并置状态。

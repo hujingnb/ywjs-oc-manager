@@ -13824,6 +13824,12 @@ export interface components {
              *     false 表示版本被编辑过，需重启实例生效。
              */
             version_synced?: boolean;
+            /**
+             * @description WebPublishPendingRestart 标记「企业已开通 web-publish，但本实例尚未注入发布能力」——
+             *     即实例在企业开通前就已运行，需重启重新 bootstrap 才能获得发布能力。
+             *     true 时前端在概览页提示「能力已开通，需重启实例生效」并提供重启入口。
+             */
+            web_publish_pending_restart?: boolean;
         };
         "service.AppSkillResult": {
             category?: string;

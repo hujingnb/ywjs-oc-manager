@@ -36,6 +36,9 @@ type AppStore interface {
 	SetAppVersion(ctx context.Context, arg sqlc.SetAppVersionParams) error
 	// UpdateAppLocale 更新实例语言偏好（hermes 对终端用户说话的语言）。
 	UpdateAppLocale(ctx context.Context, arg sqlc.UpdateAppLocaleParams) error
+	// GetWebPublishConfig 查询企业 web-publish 开通配置；用于判断实例是否「能力已开通但需重启生效」。
+	// 企业未配置时返回 sql.ErrNoRows。
+	GetWebPublishConfig(ctx context.Context, orgID string) (sqlc.OrgWebPublishConfig, error)
 }
 
 // AppImageResolver 把版本 image_id 解析成镜像 ref，用于计算 version_synced 的镜像维度。
@@ -126,6 +129,10 @@ type AppResult struct {
 	// VersionSynced 标记实例运行时是否已与绑定版本对齐（修订 + 镜像都一致）；
 	// false 表示版本被编辑过，需重启实例生效。
 	VersionSynced bool `json:"version_synced"`
+	// WebPublishPendingRestart 标记「企业已开通 web-publish，但本实例尚未注入发布能力」——
+	// 即实例在企业开通前就已运行，需重启重新 bootstrap 才能获得发布能力。
+	// true 时前端在概览页提示「能力已开通，需重启实例生效」并提供重启入口。
+	WebPublishPendingRestart bool `json:"web_publish_pending_restart"`
 	// Locale 是 hermes bot 对终端用户说话的语言（en/zh）；
 	// 空表示使用平台默认语言（历史数据或未设置）。
 	Locale string `json:"locale,omitempty"`
@@ -147,6 +154,10 @@ func (s *AppService) Get(ctx context.Context, principal auth.Principal, appID st
 	result := toAppResult(row.App)
 	// version_synced：修订 + 镜像双维度对比，判断实例是否需要重启。
 	result.VersionSynced = computeVersionSynced(row.App, row.VersionRevision, row.VersionImageID, s.imageResolver)
+	// web_publish_pending_restart：企业已开通 web-publish（enabled + provisioning ready）但本实例
+	// 上次 bootstrap 未注入发布能力（web_publish_applied=false）→ 需重启使能力生效。
+	// 企业未配置/未开通（含 sql.ErrNoRows）或查询出错时一律视为不需提示，避免误报。
+	result.WebPublishPendingRestart = s.computeWebPublishPendingRestart(ctx, row.App)
 	// runtime_image_ref / sha256 含节点内部镜像信息，仅对平台管理员开放。
 	if principal.Role == domain.UserRolePlatformAdmin {
 		result.RuntimeImageRef = row.App.RuntimeImageRef
@@ -239,6 +250,20 @@ func computeVersionSynced(app sqlc.App, versionRevision int32, versionImageID st
 	}
 	ref, ok := resolver.ResolveRuntimeImage(versionImageID)
 	return ok && app.AppliedImageRef == ref
+}
+
+// computeWebPublishPendingRestart 判断实例是否「企业已开通 web-publish 但本实例尚未注入发布能力，需重启生效」。
+// 条件：企业 web-publish 已开通且 provisioning ready，且实例最近一次 bootstrap 未注入（web_publish_applied=false）。
+// 企业未配置（sql.ErrNoRows）/未开通/未就绪/查询出错 → 一律返回 false（不提示），避免误报。
+func (s *AppService) computeWebPublishPendingRestart(ctx context.Context, app sqlc.App) bool {
+	if app.WebPublishApplied {
+		return false // 实例已注入发布能力，无需重启
+	}
+	cfg, err := s.store.GetWebPublishConfig(ctx, app.OrgID)
+	if err != nil {
+		return false // 含 sql.ErrNoRows（企业未配置）：不提示
+	}
+	return cfg.Enabled && cfg.ProvisioningStatus == domain.ProvisioningReady
 }
 
 // SwitchAppVersion 切换实例绑定的助手版本。

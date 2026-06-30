@@ -72,6 +72,11 @@ export default {
     restartNow: '立即重启',
     restartNowPending: '提交中…',
     unknownOrg: '未知企业',
+    // web-publish 能力已开通但实例需重启生效的提示
+    webPublish: {
+      pendingTitle: 'Web 发布能力已开通，需重启实例生效',
+      pendingDesc: '本实例在企业开通 Web 发布之前已运行，尚未具备发布能力。重启后即可在对话中让助手发布网站。',
+    },
     // 版本切换弹窗
     switchVersionTitle: '切换助手版本',
     switchVersionPlaceholder: '请选择助手版本',

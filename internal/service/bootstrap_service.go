@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/hermes"
 	"oc-manager/internal/integrations/storage"
+	mlog "oc-manager/internal/log"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -91,6 +93,8 @@ type bootstrapStore interface {
 	ListAppSkillsByApp(ctx context.Context, appID string) ([]sqlc.AppSkill, error)
 	// GetWebPublishConfig 查询企业 web_publish 开通配置；企业未开通时返回 sql.ErrNoRows。
 	GetWebPublishConfig(ctx context.Context, orgID string) (sqlc.OrgWebPublishConfig, error)
+	// SetAppWebPublishApplied 记录本次 bootstrap 是否注入了 web-publish 发布能力，用于「能力已开通需重启」检测。
+	SetAppWebPublishApplied(ctx context.Context, arg sqlc.SetAppWebPublishAppliedParams) error
 }
 
 // bootstrapSkillSource 提供 skill 预签名 URL（由 S3SkillBlobStore 实现）。
@@ -272,11 +276,21 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 	// web_publish：企业开通且 provisioning ready 时注入，触发 oc-publish skill 条件渲染。
 	// app_token 复用 per-app controlToken（与 knowledge 同），runtime base 同 knowledge base。
 	// 企业未开通（sql.ErrNoRows）或未就绪时三字段留空，hermes 不渲染 web_publish 段。
+	webPublishInjected := false
 	if wp, werr := s.store.GetWebPublishConfig(ctx, app.OrgID); werr == nil &&
 		wp.Enabled && wp.ProvisioningStatus == domain.ProvisioningReady {
 		in.WebPublishRuntimeBaseURL = s.cfg.KnowledgeBaseURL
 		in.WebPublishAppToken = string(controlToken)
 		in.WebPublishBaseDomain = wp.BaseDomain
+		webPublishInjected = true
+	}
+	// 记录本次 bootstrap 是否注入发布能力：与企业开通态比对即可判定运行中实例是否「需重启使能力生效」。
+	// best-effort：写失败不阻断 bootstrap（仅影响 needs-restart 提示，不影响实例正常启动），仅记 warning。
+	if err := s.store.SetAppWebPublishApplied(ctx, sqlc.SetAppWebPublishAppliedParams{
+		WebPublishApplied: webPublishInjected,
+		ID:                app.ID,
+	}); err != nil {
+		slog.WarnContext(ctx, "记录 web_publish_applied 失败", "app_id", app.ID, mlog.Err(err))
 	}
 	manifestYAML, persona, platform, err := s.renderer.Render(in)
 	if err != nil {

@@ -16,6 +16,28 @@
       </n-button>
     </template>
 
+    <!-- web-publish 能力已开通但本实例尚未注入（实例在企业开通前就已运行）：
+         提示需重启使发布能力生效，并提供直接重启入口（复用 restart 操作）。 -->
+    <n-alert
+      v-if="app && app.web_publish_pending_restart"
+      type="warning"
+      :title="t('apps.overview.webPublish.pendingTitle')"
+      style="margin-bottom: 12px"
+    >
+      <n-space align="center" :size="12">
+        <span>{{ t('apps.overview.webPublish.pendingDesc') }}</span>
+        <n-button
+          v-if="canRestartForWebPublish"
+          size="small"
+          type="primary"
+          :disabled="restartMutation.isPending.value"
+          @click="onRestartForVersionSync"
+        >
+          {{ restartMutation.isPending.value ? t('apps.overview.restartNowPending') : t('apps.overview.restartNow') }}
+        </n-button>
+      </n-space>
+    </n-alert>
+
     <p v-if="!app" class="state-text">{{ t('apps.overview.noApp') }}</p>
     <n-descriptions v-else :column="2" bordered size="small">
       <n-descriptions-item :label="t('apps.overview.labelStatus')">
@@ -157,7 +179,7 @@
 
 <script setup lang="ts">
 import { computed, inject, ref, watch, type Ref } from 'vue'
-import { NButton, NCard, NDescriptions, NDescriptionsItem, NModal, NProgress, NSelect, NSpace, NTag, type SelectOption } from 'naive-ui'
+import { NAlert, NButton, NCard, NDescriptions, NDescriptionsItem, NModal, NProgress, NSelect, NSpace, NTag, type SelectOption } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 
 import {
@@ -269,6 +291,17 @@ const canRestartForVersionSync = computed(() => {
   if (!app?.value) return false
   if (!canTriggerRuntimeOperation(auth.user, app.value)) return false
   if (app.value.version_synced !== false) return false
+  const status = app.value.status
+  return status === 'running' || status === 'binding_waiting'
+})
+
+// canRestartForWebPublish 控制 web-publish「能力已开通需重启」横幅里的重启按钮：
+// 口径与 canRestartForVersionSync 一致（有运行时操作权限 + 实例 running/binding_waiting），
+// 仅触发条件换成 web_publish_pending_restart=true（企业已开通但本实例尚未注入发布能力）。
+const canRestartForWebPublish = computed(() => {
+  if (!app?.value) return false
+  if (!canTriggerRuntimeOperation(auth.user, app.value)) return false
+  if (app.value.web_publish_pending_restart !== true) return false
   const status = app.value.status
   return status === 'running' || status === 'binding_waiting'
 })

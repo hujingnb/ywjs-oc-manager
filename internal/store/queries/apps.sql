@@ -197,6 +197,13 @@ SET applied_version_revision = ?,
     updated_at = now()
 WHERE id = ?;
 
+-- name: SetAppWebPublishApplied :exec
+-- bootstrap 渲染时记录本次是否注入了 web-publish 发布能力，用于「能力已开通需重启」检测。
+-- 不更新 updated_at：bootstrap 每次 pod 启动都会调用，避免无意义地刷新 updated_at。
+UPDATE apps
+SET web_publish_applied = ?
+WHERE id = ?;
+
 -- name: SetAppVersion :exec
 -- 切换实例绑定的助手版本，并把 applied_version_revision / applied_image_ref 清零。
 -- 不同版本各自维护独立的 revision 计数，若切换后保留旧 applied_*，当新旧版本

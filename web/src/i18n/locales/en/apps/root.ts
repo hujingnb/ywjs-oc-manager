@@ -72,6 +72,11 @@ export default {
     restartNow: 'Restart now',
     restartNowPending: 'Submitting…',
     unknownOrg: 'Unknown organization',
+    // Web publish capability enabled but the instance needs a restart to take effect
+    webPublish: {
+      pendingTitle: 'Web publish enabled — restart the instance to take effect',
+      pendingDesc: 'This instance was already running before web publish was enabled for the organization, so it does not have the publishing capability yet. After a restart, you can ask the assistant to publish a website in chat.',
+    },
     // Switch version modal
     switchVersionTitle: 'Switch assistant version',
     switchVersionPlaceholder: 'Select a version',

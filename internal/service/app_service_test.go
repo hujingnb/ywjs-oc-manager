@@ -27,6 +27,49 @@ const (
 
 // TestGetAppExposeRuntimeImageOnlyToPlatformAdmin 验证 RuntimeImageRef 和 RuntimeImageSha256
 // 仅在平台管理员调用 Get 时返回；组织管理员调用时两字段应为空。
+// TestGetAppWebPublishPendingRestart 覆盖 web_publish_pending_restart 三种判定:
+// 企业已开通ready+实例未注入→true;实例已注入→false;企业未配置→false。
+func TestGetAppWebPublishPendingRestart(t *testing.T) {
+	// 子用例:企业已开通(enabled+ready)且实例 web_publish_applied=false → 需重启提示 true。
+	t.Run("企业已开通且实例未注入→true", func(t *testing.T) {
+		svc, store := newAppServiceWithStore(t)
+		app := store.mustSeedApp(t)
+		app.WebPublishApplied = false
+		store.app = app
+		store.webPublishCfg = sqlc.OrgWebPublishConfig{OrgID: store.organization.ID, Enabled: true, ProvisioningStatus: domain.ProvisioningReady}
+
+		res, err := svc.Get(context.Background(), platformAdmin(), testAppServiceAppID)
+		require.NoError(t, err)
+		assert.True(t, res.WebPublishPendingRestart, "企业已开通但实例未注入应提示需重启")
+	})
+
+	// 子用例:实例已注入(web_publish_applied=true)→ 不提示。
+	t.Run("实例已注入→false", func(t *testing.T) {
+		svc, store := newAppServiceWithStore(t)
+		app := store.mustSeedApp(t)
+		app.WebPublishApplied = true
+		store.app = app
+		store.webPublishCfg = sqlc.OrgWebPublishConfig{OrgID: store.organization.ID, Enabled: true, ProvisioningStatus: domain.ProvisioningReady}
+
+		res, err := svc.Get(context.Background(), platformAdmin(), testAppServiceAppID)
+		require.NoError(t, err)
+		assert.False(t, res.WebPublishPendingRestart, "实例已注入发布能力不应提示")
+	})
+
+	// 子用例:企业未配置 web-publish(GetWebPublishConfig 返回 ErrNoRows)→ 不提示。
+	t.Run("企业未配置→false", func(t *testing.T) {
+		svc, store := newAppServiceWithStore(t)
+		app := store.mustSeedApp(t)
+		app.WebPublishApplied = false
+		store.app = app
+		store.webPublishErr = sql.ErrNoRows
+
+		res, err := svc.Get(context.Background(), platformAdmin(), testAppServiceAppID)
+		require.NoError(t, err)
+		assert.False(t, res.WebPublishPendingRestart, "企业未开通不应提示")
+	})
+}
+
 func TestGetAppExposeRuntimeImageOnlyToPlatformAdmin(t *testing.T) {
 	t.Parallel()
 	svc, store := newAppServiceWithStore(t)
@@ -128,6 +171,21 @@ type appServiceStoreStub struct {
 	auditErr       error
 	// setVersionCalls 记录 SetAppVersion 被调用的参数，用于断言写入行为。
 	setVersionCalls []sqlc.SetAppVersionParams
+	// webPublishCfg / webPublishErr 控制 GetWebPublishConfig 返回值；
+	// webPublishErr 默认置 sql.ErrNoRows（企业未配置 web-publish），用于 web_publish_pending_restart 检测。
+	webPublishCfg sqlc.OrgWebPublishConfig
+	webPublishErr error
+}
+
+// GetWebPublishConfig 返回预置 web-publish 配置；webPublishErr 非 nil 时优先返回它（默认 sql.ErrNoRows）。
+func (s *appServiceStoreStub) GetWebPublishConfig(_ context.Context, _ string) (sqlc.OrgWebPublishConfig, error) {
+	if s.webPublishErr != nil {
+		return sqlc.OrgWebPublishConfig{}, s.webPublishErr
+	}
+	if s.webPublishCfg.OrgID == "" {
+		return sqlc.OrgWebPublishConfig{}, sql.ErrNoRows
+	}
+	return s.webPublishCfg, nil
 }
 
 func (s *appServiceStoreStub) mustSeedApp(t *testing.T) sqlc.App {

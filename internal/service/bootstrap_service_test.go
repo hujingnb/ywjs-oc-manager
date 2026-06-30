@@ -26,6 +26,9 @@ type fakeBootstrapStore struct {
 	// webPublishErr 为非 nil 时 GetWebPublishConfig 返回该错误（模拟 sql.ErrNoRows 等）。
 	webPublishConfig sqlc.OrgWebPublishConfig
 	webPublishErr    error
+	// webPublishApplied / webPublishAppliedSet 记录 SetAppWebPublishApplied 最近写入值，供断言。
+	webPublishApplied    bool
+	webPublishAppliedSet bool
 }
 
 // GetApp 按 ID 返回预置 app。
@@ -65,6 +68,13 @@ func (f *fakeBootstrapStore) GetWebPublishConfig(_ context.Context, _ string) (s
 		return sqlc.OrgWebPublishConfig{}, f.webPublishErr
 	}
 	return f.webPublishConfig, nil
+}
+
+// SetAppWebPublishApplied 记录 bootstrap 写入的 web_publish_applied 值。
+func (f *fakeBootstrapStore) SetAppWebPublishApplied(_ context.Context, arg sqlc.SetAppWebPublishAppliedParams) error {
+	f.webPublishApplied = arg.WebPublishApplied
+	f.webPublishAppliedSet = true
+	return nil
 }
 
 // fakeSkills 实现 bootstrapSkillSource，为任意 relPath 返回固定格式的预签名 URL。
