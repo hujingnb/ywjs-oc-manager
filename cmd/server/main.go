@@ -53,6 +53,7 @@ import (
 	"oc-manager/internal/worker"
 	"oc-manager/internal/worker/handlers"
 	"oc-manager/internal/worker/reaper"
+	"oc-manager/internal/worker/webpublish"
 
 	migrate "github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/mysql"
@@ -333,6 +334,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// webPublishService 仅在 S3 启用时赋值（runtime 发布需要对象存储写入/删除能力）；
 	// nil 时 router 的 nil-guard 不注册 runtime 发布端点与 site-server 内部同步端点。
 	var webPublishService *service.WebPublishService
+	// webPublishSiteService 提供站点管理面能力（列表/下线/续期），依赖 objStore 执行整站前缀删除；
+	// S3 未启用时为 nil，router 的 nil-guard 不注册站点管理路由。
+	var webPublishSiteService *service.WebPublishSiteService
 	// workspaceObjStore 供 WorkspaceService 浏览 app workspace；S3 未启用时为 nil，
 	// Task 14 将完整接入；此处 nil 时 service 层返回 ErrWorkspaceMissing。
 	var workspaceObjStore storage.ObjectStore
@@ -377,6 +381,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		// tar.gz 解包上传（PutObject）与旧版本清理（DeletePrefix）。
 		// 生产参数（SlugGen / Now / MaxUploadSize）使用 WebPublishServiceConfig 零值触发默认实现。
 		webPublishService = service.NewWebPublishService(dbStore.Queries, objStore, service.WebPublishServiceConfig{})
+		// webPublishSiteService：管理面站点列表/下线/续期，依赖同一 objStore 执行整站前缀删除。
+		// now 传 nil，service 内部使用 time.Now。
+		webPublishSiteService = service.NewWebPublishSiteService(dbStore.Queries, objStore, nil)
 	}
 	// libraryBlobs 是平台库 skill 归档的存储后端：
 	// S3 启用时另建一个 ObjectStore 实例（与上方 bootstrap/workspace 用的 objStore 同配置同桶但相互独立，
@@ -706,6 +713,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			SkillLibraryService:           skillLibraryService,
 			WebPublishConfigService:       webPublishConfigService,
 			WebPublishService:             webPublishService,
+			WebPublishSiteService:         webPublishSiteService,
 			SiteSyncToken:                 cfg.WebPublish.SiteSyncToken,
 			BootstrapService:              bootstrapSvc,
 			JobsStore:                     dbStore.Queries,
@@ -819,6 +827,23 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		logger,
 	)
 	reaperInstance.Start(gctx)
+
+	// SiteReaper Loop：周期（60s）扫描过期 active 站点，置 expired 并删整站前缀。
+	// 多副本通过 Redis 锁 ocm:webpublish-reaper:lock 互斥，复用 distLocker + 新 uuid instanceID。
+	// 仅在 S3 启用时启动（workspaceObjStore 即同一 objStore，webPublishSiteService != nil 同条件保护）。
+	if webPublishSiteService != nil {
+		siteReaper := webpublish.NewSiteReaper(dbStore.Queries, workspaceObjStore)
+		webpublish.NewLoop(siteReaper, distLocker, uuid.NewString(), logger).Start(gctx)
+	}
+
+	// CertRenewalChecker Loop：周期（12h）巡检临近到期通配证书，逐个入队 provision job 完成续签。
+	// 多副本通过 Redis 锁 ocm:webpublish-cert-renewal:lock 互斥，复用 distLocker + 新 uuid instanceID。
+	// webPublishConfigService 实现 ProvisionEnqueuer（EnqueueProvision 方法），无条件构造。
+	{
+		certChecker := webpublish.NewCertRenewalChecker(dbStore.Queries, webPublishConfigService, 0, nil)
+		webpublish.NewCertRenewalLoop(certChecker, distLocker, uuid.NewString(), logger).Start(gctx)
+	}
+
 	if appStatusTask != nil {
 		eg.Go(func() error { return appStatusTask.Run(gctx, logger) })
 	}
