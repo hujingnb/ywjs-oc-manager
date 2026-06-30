@@ -15,5 +15,5 @@ export default {
   // Empty state when no sessions exist
   empty: 'No conversations',
   // Attach file button label
-  attach: 'Attach',
+  attach: 'File',
 } as const
