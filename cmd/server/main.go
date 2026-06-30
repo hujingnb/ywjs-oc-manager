@@ -568,12 +568,19 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if ka, ok := orch.(*k8sorch.KubernetesAdapter); ok {
 		webPublishClusterApplier = clusterApplierImpl{adapter: ka}
 	}
+	// 证书签发器：默认用真实 dnsprovider+ACME 链路；仅当本地/dev 显式开启 dev_self_signed_cert
+	// 时换成自签 provisioner（让无公网域名的 k3d 能端到端验证发布链路）。启用即打醒目 WARN。
+	var webPublishCertProvisioner handlers.CertProvisioner = certProvisionerImpl{
+		acmeEmail:  cfg.WebPublish.ACMEEmail,
+		acmeDirURL: cfg.WebPublish.ACMEDirectoryURL,
+	}
+	if cfg.WebPublish.DevSelfSignedCert {
+		logger.Warn("web-publish 已启用自签通配证书（dev_self_signed_cert=true）：跳过真实 DNS+ACME 签发，证书浏览器不信任——仅限本地/dev，生产严禁开启")
+		webPublishCertProvisioner = devSelfSignedCertProvisioner{}
+	}
 	webPublishProvisionHandler := handlers.NewWebPublishProvisionHandler(
 		dbStore.Queries,
-		certProvisionerImpl{
-			acmeEmail:  cfg.WebPublish.ACMEEmail,
-			acmeDirURL: cfg.WebPublish.ACMEDirectoryURL,
-		},
+		webPublishCertProvisioner,
 		webPublishClusterApplier,
 		cipher,
 		handlers.WebPublishProvisionConfig{

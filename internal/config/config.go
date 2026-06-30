@@ -273,6 +273,11 @@ type WebPublishConfig struct {
 	SiteServerPort int32 `yaml:"site_server_port"`
 	// SiteSyncToken 是 site-server 轮询内部同步端点的鉴权 token（与 site-server MANAGER_SYNC_TOKEN 共享）。
 	SiteSyncToken string `yaml:"site_sync_token"`
+	// DevSelfSignedCert 仅供本地/dev 联调：为 true 时用自签通配证书 provisioner 取代真实
+	// DNS+ACME 签发，使 web-publish 能在无公网域名 / 无真实 DNS 凭证的本地 k3d 跑通完整开通流程。
+	// 默认 false——生产绝不能开启（自签证书浏览器不信任、且等于绕过真实签发链路）。
+	// 仅本地 k3d 的 manager.yaml 显式置 true，启用时进程启动会打醒目 WARN 日志。
+	DevSelfSignedCert bool `yaml:"dev_self_signed_cert"`
 }
 
 // KubernetesConfig 是 app pod 编排所需的 k8s 接入参数。

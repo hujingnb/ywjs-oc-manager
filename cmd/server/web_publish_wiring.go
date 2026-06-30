@@ -8,7 +8,14 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
+	"math/big"
+	"time"
 
 	"oc-manager/internal/integrations/acme"
 	"oc-manager/internal/integrations/dnsprovider"
@@ -16,8 +23,9 @@ import (
 	"oc-manager/internal/worker/handlers"
 )
 
-// 编译期断言：两个适配器类型满足各自接口。
+// 编译期断言：三个适配器类型满足各自接口。
 var _ handlers.CertProvisioner = certProvisionerImpl{}
+var _ handlers.CertProvisioner = devSelfSignedCertProvisioner{}
 var _ handlers.ClusterApplier = clusterApplierImpl{}
 
 // certProvisionerImpl 组合 dnsprovider.New + acme.NewIssuer 实现 handlers.CertProvisioner。
@@ -51,6 +59,65 @@ func (c certProvisionerImpl) Provision(ctx context.Context, in handlers.CertProv
 
 	// Issue 先幂等写通配 A 记录，再完成 ACME DNS-01 挑战并返回 PEM 证书链。
 	return issuer.Issue(ctx, in.BaseDomain, in.IngressIP)
+}
+
+// devSelfSignedCertProvisioner 是仅供本地/dev 联调的 CertProvisioner：
+// 直接现生成一张 *.BaseDomain 自签通配证书，完全跳过 DNS provider 调用与 ACME 签发链路。
+//
+// 存在动因：真实通配证书必须走 ACME DNS-01，依赖公网可解析域名 + 真实云 DNS 凭证，
+// 本地 k3d（*.localhost、无公网、无真实凭证）无法完成。开启 dev_self_signed_cert 后，
+// provisioning 状态机除「签证书」一步换成自签外，其余（解密凭证、写真实 k8s TLS Secret、
+// 建真实通配 Ingress、状态收敛）全部走与生产一致的真实代码，使本地能端到端验证发布链路。
+//
+// 安全约束：仅当 config.WebPublish.DevSelfSignedCert=true 时才在 main 装配，默认关闭；
+// 启用时进程启动打醒目 WARN 日志。自签证书浏览器不信任，生产绝不能启用。
+type devSelfSignedCertProvisioner struct{}
+
+// Provision 生成 *.in.BaseDomain 自签通配证书（含 BaseDomain 本身的 SAN），有效期 90 天，
+// 返回与真实签发同形状的 acme.Certificate（PEM 证书 + 私钥 + NotAfter）。忽略 DNS provider 与凭证。
+func (devSelfSignedCertProvisioner) Provision(_ context.Context, in handlers.CertProvisionInput) (acme.Certificate, error) {
+	// 生成 2048 位 RSA 私钥（自签足够；与真实签发一致地输出 PEM）。
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return acme.Certificate{}, fmt.Errorf("devSelfSigned: 生成 RSA 私钥失败: %w", err)
+	}
+
+	// 有效期 90 天，与 Let's Encrypt 真实证书时长对齐，便于续期巡检逻辑在本地也可观测。
+	notBefore := time.Now().UTC()
+	notAfter := notBefore.Add(90 * 24 * time.Hour)
+	wildcard := "*." + in.BaseDomain
+
+	// 证书序列号：x509 要求唯一正整数；本地自签用当前纳秒时间戳足够避免重签碰撞。
+	serial := big.NewInt(notBefore.UnixNano())
+
+	tmpl := x509.Certificate{
+		SerialNumber: serial,
+		Subject:      pkix.Name{CommonName: wildcard},
+		// SAN 同时覆盖通配子域与基础域名本身，使 <slug>.base_domain 与 base_domain 都被证书覆盖。
+		DNSNames:              []string{wildcard, in.BaseDomain},
+		NotBefore:             notBefore,
+		NotAfter:              notAfter,
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		// 自签：自己即为 CA，IsCA 置真使其能自我签名。
+		IsCA: true,
+	}
+
+	// 自签：parent==template、签名私钥即自身私钥。
+	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &key.PublicKey, key)
+	if err != nil {
+		return acme.Certificate{}, fmt.Errorf("devSelfSigned: 自签证书失败: %w", err)
+	}
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+
+	return acme.Certificate{
+		CertPEM:  certPEM,
+		KeyPEM:   keyPEM,
+		NotAfter: notAfter.Unix(),
+	}, nil
 }
 
 // clusterApplierImpl 把 *k8sorch.KubernetesAdapter 适配为 handlers.ClusterApplier。
