@@ -221,6 +221,23 @@ func (q *Queries) ListSitesByOrg(ctx context.Context, orgID string) ([]Published
 	return items, nil
 }
 
+const renewPublishedSite = `-- name: RenewPublishedSite :exec
+UPDATE published_sites
+SET expires_at = ?, status = 'active', updated_at = now()
+WHERE id = ?
+`
+
+type RenewPublishedSiteParams struct {
+	ExpiresAt time.Time `db:"expires_at" json:"expires_at"`
+	ID        string    `db:"id" json:"id"`
+}
+
+// 续期：把过期时间延后到 now + N 天（N 由 service 按企业 site_ttl_days 传入），并置回 active。
+func (q *Queries) RenewPublishedSite(ctx context.Context, arg RenewPublishedSiteParams) error {
+	_, err := q.db.ExecContext(ctx, renewPublishedSite, arg.ExpiresAt, arg.ID)
+	return err
+}
+
 const setPublishedSiteStatus = `-- name: SetPublishedSiteStatus :exec
 UPDATE published_sites SET status = ?, updated_at = now() WHERE id = ?
 `

@@ -28,3 +28,9 @@ UPDATE published_sites SET status = ?, updated_at = now() WHERE id = ?;
 
 -- name: ListExpiredActiveSites :many
 SELECT * FROM published_sites WHERE status = 'active' AND expires_at < now();
+
+-- name: RenewPublishedSite :exec
+-- 续期：把过期时间延后到 now + N 天（N 由 service 按企业 site_ttl_days 传入），并置回 active。
+UPDATE published_sites
+SET expires_at = ?, status = 'active', updated_at = now()
+WHERE id = ?;

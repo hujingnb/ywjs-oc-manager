@@ -38,3 +38,12 @@ WHERE org_id = ?;
 UPDATE org_web_publish_config
 SET cert_status = ?, cert_not_after = ?, cert_last_issued_at = ?, cert_last_renewed_at = COALESCE(?, cert_last_renewed_at), cert_message = ?, updated_at = now()
 WHERE org_id = ?;
+
+-- name: ListConfigsCertExpiringBefore :many
+-- 证书续签巡检：列出已签发且 cert_not_after 早于阈值的企业配置（需续签）。
+SELECT * FROM org_web_publish_config
+WHERE enabled = 1
+  AND provisioning_status = 'ready'
+  AND cert_status = 'issued'
+  AND cert_not_after IS NOT NULL
+  AND cert_not_after < ?;

@@ -41,6 +41,57 @@ func (q *Queries) GetWebPublishConfig(ctx context.Context, orgID string) (OrgWeb
 	return i, err
 }
 
+const listConfigsCertExpiringBefore = `-- name: ListConfigsCertExpiringBefore :many
+SELECT org_id, enabled, base_domain, dns_provider, dns_credentials_ciphertext, site_ttl_days, max_sites, provisioning_status, provisioning_message, cert_secret_name, cert_status, cert_not_after, cert_last_issued_at, cert_last_renewed_at, cert_message, created_at, updated_at FROM org_web_publish_config
+WHERE enabled = 1
+  AND provisioning_status = 'ready'
+  AND cert_status = 'issued'
+  AND cert_not_after IS NOT NULL
+  AND cert_not_after < ?
+`
+
+// 证书续签巡检：列出已签发且 cert_not_after 早于阈值的企业配置（需续签）。
+func (q *Queries) ListConfigsCertExpiringBefore(ctx context.Context, certNotAfter null.Time) ([]OrgWebPublishConfig, error) {
+	rows, err := q.db.QueryContext(ctx, listConfigsCertExpiringBefore, certNotAfter)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []OrgWebPublishConfig{}
+	for rows.Next() {
+		var i OrgWebPublishConfig
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.Enabled,
+			&i.BaseDomain,
+			&i.DnsProvider,
+			&i.DnsCredentialsCiphertext,
+			&i.SiteTtlDays,
+			&i.MaxSites,
+			&i.ProvisioningStatus,
+			&i.ProvisioningMessage,
+			&i.CertSecretName,
+			&i.CertStatus,
+			&i.CertNotAfter,
+			&i.CertLastIssuedAt,
+			&i.CertLastRenewedAt,
+			&i.CertMessage,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWebPublishConfigs = `-- name: ListWebPublishConfigs :many
 SELECT org_id, enabled, base_domain, dns_provider, dns_credentials_ciphertext, site_ttl_days, max_sites, provisioning_status, provisioning_message, cert_secret_name, cert_status, cert_not_after, cert_last_issued_at, cert_last_renewed_at, cert_message, created_at, updated_at FROM org_web_publish_config ORDER BY updated_at DESC
 `

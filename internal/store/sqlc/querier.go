@@ -177,6 +177,8 @@ type Querier interface {
 	ListAuditLogsByOrg(ctx context.Context, arg ListAuditLogsByOrgParams) ([]ListAuditLogsByOrgRow, error)
 	// 同 ListAuditLogsByOrg，按 target_type + target_id 过滤。
 	ListAuditLogsByTarget(ctx context.Context, arg ListAuditLogsByTargetParams) ([]ListAuditLogsByTargetRow, error)
+	// 证书续签巡检：列出已签发且 cert_not_after 早于阈值的企业配置（需续签）。
+	ListConfigsCertExpiringBefore(ctx context.Context, certNotAfter null.Time) ([]OrgWebPublishConfig, error)
 	ListCustomSkillTargetsByName(ctx context.Context, customSkillName string) ([]CustomSkillTarget, error)
 	ListCustomSkillVersionsByName(ctx context.Context, name string) ([]CustomSkill, error)
 	ListDistinctAppSkillSources(ctx context.Context) ([]ListDistinctAppSkillSourcesRow, error)
@@ -254,6 +256,8 @@ type Querier interface {
 	RejectSkillTicket(ctx context.Context, arg RejectSkillTicketParams) error
 	// 重命名未删除行业知识库；唯一约束负责拦截同名未删除记录。
 	RenameIndustryKnowledgeBase(ctx context.Context, arg RenameIndustryKnowledgeBaseParams) error
+	// 续期：把过期时间延后到 now + N 天（N 由 service 按企业 site_ttl_days 传入），并置回 active。
+	RenewPublishedSite(ctx context.Context, arg RenewPublishedSiteParams) error
 	// 替换助手版本行业知识库关联前先清空旧关联，由调用方在同一事务中重新插入。
 	ReplaceAssistantVersionIndustryKnowledgeBases(ctx context.Context, versionID string) error
 	// 覆盖行业库同名文件时按旧远端 document ID 乐观替换本地映射；created_by 表示最近一次覆盖上传人，created_at 仍保留首创时间。
