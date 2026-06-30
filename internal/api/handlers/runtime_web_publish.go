@@ -4,11 +4,14 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
+	mlog "oc-manager/internal/log"
 	"oc-manager/internal/service"
 )
 
@@ -74,6 +77,15 @@ func (h *RuntimeWebPublishHandler) Publish(c *gin.Context) {
 	slug := c.PostForm("slug")
 	res, err := h.service.Publish(c.Request.Context(), token, slug, f)
 	if err != nil {
+		// runtime 发布端点由 hermes oc-publish 自动调用，错误经 writeServiceError 脱敏成稳定
+		// HTTP 码后调用方只看到兜底文案。这里记录原始错误（含底层 S3/DB/解包原因），
+		// 否则线上发布失败无任何可排查线索（观测性兜底，不改变对外响应）。
+		// 业务拒绝（slug 占用 / 未开通等）是正常结果而非系统故障，记 Warn；其余视为真实故障记 Error。
+		if errors.Is(err, service.ErrConflict) || errors.Is(err, service.ErrWebPublishNotProvisioned) {
+			slog.WarnContext(c.Request.Context(), "runtime web-publish 业务拒绝", "slug", slug, mlog.Err(err))
+		} else {
+			slog.ErrorContext(c.Request.Context(), "runtime web-publish 失败", "slug", slug, mlog.Err(err))
+		}
 		writeServiceError(c, err)
 		return
 	}

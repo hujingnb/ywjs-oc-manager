@@ -108,6 +108,38 @@ func (f *fakeObjStore) DeletePrefix(ctx context.Context, prefix string) error {
 	return nil
 }
 
+// seekableAssertObjStore 在 PutObject 时断言 body 必须实现 io.Seeker，且声明 size 等于实际内容长度。
+// 这是对「AWS S3 SDK v2 签名需要可 seek body」契约的本地复现：真实 SDK 对不可 seek 的流会报
+// "request stream is not seekable" 上传失败；用本 store 即可在单测层捕获该回归而无需真实 S3。
+type seekableAssertObjStore struct {
+	t       *testing.T
+	objects map[string][]byte
+}
+
+func newSeekableAssertObjStore(t *testing.T) *seekableAssertObjStore {
+	return &seekableAssertObjStore{t: t, objects: make(map[string][]byte)}
+}
+
+// PutObject 断言 r 可 seek（含可回到起点），并校验 size 与实际读到的字节数一致。
+func (f *seekableAssertObjStore) PutObject(_ context.Context, key string, r io.Reader, size int64) error {
+	// 必须可 seek，否则真实 AWS SDK 计算 payload hash 时会失败。
+	seeker, ok := r.(io.Seeker)
+	require.True(f.t, ok, "PutObject 的 body 必须实现 io.Seeker（S3 SDK 签名要求），key=%s", key)
+	// 验证可回到起点（SDK 计算 hash 后会 seek 回 0 再发送 body）。
+	_, err := seeker.Seek(0, io.SeekStart)
+	require.NoError(f.t, err)
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	// 声明的 size 必须等于实际内容长度（修复前 totalSize/size 用可伪造的 hdr.Size）。
+	require.Equal(f.t, int64(len(data)), size, "PutObject size 须等于实际内容长度，key=%s", key)
+	f.objects[key] = data
+	return nil
+}
+
+func (f *seekableAssertObjStore) DeletePrefix(_ context.Context, _ string) error { return nil }
+
 // makeTarGz 构造一个内含指定文件的 tar.gz 归档字节，供测试使用。
 func makeTarGz(t *testing.T, files map[string]string) io.Reader {
 	t.Helper()
@@ -206,6 +238,48 @@ func TestPublishFirstTime(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "index.html 应已上传至对象存储")
+}
+
+// TestPublishUploadsSeekableBody 回归测试：unpackToPrefix 上传单个文件时，传给 PutObject 的 body
+// 必须可 seek（AWS S3 SDK v2 签名要求），且声明 size 等于实际内容长度。修复前直接把不可 seek 的
+// io.LimitReader 传给 PutObject，真实 S3 报 "request stream is not seekable" 导致任何站点发布失败。
+func TestPublishUploadsSeekableBody(t *testing.T) {
+	const orgID = "org-seek"
+	const appID = "app-seek"
+	const token = "test-token-seek"
+
+	store := &fakeWPubStore{
+		appByHash:       map[string]sqlc.App{HashAppRuntimeToken(token): {ID: appID, OrgID: orgID}},
+		publishConfig:   map[string]sqlc.OrgWebPublishConfig{orgID: makeReadyCfg(orgID)},
+		siteByHost:      map[string]sqlc.PublishedSite{},
+		activeSiteCount: map[string]int64{orgID: 0},
+	}
+	// 用断言可 seek 的 store：若 service 传不可 seek 的 body，require 会立即 fail。
+	obj := newSeekableAssertObjStore(t)
+	svc := NewWebPublishService(store, obj, WebPublishServiceConfig{
+		SlugGen: func() string { return "seek1" },
+		Now:     func() time.Time { return fixedNow },
+	})
+
+	// 发布含两个文件的站点，覆盖多 entry 顺序上传。
+	_, err := svc.Publish(context.Background(), token, "blog", makeTarGz(t, map[string]string{
+		"index.html":     "<html>hello seekable</html>",
+		"assets/app.css": "body{color:red}",
+	}))
+	require.NoError(t, err)
+
+	// 两个文件都应上传成功，且内容与原文一致（间接验证 seek 回 0 后读到完整 body）。
+	var idx, css string
+	for k, v := range obj.objects {
+		if strings.HasSuffix(k, "index.html") {
+			idx = string(v)
+		}
+		if strings.HasSuffix(k, "assets/app.css") {
+			css = string(v)
+		}
+	}
+	assert.Equal(t, "<html>hello seekable</html>", idx)
+	assert.Equal(t, "body{color:red}", css)
 }
 
 // TestPublishUpdateInPlace 测试原地更新场景：同一 app 再次发布同 slug → 不创建新行，
@@ -314,6 +388,8 @@ func TestPublishSlugTakenByOtherApp(t *testing.T) {
 	// 应返回含"已占用"的错误，提示调用方 slug 已被其他实例持有。
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "已占用")
+	// 必须包 ErrConflict，使 handler 映射为 409 而非不透明 500（cross-app 拒绝是业务结果非系统故障）。
+	require.ErrorIs(t, err, ErrConflict)
 	// 冲突检查应在解包上传之前完成：不应产生任何对象上传。
 	assert.Empty(t, obj.objects)
 }
@@ -439,4 +515,6 @@ func TestPublishQuotaExceeded(t *testing.T) {
 	// 应返回含"配额"的错误，提示已达站点上限。
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "配额")
+	// 必须包 ErrConflict，使 handler 映射为 409 而非不透明 500（配额上限是业务结果非系统故障）。
+	require.ErrorIs(t, err, ErrConflict)
 }

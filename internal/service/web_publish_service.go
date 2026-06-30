@@ -6,6 +6,7 @@ package service
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"database/sql"
@@ -200,8 +201,10 @@ func (s *WebPublishService) Publish(ctx context.Context, appToken, slug string, 
 		return PublishResult{}, fmt.Errorf("查询站点记录失败: %w", lookupErr)
 	}
 	if isUpdate && existing.AppID != app.ID {
-		// host 已被其他 app 占用，不允许越权发布。
-		return PublishResult{}, fmt.Errorf("slug %q 已占用，该域名已被其他实例持有", slug)
+		// host 已被其他 app 占用，不允许越权发布。这是正常的业务拒绝（不是系统故障），
+		// 用 ErrConflict 包装让 handler 映射为 409 + 清晰文案，而非不透明的 500「服务暂时不可用」——
+		// 否则 oc-publish/agent 无法把「该名字已被占用」如实告诉用户。
+		return PublishResult{}, fmt.Errorf("%w: slug %q 已占用，该域名已被其他实例持有", ErrConflict, slug)
 	}
 	if !isUpdate {
 		// 新建站点前检查配额上限，避免无限制创建。
@@ -210,7 +213,8 @@ func (s *WebPublishService) Publish(ctx context.Context, appToken, slug string, 
 			return PublishResult{}, fmt.Errorf("查询站点配额失败: %w", err)
 		}
 		if count >= int64(cfg.MaxSites) {
-			return PublishResult{}, fmt.Errorf("已达站点配额上限（%d），请先删除旧站点", cfg.MaxSites)
+			// 配额上限同样是业务拒绝，用 ErrConflict 包装映射 409 + 清晰文案（同上，避免误报 500）。
+			return PublishResult{}, fmt.Errorf("%w: 已达站点配额上限（%d），请先删除旧站点", ErrConflict, cfg.MaxSites)
 		}
 	}
 
@@ -333,12 +337,23 @@ func (s *WebPublishService) unpackToPrefix(ctx context.Context, body io.Reader, 
 		// 构造目标对象 key：prefix + cleanName（prefix 末尾已带 /）。
 		objKey := prefix + cleanName
 
-		// 使用 io.LimitReader 防止 tar entry 声明 Size 与实际内容不符时超量读取。
-		lr := io.LimitReader(tr, s.maxSize-totalSize+1)
-		if err := s.obj.PutObject(ctx, objKey, lr, hdr.Size); err != nil {
+		// AWS S3 SDK v2 默认对 PutObject 做 payload 签名，需要 body 可 seek 以计算 SHA256；
+		// tar entry 流不可 seek，直接传会报 "request stream is not seekable" 导致上传失败。
+		// 静态站点单文件体积小，这里把内容读入内存（用 LimitReader 限制在 maxSize 剩余额度 +1 字节，
+		// 超出即判超限）后用可 seek 的 bytes.Reader 上传。同时以实际读取字节数累加 totalSize，
+		// 不再信任可能被伪造的 hdr.Size。
+		remaining := s.maxSize - totalSize
+		data, err := io.ReadAll(io.LimitReader(tr, remaining+1))
+		if err != nil {
+			return 0, fmt.Errorf("读取归档文件 %q 失败: %w", cleanName, err)
+		}
+		if int64(len(data)) > remaining {
+			return 0, fmt.Errorf("归档解压后总大小超过上限 %d 字节", s.maxSize)
+		}
+		if err := s.obj.PutObject(ctx, objKey, bytes.NewReader(data), int64(len(data))); err != nil {
 			return 0, fmt.Errorf("上传文件 %q 失败: %w", cleanName, err)
 		}
-		totalSize += hdr.Size
+		totalSize += int64(len(data))
 	}
 
 	return totalSize, nil
