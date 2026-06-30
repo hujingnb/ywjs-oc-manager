@@ -8,6 +8,7 @@ import (
 
 	"oc-manager/internal/integrations/dnsprovider"
 
+	"github.com/go-acme/lego/v5/certcrypto"
 	"github.com/go-acme/lego/v5/certificate"
 	"github.com/go-acme/lego/v5/lego"
 	"github.com/go-acme/lego/v5/registration"
@@ -114,9 +115,12 @@ func (o *legoObtainer) Obtain(ctx context.Context, domains []string) (Certificat
 	acc.registration = reg
 
 	// 6. 请求证书签发。Bundle=true 使返回的 Certificate 字节包含完整证书链（Leaf + Intermediate）。
+	// KeyType 必填：lego v5 将私钥类型移到 ObtainRequest（NewConfig 不再设默认），
+	// 不设会报 "the key type is missing"。用 RSA2048 兼容性最广。
 	// Obtain(ctx, ObtainRequest) (*Resource, error) — lego v5 签名。
 	resource, err := client.Certificate.Obtain(ctx, certificate.ObtainRequest{
 		Domains: domains,
+		KeyType: certcrypto.RSA2048,
 		Bundle:  true,
 	})
 	if err != nil {
