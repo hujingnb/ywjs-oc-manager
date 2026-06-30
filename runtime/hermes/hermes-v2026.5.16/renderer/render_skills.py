@@ -180,17 +180,23 @@ Do not call RAGFlow directly and do not ask for RAGFlow credentials. The `oc-kb`
 # token 只注入环境变量（OC_PUBLISH_APP_TOKEN），不写入此文件，避免凭证暴露给模型上下文。
 _OC_PUBLISH_SKILL_MD = """---
 name: oc-publish
-description: Publish a local workspace directory as a static site through manager, or update a previously published site in place using the same slug.
+description: Publish a local workspace directory as a static site through manager. A new publish always gets a fresh random URL; reuse the same slug only to update a site you already published.
 ---
 
 # oc-publish
 
-Use this skill when the user wants to publish a static site (HTML/CSS/JS files) from the current workspace to the internet, or to update a previously published site.
+Use this skill when the user wants to publish a static site (HTML/CSS/JS files) from the current workspace to the internet, or to update a site you previously published.
 
 Commands:
 
-- `oc-publish ./<dir>` publishes the directory at `<dir>` as a new static site and returns the public URL.
-- `oc-publish ./<dir> --slug <slug>` publishes (or re-publishes) the directory under the given slug. Re-running with the same `--slug` updates the existing site in place.
+- `oc-publish ./<dir>` publishes `<dir>` as a NEW static site. The manager assigns a fresh, unique, random subdomain and returns the public URL.
+- `oc-publish ./<dir> --slug <slug>` re-publishes to an EXISTING site identified by `<slug>`, updating it in place at the same URL.
+
+Important — how to choose the name:
+
+- For a NEW site, ALWAYS run `oc-publish ./<dir>` WITHOUT `--slug`. Never invent or hard-code a name; let the manager generate a random one. This guarantees repeated publishes never collide with earlier sites.
+- Use `--slug <slug>` ONLY to update a site you published earlier in this same conversation: reuse the exact slug from the URL you previously received (the leftmost label of `https://<slug>.<domain>`). Do not guess a slug you have not seen before.
+- After publishing, report the returned URL to the user.
 
 The `oc-publish` command talks only to manager runtime APIs using the app-scoped token injected by the container entrypoint. Do not construct API requests manually or ask for credentials.
 """
