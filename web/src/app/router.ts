@@ -28,6 +28,7 @@ import IndustryKnowledgePage from '@/pages/platform/IndustryKnowledgePage.vue'
 import PlatformSkillsPage from '@/pages/platform/PlatformSkillsPage.vue'
 import CustomSkillTicketsPage from '@/pages/platform/CustomSkillTicketsPage.vue'
 import OrganizationsPage from '@/pages/platform/OrganizationsPage.vue'
+import WebPublishConfigPage from '@/pages/platform/WebPublishConfigPage.vue'
 import ConsolePage from '@/pages/platform/ConsolePage.vue'
 import RechargePage from '@/pages/platform/RechargePage.vue'
 import OrgKnowledgePage from '@/pages/knowledge/OrgKnowledgePage.vue'
@@ -69,6 +70,8 @@ export const router = createRouter({
         { path: 'platform/custom-skills', component: CustomSkillTicketsPage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'platform/organizations/:orgId/recharge', component: RechargePage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'platform/permissions', component: PermissionsPage, meta: { allowedRoles: PLATFORM_ONLY } },
+        // platform/web-publish-config：平台管理员开通企业 web-publish 能力的配置页。
+        { path: 'platform/web-publish-config', component: WebPublishConfigPage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'members', component: MembersPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },
         // published-sites：企业已发布站点列表 + 证书状态面板；平台管理员可跨企业查看并重试证书。
         { path: 'published-sites', component: PublishedSitesPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },

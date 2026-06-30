@@ -51,6 +51,8 @@ export default {
     industryKnowledge: '行业知识库',
     platformSkills: '平台技能',
     customSkills: '定制技能',
+    // webPublishConfig：平台管理员开通配置企业 web-publish 能力的导航入口。
+    webPublishConfig: 'Web 发布配置',
     members: '成员',
     instance: '实例',
     balance: '账户余额',

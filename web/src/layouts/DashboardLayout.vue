@@ -171,7 +171,7 @@ import {
 } from 'naive-ui'
 import {
   BarChart3, BookOpen, Bot, Boxes, Building2, CalendarClock, FileSearch,
-  FolderOpen, Gauge, KeyRound, LayoutDashboard, ListChecks, LogOut, MessageSquare, Package, Puzzle, Radio, RefreshCw,
+  FolderOpen, Gauge, Globe, KeyRound, LayoutDashboard, ListChecks, LogOut, MessageSquare, Package, Puzzle, Radio, RefreshCw,
   ShieldCheck, Users, Wallet, Wrench,
 } from 'lucide-vue-next'
 
@@ -221,6 +221,7 @@ const activeKey = computed(() => {
     '/platform/industry-knowledge',
     '/platform/skills',
     '/platform/custom-skills',
+    '/platform/web-publish-config',
     '/members',
     '/knowledge',
     // /skills 成员技能页顶级路由；需早于更短 prefix 匹配，放在 /knowledge 后面即可。
@@ -317,6 +318,8 @@ const menuOptions = computed<MenuOption[]>(() => {
         ]),
       icon: () => h(Wrench, { size: 18 }),
     })
+    // web-publish 开通配置入口：平台管理员专属，用于开通企业站点发布能力。
+    items.push({ key: '/platform/web-publish-config', label: t('layout.nav.webPublishConfig'), icon: () => h(Globe, { size: 18 }) })
   }
   // 成员/审计 是组织管理视角，普通成员不展示。
   if (!isOrgMember.value) {

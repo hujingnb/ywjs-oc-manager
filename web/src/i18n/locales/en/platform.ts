@@ -493,6 +493,53 @@ export default {
       mcp: 'MCP routing',
     },
   },
+  // webPublishConfig: Platform-admin web-publish configuration page (WebPublishConfigPage).
+  webPublishConfig: {
+    // Page title and card headers.
+    title: 'Web Publish Setup',
+    formTitle: 'Configuration',
+    enableDisableTitle: 'Enable / Disable',
+    // Org selector.
+    labelOrg: 'Organization',
+    placeholderOrg: 'Select organization',
+    // Config form field labels and placeholders.
+    labelBaseDomain: 'Base domain *',
+    placeholderBaseDomain: 'e.g. apps.example.com',
+    labelDnsProvider: 'DNS provider *',
+    placeholderDnsProvider: 'Select DNS provider',
+    labelSiteTtlDays: 'Site TTL (days)',
+    placeholderSiteTtlDays: 'Default 7',
+    labelMaxSites: 'Max sites',
+    placeholderMaxSites: 'Default 20',
+    // Credentials section.
+    credentialHint: 'Credentials are write-only and will not be pre-filled. Leave blank to keep existing encrypted credentials.',
+    labelAccessKeyId: 'Access Key ID',
+    placeholderAccessKeyId: 'Access key ID',
+    labelAccessKeySecret: 'Access Key Secret',
+    placeholderAccessKeySecret: 'Access key secret',
+    labelRegion: 'Region (Huawei Cloud only)',
+    placeholderRegion: 'e.g. cn-north-4',
+    // Save button and feedback.
+    saveButton: 'Save configuration',
+    saveSuccess: 'Configuration saved',
+    saveFail: 'Save failed',
+    // Status display.
+    statusLoading: 'Loading status…',
+    currentStatus: 'Current status:',
+    statusEnabled: 'Enabled',
+    statusDisabled: 'Disabled',
+    // Enable / disable buttons and feedback.
+    enableButton: 'Enable web publish',
+    disableButton: 'Disable web publish',
+    enableSuccess: 'Enable submitted — check provisioning status below',
+    enableFail: 'Enable failed',
+    disableSuccess: 'Web publish disabled',
+    disableFail: 'Disable failed',
+    // Disable confirmation modal.
+    disableConfirmTitle: 'Disable web publish?',
+    disableConfirmMessage: 'This will set the provisioning status to disabled. Config data and sites are preserved.',
+    disableConfirmOk: 'Confirm disable',
+  },
   // webPublishCert: Enterprise web-publish wildcard certificate status panel (WebPublishCertPanel).
   webPublishCert: {
     // Panel title.

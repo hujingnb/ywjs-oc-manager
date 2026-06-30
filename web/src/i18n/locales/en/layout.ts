@@ -51,6 +51,8 @@ export default {
     industryKnowledge: 'Industry Knowledge',
     platformSkills: 'Platform Skills',
     customSkills: 'Custom Skills',
+    // webPublishConfig: platform admin entry for enabling and configuring org web-publish
+    webPublishConfig: 'Web Publish Setup',
     members: 'Members',
     instance: 'Instance',
     balance: 'Account Balance',

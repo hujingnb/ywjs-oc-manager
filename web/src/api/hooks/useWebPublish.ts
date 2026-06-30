@@ -1,5 +1,5 @@
 // web-publish 相关数据 hooks，覆盖企业站点列表、web-publish 配置查询
-// 以及站点下线、续期和证书重试三个写操作。
+// 以及站点下线、续期、证书重试和平台管理员写操作（配置/开通/停用）。
 // 查询 key 设计：
 //   - ['web-publish-sites', orgId]  → 站点列表
 //   - ['web-publish-config', orgId] → 企业 web-publish 配置/证书状态
@@ -7,7 +7,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 
 import { apiRequest } from '@/api/client'
-import type { SiteResult, WebPublishConfigResult } from '@/api'
+import type { SiteResult, WebPublishConfigResult, components } from '@/api'
+
+// ConfigureWebPublishRequest 从生成类型派生，对应 PUT /platform/organizations/:orgId/web-publish 请求体。
+export type ConfigureWebPublishRequest = components['schemas']['handlers.ConfigureWebPublishRequest']
 
 // webPublishSitesKey 构造站点列表的 query key。
 // 设计为函数而非常量，使不同 orgId 产生独立缓存条目。
@@ -99,6 +102,72 @@ export function useRetryCert(orgId: Ref<string | undefined>) {
       if (!orgId.value) throw new Error('orgId is required')
       await apiRequest<void>(
         `/api/v1/platform/organizations/${orgId.value}/web-publish/cert/retry`,
+        { method: 'POST' },
+      )
+    },
+    onSuccess: () => {
+      if (orgId.value) {
+        void client.invalidateQueries({ queryKey: webPublishConfigKey(orgId.value) })
+      }
+    },
+  })
+}
+
+// useConfigureWebPublish 供平台管理员写入企业 web-publish 配置（根域名、DNS provider、凭证、配额）。
+// 对应 PUT /api/v1/platform/organizations/:orgId/web-publish。
+// 凭证 credentials 为空时后端保留已有加密凭证，明文不持久化。
+// 成功后失效企业 web-publish 配置缓存，使页面及时展示最新状态。
+export function useConfigureWebPublish(orgId: Ref<string | undefined>) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: ConfigureWebPublishRequest) => {
+      if (!orgId.value) throw new Error('orgId is required')
+      await apiRequest<void>(
+        `/api/v1/platform/organizations/${orgId.value}/web-publish`,
+        { method: 'PUT', body },
+      )
+    },
+    onSuccess: () => {
+      if (orgId.value) {
+        void client.invalidateQueries({ queryKey: webPublishConfigKey(orgId.value) })
+      }
+    },
+  })
+}
+
+// useEnableWebPublish 供平台管理员开通企业 web-publish 能力。
+// 对应 POST /api/v1/platform/organizations/:orgId/web-publish/enable。
+// 该接口触发异步 provisioning job，状态机写为 provisioning；
+// 成功后失效企业 web-publish 配置缓存，让状态面板自动刷新。
+export function useEnableWebPublish(orgId: Ref<string | undefined>) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async () => {
+      if (!orgId.value) throw new Error('orgId is required')
+      await apiRequest<void>(
+        `/api/v1/platform/organizations/${orgId.value}/web-publish/enable`,
+        { method: 'POST' },
+      )
+    },
+    onSuccess: () => {
+      if (orgId.value) {
+        void client.invalidateQueries({ queryKey: webPublishConfigKey(orgId.value) })
+      }
+    },
+  })
+}
+
+// useDisableWebPublish 供平台管理员停用企业 web-publish 能力。
+// 对应 POST /api/v1/platform/organizations/:orgId/web-publish/disable。
+// 该接口只写状态机为 disabled，不删除配置数据；
+// 成功后失效企业 web-publish 配置缓存，让状态面板自动刷新。
+export function useDisableWebPublish(orgId: Ref<string | undefined>) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async () => {
+      if (!orgId.value) throw new Error('orgId is required')
+      await apiRequest<void>(
+        `/api/v1/platform/organizations/${orgId.value}/web-publish/disable`,
         { method: 'POST' },
       )
     },
