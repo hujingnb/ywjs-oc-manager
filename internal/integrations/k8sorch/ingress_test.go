@@ -26,6 +26,10 @@ func TestRenderWildcardIngress(t *testing.T) {
 	b := ing.Spec.Rules[0].HTTP.Paths[0].Backend.Service
 	assert.Equal(t, "site-server", b.Name)
 	assert.Equal(t, int32(80), b.Port.Number)
+	// 移动云 LB 注解：ingress.property 含通配 host（缺失则线上 LB 不路由）、TLS 由 LB 终止、放宽体积/超时。
+	assert.Contains(t, ing.Annotations["kubernetes.io/ingress.property"], `"host":"*.apps.example.com"`)
+	assert.Equal(t, "TERMINATED_HTTPS", ing.Annotations["kubernetes.io/load-balancer-protocol"])
+	assert.Equal(t, "1024m", ing.Annotations["nginx.ingress.kubernetes.io/proxy-body-size"])
 }
 
 // TestApplyWildcardIngressCreateThenUpdate 覆盖：首次 Apply 创建，二次 Apply 同名走更新分支不报错。

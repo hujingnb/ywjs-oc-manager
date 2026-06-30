@@ -2,6 +2,7 @@ package k8sorch
 
 import (
 	"context"
+	"fmt"
 
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -27,9 +28,10 @@ func RenderWildcardIngress(s WildcardIngressSpec) *networkingv1.Ingress {
 	className := s.IngressClassName
 	return &networkingv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      s.Name,
-			Namespace: s.Namespace,
-			Labels:    map[string]string{"app.kubernetes.io/part-of": "oc-manager", "app.kubernetes.io/component": "web-publish-ingress"},
+			Name:        s.Name,
+			Namespace:   s.Namespace,
+			Labels:      map[string]string{"app.kubernetes.io/part-of": "oc-manager", "app.kubernetes.io/component": "web-publish-ingress"},
+			Annotations: wildcardIngressAnnotations(wildcard),
 		},
 		Spec: networkingv1.IngressSpec{
 			IngressClassName: &className,
@@ -55,6 +57,26 @@ func RenderWildcardIngress(s WildcardIngressSpec) *networkingv1.Ingress {
 				},
 			}},
 		},
+	}
+}
+
+// wildcardIngressAnnotations 生成通配 Ingress 的注解，与线上 ocm Ingress 的约定对齐：
+//   - kubernetes.io/ingress.property：移动云 ingress controller 据此把规则编程进外部 LB，
+//     缺失则 LB 不会路由该域名（线上必需）；值描述 host/path/匹配方式/后端协议（HTTP，
+//     与 ocm Ingress 一致——TLS 由 LB 终止，到后端走 HTTP）。
+//   - kubernetes.io/load-balancer-protocol=TERMINATED_HTTPS：LB 终止 HTTPS（用本 Ingress
+//     TLS 段引用的通配证书），到 site-server 走明文 HTTP。
+//   - nginx proxy-*：放宽请求体大小与读写超时，适配静态站点较大文件（与 ocm Ingress 一致）。
+//
+// 这些注解对不识别它们的 controller（如本地 k3d traefik）无副作用，会被直接忽略。
+func wildcardIngressAnnotations(wildcardHost string) map[string]string {
+	return map[string]string{
+		"kubernetes.io/ingress.property":                    fmt.Sprintf(`[{"host":%q,"path":"/","compareType":"Prefix","protocol":"HTTP"}]`, wildcardHost),
+		"kubernetes.io/load-balancer-protocol":              "TERMINATED_HTTPS",
+		"nginx.ingress.kubernetes.io/proxy-body-size":       "1024m",
+		"nginx.ingress.kubernetes.io/proxy-connect-timeout": "2000",
+		"nginx.ingress.kubernetes.io/proxy-read-timeout":    "600",
+		"nginx.ingress.kubernetes.io/proxy-send-timeout":    "600",
 	}
 }
 
