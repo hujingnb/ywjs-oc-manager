@@ -5,7 +5,9 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -16,6 +18,12 @@ import (
 	"oc-manager/internal/integrations/dnsprovider"
 	"oc-manager/internal/store/sqlc"
 )
+
+// ErrWebPublishNotConfigured 表示企业从未配置过 web-publish（org_web_publish_config 无该企业行）。
+// 与 ErrWebPublishNotProvisioned（已配置但开通流程未就绪）语义不同：本错误是「尚未配置」的
+// 正常空态，handler 据此返回 200 + null body，让前端展示「未配置」初始表单而非报错
+// （与前端 WebPublishConfigResult | null 契约一致）。
+var ErrWebPublishNotConfigured = errors.New("企业未配置 web-publish")
 
 // WebPublishConfigResult 是 Get 返回的脱敏配置视图。
 // 凭证密文绝不出现在此结构体中；证书状态字段供前端展示当前续签进度。
@@ -234,9 +242,14 @@ func (s *WebPublishConfigService) Get(ctx context.Context, p auth.Principal, org
 		return WebPublishConfigResult{}, ErrForbidden
 	}
 
-	// 从存储层读取企业配置（不存在时返回 sql.ErrNoRows，透传给调用方）。
+	// 从存储层读取企业配置。无配置行是正常空态（企业从未配置过 web-publish），
+	// 映射为可识别的 ErrWebPublishNotConfigured，由 handler 返回 200 + null，
+	// 而非裹进通用错误落到 500。其余错误才是真正的存储异常。
 	cfg, err := s.store.GetWebPublishConfig(ctx, orgID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return WebPublishConfigResult{}, ErrWebPublishNotConfigured
+		}
 		return WebPublishConfigResult{}, fmt.Errorf("查询企业 %s web-publish 配置失败: %w", orgID, err)
 	}
 

@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -276,6 +277,25 @@ func TestWebPublishSitesGetConfigMapsNotProvisionedTo403(t *testing.T) {
 	// ErrWebPublishNotProvisioned 必须映射为 403，而非 500。
 	require.Equal(t, http.StatusForbidden, recorder.Code)
 	require.Contains(t, recorder.Body.String(), "WEB_PUBLISH_NOT_PROVISIONED")
+}
+
+// TestWebPublishSitesGetConfigUnconfiguredReturns200Null 验证企业从未配置 web-publish
+// （service 返回 ErrWebPublishNotConfigured）时，GetConfig 返回 200 + null body，而非 500。
+// 这是配置页打开未配置企业误报 500「站点管理服务暂时不可用」的回归用例：前端契约
+// WebPublishConfigResult | null 依赖该空态返回，500 会让 DNS 下拉与证书面板卡死/报错。
+func TestWebPublishSitesGetConfigUnconfiguredReturns200Null(t *testing.T) {
+	configSvc := &webPublishConfigReadServiceStub{getErr: service.ErrWebPublishNotConfigured}
+	router := newWebPublishSitesTestRouter(t, &webPublishSiteServiceStub{}, configSvc)
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/organizations/org-1/web-publish", nil)
+	req = withPrincipal(req, platformAdminPrincipal)
+	router.ServeHTTP(recorder, req)
+
+	// 未配置是正常空态：必须 200 而非 500。
+	require.Equal(t, http.StatusOK, recorder.Code)
+	// body 为 JSON null（前端据此渲染「未配置」初始表单）。
+	assert.Equal(t, "null", strings.TrimSpace(recorder.Body.String()))
 }
 
 // ===== RetryProvision 测试 =====

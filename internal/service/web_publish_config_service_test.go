@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"testing"
 	"time"
@@ -19,7 +20,9 @@ import (
 // 记录每次调用的参数，不做实际数据库操作。
 type fakeWPStore struct {
 	// cfg 是 GetWebPublishConfig 预置的返回值；零值表示未配置状态。
-	cfg        sqlc.OrgWebPublishConfig
+	cfg sqlc.OrgWebPublishConfig
+	// getErr 非 nil 时 GetWebPublishConfig 直接返回它，用于模拟 sql.ErrNoRows 等存储错误。
+	getErr     error
 	upserted   *sqlc.UpsertWebPublishConfigParams
 	enabled    *sqlc.SetWebPublishEnabledParams
 	createdJob *sqlc.CreateJobParams
@@ -37,8 +40,11 @@ func (f *fakeWPStore) SetWebPublishEnabled(_ context.Context, p sqlc.SetWebPubli
 	return nil
 }
 
-// GetWebPublishConfig 返回预置配置（cfg 字段），模拟存储层查询。
+// GetWebPublishConfig 返回预置配置（cfg 字段）；getErr 非 nil 时返回它，模拟存储层错误。
 func (f *fakeWPStore) GetWebPublishConfig(_ context.Context, _ string) (sqlc.OrgWebPublishConfig, error) {
+	if f.getErr != nil {
+		return sqlc.OrgWebPublishConfig{}, f.getErr
+	}
 	return f.cfg, nil
 }
 
@@ -218,6 +224,21 @@ func TestGetDeniedForOutsider(t *testing.T) {
 	outsider := auth.Principal{Role: domain.UserRoleOrgMember, OrgID: "org-OTHER"}
 	_, err := svc.Get(context.Background(), outsider, "org-1")
 	require.ErrorIs(t, err, ErrForbidden, "非本企业成员不得查看 web-publish 配置")
+}
+
+// TestGetUnconfiguredOrgReturnsNotConfigured 覆盖：企业从未配置 web-publish（store 返回 sql.ErrNoRows）时，
+// Get 必须返回可识别的 ErrWebPublishNotConfigured，而非把 sql.ErrNoRows 裹进通用错误落到 500。
+// 这是配置页打开未配置企业时误报 500 的回归用例。
+func TestGetUnconfiguredOrgReturnsNotConfigured(t *testing.T) {
+	cipher, _ := auth.NewCipher(make([]byte, 32))
+	// store 模拟无配置行：GetWebPublishConfig 返回 sql.ErrNoRows。
+	st := &fakeWPStore{getErr: sql.ErrNoRows}
+	svc := NewWebPublishConfigService(st, &fakeWPNotifier{}, cipher)
+
+	// 平台管理员查询从未配置过的企业，期望拿到「未配置」空态 sentinel。
+	admin := auth.Principal{Role: domain.UserRolePlatformAdmin}
+	_, err := svc.Get(context.Background(), admin, "org-未配置")
+	require.ErrorIs(t, err, ErrWebPublishNotConfigured, "未配置企业应返回 ErrWebPublishNotConfigured 空态而非通用错误")
 }
 
 // TestRetryProvisionDeniedForNonAdmin 覆盖：非平台管理员调用 RetryProvision 应返回 ErrForbidden，

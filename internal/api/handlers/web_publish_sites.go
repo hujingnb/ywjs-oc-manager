@@ -158,6 +158,12 @@ func (h *WebPublishSitesHandler) GetConfig(c *gin.Context) {
 	principal := principalFromCtx(c)
 	result, err := h.config.Get(c.Request.Context(), principal, c.Param("orgId"))
 	if err != nil {
+		// 企业从未配置 web-publish 是正常空态：返回 200 + null body，让前端展示「未配置」
+		// 初始表单而非错误提示（与 WebPublishConfigResult | null 契约一致），避免误报 500。
+		if errors.Is(err, service.ErrWebPublishNotConfigured) {
+			c.JSON(http.StatusOK, nil)
+			return
+		}
 		writeConfigServiceError(c, err)
 		return
 	}
