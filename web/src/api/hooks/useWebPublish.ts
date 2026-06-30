@@ -46,6 +46,18 @@ export function useWebPublishConfigQuery(orgId: Ref<string | undefined>) {
   return useQuery<WebPublishConfigResult | null>({
     queryKey: ['web-publish-config', orgId],
     enabled: () => Boolean(orgId.value),
+    // 开通/签发是异步过程（provisioning job 写通配 A 记录 → DNS-01 签证书 → 建 Ingress），
+    // 进行中时每 3s 自动轮询，使页面无需手动刷新即可看到状态推进；达终态后停止轮询。
+    refetchInterval: (query) => {
+      const cfg = query.state.data as WebPublishConfigResult | null | undefined
+      if (!cfg) return false
+      // provisioning 进行中，或证书处于首签/续签中，均视为进行中，继续轮询。
+      const inProgress =
+        cfg.provisioning_status === 'provisioning' ||
+        cfg.cert_status === 'issuing' ||
+        cfg.cert_status === 'renewing'
+      return inProgress ? 3000 : false
+    },
     queryFn: async () => {
       if (!orgId.value) return null
       return await apiRequest<WebPublishConfigResult>(
