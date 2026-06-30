@@ -240,6 +240,39 @@ func TestPublishFirstTime(t *testing.T) {
 	assert.True(t, found, "index.html 应已上传至对象存储")
 }
 
+// TestPublishIgnoresClientSlugForNewSite 回归测试：新建站点时，调用方传入的 slug 被忽略，
+// 服务端一律分配随机子域（防模型用产品名派生固定子域导致反复发布撞名）。
+func TestPublishIgnoresClientSlugForNewSite(t *testing.T) {
+	const orgID = "org-1"
+	const appID = "app-1"
+	const token = "test-token-ignore-slug"
+
+	store := &fakeWPubStore{
+		appByHash:       map[string]sqlc.App{HashAppRuntimeToken(token): {ID: appID, OrgID: orgID}},
+		publishConfig:   map[string]sqlc.OrgWebPublishConfig{orgID: makeReadyCfg(orgID)},
+		siteByHost:      map[string]sqlc.PublishedSite{}, // 无任何已有站点
+		activeSiteCount: map[string]int64{orgID: 0},
+	}
+	obj := newFakeObjStore()
+	svc := NewWebPublishService(store, obj, WebPublishServiceConfig{
+		SlugGen: func() string { return "rand123" }, // 服务端随机名
+		Now:     func() time.Time { return fixedNow },
+	})
+
+	// 调用方传入有语义的固定 slug "yunpan-pro"（模拟模型用产品名派生）。
+	result, err := svc.Publish(context.Background(), token, "yunpan-pro", makeTarGz(t, map[string]string{
+		"index.html": "<html>hi</html>",
+	}))
+	require.NoError(t, err)
+
+	// 结果必须是服务端随机名，而非传入的 "yunpan-pro"。
+	assert.Equal(t, "https://rand123.example.com", result.URL, "新建站点应忽略传入 slug、用服务端随机名")
+	require.Len(t, store.createdSites, 1)
+	assert.Equal(t, "rand123", store.createdSites[0].Slug, "落库 slug 应为随机名")
+	assert.Equal(t, "rand123.example.com", store.createdSites[0].Host)
+	assert.NotContains(t, store.createdSites[0].Host, "yunpan-pro", "传入名字不得出现在 host 中")
+}
+
 // TestPublishUploadsSeekableBody 回归测试：unpackToPrefix 上传单个文件时，传给 PutObject 的 body
 // 必须可 seek（AWS S3 SDK v2 签名要求），且声明 size 等于实际内容长度。修复前直接把不可 seek 的
 // io.LimitReader 传给 PutObject，真实 S3 报 "request stream is not seekable" 导致任何站点发布失败。

@@ -183,37 +183,44 @@ func (s *WebPublishService) Publish(ctx context.Context, appToken, slug string, 
 		return PublishResult{}, ErrWebPublishNotProvisioned
 	}
 
-	// ── 步骤3：确定 slug 并校验格式，构造 host ───────────────────────────────
-	if slug == "" {
-		// 未指定 slug 时随机生成一个合法的 DNS label。
-		slug = s.slugFn()
-	}
-	if err := validateSlug(slug); err != nil {
-		return PublishResult{}, err
-	}
-	host := slug + "." + cfg.BaseDomain
-
-	// ── 步骤4：查 host 归属，检查配额 ────────────────────────────────────────
-	existing, lookupErr := s.store.GetPublishedSiteByHost(ctx, host)
-	isUpdate := lookupErr == nil
-	if !isUpdate && !errors.Is(lookupErr, sql.ErrNoRows) {
-		// 非"不存在"的其他查询错误，属于意外故障。
-		return PublishResult{}, fmt.Errorf("查询站点记录失败: %w", lookupErr)
-	}
-	if isUpdate && existing.AppID != app.ID {
-		// host 已被其他 app 占用，不允许越权发布。这是正常的业务拒绝（不是系统故障），
-		// 用 ErrConflict 包装让 handler 映射为 409 + 清晰文案，而非不透明的 500「服务暂时不可用」——
-		// 否则 oc-publish/agent 无法把「该名字已被占用」如实告诉用户。
-		return PublishResult{}, fmt.Errorf("%w: slug %q 已占用，该域名已被其他实例持有", ErrConflict, slug)
+	// ── 步骤3-4：确定目标站点与 host（命名策略：服务端强制随机）─────────────────
+	// 传入的 slug 仅作为「更新本实例已有站点」的定位依据；一旦不命中本实例已有站点，
+	// 就一律当作新建，由服务端分配随机唯一子域并丢弃传入 slug。这样新建站点必然随机命名，
+	// 不依赖调用方/模型是否听话（曾出现模型用产品名派生固定子域、反复发布撞名的问题），
+	// 同时保留「同名原地更新」能力（更新时复用上次返回 URL 里的真实 slug）。
+	var existing sqlc.PublishedSite
+	var host string
+	isUpdate := false
+	if slug != "" {
+		if err := validateSlug(slug); err != nil {
+			return PublishResult{}, err
+		}
+		row, lookupErr := s.store.GetPublishedSiteByHost(ctx, slug+"."+cfg.BaseDomain)
+		switch {
+		case lookupErr == nil && row.AppID == app.ID:
+			// 命中本实例已有站点 → 原地更新（复用其 siteID / host）。
+			existing, isUpdate, host = row, true, row.Host
+		case lookupErr == nil:
+			// 命中其他实例的站点 → 拒绝越权覆盖（业务拒绝，handler 映射 409）。
+			return PublishResult{}, fmt.Errorf("%w: slug %q 已占用，该域名已被其他实例持有", ErrConflict, slug)
+		case errors.Is(lookupErr, sql.ErrNoRows):
+			// 传入 slug 无对应站点 → 视为新建，忽略该 slug（下面随机分配）。
+		default:
+			return PublishResult{}, fmt.Errorf("查询站点记录失败: %w", lookupErr)
+		}
 	}
 	if !isUpdate {
-		// 新建站点前检查配额上限，避免无限制创建。
+		// 新建：服务端分配随机唯一子域（忽略任何传入 slug）。
+		var err error
+		if slug, host, err = s.allocateRandomHost(ctx, cfg.BaseDomain); err != nil {
+			return PublishResult{}, err
+		}
+		// 配额上限检查（业务拒绝，handler 映射 409）。
 		count, err := s.store.CountActiveSitesByOrg(ctx, app.OrgID)
 		if err != nil {
 			return PublishResult{}, fmt.Errorf("查询站点配额失败: %w", err)
 		}
 		if count >= int64(cfg.MaxSites) {
-			// 配额上限同样是业务拒绝，用 ErrConflict 包装映射 409 + 清晰文案（同上，避免误报 500）。
 			return PublishResult{}, fmt.Errorf("%w: 已达站点配额上限（%d），请先删除旧站点", ErrConflict, cfg.MaxSites)
 		}
 	}
@@ -357,6 +364,24 @@ func (s *WebPublishService) unpackToPrefix(ctx context.Context, body io.Reader, 
 	}
 
 	return totalSize, nil
+}
+
+// allocateRandomHost 在 baseDomain 下分配一个未被占用的随机子域，返回 (slug, host)。
+// 重试至多 5 次规避随机碰撞（slug 空间足够大，碰撞概率极低）；连续命中已存在视为异常返回错误。
+func (s *WebPublishService) allocateRandomHost(ctx context.Context, baseDomain string) (string, string, error) {
+	for attempt := 0; attempt < 5; attempt++ {
+		cand := s.slugFn()
+		host := cand + "." + baseDomain
+		_, err := s.store.GetPublishedSiteByHost(ctx, host)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return cand, host, nil // 未占用，可用
+		case err != nil:
+			return "", "", fmt.Errorf("查询站点记录失败: %w", err)
+		}
+		// host 已存在（碰撞），换一个继续尝试。
+	}
+	return "", "", fmt.Errorf("分配随机站点名失败，请重试")
 }
 
 // bumpVersion 将 "vN" 格式的版本号递增为 "v(N+1)"。
