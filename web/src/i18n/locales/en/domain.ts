@@ -59,4 +59,22 @@ export default {
     failed: 'Failed',
     stopped: 'Stopped',
   },
+  // Published site statuses (active/disabled/expired)
+  siteStatus: {
+    active: 'Published',
+    disabled: 'Taken down',
+    expired: 'Expired',
+    // 未知状态降级文案，{status} 为后端原始值
+    unknown: 'Unknown status: {status}',
+  },
+  // web-publish wildcard certificate statuses (none/issuing/renewing/issued/failed)
+  certStatus: {
+    none: 'Not configured',
+    issuing: 'Issuing',
+    renewing: 'Renewing',
+    issued: 'Valid',
+    failed: 'Failed',
+    // 未知状态降级文案，{status} 为后端原始值
+    unknown: 'Unknown status: {status}',
+  },
 } as const

@@ -59,4 +59,22 @@ export default {
     failed: '解析失败',
     stopped: '已停止',
   },
+  // 已发布站点状态（active/disabled/expired）
+  siteStatus: {
+    active: '已发布',
+    disabled: '已下线',
+    expired: '已过期',
+    // 未知状态降级文案，{status} 为后端原始值
+    unknown: '未知状态：{status}',
+  },
+  // web-publish 通配证书状态（none/issuing/renewing/issued/failed）
+  certStatus: {
+    none: '未配置',
+    issuing: '首签中',
+    renewing: '续签中',
+    issued: '有效',
+    failed: '签发失败',
+    // 未知状态降级文案，{status} 为后端原始值
+    unknown: '未知状态：{status}',
+  },
 } as const

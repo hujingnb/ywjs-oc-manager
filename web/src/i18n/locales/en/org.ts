@@ -134,6 +134,42 @@ export default {
       loadError: 'Load failed, please refresh and try again',
     },
   },
+  // publishedSites: Published sites management page (PublishedSitesPage).
+  publishedSites: {
+    // list: list area title and toolbar.
+    list: {
+      title: 'Published Sites',
+      selectOrg: 'Select organization',
+    },
+    // page: page eyebrow subtitle, differs by role.
+    page: {
+      eyebrowPlatform: 'Platform · Published Sites',
+      eyebrowOrg: 'My Organization',
+    },
+    // table: column headers for the sites list.
+    table: {
+      url: 'Site URL',
+      status: 'Status',
+      expiresAt: 'Expires At',
+      size: 'Size',
+    },
+    // actions: row action button labels.
+    actions: {
+      renew: 'Renew',
+      takedown: 'Take Down',
+    },
+    // modal: takedown confirmation dialog text.
+    modal: {
+      takedownTitle: 'Confirm Takedown',
+      takedownMessage: 'Site {url} will be taken down. Visitors will no longer be able to access this address. This action cannot be undone.',
+      takedownConfirm: 'Confirm Takedown',
+    },
+    // state: empty state messages when no org is available.
+    state: {
+      noOrg: 'No organizations available',
+      noOrgLinked: 'Current account is not linked to an organization',
+    },
+  },
   // createMember 创建成员并初始化实例页（CreateMemberPage）。
   createMember: {
     // page 页头文案。

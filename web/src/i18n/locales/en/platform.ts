@@ -493,4 +493,22 @@ export default {
       mcp: 'MCP routing',
     },
   },
+  // webPublishCert: Enterprise web-publish wildcard certificate status panel (WebPublishCertPanel).
+  webPublishCert: {
+    // Panel title.
+    title: 'Web Publish Certificate',
+    // Field labels.
+    wildcardDomain: 'Wildcard domain',
+    certStatus: 'Certificate status',
+    certNotAfter: 'Cert expires at',
+    certLastIssuedAt: 'Last issued at',
+    certLastRenewedAt: 'Last renewed at',
+    certMessage: 'Failure reason',
+    // Retry button and feedback messages.
+    retryButton: 'Retry issuance / renewal',
+    retrySuccess: 'Retry submitted — refresh in a moment to check the latest status',
+    retryError: 'Retry failed — please try again later',
+    // Empty state when no config is found.
+    noConfig: 'No web-publish certificate config found for this organization',
+  },
 } as const

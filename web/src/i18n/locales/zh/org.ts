@@ -134,6 +134,42 @@ export default {
       loadError: '加载失败，请刷新重试',
     },
   },
+  // publishedSites 已发布站点管理页（PublishedSitesPage）。
+  publishedSites: {
+    // list 列表区标题与工具栏。
+    list: {
+      title: '已发布站点',
+      selectOrg: '选择企业',
+    },
+    // page 页头副标题，根据角色区分平台视角与企业视角。
+    page: {
+      eyebrowPlatform: 'Platform · 已发布站点',
+      eyebrowOrg: '我的企业',
+    },
+    // table 列表列头文案。
+    table: {
+      url: '站点地址',
+      status: '状态',
+      expiresAt: '到期时间',
+      size: '站点大小',
+    },
+    // actions 行操作按钮文案。
+    actions: {
+      renew: '续期',
+      takedown: '下线',
+    },
+    // modal 下线确认弹窗文案。
+    modal: {
+      takedownTitle: '确认下线站点',
+      takedownMessage: '将下线站点 {url}，访问者将无法继续访问该地址，操作不可撤销。',
+      takedownConfirm: '确认下线',
+    },
+    // state 无企业等错误态文案。
+    state: {
+      noOrg: '暂无可查看企业',
+      noOrgLinked: '当前账号未关联企业',
+    },
+  },
   // createMember 创建成员并初始化实例页（CreateMemberPage）。
   createMember: {
     // page 页头文案。

@@ -22,6 +22,7 @@ import RoleAwareHome from '@/pages/dashboard/RoleAwareHome.vue'
 import LoginPage from '@/pages/login/LoginPage.vue'
 import CreateMemberPage from '@/pages/org/CreateMemberPage.vue'
 import MembersPage from '@/pages/org/MembersPage.vue'
+import PublishedSitesPage from '@/pages/org/PublishedSitesPage.vue'
 import AssistantVersionsPage from '@/pages/platform/AssistantVersionsPage.vue'
 import IndustryKnowledgePage from '@/pages/platform/IndustryKnowledgePage.vue'
 import PlatformSkillsPage from '@/pages/platform/PlatformSkillsPage.vue'
@@ -69,6 +70,8 @@ export const router = createRouter({
         { path: 'platform/organizations/:orgId/recharge', component: RechargePage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'platform/permissions', component: PermissionsPage, meta: { allowedRoles: PLATFORM_ONLY } },
         { path: 'members', component: MembersPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },
+        // published-sites：企业已发布站点列表 + 证书状态面板；平台管理员可跨企业查看并重试证书。
+        { path: 'published-sites', component: PublishedSitesPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },
         { path: 'members/new', component: CreateMemberPage, meta: { allowedRoles: ORG_ADMIN_ONLY } },
         { path: 'audit-logs', component: AuditLogsPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },
         { path: 'knowledge', component: OrgKnowledgePage },
