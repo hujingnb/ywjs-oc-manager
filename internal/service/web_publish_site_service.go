@@ -6,6 +6,8 @@ package service
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -154,6 +156,10 @@ func (s *WebPublishSiteService) Renew(ctx context.Context, p auth.Principal, sit
 func (s *WebPublishSiteService) authorizeSite(ctx context.Context, p auth.Principal, siteID string) (sqlc.PublishedSite, error) {
 	site, err := s.store.GetPublishedSiteByID(ctx, siteID)
 	if err != nil {
+		// 站点不存在映射为 ErrNotFound（handler 层映射 404），其余错误透传供上层映射 500。
+		if errors.Is(err, sql.ErrNoRows) {
+			return sqlc.PublishedSite{}, ErrNotFound
+		}
 		return sqlc.PublishedSite{}, fmt.Errorf("查询站点失败: %w", err)
 	}
 

@@ -147,6 +147,28 @@ func TestTakedownDeniedCrossOrg(t *testing.T) {
 	assert.Empty(t, obj.deletedPrefixes, "跨企业下线不应删除对象")
 }
 
+// TestTakedownSiteNotFound 测试下线不存在站点场景：
+// GetPublishedSiteByID 返回 sql.ErrNoRows 时，service 层应映射为 ErrNotFound（而非 500），
+// 不调用任何写入操作。此处直接验证 service 层映射，而非依赖 handler mock 掩盖。
+func TestTakedownSiteNotFound(t *testing.T) {
+	// store 为空：任何 siteID 查询都命中 fakeSiteStore 的 sql.ErrNoRows 分支。
+	store := &fakeSiteStore{
+		siteByID: map[string]sqlc.PublishedSite{},
+	}
+	obj := &fakeSiteObj{}
+
+	svc := NewWebPublishSiteService(store, obj, func() time.Time { return fixedSiteNow })
+
+	// 平台管理员对不存在的站点发起下线——应在权限校验前因找不到站点返回 ErrNotFound。
+	p := auth.Principal{Role: domain.UserRolePlatformAdmin}
+	err := svc.Takedown(context.Background(), p, "no-such-site")
+
+	// 必须映射为 ErrNotFound，且不产生任何写入/删除副作用。
+	require.ErrorIs(t, err, ErrNotFound)
+	assert.Empty(t, store.statusCalls, "站点不存在不应写入状态")
+	assert.Empty(t, obj.deletedPrefixes, "站点不存在不应删除对象")
+}
+
 // TestRenewExtendsExpiry 测试续期场景：
 // Renew 应按企业 site_ttl_days 计算新到期时间，并调用 RenewPublishedSite 写入。
 func TestRenewExtendsExpiry(t *testing.T) {
