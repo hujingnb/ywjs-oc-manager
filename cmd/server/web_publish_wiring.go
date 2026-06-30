@@ -8,6 +8,9 @@ package main
 
 import (
 	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -15,6 +18,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"sync"
 	"time"
 
 	"oc-manager/internal/integrations/acme"
@@ -24,37 +28,113 @@ import (
 )
 
 // 编译期断言：三个适配器类型满足各自接口。
-var _ handlers.CertProvisioner = certProvisionerImpl{}
+var _ handlers.CertProvisioner = (*certProvisionerImpl)(nil)
 var _ handlers.CertProvisioner = devSelfSignedCertProvisioner{}
 var _ handlers.ClusterApplier = clusterApplierImpl{}
 
+// ACME 账户私钥持久化位置：manager 命名空间内的 Opaque Secret（平台级单例，跨企业共用一个 ACME 账户）。
+const (
+	acmeAccountSecretName = "web-publish-acme-account"
+	acmeAccountSecretKey  = "account.key.pem"
+)
+
+// acmeAccountKeyStore 抽象「幂等读取/创建持久化机密值」的能力，由 *k8sorch.KubernetesAdapter 实现。
+// 抽成接口便于在 k8s 未启用时传 nil 退回旧行为，也便于将来替换持久化后端。
+type acmeAccountKeyStore interface {
+	GetOrCreateOpaqueSecretValue(ctx context.Context, name, dataKey string, gen func() ([]byte, error)) ([]byte, error)
+}
+
 // certProvisionerImpl 组合 dnsprovider.New + acme.NewIssuer 实现 handlers.CertProvisioner。
 //
-// 设计说明：每次 Provision 调用均重新构造 Provider 与 Issuer，保证无共享状态（并发安全）；
-// acme.Issuer 的账户私钥在 NewIssuer 内部生成，每次签发均独立注册，符合无状态 ACME 账户策略。
+// ACME 账户私钥策略：从持久化 Secret 读取/创建一份稳定的平台账户私钥，所有签发复用同一账户，
+// 使 lego 注册返回「已存在账户」而非新建，避免 Let's Encrypt「每 IP 每 3h 新注册数」限流（429）。
+// 进程内缓存解析后的私钥，避免每次 Provision 都读 Secret。keyStore 为 nil（k8s 未启用）时退回
+// 旧行为：每次签发生成新账户私钥。
 type certProvisionerImpl struct {
 	// acmeEmail 是注册到 ACME CA 的联系邮箱，用于到期提醒等通知。
 	acmeEmail string
 	// acmeDirURL 是 ACME 目录 URL；留空使用 lego 默认（Let's Encrypt 生产）。
 	acmeDirURL string
+	// keyStore 持久化 ACME 账户私钥；nil 时不持久化（降级为每次新账户）。
+	keyStore acmeAccountKeyStore
+
+	// mu 保护下面的缓存字段；accountKey 仅在成功加载后缓存，失败不缓存以便后续重试。
+	mu         sync.Mutex
+	accountKey crypto.Signer
+}
+
+// ensureAccountKey 返回稳定复用的 ACME 账户私钥（从 Secret 读取/创建，进程内缓存）。
+// keyStore 为 nil 时返回 (nil, nil)，由 Issuer 退回为每次签发生成新账户。
+func (c *certProvisionerImpl) ensureAccountKey(ctx context.Context) (crypto.Signer, error) {
+	if c.keyStore == nil {
+		return nil, nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.accountKey != nil {
+		return c.accountKey, nil
+	}
+	pemBytes, err := c.keyStore.GetOrCreateOpaqueSecretValue(ctx, acmeAccountSecretName, acmeAccountSecretKey, generateECAccountKeyPEM)
+	if err != nil {
+		return nil, fmt.Errorf("certProvisioner: 读取/创建 ACME 账户私钥失败: %w", err)
+	}
+	key, err := parseECAccountKeyPEM(pemBytes)
+	if err != nil {
+		return nil, fmt.Errorf("certProvisioner: 解析 ACME 账户私钥失败: %w", err)
+	}
+	c.accountKey = key
+	return key, nil
+}
+
+// generateECAccountKeyPEM 生成一把 P-256 ECDSA 私钥并编码为 PEM（EC PRIVATE KEY）。供首次持久化使用。
+func generateECAccountKeyPEM() ([]byte, error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	der, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		return nil, err
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}), nil
+}
+
+// parseECAccountKeyPEM 解析 generateECAccountKeyPEM 写出的 PEM，返回 crypto.Signer。
+func parseECAccountKeyPEM(pemBytes []byte) (crypto.Signer, error) {
+	block, _ := pem.Decode(pemBytes)
+	if block == nil {
+		return nil, fmt.Errorf("ACME 账户私钥 PEM 解码失败")
+	}
+	key, err := x509.ParseECPrivateKey(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	return key, nil
 }
 
 // Provision 根据 in 中的 DNS provider 类型和凭证，签发 *.in.BaseDomain 通配证书。
 // 流程：
 //  1. 按 ProviderType 构造 DNS provider（校验凭证）；
-//  2. 构造 acme.Issuer（连接 ACME CA）；
-//  3. 调用 Issue 写通配 A 记录并完成 DNS-01 挑战，返回 PEM 证书链。
-func (c certProvisionerImpl) Provision(ctx context.Context, in handlers.CertProvisionInput) (acme.Certificate, error) {
+//  2. 取稳定的平台 ACME 账户私钥（复用避免新注册限流）；
+//  3. 构造 acme.Issuer 并 Issue（写通配 A 记录 + DNS-01 挑战），返回 PEM 证书链。
+func (c *certProvisionerImpl) Provision(ctx context.Context, in handlers.CertProvisionInput) (acme.Certificate, error) {
 	// 按 provider 类型构造 DNS provider 实例，同时校验凭证字段完整性。
 	p, err := dnsprovider.New(ctx, dnsprovider.ProviderType(in.ProviderType), in.Credentials, in.BaseDomain)
 	if err != nil {
 		return acme.Certificate{}, fmt.Errorf("certProvisioner: 构造 DNS provider 失败: %w", err)
 	}
 
-	// 构造 ACME Issuer：每次调用重新生成账户私钥并向 CA 注册（无状态 ACME 账户策略）。
+	// 取稳定复用的平台 ACME 账户私钥（持久化在 Secret，跨重试/重启/副本共用同一账户）。
+	accountKey, err := c.ensureAccountKey(ctx)
+	if err != nil {
+		return acme.Certificate{}, err
+	}
+
+	// 构造 ACME Issuer：注入复用账户私钥（nil 时 Issuer 退回每次新账户）。
 	issuer := acme.NewIssuer(p, acme.IssuerConfig{
-		Email:    c.acmeEmail,
-		CADirURL: c.acmeDirURL,
+		Email:      c.acmeEmail,
+		CADirURL:   c.acmeDirURL,
+		AccountKey: accountKey,
 	})
 
 	// Issue 先幂等写通配 A 记录，再完成 ACME DNS-01 挑战并返回 PEM 证书链。

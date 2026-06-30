@@ -44,6 +44,13 @@ func newAccount(email string) (*account, error) {
 	return &account{email: email, privateKey: key}, nil
 }
 
+// newAccountWithKey 用给定（已持久化、稳定）的私钥构造 ACME 账户。
+// 复用同一账户私钥可使 lego 注册时返回「已存在账户」而非新建，从而不触发 Let's Encrypt
+// 「每 IP 每 3h 新注册数」限流——这是反复签发/重试时避免 429 rateLimited 的关键。
+func newAccountWithKey(email string, key crypto.Signer) *account {
+	return &account{email: email, privateKey: key}
+}
+
 // GetEmail 返回账户邮箱（registration.User 接口）。
 func (a *account) GetEmail() string { return a.email }
 

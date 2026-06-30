@@ -14,6 +14,65 @@ import (
 	"oc-manager/internal/worker/handlers"
 )
 
+// fakeAccountKeyStore 记录 GetOrCreateOpaqueSecretValue 调用次数，并模拟「已存在则返回同值」：
+// 首次调用执行 gen 生成并缓存，后续返回缓存值（对齐真实 Secret 复用语义）。
+type fakeAccountKeyStore struct {
+	calls int
+	value []byte
+	err   error
+}
+
+func (f *fakeAccountKeyStore) GetOrCreateOpaqueSecretValue(_ context.Context, _, _ string, gen func() ([]byte, error)) ([]byte, error) {
+	f.calls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.value == nil {
+		v, err := gen()
+		if err != nil {
+			return nil, err
+		}
+		f.value = v
+	}
+	return f.value, nil
+}
+
+// TestEnsureAccountKey_CachesAndReuses 验证账户私钥：从 store 读取/创建后进程内缓存，
+// 多次 ensureAccountKey 只触达 store 一次且返回同一把私钥（复用同一 ACME 账户、避免新注册限流）。
+func TestEnsureAccountKey_CachesAndReuses(t *testing.T) {
+	store := &fakeAccountKeyStore{}
+	c := &certProvisionerImpl{keyStore: store}
+
+	k1, err := c.ensureAccountKey(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, k1)
+	k2, err := c.ensureAccountKey(context.Background())
+	require.NoError(t, err)
+	// 缓存命中：store 只被调用一次，且两次返回同一把私钥。
+	assert.Equal(t, 1, store.calls, "第二次应命中进程内缓存，不再访问 store")
+	assert.Equal(t, k1, k2)
+}
+
+// TestEnsureAccountKey_NilStoreReturnsNil 验证未配置持久化（k8s 未启用）时返回 nil，
+// 由 Issuer 退回为每次签发生成新账户（旧行为，不报错）。
+func TestEnsureAccountKey_NilStoreReturnsNil(t *testing.T) {
+	c := &certProvisionerImpl{keyStore: nil}
+	k, err := c.ensureAccountKey(context.Background())
+	require.NoError(t, err)
+	assert.Nil(t, k)
+}
+
+// TestECAccountKeyPEM_RoundTrip 验证账户私钥 PEM 生成与解析可往返，得到可用的 crypto.Signer。
+func TestECAccountKeyPEM_RoundTrip(t *testing.T) {
+	pemBytes, err := generateECAccountKeyPEM()
+	require.NoError(t, err)
+	require.NotEmpty(t, pemBytes)
+	key, err := parseECAccountKeyPEM(pemBytes)
+	require.NoError(t, err)
+	require.NotNil(t, key)
+	require.NotNil(t, key.Public(), "解析出的私钥应能取出公钥")
+}
+
 // TestDevSelfSignedCertProvisioner_Provision 验证自签 provisioner 产出可解析的通配证书：
 // 证书 PEM 可解析、SAN 同时覆盖 *.base_domain 与 base_domain、有效期约 90 天、
 // 证书与返回的私钥匹配，且完全忽略传入的 DNS provider 类型与凭证（本地无真实凭证也能签）。

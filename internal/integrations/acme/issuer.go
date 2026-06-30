@@ -2,6 +2,7 @@ package acme
 
 import (
 	"context"
+	"crypto"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
@@ -39,6 +40,10 @@ type IssuerConfig struct {
 	Email string
 	// CADirURL 是 ACME 目录 URL；留空则使用 lego 默认值（Let's Encrypt 生产）。
 	CADirURL string
+	// AccountKey 是稳定复用的 ACME 账户私钥；非 nil 时所有签发共用该账户，
+	// 使 lego 注册返回「已存在账户」而非新建，避免 Let's Encrypt 新注册限流（429）。
+	// 留空（如本地/测试）则每次签发生成新账户私钥（旧行为）。
+	AccountKey crypto.Signer
 }
 
 // NewIssuer 构造一个连接真实 ACME CA 的 Issuer（生产用）。
@@ -82,10 +87,17 @@ type legoObtainer struct {
 // 流程：生成账户 → 构建 lego Config → 创建 Client → 设置 DNS-01 挑战器 →
 // 注册账户 → 签发证书 → 解析 NotAfter。
 func (o *legoObtainer) Obtain(ctx context.Context, domains []string) (Certificate, error) {
-	// 1. 生成本次签发专用的 ACME 账户（含新 P-256 私钥）。
-	acc, err := newAccount(o.cfg.Email)
-	if err != nil {
-		return Certificate{}, fmt.Errorf("acme: 生成账户私钥失败: %w", err)
+	// 1. 准备 ACME 账户：优先复用配置注入的稳定账户私钥（避免新注册限流），
+	// 未注入时退回为本次签发生成新私钥（旧行为，适配本地/测试）。
+	var acc *account
+	if o.cfg.AccountKey != nil {
+		acc = newAccountWithKey(o.cfg.Email, o.cfg.AccountKey)
+	} else {
+		var err error
+		acc, err = newAccount(o.cfg.Email)
+		if err != nil {
+			return Certificate{}, fmt.Errorf("acme: 生成账户私钥失败: %w", err)
+		}
 	}
 
 	// 2. 构建 lego Config；若指定了自定义 CA 目录（如 ZeroSSL、Pebble 测试），覆盖默认值。
