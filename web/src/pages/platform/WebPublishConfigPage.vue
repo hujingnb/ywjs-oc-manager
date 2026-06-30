@@ -46,7 +46,7 @@
               </n-form-item>
             </n-grid-item>
 
-            <!-- DNS provider：必填；值与后端白名单对齐 alidns/huaweicloud/tencentcloud/cmcccloud -->
+            <!-- DNS provider：必填；当前仅开放阿里云 alidns（dev 模式另含 local），其余三家待实现 -->
             <n-grid-item>
               <n-form-item :label="t('platform.webPublishConfig.labelDnsProvider')">
                 <n-select
@@ -288,14 +288,12 @@ const publicConfigQuery = useQuery({
 })
 const webPublishDevMode = computed(() => Boolean(publicConfigQuery.data.value?.web_publish_dev_mode))
 
-// DNS provider 枚举选项：与后端白名单对齐 alidns/huaweicloud/tencentcloud/cmcccloud；
+// DNS provider 枚举选项：当前仅开放阿里云 DNS（alidns）——huaweicloud/tencentcloud/cmcccloud
+// 的通配 A 记录尚未实现，后端 Configure 也会拒绝，故先不在下拉暴露；待实现后再放开。
 // dev 模式额外提供「本地调试(local)」占位 provider，配合自签证书在本地一键开通（生产不出现）。
 const dnsProviderOptions = computed(() => {
   const base = [
     { label: '阿里云 DNS (alidns)', value: 'alidns' },
-    { label: '华为云 DNS (huaweicloud)', value: 'huaweicloud' },
-    { label: '腾讯云 DNS (tencentcloud)', value: 'tencentcloud' },
-    { label: '移动云 DNS (cmcccloud)', value: 'cmcccloud' },
   ]
   if (webPublishDevMode.value) {
     base.push({ label: '本地调试 (local)', value: 'local' })

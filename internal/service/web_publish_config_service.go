@@ -146,6 +146,15 @@ func (s *WebPublishConfigService) Configure(ctx context.Context, p auth.Principa
 	if !dnsprovider.ProviderType(in.DNSProvider).Valid() {
 		return fmt.Errorf("不支持的 DNS provider: %s", in.DNSProvider)
 	}
+	// 当前仅开放阿里云 DNS：huaweicloud/tencentcloud/cmcccloud 的通配 A 记录尚未实现，
+	// 选用它们会在签发阶段失败，故在配置阶段就拒绝（前端也只暴露 alidns）。
+	// local 是 dev 自签占位 provider，由下方 dev 开关二次校验后放行。
+	switch dnsprovider.ProviderType(in.DNSProvider) {
+	case dnsprovider.ProviderAlidns, dnsprovider.ProviderLocal:
+		// 允许（local 仍需通过下方 dev 开关校验）
+	default:
+		return fmt.Errorf("当前仅支持阿里云 DNS（alidns），%q 暂未开放", in.DNSProvider)
+	}
 	// 「local」是仅供本地 dev 调试的占位 provider：只有平台开启 dev_self_signed_cert 时才允许选用，
 	// 否则（生产）拒绝，避免误选导致真实签发链路（factory.New 不支持 local）失败。
 	if dnsprovider.ProviderType(in.DNSProvider) == dnsprovider.ProviderLocal && !s.devSelfSignedCert {

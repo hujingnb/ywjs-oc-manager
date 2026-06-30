@@ -208,6 +208,24 @@ func TestConfigureDeniedForOrgAdminOfOtherOrg(t *testing.T) {
 	assert.Nil(t, st.upserted, "权限拒绝后不应写入")
 }
 
+// TestConfigureRejectsUnsupportedProvider 覆盖：当前仅开放阿里云，选用 huaweicloud 等
+// 尚未实现的合法枚举 provider，应在配置阶段被拒（防止签发时才在通配 A 记录桩处失败）。
+func TestConfigureRejectsUnsupportedProvider(t *testing.T) {
+	cipher, _ := auth.NewCipher(make([]byte, 32))
+	st := &fakeWPStore{}
+	svc := NewWebPublishConfigService(st, &fakeWPNotifier{}, cipher, false)
+
+	admin := auth.Principal{Role: domain.UserRolePlatformAdmin}
+	// huaweicloud 是合法枚举（Valid() 通过）但尚未开放，应被「仅支持阿里云」gate 拦下。
+	err := svc.Configure(context.Background(), admin, WebPublishConfigInput{
+		OrgID: "org-1", BaseDomain: "apps.example.com", DNSProvider: "huaweicloud",
+		Credentials: map[string]string{"access_key_id": "ak", "access_key_secret": "sk"},
+	})
+	require.Error(t, err, "未开放的 provider 应被拒")
+	assert.Contains(t, err.Error(), "alidns", "错误应提示当前仅支持阿里云")
+	assert.Nil(t, st.upserted, "拒绝后不应写入")
+}
+
 // TestConfigureLocalProviderRejectedWhenDevOff 覆盖：非 dev 模式（devSelfSignedCert=false）下
 // 选用 local provider 应被拒（生产防误选）。
 func TestConfigureLocalProviderRejectedWhenDevOff(t *testing.T) {
