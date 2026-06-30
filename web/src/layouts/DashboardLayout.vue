@@ -16,13 +16,18 @@
       </div>
 
       <!-- Nav -->
+      <!-- 菜单区作为独立滚动区:flex:1 占据 logo 与 footer 之间的剩余空间,
+           min-height:0 允许其收缩到分配高度以下(覆盖 flex item 默认 min-height:auto),
+           overflow-y:auto 覆盖 naive .n-menu 默认的 overflow:hidden——否则菜单项多到
+           装不下时会被直接裁剪且无法滚动,导致末尾入口(如「用量」)在矮窗口下被遮挡不可达。
+           footer 用 flex 钉在底部,菜单在此区内部滚动,任意窗口高度下所有入口均可达。 -->
       <n-menu
         :value="activeKey"
         :options="menuOptions"
         :collapsed-width="64"
         :collapsed-icon-size="22"
         :indent="16"
-        style="flex: 1"
+        style="flex: 1; min-height: 0; overflow-y: auto"
         @update:value="onNav"
       />
 
