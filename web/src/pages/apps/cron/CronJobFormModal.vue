@@ -8,15 +8,15 @@
   >
     <n-form>
       <!-- ① 基础：name 必填 + prompt。 -->
-      <n-form-item label="name" required>
+      <n-form-item :label="t('apps.cron.form.labels.name')" required>
         <n-input v-model:value="form.name" :placeholder="t('apps.cron.form.namePlaceholder')" />
       </n-form-item>
-      <n-form-item label="prompt">
+      <n-form-item :label="t('apps.cron.form.labels.prompt')">
         <n-input v-model:value="form.prompt" type="textarea" :placeholder="t('apps.cron.form.promptPlaceholder')" />
       </n-form-item>
 
       <!-- ② 调度：可视化点选器 + 运行次数上限（原 repeat）。 -->
-      <n-form-item label="schedule" required>
+      <n-form-item :label="t('apps.cron.form.labels.schedule')" required>
         <ScheduleField v-model:value="form.schedule" />
       </n-form-item>
       <n-form-item :label="t('apps.cron.form.repeatLabel')">
@@ -32,15 +32,15 @@
       </n-form-item>
 
       <!-- ③ 投递：从已绑定渠道点选。 -->
-      <n-form-item label="deliver">
+      <n-form-item :label="t('apps.cron.form.labels.deliver')">
         <DeliverField v-model:value="form.deliver" :app-id="appId" />
       </n-form-item>
 
       <!-- ④ 执行：脚本点选 + 是否仅跑脚本。 -->
-      <n-form-item label="script">
+      <n-form-item :label="t('apps.cron.form.labels.script')">
         <WorkspaceFilePicker v-model:value="form.script" :app-id="appId" />
       </n-form-item>
-      <n-form-item label="no_agent">
+      <n-form-item :label="t('apps.cron.form.labels.noAgent')">
         <n-space align="center" :size="6">
           <n-checkbox v-model:checked="form.no_agent">{{ t('apps.cron.form.noAgentLabel') }}</n-checkbox>
           <n-tooltip>
@@ -52,19 +52,19 @@
 
       <!-- 平台管理员·高级：workdir 与模型相关字段仅平台管理员可见，后端仍会做最终权限裁剪。 -->
       <template v-if="isPlatformAdmin">
-        <n-form-item label="workdir">
+        <n-form-item :label="t('apps.cron.form.labels.workdir')">
           <n-input v-model:value="form.workdir" :placeholder="t('apps.cron.form.workdirPlaceholder')" />
         </n-form-item>
-        <n-form-item label="skills">
+        <n-form-item :label="t('apps.cron.form.labels.skills')">
           <n-input v-model:value="form.skills" :placeholder="t('apps.cron.form.skillsPlaceholder')" />
         </n-form-item>
-        <n-form-item label="model">
+        <n-form-item :label="t('apps.cron.form.labels.model')">
           <n-input v-model:value="form.model" :placeholder="t('apps.cron.form.modelPlaceholder')" />
         </n-form-item>
-        <n-form-item label="provider">
+        <n-form-item :label="t('apps.cron.form.labels.provider')">
           <n-input v-model:value="form.provider" :placeholder="t('apps.cron.form.providerPlaceholder')" />
         </n-form-item>
-        <n-form-item label="base_url">
+        <n-form-item :label="t('apps.cron.form.labels.baseUrl')">
           <n-input v-model:value="form.base_url" :placeholder="t('apps.cron.form.baseUrlPlaceholder')" />
         </n-form-item>
       </template>

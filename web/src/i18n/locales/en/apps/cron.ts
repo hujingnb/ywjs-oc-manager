@@ -25,6 +25,20 @@ export default {
   form: {
     titleEdit: 'Edit scheduled job',
     titleCreate: 'New scheduled job',
+    // labels.* — form field titles, mirroring backend field names
+    labels: {
+      name: 'Name',
+      prompt: 'Prompt',
+      schedule: 'Schedule',
+      deliver: 'Deliver',
+      script: 'Script',
+      noAgent: 'Script only',
+      workdir: 'Working directory',
+      skills: 'Skills',
+      model: 'Model',
+      provider: 'Provider',
+      baseUrl: 'Base URL',
+    },
     namePlaceholder: 'Job name',
     promptPlaceholder: 'Prompt sent to Hermes on trigger',
     repeatLabel: 'Max runs',

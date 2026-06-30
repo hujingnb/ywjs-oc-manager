@@ -25,6 +25,20 @@ export default {
   form: {
     titleEdit: '编辑定时任务',
     titleCreate: '新建定时任务',
+    // labels.* — 表单各字段的标题，保留与后端字段对应关系但以中文呈现
+    labels: {
+      name: '任务名称',
+      prompt: '提示词',
+      schedule: '调度计划',
+      deliver: '结果投递',
+      script: '执行脚本',
+      noAgent: '仅运行脚本',
+      workdir: '运行目录',
+      skills: '技能',
+      model: '模型',
+      provider: 'Provider',
+      baseUrl: 'Base URL',
+    },
     namePlaceholder: '任务名称',
     promptPlaceholder: '触发时交给 Hermes 的提示词',
     repeatLabel: '运行次数上限',

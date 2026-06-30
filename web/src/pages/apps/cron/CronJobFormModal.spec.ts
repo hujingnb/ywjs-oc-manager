@@ -78,25 +78,29 @@ function mountFormModal(isPlatformAdmin: boolean, job: CronJob | null = null) {
   })
 }
 
+// label 取自 i18n catalog：表单字段标题已汉化，断言改用译文而非英文字段名，
+// 保持「字段显隐」语义的同时与翻译文件对齐。
+const label = (key: string) => i18n.global.t(`apps.cron.form.labels.${key}`)
+
 describe('CronJobFormModal', () => {
   // 组织成员：可见 script/no_agent，不可见高级区（含已下沉的 workdir）。
   it('org member 不再看到 workdir 与高级字段', () => {
     const text = mountFormModal(false).text()
-    expect(text).toContain('script')
-    expect(text).toContain('no_agent')
-    expect(text).not.toContain('workdir')
-    expect(text).not.toContain('model')
-    expect(text).not.toContain('skills')
+    expect(text).toContain(label('script'))
+    expect(text).toContain(label('noAgent'))
+    expect(text).not.toContain(label('workdir'))
+    expect(text).not.toContain(label('model'))
+    expect(text).not.toContain(label('skills'))
   })
 
   // 平台管理员：高级区可见，workdir 在高级区出现。
   it('platform admin 看到 workdir 与全部高级字段', () => {
     const text = mountFormModal(true).text()
-    expect(text).toContain('workdir')
-    expect(text).toContain('skills')
-    expect(text).toContain('model')
-    expect(text).toContain('provider')
-    expect(text).toContain('base_url')
+    expect(text).toContain(label('workdir'))
+    expect(text).toContain(label('skills'))
+    expect(text).toContain(label('model'))
+    expect(text).toContain(label('provider'))
+    expect(text).toContain(label('baseUrl'))
   })
 
   // no_agent 文案改为「不使用 AI，仅运行脚本」。
