@@ -54,6 +54,8 @@ export default {
     // webPublishConfig: platform admin entry for enabling and configuring org web-publish
     webPublishConfig: 'Web Publish Setup',
     members: 'Members',
+    // publishedSites: org-management entry for the published sites list (org_admin & platform_admin)
+    publishedSites: 'Published Sites',
     instance: 'Instance',
     balance: 'Account Balance',
     audit: 'Audit',

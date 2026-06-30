@@ -223,6 +223,7 @@ const activeKey = computed(() => {
     '/platform/custom-skills',
     '/platform/web-publish-config',
     '/members',
+    '/published-sites',
     '/knowledge',
     // /skills 成员技能页顶级路由；需早于更短 prefix 匹配，放在 /knowledge 后面即可。
     '/skills',
@@ -324,6 +325,9 @@ const menuOptions = computed<MenuOption[]>(() => {
   // 成员/审计 是组织管理视角，普通成员不展示。
   if (!isOrgMember.value) {
     items.push({ key: '/members', label: t('layout.nav.members'), icon: () => h(Users, { size: 18 }) })
+    // 已发布站点入口：与 members/audit 同属组织管理视角，org_admin 与 platform_admin 可见，
+    // 路由 allowedRoles 为 ORG_ADMIN_ABOVE，普通成员不展示。
+    items.push({ key: '/published-sites', label: t('layout.nav.publishedSites'), icon: () => h(Globe, { size: 18 }) })
   }
   items.push(
     { key: memberAppPath.value, label: t('layout.nav.instance'), icon: () => h(Bot, { size: 18 }) },
