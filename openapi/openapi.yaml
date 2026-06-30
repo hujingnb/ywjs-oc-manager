@@ -10329,15 +10329,12 @@ paths:
         content:
           application/x-www-form-urlencoded:
             schema:
-              oneOf:
-              - title: slug
-                type: string
-              - title: file
-                type: file
+              title: file
+              type: file
           multipart/form-data:
             schema:
               type: object
-        description: 站点 slug（缺省由 service 分配或沿用已有站点 slug） | 站点目录 tar.gz
+        description: 站点目录 tar.gz
         required: true
       responses:
         "200":

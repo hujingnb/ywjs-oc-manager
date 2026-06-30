@@ -1,5 +1,5 @@
 // Package service - WebPublishService 核心发布逻辑单元测试。
-// 覆盖首次发布、原地更新、slug 归属冲突、企业未开通、站点配额超限五个核心分支。
+// 覆盖发布（每次新建随机站点）、企业未开通、站点配额超限等核心分支。
 package service
 
 import (
@@ -9,6 +9,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -34,8 +35,6 @@ type fakeWPubStore struct {
 	activeSiteCount map[string]int64
 	// createdSites 记录 CreatePublishedSite 的调用参数列表。
 	createdSites []sqlc.CreatePublishedSiteParams
-	// updatedVersions 记录 UpdatePublishedSiteVersion 的调用参数列表。
-	updatedVersions []sqlc.UpdatePublishedSiteVersionParams
 }
 
 func (f *fakeWPubStore) GetAppByRuntimeTokenHash(ctx context.Context, hash null.String) (sqlc.App, error) {
@@ -69,11 +68,6 @@ func (f *fakeWPubStore) CountActiveSitesByOrg(ctx context.Context, orgID string)
 
 func (f *fakeWPubStore) CreatePublishedSite(ctx context.Context, arg sqlc.CreatePublishedSiteParams) error {
 	f.createdSites = append(f.createdSites, arg)
-	return nil
-}
-
-func (f *fakeWPubStore) UpdatePublishedSiteVersion(ctx context.Context, arg sqlc.UpdatePublishedSiteVersionParams) error {
-	f.updatedVersions = append(f.updatedVersions, arg)
 	return nil
 }
 
@@ -204,8 +198,8 @@ func TestPublishFirstTime(t *testing.T) {
 		Now: func() time.Time { return fixedNow },
 	})
 
-	// 传空 slug 触发随机 slug 生成分支。
-	result, err := svc.Publish(context.Background(), token, "", makeTarGz(t, map[string]string{
+	// 发布：服务端随机分配 slug。
+	result, err := svc.Publish(context.Background(), token, makeTarGz(t, map[string]string{
 		"index.html": "<html>hello</html>",
 	}))
 	require.NoError(t, err)
@@ -215,9 +209,8 @@ func TestPublishFirstTime(t *testing.T) {
 	// ExpiresAt 应等于 now + 7 天。
 	assert.Equal(t, fixedNow.Add(7*24*time.Hour), result.ExpiresAt)
 
-	// 应调用一次 CreatePublishedSite，而非 UpdatePublishedSiteVersion。
+	// 应调用一次 CreatePublishedSite。
 	require.Len(t, store.createdSites, 1)
-	assert.Empty(t, store.updatedVersions)
 
 	created := store.createdSites[0]
 	// 创建行的字段应与生成的 host/slug/version/prefix 一致。
@@ -240,12 +233,12 @@ func TestPublishFirstTime(t *testing.T) {
 	assert.True(t, found, "index.html 应已上传至对象存储")
 }
 
-// TestPublishIgnoresClientSlugForNewSite 回归测试：新建站点时，调用方传入的 slug 被忽略，
-// 服务端一律分配随机子域（防模型用产品名派生固定子域导致反复发布撞名）。
-func TestPublishIgnoresClientSlugForNewSite(t *testing.T) {
+// TestPublishAlwaysCreatesNewRandomSite 回归测试：每次发布都创建全新随机站点，不做原地更新。
+// 连续两次发布应得到两个不同的随机 slug、两条独立的 CreatePublishedSite 记录（互不覆盖）。
+func TestPublishAlwaysCreatesNewRandomSite(t *testing.T) {
 	const orgID = "org-1"
 	const appID = "app-1"
-	const token = "test-token-ignore-slug"
+	const token = "test-token-new-each"
 
 	store := &fakeWPubStore{
 		appByHash:       map[string]sqlc.App{HashAppRuntimeToken(token): {ID: appID, OrgID: orgID}},
@@ -254,23 +247,28 @@ func TestPublishIgnoresClientSlugForNewSite(t *testing.T) {
 		activeSiteCount: map[string]int64{orgID: 0},
 	}
 	obj := newFakeObjStore()
+	// SlugGen 每次返回不同值，模拟服务端随机分配。
+	seq := 0
 	svc := NewWebPublishService(store, obj, WebPublishServiceConfig{
-		SlugGen: func() string { return "rand123" }, // 服务端随机名
+		SlugGen: func() string { seq++; return fmt.Sprintf("rand%d", seq) },
 		Now:     func() time.Time { return fixedNow },
 	})
 
-	// 调用方传入有语义的固定 slug "yunpan-pro"（模拟模型用产品名派生）。
-	result, err := svc.Publish(context.Background(), token, "yunpan-pro", makeTarGz(t, map[string]string{
-		"index.html": "<html>hi</html>",
-	}))
+	// 第一次发布。
+	r1, err := svc.Publish(context.Background(), token, makeTarGz(t, map[string]string{"index.html": "<html>v1</html>"}))
+	require.NoError(t, err)
+	// 第二次发布（相当于「改了内容再发」）。
+	r2, err := svc.Publish(context.Background(), token, makeTarGz(t, map[string]string{"index.html": "<html>v2</html>"}))
 	require.NoError(t, err)
 
-	// 结果必须是服务端随机名，而非传入的 "yunpan-pro"。
-	assert.Equal(t, "https://rand123.example.com", result.URL, "新建站点应忽略传入 slug、用服务端随机名")
-	require.Len(t, store.createdSites, 1)
-	assert.Equal(t, "rand123", store.createdSites[0].Slug, "落库 slug 应为随机名")
-	assert.Equal(t, "rand123.example.com", store.createdSites[0].Host)
-	assert.NotContains(t, store.createdSites[0].Host, "yunpan-pro", "传入名字不得出现在 host 中")
+	// 两次得到不同的随机地址，互不覆盖。
+	assert.Equal(t, "https://rand1.example.com", r1.URL)
+	assert.Equal(t, "https://rand2.example.com", r2.URL)
+	assert.NotEqual(t, r1.URL, r2.URL, "每次发布都应是新的随机地址")
+	// 两条独立的创建记录（没有走更新路径覆盖第一条）。
+	require.Len(t, store.createdSites, 2)
+	assert.Equal(t, "rand1", store.createdSites[0].Slug)
+	assert.Equal(t, "rand2", store.createdSites[1].Slug)
 }
 
 // TestPublishUploadsSeekableBody 回归测试：unpackToPrefix 上传单个文件时，传给 PutObject 的 body
@@ -295,7 +293,7 @@ func TestPublishUploadsSeekableBody(t *testing.T) {
 	})
 
 	// 发布含两个文件的站点，覆盖多 entry 顺序上传。
-	_, err := svc.Publish(context.Background(), token, "blog", makeTarGz(t, map[string]string{
+	_, err := svc.Publish(context.Background(), token, makeTarGz(t, map[string]string{
 		"index.html":     "<html>hello seekable</html>",
 		"assets/app.css": "body{color:red}",
 	}))
@@ -313,118 +311,6 @@ func TestPublishUploadsSeekableBody(t *testing.T) {
 	}
 	assert.Equal(t, "<html>hello seekable</html>", idx)
 	assert.Equal(t, "body{color:red}", css)
-}
-
-// TestPublishUpdateInPlace 测试原地更新场景：同一 app 再次发布同 slug → 不创建新行，
-// 切到 v2 前缀，重置 TTL，删除旧 v1 前缀。
-func TestPublishUpdateInPlace(t *testing.T) {
-	const orgID = "org-1"
-	const appID = "app-1"
-	const siteID = "site-uuid-123"
-	const token = "test-token-update"
-	const slug = "mysite"
-	const host = "mysite.example.com"
-	const oldPrefix = "published-sites/site-uuid-123/v1/"
-
-	store := &fakeWPubStore{
-		appByHash: map[string]sqlc.App{
-			HashAppRuntimeToken(token): {ID: appID, OrgID: orgID},
-		},
-		publishConfig: map[string]sqlc.OrgWebPublishConfig{
-			orgID: makeReadyCfg(orgID),
-		},
-		// 已有同一 app 拥有的站点记录。
-		siteByHost: map[string]sqlc.PublishedSite{
-			host: {
-				ID:             siteID,
-				OrgID:          orgID,
-				AppID:          appID, // 同一 app，不触发归属冲突。
-				Host:           host,
-				Slug:           slug,
-				CurrentVersion: "v1",
-				S3Prefix:       oldPrefix,
-				Status:         "active",
-			},
-		},
-		activeSiteCount: map[string]int64{orgID: 1},
-	}
-	obj := newFakeObjStore()
-
-	svc := NewWebPublishService(store, obj, WebPublishServiceConfig{
-		SlugGen: func() string { return "should-not-be-called" },
-		Now:     func() time.Time { return fixedNow },
-	})
-
-	// 传入已有 slug，触发原地更新分支。
-	result, err := svc.Publish(context.Background(), token, slug, makeTarGz(t, map[string]string{
-		"index.html": "<html>v2</html>",
-	}))
-	require.NoError(t, err)
-
-	// URL 应与旧站点相同（host 不变）。
-	assert.Equal(t, "https://"+host, result.URL)
-	// ExpiresAt 应重置为 now + 7 天。
-	assert.Equal(t, fixedNow.Add(7*24*time.Hour), result.ExpiresAt)
-
-	// 不应创建新行，只应更新现有行。
-	assert.Empty(t, store.createdSites)
-	require.Len(t, store.updatedVersions, 1)
-
-	updated := store.updatedVersions[0]
-	// 版本应从 v1 升到 v2。
-	assert.Equal(t, "v2", updated.CurrentVersion)
-	assert.Equal(t, siteID, updated.ID)
-	assert.True(t, strings.HasSuffix(updated.S3Prefix, "/v2/"))
-
-	// 旧版本前缀应被删除。
-	require.Len(t, obj.deletedPrefixes, 1)
-	assert.Equal(t, oldPrefix, obj.deletedPrefixes[0])
-}
-
-// TestPublishSlugTakenByOtherApp 测试 slug 归属冲突场景：目标 host 已被其它 app 占用 → 返回含"已占用"的错误。
-func TestPublishSlugTakenByOtherApp(t *testing.T) {
-	const orgID = "org-1"
-	const appID = "app-1"
-	const otherAppID = "app-other"
-	const token = "test-token-taken"
-	const slug = "taken"
-	const host = "taken.example.com"
-
-	store := &fakeWPubStore{
-		appByHash: map[string]sqlc.App{
-			HashAppRuntimeToken(token): {ID: appID, OrgID: orgID},
-		},
-		publishConfig: map[string]sqlc.OrgWebPublishConfig{
-			orgID: makeReadyCfg(orgID),
-		},
-		// host 已被另一个 app 占用。
-		siteByHost: map[string]sqlc.PublishedSite{
-			host: {
-				ID:    "site-other",
-				AppID: otherAppID, // 不同 app，触发归属冲突检查。
-				Host:  host,
-				Slug:  slug,
-			},
-		},
-		activeSiteCount: map[string]int64{orgID: 1},
-	}
-	obj := newFakeObjStore()
-
-	svc := NewWebPublishService(store, obj, WebPublishServiceConfig{
-		SlugGen: func() string { return "rand-unused" },
-		Now:     func() time.Time { return fixedNow },
-	})
-
-	_, err := svc.Publish(context.Background(), token, slug, makeTarGz(t, map[string]string{
-		"index.html": "hi",
-	}))
-	// 应返回含"已占用"的错误，提示调用方 slug 已被其他实例持有。
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "已占用")
-	// 必须包 ErrConflict，使 handler 映射为 409 而非不透明 500（cross-app 拒绝是业务结果非系统故障）。
-	require.ErrorIs(t, err, ErrConflict)
-	// 冲突检查应在解包上传之前完成：不应产生任何对象上传。
-	assert.Empty(t, obj.objects)
 }
 
 // TestPublishSkipsAbsolutePathEntry 测试归档含绝对路径 entry（如 /etc/passwd）时被跳过：
@@ -452,7 +338,7 @@ func TestPublishSkipsAbsolutePathEntry(t *testing.T) {
 	})
 
 	// 归档同时含绝对路径 entry 与正常文件，绝对路径应被跳过。
-	_, err := svc.Publish(context.Background(), token, "", makeTarGz(t, map[string]string{
+	_, err := svc.Publish(context.Background(), token, makeTarGz(t, map[string]string{
 		"/etc/passwd": "root:x:0:0",
 		"index.html":  "<html>ok</html>",
 	}))
@@ -503,7 +389,7 @@ func TestPublishNotProvisioned(t *testing.T) {
 		Now:     func() time.Time { return fixedNow },
 	})
 
-	_, err := svc.Publish(context.Background(), token, "myslug", makeTarGz(t, map[string]string{
+	_, err := svc.Publish(context.Background(), token, makeTarGz(t, map[string]string{
 		"index.html": "hi",
 	}))
 	// 应拒绝发布，并返回说明企业未开通的错误。
@@ -542,7 +428,7 @@ func TestPublishQuotaExceeded(t *testing.T) {
 		Now:     func() time.Time { return fixedNow },
 	})
 
-	_, err := svc.Publish(context.Background(), token, "newslug", makeTarGz(t, map[string]string{
+	_, err := svc.Publish(context.Background(), token, makeTarGz(t, map[string]string{
 		"index.html": "hi",
 	}))
 	// 应返回含"配额"的错误，提示已达站点上限。

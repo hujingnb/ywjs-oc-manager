@@ -180,23 +180,22 @@ Do not call RAGFlow directly and do not ask for RAGFlow credentials. The `oc-kb`
 # token 只注入环境变量（OC_PUBLISH_APP_TOKEN），不写入此文件，避免凭证暴露给模型上下文。
 _OC_PUBLISH_SKILL_MD = """---
 name: oc-publish
-description: Publish a local workspace directory as a static site through manager. A new publish always gets a fresh random URL; reuse the same slug only to update a site you already published.
+description: Publish a local workspace directory as a static site through manager. Every publish creates a brand-new site at a fresh random URL.
 ---
 
 # oc-publish
 
-Use this skill when the user wants to publish a static site (HTML/CSS/JS files) from the current workspace to the internet, or to update a site you previously published.
+Use this skill when the user wants to publish a static site (HTML/CSS/JS files) from the current workspace to the internet.
 
-Commands:
+Command:
 
-- `oc-publish ./<dir>` publishes `<dir>` as a NEW static site. The manager assigns a fresh, unique, random subdomain and returns the public URL.
-- `oc-publish ./<dir> --slug <slug>` re-publishes to an EXISTING site identified by `<slug>`, updating it in place at the same URL.
+- `oc-publish ./<dir>` publishes `<dir>` as a static site. The manager always assigns a fresh, unique, random subdomain and returns the public URL.
 
-Important — how to choose the name:
+Important:
 
-- For a NEW site, ALWAYS run `oc-publish ./<dir>` WITHOUT `--slug`. Never invent or hard-code a name; let the manager generate a random one. This guarantees repeated publishes never collide with earlier sites.
-- Use `--slug <slug>` ONLY to update a site you published earlier in this same conversation: reuse the exact slug from the URL you previously received (the leftmost label of `https://<slug>.<domain>`). Do not guess a slug you have not seen before.
-- After publishing, report the returned URL to the user.
+- Every publish creates a NEW site with a new random URL. There is no way to pick the name or to update a site in place — re-running `oc-publish` produces a different URL, it does not overwrite an earlier one. If the user wants to change a published page, edit the files and run `oc-publish ./<dir>` again, then give them the new URL.
+- The command takes only the directory argument; do not pass any other flags.
+- Always report the returned URL to the user.
 
 The `oc-publish` command talks only to manager runtime APIs using the app-scoped token injected by the container entrypoint. Do not construct API requests manually or ask for credentials.
 """

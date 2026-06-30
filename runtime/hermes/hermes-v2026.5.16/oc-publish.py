@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """oc-publish：把本地静态目录发布为带域名的公网站点。
 
-用法：oc-publish ./<dir> [--slug <slug>]
+用法：oc-publish ./<dir>
 
 把目录打成 tar.gz，经 manager runtime 发布端点（X-OC-App-Token 鉴权）上传，
-manager 解包上传对象存储、分配 <slug>.<base_domain>、返回 {url, expires_at}。
-配置（OC_PUBLISH_RUNTIME_BASE_URL / OC_PUBLISH_APP_TOKEN）由 oc-entrypoint
-从 manifest.web_publish 注入进程环境（见 _configure_web_publish_env）。
+manager 解包上传对象存储、分配随机 <slug>.<base_domain>、返回 {url, expires_at}。
+每次发布都创建一个全新的随机站点（不支持指定名字或原地更新）；要改内容就再发布
+一次，会得到一个新的随机地址。配置（OC_PUBLISH_RUNTIME_BASE_URL /
+OC_PUBLISH_APP_TOKEN）由 oc-entrypoint 从 manifest.web_publish 注入进程环境。
 """
 
 from __future__ import annotations
@@ -59,26 +60,17 @@ def _make_targz(src_dir: str) -> bytes:
     return data
 
 
-def _publish(src_dir: str, slug: str) -> dict:
+def _publish(src_dir: str) -> dict:
     """上传 tar.gz 到 manager 发布端点并返回解析后的 JSON。
 
     手写 multipart 而不是用 requests：避免引入第三方依赖，与 oc-kb 保持一致；
-    boundary 用 uuid4 hex，与正文不可能冲突；slug 为空时跳过该表单字段，
-    由 manager 端自动分配。
+    boundary 用 uuid4 hex，与正文不可能冲突。manager 端每次都分配随机站点名，
+    无需也不接受调用方指定 slug。
     """
     base_url, token = _config()
     payload = _make_targz(src_dir)
     boundary = "----oc-publish-" + uuid.uuid4().hex
-    parts: list[bytes] = []
-    # slug 非空时作为独立表单字段发送；为空时省略，由 manager 自动生成。
-    if slug:
-        parts += [
-            f"--{boundary}\r\n".encode(),
-            b'Content-Disposition: form-data; name="slug"\r\n\r\n',
-            slug.encode(),
-            b"\r\n",
-        ]
-    parts += [
+    parts: list[bytes] = [
         f"--{boundary}\r\n".encode(),
         b'Content-Disposition: form-data; name="file"; filename="site.tar.gz"\r\n',
         b"Content-Type: application/gzip\r\n\r\n",
@@ -133,23 +125,13 @@ def main(argv: list[str]) -> int:
     - 1：运行时错误（配置缺失 / 目录不存在 / 网络异常等），stderr 给原因；
     - 2：参数错误（缺少 dir 位置参数），stderr 给用法提示。
     """
-    args = argv[1:]
-    slug = ""
-    positional: list[str] = []
-    i = 0
-    # 手动解析参数，避免引入 argparse 增加脚本复杂度；--slug 为唯一命名参数。
-    while i < len(args):
-        if args[i] == "--slug" and i + 1 < len(args):
-            slug = args[i + 1]
-            i += 2
-            continue
-        positional.append(args[i])
-        i += 1
+    # 仅取第一个位置参数作为发布目录；不再支持任何命名参数（每次都是新随机站点）。
+    positional = [a for a in argv[1:] if not a.startswith("--")]
     if not positional:
-        print("用法：oc-publish ./<dir> [--slug <slug>]", file=sys.stderr)
+        print("用法：oc-publish ./<dir>", file=sys.stderr)
         return 2
     try:
-        result = _publish(positional[0], slug)
+        result = _publish(positional[0])
     except Exception as exc:  # noqa: BLE001 — CLI 顶层统一兜底，错误回显给 hermes
         print(f"发布失败：{exc}", file=sys.stderr)
         return 1

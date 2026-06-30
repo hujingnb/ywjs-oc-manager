@@ -13,16 +13,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"path"
-	"strconv"
 	"strings"
 	"time"
 
 	null "github.com/guregu/null/v5"
 
 	"oc-manager/internal/domain"
-	mlog "oc-manager/internal/log"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -41,10 +38,8 @@ type WebPublishStore interface {
 	GetPublishedSiteByHost(ctx context.Context, host string) (sqlc.PublishedSite, error)
 	// CountActiveSitesByOrg 统计企业下 status='active' 的站点数，用于配额校验。
 	CountActiveSitesByOrg(ctx context.Context, orgID string) (int64, error)
-	// CreatePublishedSite 插入新站点记录（首次发布）。
+	// CreatePublishedSite 插入新站点记录（每次发布都是新站点）。
 	CreatePublishedSite(ctx context.Context, arg sqlc.CreatePublishedSiteParams) error
-	// UpdatePublishedSiteVersion 原子更新版本指针、前缀、大小、过期时间（原地更新）。
-	UpdatePublishedSiteVersion(ctx context.Context, arg sqlc.UpdatePublishedSiteVersionParams) error
 	// ListActiveSites 返回所有 status='active' 的站点路由摘要，供 site-server 同步。
 	ListActiveSites(ctx context.Context) ([]sqlc.ListActiveSitesRow, error)
 }
@@ -151,10 +146,11 @@ func NewWebPublishService(store WebPublishStore, obj publishObjectStore, cfg Web
 	return s
 }
 
-// Publish 解析 app runtime token，校验企业开通状态，执行 slug/配额检查，
-// 将 body（tar.gz）解包上传到新版本前缀，原子更新版本指针，删旧前缀。
-// 返回站点 URL 与新的过期时间，首发与更新对调用方接口完全一致。
-func (s *WebPublishService) Publish(ctx context.Context, appToken, slug string, body io.Reader) (PublishResult, error) {
+// Publish 解析 app runtime token，校验企业开通状态，分配随机唯一子域并校验配额，
+// 将 body（tar.gz）解包上传到对象存储，插入站点记录，返回站点 URL 与过期时间。
+// 命名策略：每次发布都创建全新随机站点，不接受调用方指定名字、不做原地更新——
+// 反复发布永不撞名、URL 不可猜测；要改内容就再发布一个新地址（旧站点按 TTL 自动回收）。
+func (s *WebPublishService) Publish(ctx context.Context, appToken string, body io.Reader) (PublishResult, error) {
 	// ── 步骤1：token → app ────────────────────────────────────────────────────
 	// 对 plain token 做 hash 后查库，避免明文 token 落日志或被 SQL 层比较明文。
 	if strings.TrimSpace(appToken) == "" {
@@ -183,64 +179,29 @@ func (s *WebPublishService) Publish(ctx context.Context, appToken, slug string, 
 		return PublishResult{}, ErrWebPublishNotProvisioned
 	}
 
-	// ── 步骤3-4：确定目标站点与 host（命名策略：服务端强制随机）─────────────────
-	// 传入的 slug 仅作为「更新本实例已有站点」的定位依据；一旦不命中本实例已有站点，
-	// 就一律当作新建，由服务端分配随机唯一子域并丢弃传入 slug。这样新建站点必然随机命名，
-	// 不依赖调用方/模型是否听话（曾出现模型用产品名派生固定子域、反复发布撞名的问题），
-	// 同时保留「同名原地更新」能力（更新时复用上次返回 URL 里的真实 slug）。
-	var existing sqlc.PublishedSite
-	var host string
-	isUpdate := false
-	if slug != "" {
-		if err := validateSlug(slug); err != nil {
-			return PublishResult{}, err
-		}
-		row, lookupErr := s.store.GetPublishedSiteByHost(ctx, slug+"."+cfg.BaseDomain)
-		switch {
-		case lookupErr == nil && row.AppID == app.ID:
-			// 命中本实例已有站点 → 原地更新（复用其 siteID / host）。
-			existing, isUpdate, host = row, true, row.Host
-		case lookupErr == nil:
-			// 命中其他实例的站点 → 拒绝越权覆盖（业务拒绝，handler 映射 409）。
-			return PublishResult{}, fmt.Errorf("%w: slug %q 已占用，该域名已被其他实例持有", ErrConflict, slug)
-		case errors.Is(lookupErr, sql.ErrNoRows):
-			// 传入 slug 无对应站点 → 视为新建，忽略该 slug（下面随机分配）。
-		default:
-			return PublishResult{}, fmt.Errorf("查询站点记录失败: %w", lookupErr)
-		}
+	// ── 步骤3：分配随机唯一子域 + 配额检查 ───────────────────────────────────
+	// 每次发布都创建全新随机站点，不接受调用方指定名字、不做原地更新：保证反复发布
+	// 永不撞名、URL 不可猜测（曾出现模型用产品名派生固定子域导致撞名/静默覆盖的问题）。
+	slug, host, err := s.allocateRandomHost(ctx, cfg.BaseDomain)
+	if err != nil {
+		return PublishResult{}, err
 	}
-	if !isUpdate {
-		// 新建：服务端分配随机唯一子域（忽略任何传入 slug）。
-		var err error
-		if slug, host, err = s.allocateRandomHost(ctx, cfg.BaseDomain); err != nil {
-			return PublishResult{}, err
-		}
-		// 配额上限检查（业务拒绝，handler 映射 409）。
-		count, err := s.store.CountActiveSitesByOrg(ctx, app.OrgID)
-		if err != nil {
-			return PublishResult{}, fmt.Errorf("查询站点配额失败: %w", err)
-		}
-		if count >= int64(cfg.MaxSites) {
-			return PublishResult{}, fmt.Errorf("%w: 已达站点配额上限（%d），请先删除旧站点", ErrConflict, cfg.MaxSites)
-		}
+	count, err := s.store.CountActiveSitesByOrg(ctx, app.OrgID)
+	if err != nil {
+		return PublishResult{}, fmt.Errorf("查询站点配额失败: %w", err)
+	}
+	if count >= int64(cfg.MaxSites) {
+		// 配额上限是业务拒绝，用 ErrConflict 包装映射 409 + 清晰文案（避免误报 500）。
+		return PublishResult{}, fmt.Errorf("%w: 已达站点配额上限（%d），请先删除旧站点", ErrConflict, cfg.MaxSites)
 	}
 
-	// ── 步骤5：确定站点 ID、新版本号、新前缀 ─────────────────────────────────
-	var siteID string
-	var nextVer string
-	if isUpdate {
-		// 原地更新：复用已有 siteID，版本号递增。
-		siteID = existing.ID
-		nextVer = bumpVersion(existing.CurrentVersion)
-	} else {
-		// 首次发布：生成新 UUID 作为 siteID，从 v1 开始。
-		siteID = newUUID()
-		nextVer = "v1"
-	}
-	// 对象存储前缀格式：published-sites/<siteID>/<version>/（末尾带 /）。
-	newPrefix := fmt.Sprintf("published-sites/%s/%s/", siteID, nextVer)
+	// ── 步骤4：确定站点 ID 与对象存储前缀 ────────────────────────────────────
+	// 每个站点都是新建，版本固定 v1；前缀格式：published-sites/<siteID>/v1/（末尾带 /）。
+	siteID := newUUID()
+	const version = "v1"
+	newPrefix := fmt.Sprintf("published-sites/%s/%s/", siteID, version)
 
-	// ── 步骤6：解包 tar.gz 并上传到新版本前缀 ────────────────────────────────
+	// ── 步骤5：解包 tar.gz 并上传到前缀 ──────────────────────────────────────
 	// 防 zip-slip：对每个 tar entry 的 name 做 path.Clean，拒绝 ../ 越界。
 	// 全局大小上限：所有文件之和不超过 MaxUploadSize。
 	totalSize, err := s.unpackToPrefix(ctx, body, newPrefix)
@@ -248,40 +209,20 @@ func (s *WebPublishService) Publish(ctx context.Context, appToken, slug string, 
 		return PublishResult{}, fmt.Errorf("解包上传失败: %w", err)
 	}
 
-	// ── 步骤7：原子切换版本指针，重置 TTL，删旧前缀 ─────────────────────────
+	// ── 步骤6：插入新站点行，设置 TTL ────────────────────────────────────────
 	expiresAt := s.nowFn().Add(time.Duration(cfg.SiteTtlDays) * 24 * time.Hour)
-	if isUpdate {
-		// 先更新 DB 中的版本指针，确保新流量路由到新前缀后再删除旧对象。
-		if err := s.store.UpdatePublishedSiteVersion(ctx, sqlc.UpdatePublishedSiteVersionParams{
-			CurrentVersion: nextVer,
-			S3Prefix:       newPrefix,
-			SizeBytes:      totalSize,
-			ExpiresAt:      expiresAt,
-			ID:             siteID,
-		}); err != nil {
-			return PublishResult{}, fmt.Errorf("更新站点版本指针失败: %w", err)
-		}
-		// 删除旧版本前缀下所有对象（版本指针已切换，旧对象不再被引用）。
-		if err := s.obj.DeletePrefix(ctx, existing.S3Prefix); err != nil {
-			// 删除失败不阻断响应（DB 指针已切到新前缀，发布已生效），但必须记一条 warning，
-			// 否则运维无法发现遗留的孤儿前缀。旧对象会在下次发布或巡检时被清理。
-			slog.WarnContext(ctx, "清理旧版本前缀失败", "prefix", existing.S3Prefix, mlog.Err(err))
-		}
-	} else {
-		// 首次发布：插入新站点行。
-		if err := s.store.CreatePublishedSite(ctx, sqlc.CreatePublishedSiteParams{
-			ID:             siteID,
-			OrgID:          app.OrgID,
-			AppID:          app.ID,
-			Host:           host,
-			Slug:           slug,
-			CurrentVersion: nextVer,
-			S3Prefix:       newPrefix,
-			SizeBytes:      totalSize,
-			ExpiresAt:      expiresAt,
-		}); err != nil {
-			return PublishResult{}, fmt.Errorf("创建站点记录失败: %w", err)
-		}
+	if err := s.store.CreatePublishedSite(ctx, sqlc.CreatePublishedSiteParams{
+		ID:             siteID,
+		OrgID:          app.OrgID,
+		AppID:          app.ID,
+		Host:           host,
+		Slug:           slug,
+		CurrentVersion: version,
+		S3Prefix:       newPrefix,
+		SizeBytes:      totalSize,
+		ExpiresAt:      expiresAt,
+	}); err != nil {
+		return PublishResult{}, fmt.Errorf("创建站点记录失败: %w", err)
 	}
 
 	return PublishResult{
@@ -384,35 +325,3 @@ func (s *WebPublishService) allocateRandomHost(ctx context.Context, baseDomain s
 	return "", "", fmt.Errorf("分配随机站点名失败，请重试")
 }
 
-// bumpVersion 将 "vN" 格式的版本号递增为 "v(N+1)"。
-// 若 cur 格式非法或解析失败，返回 "v2" 作为保守默认值。
-func bumpVersion(cur string) string {
-	if !strings.HasPrefix(cur, "v") {
-		return "v2"
-	}
-	n, err := strconv.Atoi(cur[1:])
-	if err != nil || n < 1 {
-		// 格式不符合 vN，保守返回 v2。
-		return "v2"
-	}
-	return fmt.Sprintf("v%d", n+1)
-}
-
-// validateSlug 校验 slug 是否符合 DNS label 规范：
-//   - 仅含小写字母、数字和连字符；
-//   - 长度 1~63；
-//   - 不以连字符开头或结尾。
-func validateSlug(slug string) error {
-	if len(slug) == 0 || len(slug) > 63 {
-		return fmt.Errorf("slug 长度必须在 1~63 之间，当前长度 %d", len(slug))
-	}
-	if slug[0] == '-' || slug[len(slug)-1] == '-' {
-		return fmt.Errorf("slug 不能以连字符开头或结尾: %q", slug)
-	}
-	for _, c := range slug {
-		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
-			return fmt.Errorf("slug 只允许小写字母、数字和连字符，非法字符 %q: %q", c, slug)
-		}
-	}
-	return nil
-}

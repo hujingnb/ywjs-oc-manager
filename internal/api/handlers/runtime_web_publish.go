@@ -17,8 +17,8 @@ import (
 
 // webPublishRuntimeService 是 RuntimeWebPublishHandler 依赖的最小 service 接口，便于单测注入 stub。
 type webPublishRuntimeService interface {
-	// Publish 接收应用 token、站点 slug 和 tar.gz 流，完成发布并返回站点 URL 与到期时间。
-	Publish(ctx context.Context, appToken, slug string, body io.Reader) (service.PublishResult, error)
+	// Publish 接收应用 token 和 tar.gz 流，完成发布并返回站点 URL 与到期时间。
+	Publish(ctx context.Context, appToken string, body io.Reader) (service.PublishResult, error)
 }
 
 // RuntimeWebPublishHandler 暴露给 hermes oc-publish 使用的 runtime 发布端点。
@@ -38,7 +38,8 @@ func RegisterRuntimeWebPublishRoutes(router gin.IRouter, h *RuntimeWebPublishHan
 	router.POST("/api/v1/runtime/web-publish", h.Publish)
 }
 
-// Publish 接收 oc-publish 上传的 tar.gz（multipart file 字段）+ 可选 slug，转交 service 完成发布。
+// Publish 接收 oc-publish 上传的 tar.gz（multipart file 字段），转交 service 完成发布。
+// 每次发布都创建全新随机站点，不接受调用方指定 slug。
 //
 // @Summary      发布静态站点
 // @Description  oc-publish 通过 app runtime token 上传站点 tar.gz，返回对外访问 URL 和到期时间
@@ -46,7 +47,6 @@ func RegisterRuntimeWebPublishRoutes(router gin.IRouter, h *RuntimeWebPublishHan
 // @Accept       multipart/form-data
 // @Produce      json
 // @Param        X-OC-App-Token  header    string  true   "per-app runtime token"
-// @Param        slug            formData  string  false  "站点 slug（缺省由 service 分配或沿用已有站点 slug）"
 // @Param        file            formData  file    true   "站点目录 tar.gz"
 // @Success      200  {object}  service.PublishResult
 // @Failure      401  {object}  ErrorResponse
@@ -73,18 +73,16 @@ func (h *RuntimeWebPublishHandler) Publish(c *gin.Context) {
 	}
 	defer f.Close()
 
-	// slug 为可选字段：首次发布时缺省由 service 分配随机 slug，后续更新时沿用已有记录。
-	slug := c.PostForm("slug")
-	res, err := h.service.Publish(c.Request.Context(), token, slug, f)
+	res, err := h.service.Publish(c.Request.Context(), token, f)
 	if err != nil {
 		// runtime 发布端点由 hermes oc-publish 自动调用，错误经 writeServiceError 脱敏成稳定
 		// HTTP 码后调用方只看到兜底文案。这里记录原始错误（含底层 S3/DB/解包原因），
 		// 否则线上发布失败无任何可排查线索（观测性兜底，不改变对外响应）。
-		// 业务拒绝（slug 占用 / 未开通等）是正常结果而非系统故障，记 Warn；其余视为真实故障记 Error。
+		// 业务拒绝（配额上限 / 未开通等）是正常结果而非系统故障，记 Warn；其余视为真实故障记 Error。
 		if errors.Is(err, service.ErrConflict) || errors.Is(err, service.ErrWebPublishNotProvisioned) {
-			slog.WarnContext(c.Request.Context(), "runtime web-publish 业务拒绝", "slug", slug, mlog.Err(err))
+			slog.WarnContext(c.Request.Context(), "runtime web-publish 业务拒绝", mlog.Err(err))
 		} else {
-			slog.ErrorContext(c.Request.Context(), "runtime web-publish 失败", "slug", slug, mlog.Err(err))
+			slog.ErrorContext(c.Request.Context(), "runtime web-publish 失败", mlog.Err(err))
 		}
 		writeServiceError(c, err)
 		return

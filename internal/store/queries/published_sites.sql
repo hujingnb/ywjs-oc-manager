@@ -18,11 +18,6 @@ INSERT INTO published_sites (
     id, org_id, app_id, host, slug, current_version, s3_prefix, status, size_bytes, expires_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?);
 
--- name: UpdatePublishedSiteVersion :exec
-UPDATE published_sites
-SET current_version = ?, s3_prefix = ?, size_bytes = ?, status = 'active', expires_at = ?, updated_at = now()
-WHERE id = ?;
-
 -- name: SetPublishedSiteStatus :exec
 UPDATE published_sites SET status = ?, updated_at = now() WHERE id = ?;
 

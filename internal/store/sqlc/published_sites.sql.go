@@ -251,28 +251,3 @@ func (q *Queries) SetPublishedSiteStatus(ctx context.Context, arg SetPublishedSi
 	_, err := q.db.ExecContext(ctx, setPublishedSiteStatus, arg.Status, arg.ID)
 	return err
 }
-
-const updatePublishedSiteVersion = `-- name: UpdatePublishedSiteVersion :exec
-UPDATE published_sites
-SET current_version = ?, s3_prefix = ?, size_bytes = ?, status = 'active', expires_at = ?, updated_at = now()
-WHERE id = ?
-`
-
-type UpdatePublishedSiteVersionParams struct {
-	CurrentVersion string    `db:"current_version" json:"current_version"`
-	S3Prefix       string    `db:"s3_prefix" json:"s3_prefix"`
-	SizeBytes      int64     `db:"size_bytes" json:"size_bytes"`
-	ExpiresAt      time.Time `db:"expires_at" json:"expires_at"`
-	ID             string    `db:"id" json:"id"`
-}
-
-func (q *Queries) UpdatePublishedSiteVersion(ctx context.Context, arg UpdatePublishedSiteVersionParams) error {
-	_, err := q.db.ExecContext(ctx, updatePublishedSiteVersion,
-		arg.CurrentVersion,
-		arg.S3Prefix,
-		arg.SizeBytes,
-		arg.ExpiresAt,
-		arg.ID,
-	)
-	return err
-}

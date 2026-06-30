@@ -350,7 +350,6 @@ type Querier interface {
 	// OOS-2 access_token 自愈用：仅更新 newapi_user_credentials_ciphertext，不动 newapi_user_id。
 	UpdateOrganizationCredentialsCiphertext(ctx context.Context, arg UpdateOrganizationCredentialsCiphertextParams) error
 	UpdateOrganizationProfile(ctx context.Context, arg UpdateOrganizationProfileParams) error
-	UpdatePublishedSiteVersion(ctx context.Context, arg UpdatePublishedSiteVersionParams) error
 	// 回写解析状态、进度和错误；状态值由 service 层从 RAGFlow run 值归一化。
 	UpdateRAGFlowDocumentParseStatus(ctx context.Context, arg UpdateRAGFlowDocumentParseStatusParams) error
 	UpdateSkillTicketStatus(ctx context.Context, arg UpdateSkillTicketStatusParams) error

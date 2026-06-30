@@ -11989,10 +11989,10 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            /** @description 站点 slug（缺省由 service 分配或沿用已有站点 slug） | 站点目录 tar.gz */
+            /** @description 站点目录 tar.gz */
             requestBody: {
                 content: {
-                    "application/x-www-form-urlencoded": string | Record<string, never>;
+                    "application/x-www-form-urlencoded": Record<string, never>;
                     "multipart/form-data": Record<string, never>;
                 };
             };
