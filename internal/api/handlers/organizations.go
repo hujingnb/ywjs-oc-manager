@@ -212,15 +212,16 @@ func (h *OrganizationsHandler) setStatus(c *gin.Context, status string) {
 // AssistantVersionIDsSet 始终设为 true，以请求体中的 allowlist 为权威值；前端更新表单需完整传入列表。
 func toOrganizationInput(req OrganizationRequest) service.OrganizationInput {
 	input := service.OrganizationInput{
-		Name:                   req.Name,
-		ContactName:            req.ContactName,
-		ContactPhone:           req.ContactPhone,
-		Remark:                 req.Remark,
-		CreditWarningThreshold: req.CreditWarningThreshold,
-		MaxInstanceCount:       req.MaxInstanceCount,
-		KnowledgeQuotaBytes:    req.KnowledgeQuotaBytes,
-		AssistantVersionIDs:    req.AssistantVersionIDs,
-		AssistantVersionIDsSet: true,
+		Name:                            req.Name,
+		ContactName:                     req.ContactName,
+		ContactPhone:                    req.ContactPhone,
+		Remark:                          req.Remark,
+		CreditWarningThreshold:          req.CreditWarningThreshold,
+		MaxInstanceCount:                req.MaxInstanceCount,
+		KnowledgeQuotaBytes:             req.KnowledgeQuotaBytes,
+		DefaultAppKnowledgeQuotaBytes:   req.DefaultAppKnowledgeQuotaBytes,
+		AssistantVersionIDs:             req.AssistantVersionIDs,
+		AssistantVersionIDsSet:          true,
 	}
 	return input
 }
@@ -228,18 +229,19 @@ func toOrganizationInput(req OrganizationRequest) service.OrganizationInput {
 // toCreateOrganizationInput 将创建 DTO 转为 service 入参，保留管理员初始化字段。
 func toCreateOrganizationInput(req CreateOrganizationRequest) service.OrganizationInput {
 	return service.OrganizationInput{
-		Name:                   req.Name,
-		Code:                   req.Code,
-		ContactName:            req.ContactName,
-		ContactPhone:           req.ContactPhone,
-		Remark:                 req.Remark,
-		CreditWarningThreshold: req.CreditWarningThreshold,
-		MaxInstanceCount:       req.MaxInstanceCount,
-		KnowledgeQuotaBytes:    req.KnowledgeQuotaBytes,
-		AdminUsername:          req.AdminUsername,
-		AdminDisplayName:       req.AdminDisplayName,
-		AdminPassword:          req.AdminPassword,
-		AssistantVersionIDs:    req.AssistantVersionIDs,
+		Name:                            req.Name,
+		Code:                            req.Code,
+		ContactName:                     req.ContactName,
+		ContactPhone:                    req.ContactPhone,
+		Remark:                          req.Remark,
+		CreditWarningThreshold:          req.CreditWarningThreshold,
+		MaxInstanceCount:                req.MaxInstanceCount,
+		KnowledgeQuotaBytes:             req.KnowledgeQuotaBytes,
+		DefaultAppKnowledgeQuotaBytes:   req.DefaultAppKnowledgeQuotaBytes,
+		AdminUsername:                   req.AdminUsername,
+		AdminDisplayName:                req.AdminDisplayName,
+		AdminPassword:                   req.AdminPassword,
+		AssistantVersionIDs:             req.AssistantVersionIDs,
 	}
 }
 

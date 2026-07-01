@@ -69,6 +69,8 @@ type CreateOrganizationRequest struct {
 	MaxInstanceCount *int32 `json:"max_instance_count"`
 	// KnowledgeQuotaBytes 是企业知识库累计容量上限，单位字节；nil 表示创建时使用默认值、更新时保留旧值。
 	KnowledgeQuotaBytes *int64 `json:"knowledge_quota_bytes"`
+	// DefaultAppKnowledgeQuotaBytes 是该企业新建实例的默认知识库容量上限，单位字节；nil 表示使用默认 1GB。
+	DefaultAppKnowledgeQuotaBytes *int64 `json:"default_app_knowledge_quota_bytes"`
 	// AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。
 	AssistantVersionIDs []string `json:"assistant_version_ids"`
 	// AdminUsername 是随企业创建的首个 org_admin 账号名。
@@ -95,6 +97,8 @@ type OrganizationRequest struct {
 	MaxInstanceCount *int32 `json:"max_instance_count"`
 	// KnowledgeQuotaBytes 是企业知识库累计容量上限，单位字节；nil 表示创建时使用默认值、更新时保留旧值。
 	KnowledgeQuotaBytes *int64 `json:"knowledge_quota_bytes"`
+	// DefaultAppKnowledgeQuotaBytes 是该企业新建实例的默认知识库容量上限，单位字节；nil 表示保留旧值。
+	DefaultAppKnowledgeQuotaBytes *int64 `json:"default_app_knowledge_quota_bytes"`
 	// AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。
 	AssistantVersionIDs []string `json:"assistant_version_ids"`
 }
