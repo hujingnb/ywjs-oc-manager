@@ -1,6 +1,13 @@
 // knowledgeUploadBatch 提供知识库多文件上传的前端编排 helper。
 // 后端仍是单文件接口，这里只负责把 input/drop 事件转成 uploadProgress 可消费的队列。
-import { KNOWLEDGE_UPLOAD_MAX_LABEL, getKnowledgeUploadMaxMessage, isKnowledgeUploadTooLarge } from '@/api/hooks/useKnowledge'
+import {
+  KNOWLEDGE_ALLOWED_EXTENSIONS_LABEL,
+  KNOWLEDGE_UPLOAD_MAX_LABEL,
+  getKnowledgeUploadMaxMessage,
+  getKnowledgeUploadTypeRejectedMessage,
+  isKnowledgeUploadTooLarge,
+  isKnowledgeUploadTypeAllowed,
+} from '@/api/hooks/useKnowledge'
 import { i18n } from '@/i18n'
 import type { RunItem } from '@/stores/uploadProgress'
 
@@ -34,23 +41,38 @@ export function hasKnowledgeFilesInDrag(event: DragEvent): boolean {
   return (transfer.files?.length ?? 0) > 0
 }
 
-// filterKnowledgeUploadFiles 只做单文件上限拦截；容量不足等动态条件交给后端逐个判断。
+// filterKnowledgeUploadFiles 做类型白名单与单文件上限两层前端拦截；容量不足等动态条件交给后端逐个判断。
+// 类型拦截先于上限判断：既过滤掉 exe 等无法解析且有安全风险的文件，也避免超限提示误导用户以为是大小问题。
 export function filterKnowledgeUploadFiles(files: File[], warning: WarningFn): File[] {
   const accepted: File[] = []
-  let rejectedCount = 0
+  let typeRejectedCount = 0
+  let tooLargeCount = 0
   for (const file of files) {
+    // 类型不在白名单（如 exe）直接拒绝，不再判断大小。
+    if (!isKnowledgeUploadTypeAllowed(file)) {
+      typeRejectedCount += 1
+      continue
+    }
     if (isKnowledgeUploadTooLarge(file)) {
-      rejectedCount += 1
+      tooLargeCount += 1
       continue
     }
     accepted.push(file)
   }
-  if (rejectedCount === 1) {
+  // 类型不支持与超限分别提示，保证用户能区分被拒的真实原因。
+  if (typeRejectedCount === 1) {
+    // 单文件类型不支持：展示允许的类型列表。
+    warning(getKnowledgeUploadTypeRejectedMessage())
+  } else if (typeRejectedCount > 1) {
+    // 多文件批量存在不支持类型：说明跳过数量并附上允许的类型列表。
+    warning(i18n.global.t('knowledge.messages.uploadSkipTypeMultiple', { count: typeRejectedCount, label: KNOWLEDGE_ALLOWED_EXTENSIONS_LABEL }))
+  }
+  if (tooLargeCount === 1) {
     // 单文件超限：直接展示上限提示。
     warning(getKnowledgeUploadMaxMessage())
-  } else if (rejectedCount > 1) {
+  } else if (tooLargeCount > 1) {
     // 多文件批量超限：说明跳过数量并附上单文件上限提示。
-    warning(i18n.global.t('knowledge.messages.uploadSkipMultiple', { count: rejectedCount, label: KNOWLEDGE_UPLOAD_MAX_LABEL }))
+    warning(i18n.global.t('knowledge.messages.uploadSkipMultiple', { count: tooLargeCount, label: KNOWLEDGE_UPLOAD_MAX_LABEL }))
   }
   return accepted
 }

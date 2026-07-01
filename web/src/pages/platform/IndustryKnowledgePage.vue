@@ -34,6 +34,7 @@
       </template>
       <template #header-extra>
         <div class="upload-actions">
+          <span class="upload-limit">{{ t('knowledge.messages.uploadAcceptedTypes', { label: KNOWLEDGE_ALLOWED_EXTENSIONS_LABEL }) }}</span>
           <span class="upload-limit">{{ t('knowledge.messages.uploadMaxMessage', { label: KNOWLEDGE_UPLOAD_MAX_LABEL }) }}</span>
           <n-button
             size="small"
@@ -45,7 +46,7 @@
             {{ t('platform.industry.fileSection.clearButton') }}
           </n-button>
           <label class="primary-button">
-            <input class="hidden-input" type="file" multiple @change="onUpload" />
+            <input class="hidden-input" type="file" multiple :accept="KNOWLEDGE_UPLOAD_ACCEPT" @change="onUpload" />
             {{ t('platform.industry.fileSection.uploadButton') }}
           </label>
         </div>
@@ -219,6 +220,8 @@ import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import DataTableList from '@/components/DataTableList.vue'
 import RAGFlowDatasetInfoDialog from '@/components/RAGFlowDatasetInfoDialog.vue'
 import {
+  KNOWLEDGE_ALLOWED_EXTENSIONS_LABEL,
+  KNOWLEDGE_UPLOAD_ACCEPT,
   KNOWLEDGE_UPLOAD_MAX_LABEL,
   formatKnowledgeBytes,
   type KnowledgeDocument,

@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { KNOWLEDGE_UPLOAD_MAX_BYTES, KNOWLEDGE_UPLOAD_MAX_LABEL, getKnowledgeUploadMaxMessage } from '@/api/hooks/useKnowledge'
+import {
+  KNOWLEDGE_ALLOWED_EXTENSIONS_LABEL,
+  KNOWLEDGE_UPLOAD_MAX_BYTES,
+  KNOWLEDGE_UPLOAD_MAX_LABEL,
+  getKnowledgeUploadMaxMessage,
+  getKnowledgeUploadTypeRejectedMessage,
+} from '@/api/hooks/useKnowledge'
 import { i18n } from '@/i18n'
 import {
   filterKnowledgeUploadFiles,
@@ -95,6 +101,44 @@ describe('knowledgeUploadBatch', () => {
     expect(warning).toHaveBeenCalledTimes(1)
     // 批量超限时应包含跳过数量和上限 label，断言当前语言下的实际文案。
     expect(warning).toHaveBeenCalledWith(`已跳过 2 个超过上限的文件，单文件最大支持 ${KNOWLEDGE_UPLOAD_MAX_LABEL}`)
+  })
+
+  // 覆盖单个类型不支持文件：exe 等白名单外文件被跳过，合法文件仍继续上传，并提示类型不支持。
+  it('过滤类型不支持的文件并保留合法文件', () => {
+    const warning = vi.fn()
+    const ok = fileWithSize('ok.pdf', 1024)
+    const exe = fileWithSize('virus.exe', 1024)
+
+    expect(filterKnowledgeUploadFiles([exe, ok], warning)).toEqual([ok])
+    // 单文件类型不支持时，提示文案应与 getKnowledgeUploadTypeRejectedMessage() 当前语言一致。
+    expect(warning).toHaveBeenCalledWith(getKnowledgeUploadTypeRejectedMessage())
+  })
+
+  // 覆盖多个类型不支持文件：批量过滤只提示一次，并在文案里说明跳过数量与允许类型。
+  it('过滤多个类型不支持的文件时只提示一次跳过数量', () => {
+    const warning = vi.fn()
+    const ok = fileWithSize('ok.pdf', 1024)
+    const exe = fileWithSize('virus.exe', 1024)
+    const zip = fileWithSize('archive.zip', 1024)
+
+    expect(filterKnowledgeUploadFiles([exe, ok, zip], warning)).toEqual([ok])
+    expect(warning).toHaveBeenCalledTimes(1)
+    // 批量类型不支持时应包含跳过数量与允许类型列表，断言当前语言下的实际文案。
+    expect(warning).toHaveBeenCalledWith(`已跳过 2 个不支持类型的文件，仅支持：${KNOWLEDGE_ALLOWED_EXTENSIONS_LABEL}`)
+  })
+
+  // 覆盖类型与大小混合拒绝：类型不支持与超限分别独立提示，互不覆盖。
+  it('类型不支持与超限的文件分别提示', () => {
+    const warning = vi.fn()
+    const ok = fileWithSize('ok.pdf', 1024)
+    const exe = fileWithSize('virus.exe', 1024)
+    const tooLarge = fileWithSize('too-large.pdf', KNOWLEDGE_UPLOAD_MAX_BYTES + 1)
+
+    expect(filterKnowledgeUploadFiles([exe, tooLarge, ok], warning)).toEqual([ok])
+    expect(warning).toHaveBeenCalledTimes(2)
+    // 类型不支持提示与超限提示各出现一次。
+    expect(warning).toHaveBeenCalledWith(getKnowledgeUploadTypeRejectedMessage())
+    expect(warning).toHaveBeenCalledWith(getKnowledgeUploadMaxMessage())
   })
 
   // 覆盖批量 items：上传队列 label 使用文件名，File 对象必须原样传递给 XHR 上传。

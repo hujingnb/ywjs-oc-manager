@@ -25,6 +25,7 @@
           >
             {{ t('knowledge.actions.ragflowInfo') }}
           </n-button>
+          <span class="upload-limit">{{ t('knowledge.messages.uploadAcceptedTypes', { label: KNOWLEDGE_ALLOWED_EXTENSIONS_LABEL }) }}</span>
           <span class="upload-limit">{{ t('knowledge.messages.uploadMaxMessage', { label: KNOWLEDGE_UPLOAD_MAX_LABEL }) }}</span>
           <n-button
             size="small"
@@ -36,7 +37,7 @@
             {{ t('knowledge.actions.clearFiles') }}
           </n-button>
           <label class="primary-button">
-            <input class="hidden-input" type="file" multiple :disabled="!canManage" @change="onUpload" />
+            <input class="hidden-input" type="file" multiple :accept="KNOWLEDGE_UPLOAD_ACCEPT" :disabled="!canManage" @change="onUpload" />
             {{ t('knowledge.actions.uploadFiles') }}
           </label>
         </div>
@@ -110,6 +111,8 @@ import { NButton, NCard, NDataTable, NInput, NSelect, NSpace, NTag, useMessage, 
 import { useI18n } from 'vue-i18n'
 
 import {
+  KNOWLEDGE_ALLOWED_EXTENSIONS_LABEL,
+  KNOWLEDGE_UPLOAD_ACCEPT,
   KNOWLEDGE_UPLOAD_MAX_LABEL,
   downloadOrgKnowledgeFile,
   formatKnowledgeBytes,
