@@ -57,7 +57,7 @@
 
     <!-- 右侧：消息历史 + 输入框。
          拖拽上传：拖文件到本区域触发高亮，松手后文件追加到 pendingFiles（与点击选择一致）。
-         仅在已选中会话（currentId 非空）且未发送中（!sending）时才响应拖拽。 -->
+         仅在已选中会话（currentId 非空）时才响应拖拽。 -->
     <div
       class="messages-col"
       :class="{ 'drag-active': dragActive }"
@@ -76,6 +76,80 @@
         >
           <span class="role-label">{{ msg.role }}</span>
           <ConversationMessageView :message="msg" :app-id="props.appId" :session-id="currentId" />
+        </div>
+      </div>
+
+      <!-- 待发送队列：任务进行中入队的消息，逐条串行自动发送；仅渲染当前会话的项。 -->
+      <div v-if="queuedForCurrent.length" class="queue-panel">
+        <div class="queue-header">
+          <span class="queue-title">{{ t('apps.conversations.queueTitle') }}</span>
+          <span v-if="sending" class="queue-generating">{{ t('apps.conversations.generating') }}</span>
+        </div>
+        <div
+          v-for="item in queuedForCurrent"
+          :key="item.id"
+          class="queue-item"
+          :class="{ 'queue-item--failed': item.status === 'failed' }"
+          :data-test="`queued-${item.id}`"
+        >
+          <!-- 编辑态：内联 textarea + 可移除文件 tag + 保存/取消 -->
+          <template v-if="editingId === item.id">
+            <n-input
+              v-model:value="editDraft"
+              type="textarea"
+              :autosize="{ minRows: 1, maxRows: 4 }"
+            />
+            <div v-if="editFiles.length" class="queue-files">
+              <n-tag
+                v-for="(f, i) in editFiles"
+                :key="i"
+                closable
+                size="small"
+                @close="removeEditFile(i)"
+              >
+                {{ f.name }}
+              </n-tag>
+            </div>
+            <div class="queue-actions">
+              <n-button size="tiny" type="primary" @click="saveEdit(item.id)">
+                {{ t('apps.conversations.queueSave') }}
+              </n-button>
+              <n-button size="tiny" quaternary @click="cancelEdit">
+                {{ t('apps.conversations.queueCancel') }}
+              </n-button>
+            </div>
+          </template>
+          <!-- 展示态：文本预览 + 只读文件 tag + 失败标记/重试/编辑/删除 -->
+          <template v-else>
+            <div class="queue-text">{{ item.text || '—' }}</div>
+            <div v-if="item.files.length" class="queue-files">
+              <n-tag v-for="(f, i) in item.files" :key="i" size="small">{{ f.name }}</n-tag>
+            </div>
+            <div class="queue-actions">
+              <n-tag
+                v-if="item.status === 'failed'"
+                size="tiny"
+                type="error"
+                :bordered="false"
+              >
+                {{ t('apps.conversations.queueFailed') }}
+              </n-tag>
+              <n-button
+                v-if="item.status === 'failed'"
+                size="tiny"
+                type="primary"
+                @click="retryQueued(item.id)"
+              >
+                {{ t('apps.conversations.queueRetry') }}
+              </n-button>
+              <n-button size="tiny" quaternary @click="startEdit(item)">
+                {{ t('apps.conversations.queueEdit') }}
+              </n-button>
+              <n-button size="tiny" quaternary type="error" @click="removeQueued(item.id)">
+                {{ t('apps.conversations.queueRemove') }}
+              </n-button>
+            </div>
+          </template>
         </div>
       </div>
 
@@ -100,31 +174,30 @@
             type="textarea"
             :autosize="{ minRows: 2, maxRows: 5 }"
             :placeholder="t('apps.conversations.placeholder')"
-            :disabled="!currentId || sending"
-            @keydown.enter.exact.prevent="onSend"
+            :disabled="!currentId"
+            @keydown.enter.exact.prevent="onComposerSubmit"
           />
           <!-- 附件选择：用 label 包裹隐藏 input，点击 label 触发文件选择框 -->
           <label
             class="attach-button"
-            :class="{ 'attach-button--disabled': !currentId || sending }"
+            :class="{ 'attach-button--disabled': !currentId }"
           >
             <input
               class="hidden-input"
               type="file"
               multiple
-              :disabled="!currentId || sending"
+              :disabled="!currentId"
               @change="onPickFiles"
             />
             {{ t('apps.conversations.attach') }}
           </label>
           <n-button
             type="primary"
-            :disabled="!currentId || sending || (!draft.trim() && pendingFiles.length === 0)"
-            :loading="sending"
+            :disabled="!currentId || (!draft.trim() && pendingFiles.length === 0)"
             data-test="send"
-            @click="onSend"
+            @click="onComposerSubmit"
           >
-            {{ sending ? t('apps.conversations.sending') : t('apps.conversations.send') }}
+            {{ sending ? t('apps.conversations.queueSend') : t('apps.conversations.send') }}
           </n-button>
         </div>
       </div>
@@ -150,12 +223,21 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, nextTick, onMounted } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NButton, NInput, NModal, NSpace, NTag, useMessage } from 'naive-ui'
 import * as api from '@/api/conversations'
 import type { ConversationSession, ConversationPart } from '@/api/conversations'
 import { isDialogueMessage } from '@/domain/conversation'
+import {
+  nextPending,
+  removeById,
+  prependFailed,
+  setStatus,
+  applyEdit,
+  forSession,
+  type QueuedMessage,
+} from '@/domain/messageQueue'
 import ConversationMessageView from './ConversationMessageView.vue'
 
 // appId 由路由 props: true 注入，标识当前实例。
@@ -176,6 +258,21 @@ const sending = ref(false)
 const pendingFiles = ref<File[]>([])
 // dragActive 标记当前是否有文件正被拖拽到对话区域，为 true 时显示高亮边框。
 const dragActive = ref(false)
+// queue 是任务进行中入队的待发送消息，逐条串行自动发送；纯内存、不持久化。
+const queue = ref<QueuedMessage[]>([])
+// queueSeq 本地自增序号，用于生成队列项唯一 id（不依赖时间/随机源）。
+let queueSeq = 0
+// draining 防止 drainQueue 重入（如失败重试与自动消费并发）。
+let draining = false
+// queuedForCurrent 仅暴露当前会话的队列项，供面板按会话隔离渲染。
+const queuedForCurrent = computed(() => forSession(queue.value, currentId.value))
+
+// ─── 队列项内联编辑状态 ───────────────────────────────────────────────────────
+// editingId 为正在编辑的队列项 id；null 表示无编辑态。
+const editingId = ref<string | null>(null)
+// editDraft / editFiles 是编辑态的文本与文件草稿，保存时写回队列项。
+const editDraft = ref('')
+const editFiles = ref<File[]>([])
 // msgListEl 用于发送后滚动到底部。
 const msgListEl = ref<HTMLElement | null>(null)
 
@@ -203,15 +300,15 @@ function hasFiles(e: DragEvent): boolean {
   return !!e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')
 }
 
-// onDragEnter 文件拖入对话区域时激活高亮；条件：已选会话且未发送中且携带文件。
+// onDragEnter 文件拖入对话区域时激活高亮；条件：已选会话且携带文件。
 function onDragEnter(e: DragEvent) {
-  if (!currentId.value || sending.value || !hasFiles(e)) return
+  if (!currentId.value || !hasFiles(e)) return
   dragActive.value = true
 }
 
 // onDragOver 持续拖拽经过时保持高亮并设置 dropEffect 为 copy，告知系统可放置。
 function onDragOver(e: DragEvent) {
-  if (!currentId.value || sending.value || !hasFiles(e)) return
+  if (!currentId.value || !hasFiles(e)) return
   dragActive.value = true
   if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
 }
@@ -228,7 +325,7 @@ function onDragLeave(e: DragEvent) {
 // onDrop 放置时把文件追加到 pendingFiles，与点击「附件」选择文件的行为完全一致。
 function onDrop(e: DragEvent) {
   dragActive.value = false
-  if (!currentId.value || sending.value) return
+  if (!currentId.value) return
   const files = e.dataTransfer ? Array.from(e.dataTransfer.files) : []
   if (files.length) pendingFiles.value.push(...files)
 }
@@ -310,35 +407,29 @@ async function onDelete(sid: string) {
   }
 }
 
-// onSend 以 SSE 流式发送消息，支持纯文本与多模态（文件+文字）：
-//   1. 先逐个上传 pendingFiles 拿到 file_id，组 ConversationPart[]；
-//   2. 立即把用户消息推入列表（乐观更新）；
-//   3. 插入空的 assistant 占位消息；
-//   4. 逐帧把 onDelta 内容追加到占位消息的 content；
-//   5. 完成后重新拉取该会话消息列表以确保一致性。
-// 注意：useMessage() 返回的通知 API 已命名为 `message`，发送消息内容使用 `payload` 避免遮蔽。
-async function onSend() {
-  const text = draft.value.trim()
-  const files = pendingFiles.value.slice()
-  // 文字与文件都为空时不发送。
-  if ((!text && files.length === 0) || !currentId.value || sending.value) return
+// sendMessage 以 SSE 流式发送一条消息（文本 + 文件），手动发送与队列消费共用：
+//   1. 逐个上传 files 拿 file_id 组 ConversationPart[]（上传失败直接抛出）；
+//   2. 乐观推入用户消息与空 assistant 占位；
+//   3. 逐帧把 onDelta 追加到占位消息；
+//   4. 成功后 refetch 保持一致。
+// 关键：api.chatStream 从不 reject，失败只走 onError 回调后正常 resolve，故此处在 onError
+// 里捕获错误信息，流结束后若有错误：移除刚才乐观推入的两条消息、抛出错误，让调用方（drainQueue /
+// onComposerSubmit）感知失败并处理，避免失败消息残留在气泡里。
+async function sendMessage(text: string, files: File[]) {
+  if ((!text && files.length === 0) || !currentId.value) return
 
   sending.value = true
-  // 立即清空草稿与待发文件，让用户感知操作已受理。
-  draft.value = ''
-  pendingFiles.value = []
 
-  // 逐个上传文件，拿到 file_id 组装 file parts。
-  let fileParts: ConversationPart[] = []
+  // 逐个上传文件，拿到 file_id 组装 file parts；失败则复位 sending 并抛出。
+  const fileParts: ConversationPart[] = []
   try {
     for (const f of files) {
       const meta = await api.uploadConversationFile(props.appId, currentId.value, f)
       fileParts.push({ type: 'input_file', file_id: meta.file_id, filename: meta.filename, mime: meta.mime })
     }
   } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e))
     sending.value = false
-    return
+    throw e instanceof Error ? e : new Error(String(e))
   }
 
   // 有文件时组装多模态 parts；纯文字时保持字符串，与旧行为兼容。
@@ -347,13 +438,15 @@ async function onSend() {
       ? [...(text ? [{ type: 'text' as const, text }] : []), ...fileParts]
       : text
 
-  // 乐观推入用户消息。
-  messages.value.push({ role: 'user', content: payload })
-  // 用 reactive 包裹占位对象，确保 content 字段的变更触发视图更新。
+  // 乐观推入用户消息与 assistant 占位（保存引用，失败时按引用精准移除）。
+  const userMsg: api.ConversationMessage = { role: 'user', content: payload }
+  messages.value.push(userMsg)
   const asst = reactive<api.ConversationMessage>({ role: 'assistant', content: '' })
   messages.value.push(asst)
   await scrollToBottom()
 
+  // streamErr 捕获流内错误：chatStream 不 reject，靠 onError 回填。
+  let streamErr: string | null = null
   try {
     await api.chatStream(props.appId, currentId.value, payload, {
       onDelta: (d) => {
@@ -362,16 +455,118 @@ async function onSend() {
       },
       onDone: () => {},
       onError: (m) => {
-        message.error(m)
+        streamErr = m
       },
     })
-    // 流结束后重新拉取消息，使列表与服务端状态一致（包含 token/finish_reason 等完整字段）。
-    await selectSession(currentId.value)
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e))
   } finally {
     sending.value = false
   }
+
+  if (streamErr) {
+    // 失败：移除刚才乐观推入的占位与用户消息，使该条不残留在气泡；抛出供调用方处理。
+    const ai = messages.value.indexOf(asst)
+    if (ai >= 0) messages.value.splice(ai, 1)
+    const ui = messages.value.indexOf(userMsg)
+    if (ui >= 0) messages.value.splice(ui, 1)
+    throw new Error(streamErr)
+  }
+
+  // 成功后重新拉取消息，使列表与服务端状态一致（含 token/finish_reason 等完整字段）。
+  await selectSession(currentId.value)
+}
+
+// onComposerSubmit 是发送按钮 / 回车的统一入口：
+//   - 任务进行中（sending）：把当前草稿入队，不立即发送；
+//   - 空闲：立即发送，成功后驱动 drainQueue 消费期间新入的队列项。
+async function onComposerSubmit() {
+  const text = draft.value.trim()
+  const files = pendingFiles.value.slice()
+  if ((!text && files.length === 0) || !currentId.value) return
+
+  if (sending.value) {
+    // 入队：生成唯一 id，绑定当前会话；清空草稿让用户感知已受理。
+    queue.value = [
+      ...queue.value,
+      { id: `q${++queueSeq}`, sessionId: currentId.value, text, files, status: 'pending' },
+    ]
+    draft.value = ''
+    pendingFiles.value = []
+    return
+  }
+
+  // 空闲：立即发送。清空草稿后发送，失败则回填草稿并提示。
+  draft.value = ''
+  pendingFiles.value = []
+  try {
+    await sendMessage(text, files)
+  } catch (e) {
+    draft.value = text
+    pendingFiles.value = files
+    message.error(e instanceof Error ? e.message : String(e))
+    return
+  }
+  await drainQueue()
+}
+
+// drainQueue 串行消费当前会话的 pending 队列：逐条取出发送，上一条流式跑完再发下一条。
+// 任一条失败即停止（方案 A：停止并保留），把该条以 failed 放回队头供重试。
+// draining 防重入；sending 为真时不启动（避免与在飞发送并发）。
+async function drainQueue() {
+  if (draining || sending.value) return
+  draining = true
+  try {
+    for (;;) {
+      const next = nextPending(queue.value, currentId.value)
+      if (!next) return
+      // 先移出队列：发送时它会经乐观更新变成真实用户气泡，从队列面板消失。
+      queue.value = removeById(queue.value, next.id)
+      try {
+        await sendMessage(next.text, next.files)
+      } catch (e) {
+        queue.value = prependFailed(queue.value, next)
+        message.error(e instanceof Error ? e.message : String(e))
+        return
+      }
+    }
+  } finally {
+    draining = false
+  }
+}
+
+// ─── 队列项操作 ───────────────────────────────────────────────────────────────
+// startEdit 进入某队列项的内联编辑态，预填其文本与文件。
+function startEdit(item: QueuedMessage) {
+  editingId.value = item.id
+  editDraft.value = item.text
+  editFiles.value = item.files.slice()
+}
+
+// removeEditFile 在编辑态移除某个待发文件。
+function removeEditFile(i: number) {
+  editFiles.value.splice(i, 1)
+}
+
+// cancelEdit 放弃本次编辑，丢弃编辑草稿。
+function cancelEdit() {
+  editingId.value = null
+}
+
+// saveEdit 把编辑草稿写回队列项并退出编辑态。
+function saveEdit(id: string) {
+  queue.value = applyEdit(queue.value, id, editDraft.value.trim(), editFiles.value.slice())
+  editingId.value = null
+}
+
+// removeQueued 从队列删除某项。
+function removeQueued(id: string) {
+  queue.value = removeById(queue.value, id)
+  if (editingId.value === id) editingId.value = null
+}
+
+// retryQueued 把失败项改回 pending 并重新驱动消费。
+async function retryQueued(id: string) {
+  queue.value = setStatus(queue.value, id, 'pending')
+  await drainQueue()
 }
 
 // scrollToBottom 在 DOM 更新后把消息列表滚到最底部。
@@ -553,6 +748,72 @@ onMounted(loadSessions)
 .msg-row.assistant :deep(.markdown-body code),
 .msg-row.assistant :deep(.markdown-body pre) {
   background: #fff;
+}
+
+/* ─── 待发送队列面板 ──────────────────────────────
+   位于消息列表与输入区之间，flex-shrink:0 不被压缩；内部自身可滚动，避免排多条时顶高布局。 */
+.queue-panel {
+  flex-shrink: 0;
+  max-height: 30%;
+  overflow-y: auto;
+  padding: 8px 12px;
+  border-top: 1px dashed var(--color-border, #e5e7eb);
+  background: var(--color-bg-hover, #f5f5f5);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.queue-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.queue-title {
+  font-weight: 600;
+}
+
+.queue-generating {
+  color: var(--color-brand-text, #8a3700);
+}
+
+/* 单条队列项：卡片式，纵向堆叠文本/文件/操作。 */
+.queue-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 6px;
+  background: var(--color-surface, #fff);
+}
+
+/* 失败项：红色左边框强调。 */
+.queue-item--failed {
+  border-left: 3px solid var(--color-error, #d03050);
+}
+
+.queue-text {
+  font-size: 13px;
+  color: var(--color-text-primary, #1f2329);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.queue-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.queue-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
 }
 
 /* 输入区：固定在右侧底部。
