@@ -38,5 +38,17 @@ export function createRecorder(): Recorder {
         mr.stop()
       })
     },
+
+    dispose() {
+      // 组件卸载时若仍在录音，强制停止并释放麦克风轨(否则标签页录音指示灯常亮)。
+      try {
+        media?.stop()
+      } catch {
+        // MediaRecorder 已停止时 stop() 会抛错，忽略。
+      }
+      stream?.getTracks().forEach((t) => t.stop())
+      stream = null
+      media = null
+    },
   }
 }

@@ -56,7 +56,7 @@
 
 <script setup lang="ts">
 // 模型选择弹层：受控组件，选择结果通过 confirm 事件回传父组件驱动 voiceController。
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NModal, NSpace, NRadioGroup, NRadioButton, NRadio, NProgress, NButton } from 'naive-ui'
 import { MODEL_OPTIONS, DEFAULT_TIER, DEFAULT_SOURCE, type ModelTier, type SourceId } from './voiceSettings'
@@ -80,6 +80,17 @@ const { t } = useI18n()
 // 本地选择态，用初始值(或默认)预填，便于用户直接确认。
 const tier = ref<ModelTier>(props.initialTier ?? DEFAULT_TIER)
 const source = ref<SourceId>(props.initialSource ?? DEFAULT_SOURCE)
+
+// 弹层每次打开时把单选回填为最新持久化值，避免沿用上次未提交/已取消的临时选择。
+watch(
+  () => props.show,
+  (visible) => {
+    if (visible) {
+      tier.value = props.initialTier ?? DEFAULT_TIER
+      source.value = props.initialSource ?? DEFAULT_SOURCE
+    }
+  },
+)
 
 // tierHint 按档位取对应说明文案。
 function tierHint(tv: ModelTier): string {

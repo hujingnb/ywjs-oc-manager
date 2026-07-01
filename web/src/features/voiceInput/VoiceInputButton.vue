@@ -9,7 +9,7 @@
           circle
           :type="ctrl.state.value === 'recording' ? 'error' : 'default'"
           :disabled="disabled || busy"
-          :loading="ctrl.state.value === 'transcribing'"
+          :loading="ctrl.state.value === 'transcribing' || ctrl.state.value === 'downloading'"
           :class="{ 'voice-input__rec': ctrl.state.value === 'recording' }"
           data-test="voice-toggle"
           @click="ctrl.toggle()"
@@ -38,7 +38,7 @@
 
 <script setup lang="ts">
 // 麦克风按钮：驱动 useVoiceInput 状态机，串联模型选择弹层与错误提示。
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NButton, NTooltip, useMessage } from 'naive-ui'
 import ModelPickerPopover from './ModelPickerPopover.vue'
@@ -67,6 +67,8 @@ const hint = computed(() => {
   switch (ctrl.state.value) {
     case 'recording': return t('apps.conversations.voice.recording')
     case 'transcribing': return t('apps.conversations.voice.transcribing')
+    // 从缓存(重)载模型也走 downloading 态，给出进度提示避免按钮看起来卡死。
+    case 'downloading': return t('apps.conversations.voice.downloading', { percent: Math.round(ctrl.downloadProgress.value * 100) })
     default: return t('apps.conversations.voice.start')
   }
 })
@@ -97,6 +99,9 @@ async function onPickerConfirm(tier: ModelTier, source: SourceId) {
   // 仅在未报错时关闭(下载失败保留弹层供切源重试)。
   if (!ctrl.errorKey.value) pickerShow.value = false
 }
+
+// 组件卸载(切换 tab/实例)时释放 Worker 与麦克风，避免遗留孤儿 Worker 与录音指示灯常亮。
+onUnmounted(() => ctrl.dispose())
 </script>
 
 <style scoped>

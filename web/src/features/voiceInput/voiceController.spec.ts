@@ -117,4 +117,32 @@ describe('voiceController', () => {
     expect(recorder.start).not.toHaveBeenCalled()
     expect(ctrl.state.value).toBe('idle')
   })
+
+  // 空录音(decode 返回 0 长度)：判为 noSpeech，不调用 transcribe、不落文本
+  it('空 PCM 直接判 noSpeech 不做识别', async () => {
+    const transcribe = vi.fn().mockResolvedValue('不该被调用')
+    const { ctrl, onText } = mkDeps({
+      decode: vi.fn().mockResolvedValue(new Float32Array(0)), // 空音频
+      recognizer: { ready: vi.fn().mockReturnValue(true), ensureModel: vi.fn(), transcribe },
+    })
+    await ctrl.toggle() // 进入 recording
+    await ctrl.toggle() // 结束，走空 PCM 短路
+    expect(transcribe).not.toHaveBeenCalled()
+    expect(onText).not.toHaveBeenCalled()
+    expect(ctrl.errorKey.value).toBe('noSpeech')
+    expect(ctrl.state.value).toBe('idle')
+  })
+
+  // dispose 透传释放底层录音器与识别器资源(组件卸载时防泄漏)
+  it('dispose 透传释放录音器与识别器', () => {
+    const recorderDispose = vi.fn()
+    const recognizerDispose = vi.fn()
+    const { ctrl } = mkDeps({
+      recorder: { dispose: recorderDispose },
+      recognizer: { ready: vi.fn().mockReturnValue(true), ensureModel: vi.fn(), transcribe: vi.fn(), dispose: recognizerDispose },
+    })
+    ctrl.dispose()
+    expect(recorderDispose).toHaveBeenCalledOnce()
+    expect(recognizerDispose).toHaveBeenCalledOnce()
+  })
 })

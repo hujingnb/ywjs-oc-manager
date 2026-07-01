@@ -17,6 +17,8 @@ export type VoiceErrorKey = 'permissionDenied' | 'notSupported' | 'noSpeech' | '
 export interface Recorder {
   start(): Promise<void>
   stop(): Promise<Blob>
+  // dispose 释放麦克风等底层资源(组件卸载时调用)；实现可选。
+  dispose?(): void
 }
 
 // Recognizer 识别器接口：ready 查询某档位/源是否已就绪，ensureModel 加载(下载)模型并吐进度，
@@ -25,6 +27,8 @@ export interface Recognizer {
   ready(tier: ModelTier, source: SourceId): boolean
   ensureModel(tier: ModelTier, source: SourceId, onProgress: (p: number) => void): Promise<void>
   transcribe(pcm: Float32Array, language: string): Promise<string>
+  // dispose 终止 Worker、释放已加载模型占用的内存(组件卸载时调用)；实现可选。
+  dispose?(): void
 }
 
 // ControllerDeps 编排器依赖集合。
@@ -47,6 +51,8 @@ export interface VoiceController {
   toggle(): Promise<void>
   chooseModel(tier: ModelTier, source: SourceId): Promise<void>
   onProgress(cb: (p: number) => void): void
+  // dispose 释放录音器与识别器底层资源；由承载组件在卸载时调用，防止 Worker/麦克风泄漏。
+  dispose(): void
 }
 
 // mapError 把底层异常映射为 UI 错误键：麦克风拒绝→permissionDenied，其余→fallback。
@@ -94,6 +100,11 @@ export function createVoiceController(deps: ControllerDeps): VoiceController {
     try {
       const blob = await deps.recorder.stop()
       const pcm = await deps.decode(blob)
+      // 空录音(无有效采样)直接判为未识别，避免对空音频做一次无谓的推理。
+      if (pcm.length === 0) {
+        errorKey.value = 'noSpeech'
+        return
+      }
       const text = (await deps.recognizer.transcribe(pcm, deps.language())).trim()
       if (!text) {
         errorKey.value = 'noSpeech'
@@ -153,5 +164,11 @@ export function createVoiceController(deps: ControllerDeps): VoiceController {
     await downloadThen(tier, source, startRecording)
   }
 
-  return { state, downloadProgress, errorKey, needModelPick, toggle, chooseModel, onProgress }
+  // dispose 释放底层资源(Worker、麦克风轨)；承载组件卸载时调用。
+  function dispose() {
+    deps.recorder.dispose?.()
+    deps.recognizer.dispose?.()
+  }
+
+  return { state, downloadProgress, errorKey, needModelPick, toggle, chooseModel, onProgress, dispose }
 }

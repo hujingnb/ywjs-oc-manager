@@ -65,5 +65,13 @@ export function createRecognizer(): Recognizer {
         w.postMessage({ type: 'transcribe', id, pcm, language }, [pcm.buffer])
       })
     },
+
+    dispose() {
+      // 终止 Worker，释放其加载的 whisper 模型占用的内存与 WebGPU 资源；
+      // readyKey 一并清空，下次使用会重新惰性创建 Worker 并重载模型。
+      worker?.terminate()
+      worker = null
+      readyKey = ''
+    },
   }
 }
