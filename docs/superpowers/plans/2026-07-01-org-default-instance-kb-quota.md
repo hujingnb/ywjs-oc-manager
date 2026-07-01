@@ -20,8 +20,8 @@
 
 | 文件 | 责任 | 动作 |
 |------|------|------|
-| `internal/migrations/000006_org_default_app_kb_quota.up.sql` | organizations 加列 + CHECK 约束 | 创建 |
-| `internal/migrations/000006_org_default_app_kb_quota.down.sql` | 回滚（删约束 + 列） | 创建 |
+| `internal/migrations/000026_org_default_app_kb_quota.up.sql` | organizations 加列 + CHECK 约束 | 创建 |
+| `internal/migrations/000026_org_default_app_kb_quota.down.sql` | 回滚（删约束 + 列） | 创建 |
 | `internal/store/queries/organizations.sql` | Create/Update 带上新列 | 修改 |
 | `internal/store/queries/apps.sql` | `CreateApp` INSERT 增加 `knowledge_quota_bytes` 列 | 修改 |
 | `internal/store/sqlc/*.go` | sqlc 生成产物 | 重新生成 |
@@ -41,12 +41,12 @@
 ## Task 1: 数据库 migration
 
 **Files:**
-- Create: `internal/migrations/000006_org_default_app_kb_quota.up.sql`
-- Create: `internal/migrations/000006_org_default_app_kb_quota.down.sql`
+- Create: `internal/migrations/000026_org_default_app_kb_quota.up.sql`
+- Create: `internal/migrations/000026_org_default_app_kb_quota.down.sql`
 
 - [ ] **Step 1: 写 up migration**
 
-创建 `internal/migrations/000006_org_default_app_kb_quota.up.sql`，完全对齐 000005 的字节存储 + CHECK 模式，并带中文 COMMENT（项目规范要求新增列带 COMMENT）：
+创建 `internal/migrations/000026_org_default_app_kb_quota.up.sql`，完全对齐 000005 的字节存储 + CHECK 模式，并带中文 COMMENT（项目规范要求新增列带 COMMENT）：
 
 ```sql
 -- 企业级「个人知识库空间」默认配额：作为该企业新建实例（成员个人知识库）的默认知识库容量上限。
@@ -60,7 +60,7 @@ ALTER TABLE organizations
 
 - [ ] **Step 2: 写 down migration**
 
-创建 `internal/migrations/000006_org_default_app_kb_quota.down.sql`，对齐 000005 down 的"先删约束再删列"：
+创建 `internal/migrations/000026_org_default_app_kb_quota.down.sql`，对齐 000005 down 的"先删约束再删列"：
 
 ```sql
 -- 回滚企业级个人知识库默认配额：先删 CHECK 约束再删列（MySQL 8 支持 DROP CONSTRAINT）。
@@ -71,13 +71,13 @@ ALTER TABLE organizations
 
 - [ ] **Step 3: 校验 migration 文件命名与序号**
 
-Run: `ls internal/migrations/ | grep 000006`
-Expected: 输出两个文件 `000006_org_default_app_kb_quota.up.sql` 与 `000006_org_default_app_kb_quota.down.sql`，且 `000005` 为当前最大序号（无 000006 冲突）。
+Run: `ls internal/migrations/ | grep 000026`
+Expected: 输出两个文件 `000026_org_default_app_kb_quota.up.sql` 与 `000026_org_default_app_kb_quota.down.sql`。当前最大序号为 `000025_apps_web_publish_applied`，故 000026 为下一个可用序号，无冲突。
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add internal/migrations/000006_org_default_app_kb_quota.up.sql internal/migrations/000006_org_default_app_kb_quota.down.sql
+git add internal/migrations/000026_org_default_app_kb_quota.up.sql internal/migrations/000026_org_default_app_kb_quota.down.sql
 git commit -m "feat(db): 企业新增个人知识库默认配额列
 
 organizations 表新增 default_app_knowledge_quota_bytes（默认 1GB，
@@ -723,7 +723,7 @@ GB↔Bytes 换算复用现有工具，字段下方展示说明文案（中英）
 
 前置：本地 k3d 环境已 `make local-up`（若开机后 CrashLoop，先 `sudo modprobe br_netfilter` + rollout restart，见项目内存）。manager-api 启动会自动跑迁移；如需手动：
 Run: `make migrate-up`
-Expected: 000006 迁移成功，无报错。
+Expected: 000026 迁移成功，无报错。
 
 验证列已存在（经 rtk 绕过，见项目约定）：
 Run: `rtk proxy kubectl -n ocm exec deploy/manager-api -- sh -c "echo 'DESCRIBE organizations;' | mysql ..."`（连接串按本地约定），确认 `default_app_knowledge_quota_bytes` 列存在、默认 1073741824。
