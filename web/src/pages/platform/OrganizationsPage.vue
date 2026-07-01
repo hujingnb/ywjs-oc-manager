@@ -150,6 +150,23 @@
               />
             </n-form-item>
           </n-grid-item>
+          <n-grid-item>
+            <n-form-item :label="t('platform.orgs.form.labelPersonalKnowledgeQuota')">
+              <n-input-number
+                v-if="modalMode === 'create'"
+                v-model:value="form.personal_knowledge_quota_gb"
+                :min="1" :precision="0" style="width: 100%"
+              />
+              <n-input-number
+                v-else
+                v-model:value="editForm.personal_knowledge_quota_gb"
+                :min="1" :precision="0" style="width: 100%"
+              />
+              <template #feedback>
+                {{ t('platform.orgs.form.personalKnowledgeQuotaHint') }}
+              </template>
+            </n-form-item>
+          </n-grid-item>
           <n-grid-item :span="2">
             <n-form-item :label="t('platform.orgs.form.labelRemark')">
               <n-input
@@ -352,10 +369,23 @@ function editQuotaBytesForPayload(): number {
   return quotaGBToBytes(editForm.knowledge_quota_gb)
 }
 
+// editPersonalQuotaBytesForPayload 在编辑表单未改动个人知识库 GB 输入时保留后端原始 bytes，避免整 GB 展示导致非整 GB 容量被静默舍入。
+function editPersonalQuotaBytesForPayload(): number {
+  if (
+    editForm.personal_knowledge_quota_gb === editForm.personal_knowledge_quota_original_gb
+    && typeof editForm.personal_knowledge_quota_original_bytes === 'number'
+  ) {
+    return editForm.personal_knowledge_quota_original_bytes
+  }
+  return quotaGBToBytes(editForm.personal_knowledge_quota_gb)
+}
+
 // OrganizationCreateForm 在后端创建 payload 外追加 GB 输入字段，仅用于页面表单展示。
 interface OrganizationCreateForm extends OrganizationFormPayload {
-  // knowledge_quota_gb 是平台管理员看到的 GB 单位，提交前转换为后端 bytes。
+  // knowledge_quota_gb 是平台管理员看到的企业知识库 GB 单位，提交前转换为后端 bytes。
   knowledge_quota_gb: number
+  // personal_knowledge_quota_gb 是个人知识库（实例默认）空间 GB 输入，提交前转换为 bytes。
+  personal_knowledge_quota_gb: number
 }
 
 // editForm 是编辑模式的响应式表单对象，由 openEditForm 按当前组织数据预填。
@@ -369,6 +399,9 @@ const editForm = reactive({
   knowledge_quota_gb: knowledgeQuotaGBDefault,
   knowledge_quota_original_gb: knowledgeQuotaGBDefault,
   knowledge_quota_original_bytes: undefined as number | undefined,
+  personal_knowledge_quota_gb: knowledgeQuotaGBDefault,
+  personal_knowledge_quota_original_gb: knowledgeQuotaGBDefault,
+  personal_knowledge_quota_original_bytes: undefined as number | undefined,
   assistant_version_ids: [] as string[],
 })
 // editSubmitting 控制编辑提交中的 loading 状态。
@@ -393,6 +426,11 @@ function openEditForm(org: Organization) {
   editForm.knowledge_quota_original_gb = knowledgeQuotaGB
   editForm.knowledge_quota_original_bytes = typeof org.knowledge_quota_bytes === 'number'
     ? org.knowledge_quota_bytes : undefined
+  const personalQuotaGB = quotaBytesToGB(org.default_app_knowledge_quota_bytes)
+  editForm.personal_knowledge_quota_gb = personalQuotaGB
+  editForm.personal_knowledge_quota_original_gb = personalQuotaGB
+  editForm.personal_knowledge_quota_original_bytes = typeof org.default_app_knowledge_quota_bytes === 'number'
+    ? org.default_app_knowledge_quota_bytes : undefined
   editForm.assistant_version_ids = org.assistant_version_ids ? [...org.assistant_version_ids] : []
   editError.value = null
   editFormVisible.value = true
@@ -432,6 +470,7 @@ async function submitEditOrganization() {
         max_instance_count: typeof editForm.max_instance_count === 'number'
           ? editForm.max_instance_count : undefined,
         knowledge_quota_bytes: editQuotaBytesForPayload(),
+        default_app_knowledge_quota_bytes: editPersonalQuotaBytesForPayload(),
         assistant_version_ids: editForm.assistant_version_ids,
       },
     })
@@ -509,6 +548,7 @@ const createFormMutation = {
     credit_warning_threshold: payload.credit_warning_threshold,
     max_instance_count: payload.max_instance_count,
     knowledge_quota_bytes: payload.knowledge_quota_bytes,
+    default_app_knowledge_quota_bytes: payload.default_app_knowledge_quota_bytes,
     assistant_version_ids: payload.assistant_version_ids,
     admin_username: payload.admin_username,
     admin_display_name: payload.admin_display_name,
@@ -526,6 +566,7 @@ const { form, formVisible, creating, submitError, openForm: _openForm, submit: s
     credit_warning_threshold: undefined as number | undefined,
     max_instance_count: undefined as number | undefined,
     knowledge_quota_gb: knowledgeQuotaGBDefault,
+    personal_knowledge_quota_gb: knowledgeQuotaGBDefault,
     admin_username: '',
     admin_display_name: '',
     admin_password: '',
@@ -543,6 +584,8 @@ const { form, formVisible, creating, submitError, openForm: _openForm, submit: s
     max_instance_count: typeof f.max_instance_count === 'number' ? f.max_instance_count : undefined,
     knowledge_quota_gb: f.knowledge_quota_gb,
     knowledge_quota_bytes: quotaGBToBytes(f.knowledge_quota_gb),
+    personal_knowledge_quota_gb: f.personal_knowledge_quota_gb,
+    default_app_knowledge_quota_bytes: quotaGBToBytes(f.personal_knowledge_quota_gb),
     admin_username: f.admin_username,
     admin_display_name: f.admin_display_name,
     admin_password: f.admin_password,

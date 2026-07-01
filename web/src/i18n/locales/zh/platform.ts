@@ -19,6 +19,8 @@ export default {
       labelCreditWarning: '余额预警阈值 (%)',
       labelMaxInstance: '实例数量上限（留空 = 不限制）',
       labelKnowledgeQuota: '企业知识库空间 (GB)',
+      labelPersonalKnowledgeQuota: '个人知识库空间 (GB)',
+      personalKnowledgeQuotaHint: '该企业新建实例的默认个人知识库空间上限。仅对之后新建的实例生效，不影响已有实例；平台管理员仍可在实例中单独调整。',
       labelRemark: '备注',
       labelVersions: '可用助手版本',
       placeholderName: '企业名称',
