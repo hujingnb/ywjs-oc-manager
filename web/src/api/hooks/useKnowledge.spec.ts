@@ -12,6 +12,10 @@ import {
   getKnowledgeUploadMaxMessage,
   isKnowledgeUploadOverRemaining,
   isKnowledgeUploadTooLarge,
+  KNOWLEDGE_ALLOWED_EXTENSIONS_LABEL,
+  KNOWLEDGE_UPLOAD_ACCEPT,
+  getKnowledgeUploadTypeRejectedMessage,
+  isKnowledgeUploadTypeAllowed,
   normalizeKnowledgeListing,
 } from './useKnowledge'
 import { i18n } from '@/i18n'
@@ -65,6 +69,31 @@ describe('知识库上传大小限制', () => {
   it('允许达到上限的文件并拒绝超过 1 字节的文件', () => {
     expect(isKnowledgeUploadTooLarge({ size: KNOWLEDGE_UPLOAD_MAX_BYTES })).toBe(false)
     expect(isKnowledgeUploadTooLarge({ size: KNOWLEDGE_UPLOAD_MAX_BYTES + 1 })).toBe(true)
+  })
+})
+
+describe('知识库上传类型白名单', () => {
+  // 覆盖白名单命中：常见文档 / 表格 / 图片扩展名允许上传，扩展名大小写不敏感。
+  it('允许白名单内的文件类型且忽略扩展名大小写', () => {
+    expect(isKnowledgeUploadTypeAllowed({ name: 'report.pdf' })).toBe(true) // 场景：常见 PDF 文档。
+    expect(isKnowledgeUploadTypeAllowed({ name: 'notes.MD' })).toBe(true) // 场景：大写扩展名应归一化后命中。
+    expect(isKnowledgeUploadTypeAllowed({ name: 'photo.JPEG' })).toBe(true) // 场景：图片类型且大写扩展名。
+  })
+
+  // 覆盖白名单未命中：可执行文件、无扩展名、以点结尾的文件名一律拒绝。
+  it('拒绝可执行文件与无有效扩展名的文件', () => {
+    expect(isKnowledgeUploadTypeAllowed({ name: 'virus.exe' })).toBe(false) // 场景：可执行文件直接拒绝。
+    expect(isKnowledgeUploadTypeAllowed({ name: 'archive.zip' })).toBe(false) // 场景：压缩包不在白名单。
+    expect(isKnowledgeUploadTypeAllowed({ name: 'README' })).toBe(false) // 场景：无扩展名无法判断类型。
+    expect(isKnowledgeUploadTypeAllowed({ name: 'trailing.' })).toBe(false) // 场景：以点结尾扩展名为空。
+  })
+
+  // 覆盖 accept 属性与提示文案：accept 由白名单派生为带点扩展名列表，拒绝提示包含可读类型列表。
+  it('导出 accept 属性并生成含类型列表的拒绝提示', () => {
+    expect(KNOWLEDGE_UPLOAD_ACCEPT).toContain('.pdf') // accept 用带点扩展名引导系统文件选择器。
+    expect(KNOWLEDGE_UPLOAD_ACCEPT).not.toContain('.exe') // 白名单外类型不应出现在 accept 中。
+    // getKnowledgeUploadTypeRejectedMessage 通过 i18n 生成当前语言提示，并插入白名单类型列表。
+    expect(getKnowledgeUploadTypeRejectedMessage()).toBe(`文件类型不支持，仅支持：${KNOWLEDGE_ALLOWED_EXTENSIONS_LABEL}`)
   })
 })
 

@@ -65,5 +65,11 @@ export default {
     uploadMaxMessage: 'Max file size: {label}',
     // uploadSkipMultiple 是多文件批量过滤时跳过文件的提示，其中包含上限文案。
     uploadSkipMultiple: 'Skipped {count} files exceeding the limit, max file size: {label}',
+    // uploadAcceptedTypes 是上传区常驻的支持格式说明，label 为白名单类型列表。
+    uploadAcceptedTypes: 'Supported formats: {label}',
+    // uploadTypeRejected 是单文件类型不支持提示，label 为白名单类型列表。
+    uploadTypeRejected: 'Unsupported file type, only supports: {label}',
+    // uploadSkipTypeMultiple 是多文件批量过滤时跳过不支持类型文件的提示，其中包含允许的类型列表。
+    uploadSkipTypeMultiple: 'Skipped {count} files of unsupported type, only supports: {label}',
   },
 } as const

@@ -80,6 +80,39 @@ export function getKnowledgeUploadMaxMessage(): string {
   return i18n.global.t('knowledge.messages.uploadMaxMessage', { label: KNOWLEDGE_UPLOAD_MAX_LABEL })
 }
 
+// KNOWLEDGE_ALLOWED_EXTENSIONS 是知识库允许上传的文件扩展名白名单（小写，不含点）。
+// RAGFlow 仅能解析文档 / 表格 / 演示文稿 / 图片等格式；可执行文件（如 exe）等二进制既无法解析又存在安全风险，
+// 因此在前端按白名单拦截，避免其进入无意义的上传会话。新增可解析类型时在此追加即可，展示文案与提示会自动同步。
+export const KNOWLEDGE_ALLOWED_EXTENSIONS = [
+  'pdf', 'doc', 'docx', 'txt', 'md', 'csv',
+  'xls', 'xlsx', 'ppt', 'pptx',
+  'jpg', 'jpeg', 'png', 'gif',
+] as const
+// KNOWLEDGE_ALLOWED_EXTENSIONS_LABEL 是白名单的人类可读展示，用于上传区说明与拒绝提示，随白名单自动同步。
+export const KNOWLEDGE_ALLOWED_EXTENSIONS_LABEL = KNOWLEDGE_ALLOWED_EXTENSIONS
+  .map(ext => ext.toUpperCase())
+  .join('、')
+// KNOWLEDGE_UPLOAD_ACCEPT 供原生 file input 的 accept 属性使用，引导系统文件选择器默认过滤；
+// accept 仅是提示、可被绕过（拖拽或手动选择「全部文件」），因此仍需 isKnowledgeUploadTypeAllowed 做兜底校验。
+export const KNOWLEDGE_UPLOAD_ACCEPT = KNOWLEDGE_ALLOWED_EXTENSIONS.map(ext => `.${ext}`).join(',')
+
+// knowledgeFileExtension 提取文件名末段扩展名（小写、不含点）；无扩展名或以点结尾时返回空串。
+function knowledgeFileExtension(fileName: string): string {
+  const dot = fileName.lastIndexOf('.')
+  if (dot < 0 || dot === fileName.length - 1) return ''
+  return fileName.slice(dot + 1).toLowerCase()
+}
+
+// isKnowledgeUploadTypeAllowed 依据扩展名白名单判断文件类型是否可上传；无扩展名或不在白名单一律拒绝。
+export function isKnowledgeUploadTypeAllowed(file: Pick<File, 'name'>): boolean {
+  return (KNOWLEDGE_ALLOWED_EXTENSIONS as readonly string[]).includes(knowledgeFileExtension(file.name))
+}
+
+// getKnowledgeUploadTypeRejectedMessage 返回单文件类型不支持的用户可见提示（经 i18n 翻译）。
+export function getKnowledgeUploadTypeRejectedMessage(): string {
+  return i18n.global.t('knowledge.messages.uploadTypeRejected', { label: KNOWLEDGE_ALLOWED_EXTENSIONS_LABEL })
+}
+
 // KnowledgeListQueryInput 是列表页传入分页、文件名搜索和状态过滤的原始参数。
 export interface KnowledgeListQueryInput {
   page?: number | null
