@@ -151,6 +151,9 @@ type OrganizationInput struct {
 	MaxInstanceCount *int32
 	// KnowledgeQuotaBytes 是企业知识库累计容量上限，单位字节；nil 表示创建时默认 1GB，更新时保留旧值。
 	KnowledgeQuotaBytes *int64
+	// DefaultAppKnowledgeQuotaBytes 是该企业新建实例的默认知识库容量上限，单位字节；
+	// nil 表示创建时默认 1GB、更新时保留旧值（前端负责必填校验）。
+	DefaultAppKnowledgeQuotaBytes *int64
 	// AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。
 	AssistantVersionIDs []string
 	// AssistantVersionIDsSet 标记更新请求是否显式传入了 allowlist。
@@ -187,6 +190,8 @@ type OrganizationResult struct {
 	MaxInstanceCount *int32 `json:"max_instance_count,omitempty"`
 	// KnowledgeQuotaBytes 是企业知识库累计容量上限，单位字节。
 	KnowledgeQuotaBytes int64 `json:"knowledge_quota_bytes"`
+	// DefaultAppKnowledgeQuotaBytes 是该企业新建实例的默认知识库容量上限，单位字节。
+	DefaultAppKnowledgeQuotaBytes int64 `json:"default_app_knowledge_quota_bytes"`
 	// AdminUsername 是企业首个可用管理员账号名，用于平台管理员复制登录信息。
 	AdminUsername string `json:"admin_username,omitempty"`
 	// AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。
@@ -235,6 +240,11 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 	if err != nil {
 		return OrganizationResult{}, err
 	}
+	// 个人知识库默认配额：与企业知识库同样走 normalize（nil→1GB、>0 校验），前端保证必填。
+	defaultAppKnowledgeQuotaBytes, err := normalizeKnowledgeQuotaBytes(input.DefaultAppKnowledgeQuotaBytes)
+	if err != nil {
+		return OrganizationResult{}, err
+	}
 
 	// CreateOrganization 为 :exec；预先生成 ID，写入后通过 GetOrganization 读回。
 	orgID := newUUID()
@@ -247,9 +257,10 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 		ContactPhone:           nullStr(input.ContactPhone),
 		Remark:                 nullStr(input.Remark),
 		CreditWarningThreshold: nullIntFromInt32Ptr(input.CreditWarningThreshold),
-		MaxInstanceCount:       nullIntFromInt32Ptr(input.MaxInstanceCount),
-		KnowledgeQuotaBytes:    knowledgeQuotaBytes,
-		AssistantVersionIds:    versionIDsJSON,
+		MaxInstanceCount:              nullIntFromInt32Ptr(input.MaxInstanceCount),
+		KnowledgeQuotaBytes:           knowledgeQuotaBytes,
+		DefaultAppKnowledgeQuotaBytes: defaultAppKnowledgeQuotaBytes,
+		AssistantVersionIds:           versionIDsJSON,
 	}); err != nil {
 		if isMySQLUniqueViolation(err) {
 			return OrganizationResult{}, fmt.Errorf("%w: 企业名称或企业标识已存在", ErrConflict)
@@ -552,6 +563,14 @@ func (s *OrganizationService) UpdateOrganization(ctx context.Context, principal 
 		}
 		knowledgeQuotaBytes = *input.KnowledgeQuotaBytes
 	}
+	// 个人知识库默认配额：未提交时保留数据库原值；显式提交时只校验正数。
+	defaultAppKnowledgeQuotaBytes := current.DefaultAppKnowledgeQuotaBytes
+	if input.DefaultAppKnowledgeQuotaBytes != nil {
+		if err := validateKnowledgeQuotaBytes(*input.DefaultAppKnowledgeQuotaBytes); err != nil {
+			return OrganizationResult{}, err
+		}
+		defaultAppKnowledgeQuotaBytes = *input.DefaultAppKnowledgeQuotaBytes
+	}
 	// 处理助手版本 allowlist：显式传入时校验并更新，否则保留原有值。
 	var versionIDsJSON []byte
 	if input.AssistantVersionIDsSet {
@@ -578,9 +597,10 @@ func (s *OrganizationService) UpdateOrganization(ctx context.Context, principal 
 		ContactPhone:           nullStr(input.ContactPhone),
 		Remark:                 nullStr(input.Remark),
 		CreditWarningThreshold: nullIntFromInt32Ptr(input.CreditWarningThreshold),
-		MaxInstanceCount:       nullIntFromInt32Ptr(input.MaxInstanceCount),
-		KnowledgeQuotaBytes:    knowledgeQuotaBytes,
-		AssistantVersionIds:    versionIDsJSON,
+		MaxInstanceCount:              nullIntFromInt32Ptr(input.MaxInstanceCount),
+		KnowledgeQuotaBytes:           knowledgeQuotaBytes,
+		DefaultAppKnowledgeQuotaBytes: defaultAppKnowledgeQuotaBytes,
+		AssistantVersionIds:           versionIDsJSON,
 	}); err != nil {
 		return OrganizationResult{}, fmt.Errorf("更新企业失败: %w", err)
 	}
@@ -703,8 +723,9 @@ func toOrganizationResult(org sqlc.Organization) OrganizationResult {
 		NewAPIUserID:           strOrEmpty(org.NewapiUserID),
 		CreditWarningThreshold: int32PtrFromNullInt(org.CreditWarningThreshold),
 		MaxInstanceCount:       int32PtrFromNullInt(org.MaxInstanceCount),
-		KnowledgeQuotaBytes:    org.KnowledgeQuotaBytes,
-		AssistantVersionIDs:    versionIDs,
+		KnowledgeQuotaBytes:           org.KnowledgeQuotaBytes,
+		DefaultAppKnowledgeQuotaBytes: org.DefaultAppKnowledgeQuotaBytes,
+		AssistantVersionIDs:           versionIDs,
 	}
 }
 

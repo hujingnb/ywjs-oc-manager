@@ -432,14 +432,15 @@ func (s *organizationStoreStub) CreateOrganization(_ context.Context, arg sqlc.C
 	}
 	// 使用 service 传入的 arg.ID（由 service 调用 newUUID() 生成），供后续 GetOrganization(orgID) 读回。
 	created := sqlc.Organization{
-		ID:                     arg.ID,
-		Name:                   arg.Name,
-		Code:                   arg.Code,
-		Status:                 arg.Status,
-		ContactName:            arg.ContactName,
-		CreditWarningThreshold: arg.CreditWarningThreshold,
-		KnowledgeQuotaBytes:    arg.KnowledgeQuotaBytes,
-		AssistantVersionIds:    arg.AssistantVersionIds,
+		ID:                            arg.ID,
+		Name:                          arg.Name,
+		Code:                          arg.Code,
+		Status:                        arg.Status,
+		ContactName:                   arg.ContactName,
+		CreditWarningThreshold:        arg.CreditWarningThreshold,
+		KnowledgeQuotaBytes:           arg.KnowledgeQuotaBytes,
+		DefaultAppKnowledgeQuotaBytes: arg.DefaultAppKnowledgeQuotaBytes,
+		AssistantVersionIds:           arg.AssistantVersionIds,
 	}
 	s.org = created
 	return nil
@@ -490,6 +491,7 @@ func (s *organizationStoreStub) UpdateOrganizationProfile(_ context.Context, arg
 	s.org.Name = arg.Name
 	s.org.ContactName = arg.ContactName
 	s.org.KnowledgeQuotaBytes = arg.KnowledgeQuotaBytes
+	s.org.DefaultAppKnowledgeQuotaBytes = arg.DefaultAppKnowledgeQuotaBytes
 	s.org.AssistantVersionIds = arg.AssistantVersionIds
 	return nil
 }
@@ -741,4 +743,84 @@ func TestUpdateOrganization_PersistsMaxInstanceCount(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, store.updatedProfile.MaxInstanceCount.Valid)
 	assert.Equal(t, int64(3), store.updatedProfile.MaxInstanceCount.Int64)
+}
+
+// TestCreateOrganization_PersistsDefaultAppKnowledgeQuota 验证创建企业时"个人知识库默认配额"写入 CreateOrganizationParams。
+// 覆盖正常路径：平台管理员显式传入正整数默认配额，service 应原样写库。
+func TestCreateOrganization_PersistsDefaultAppKnowledgeQuota(t *testing.T) {
+	store := &organizationStoreStub{}
+	prov := &fakeProvisioner{user: newapi.User{ID: 42}, accessToken: "access-tok-xyz"}
+	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
+	svc.SetVersionValidator(fakeVersionValidator{known: map[string]bool{}})
+	svc.hashPassword = fakeHash
+	quota := int64(5 * 1024 * 1024 * 1024) // 5GB，区别于 1GB 默认以确认确实来自入参
+
+	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
+		Name:                          "测试组织",
+		Code:                          "test-org",
+		DefaultAppKnowledgeQuotaBytes: &quota,
+		AdminUsername:                 "org-admin",
+		AdminDisplayName:              "企业管理员",
+		AdminPassword:                 "secret-password",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, quota, store.created.DefaultAppKnowledgeQuotaBytes)
+}
+
+// TestCreateOrganization_DefaultsAppKnowledgeQuota 验证创建企业未传"个人知识库默认配额"时回落 1GB 默认。
+// 覆盖边界：nil 入参走 normalizeKnowledgeQuotaBytes，写入 KnowledgeQuotaDefaultBytes。
+func TestCreateOrganization_DefaultsAppKnowledgeQuota(t *testing.T) {
+	store := &organizationStoreStub{}
+	prov := &fakeProvisioner{user: newapi.User{ID: 42}, accessToken: "access-tok-xyz"}
+	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
+	svc.SetVersionValidator(fakeVersionValidator{known: map[string]bool{}})
+	svc.hashPassword = fakeHash
+
+	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
+		Name:             "测试组织",
+		Code:             "test-org",
+		AdminUsername:    "org-admin",
+		AdminDisplayName: "企业管理员",
+		AdminPassword:    "secret-password",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, KnowledgeQuotaDefaultBytes, store.created.DefaultAppKnowledgeQuotaBytes)
+}
+
+// TestCreateOrganization_RejectsNonPositiveDefaultAppKnowledgeQuota 验证显式传入非正数默认配额时返回参数错误。
+// 覆盖异常路径：0 值经 normalizeKnowledgeQuotaBytes 校验应被拒绝。
+func TestCreateOrganization_RejectsNonPositiveDefaultAppKnowledgeQuota(t *testing.T) {
+	store := &organizationStoreStub{}
+	prov := &fakeProvisioner{user: newapi.User{ID: 42}, accessToken: "access-tok-xyz"}
+	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
+	svc.SetVersionValidator(fakeVersionValidator{known: map[string]bool{}})
+	svc.hashPassword = fakeHash
+	invalid := int64(0)
+
+	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
+		Name:                          "测试组织",
+		Code:                          "test-org",
+		DefaultAppKnowledgeQuotaBytes: &invalid,
+		AdminUsername:                 "org-admin",
+		AdminDisplayName:              "企业管理员",
+		AdminPassword:                 "secret-password",
+	})
+	require.ErrorIs(t, err, ErrMemberCreateInvalid)
+}
+
+// TestUpdateOrganization_PreservesDefaultAppKnowledgeQuotaWhenOmitted 验证编辑企业未传默认配额时保留原值。
+// 覆盖边界：nil 入参不覆盖数据库既有 default_app_knowledge_quota_bytes。
+func TestUpdateOrganization_PreservesDefaultAppKnowledgeQuotaWhenOmitted(t *testing.T) {
+	store := &organizationStoreStub{}
+	org := store.mustSeedOrganization(t, "test-org")
+	store.org.DefaultAppKnowledgeQuotaBytes = 7 * 1024 * 1024 * 1024
+	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
+	svc.SetVersionValidator(fakeVersionValidator{known: map[string]bool{}})
+
+	_, err := svc.UpdateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, org.ID, OrganizationInput{
+		Name:                   store.org.Name,
+		AssistantVersionIDsSet: false,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(7*1024*1024*1024), store.updatedProfile.DefaultAppKnowledgeQuotaBytes)
 }
