@@ -13172,6 +13172,8 @@ export interface components {
             contact_phone?: string;
             /** @description CreditWarningThreshold 是企业余额预警阈值；nil 表示不启用余额预警或保持预警关闭。 */
             credit_warning_threshold?: number;
+            /** @description DefaultAppKnowledgeQuotaBytes 是该企业新建实例的默认知识库容量上限，单位字节；nil 表示使用默认 1GB。 */
+            default_app_knowledge_quota_bytes?: number;
             /** @description KnowledgeQuotaBytes 是企业知识库累计容量上限，单位字节；nil 表示创建时使用默认值、更新时保留旧值。 */
             knowledge_quota_bytes?: number;
             /** @description MaxInstanceCount 是企业最多可创建的实例（应用）数；nil 表示不限制。 */
@@ -13299,6 +13301,8 @@ export interface components {
             contact_phone?: string;
             /** @description CreditWarningThreshold 是企业余额预警阈值；nil 表示清空或未设置预警阈值。 */
             credit_warning_threshold?: number;
+            /** @description DefaultAppKnowledgeQuotaBytes 是该企业新建实例的默认知识库容量上限，单位字节；nil 表示保留旧值。 */
+            default_app_knowledge_quota_bytes?: number;
             /** @description KnowledgeQuotaBytes 是企业知识库累计容量上限，单位字节；nil 表示创建时使用默认值、更新时保留旧值。 */
             knowledge_quota_bytes?: number;
             /** @description MaxInstanceCount 是企业最多可创建的实例（应用）数；nil 表示不限制。 */
@@ -14149,6 +14153,8 @@ export interface components {
             contact_phone?: string;
             /** @description CreditWarningThreshold 是企业余额预警阈值。 */
             credit_warning_threshold?: number;
+            /** @description DefaultAppKnowledgeQuotaBytes 是该企业新建实例的默认知识库容量上限，单位字节。 */
+            default_app_knowledge_quota_bytes?: number;
             /** @description ID 是 manager 企业 UUID。 */
             id?: string;
             /** @description KnowledgeQuotaBytes 是企业知识库累计容量上限，单位字节。 */
