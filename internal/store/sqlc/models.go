@@ -283,6 +283,8 @@ type Organization struct {
 	DeletedAt           null.Time       `db:"deleted_at" json:"deleted_at"`
 	MaxInstanceCount    null.Int        `db:"max_instance_count" json:"max_instance_count"`
 	KnowledgeQuotaBytes int64           `db:"knowledge_quota_bytes" json:"knowledge_quota_bytes"`
+	// 该企业新建实例的默认个人知识库空间上限（字节），默认 1GB
+	DefaultAppKnowledgeQuotaBytes int64 `db:"default_app_knowledge_quota_bytes" json:"default_app_knowledge_quota_bytes"`
 }
 
 // 平台库 skill，平台管理员维护，多版本共存

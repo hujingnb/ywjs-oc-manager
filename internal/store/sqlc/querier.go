@@ -52,6 +52,7 @@ type Querier interface {
 	CountRAGFlowIndustryDocuments(ctx context.Context, arg CountRAGFlowIndustryDocumentsParams) (int64, error)
 	// k8s 模型下 app 对应 Deployment，pod 落点由调度器决定，不再写 runtime_node_id。
 	// locale 在创建时快照 owner 的用户语言偏好（NULL=平台回退默认）。
+	// knowledge_quota_bytes 由 service 传入所属企业的默认配额，替代 DB 默认 1GB。
 	CreateApp(ctx context.Context, arg CreateAppParams) error
 	CreateAppSkill(ctx context.Context, arg CreateAppSkillParams) error
 	CreateAssistantVersion(ctx context.Context, arg CreateAssistantVersionParams) error

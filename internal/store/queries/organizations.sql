@@ -10,10 +10,12 @@ INSERT INTO organizations (
     credit_warning_threshold,
     max_instance_count,
     knowledge_quota_bytes,
+    default_app_knowledge_quota_bytes,
     assistant_version_ids
 ) VALUES (
     ?, ?, ?, ?, ?, ?, ?, ?, ?,
     COALESCE(NULLIF(CAST(sqlc.arg(knowledge_quota_bytes) AS SIGNED), 0), 1073741824),
+    COALESCE(NULLIF(CAST(sqlc.arg(default_app_knowledge_quota_bytes) AS SIGNED), 0), 1073741824),
     ?
 );
 
@@ -58,6 +60,7 @@ SET
     credit_warning_threshold = ?,
     max_instance_count = ?,
     knowledge_quota_bytes = COALESCE(NULLIF(CAST(sqlc.arg(knowledge_quota_bytes) AS SIGNED), 0), knowledge_quota_bytes),
+    default_app_knowledge_quota_bytes = COALESCE(NULLIF(CAST(sqlc.arg(default_app_knowledge_quota_bytes) AS SIGNED), 0), default_app_knowledge_quota_bytes),
     assistant_version_ids = ?,
     updated_at = now()
 WHERE id = ?;

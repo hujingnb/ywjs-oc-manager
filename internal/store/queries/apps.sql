@@ -1,6 +1,7 @@
 -- name: CreateApp :exec
 -- k8s 模型下 app 对应 Deployment，pod 落点由调度器决定，不再写 runtime_node_id。
 -- locale 在创建时快照 owner 的用户语言偏好（NULL=平台回退默认）。
+-- knowledge_quota_bytes 由 service 传入所属企业的默认配额，替代 DB 默认 1GB。
 INSERT INTO apps (
     id,
     org_id,
@@ -10,9 +11,10 @@ INSERT INTO apps (
     status,
     api_key_status,
     version_id,
-    locale
+    locale,
+    knowledge_quota_bytes
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 );
 
 -- name: GetApp :one
