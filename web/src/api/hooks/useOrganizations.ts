@@ -123,7 +123,7 @@ export interface OrganizationUpdatePayload {
   max_instance_count?: number | null
   // 企业知识库累计容量上限，单位字节；未传时后端创建默认 1GB、更新保留旧值。
   knowledge_quota_bytes?: number
-  // 该企业新建实例的默认知识库容量上限，单位字节；未传时后端回落 1GB。
+  // 该企业新建实例的默认知识库容量上限，单位字节；更新未传时后端保留旧值。
   default_app_knowledge_quota_bytes?: number
   // 组织可用的助手版本 id 列表。
   assistant_version_ids: string[]
