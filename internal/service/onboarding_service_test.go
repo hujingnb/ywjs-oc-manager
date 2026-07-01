@@ -297,10 +297,11 @@ type onboardingStub struct {
 	committedJobs        []sqlc.CreateJobParams // 已提交的 job，供测试断言 payload 内容。
 	appErr               error
 	jobErr               error
-	lastAppOwnerID       string
-	lastAppVersionID     string      // 记录最近一次 CreateApp 使用的 VersionID，供断言校验。
-	lastAppLocale        null.String // 记录最近一次 CreateApp 使用的 Locale，供断言校验。
-	lastCreateUserParams sqlc.CreateUserParams // 记录最近一次 CreateUser 的完整入参，供断言校验。
+	lastAppOwnerID             string
+	lastAppVersionID           string      // 记录最近一次 CreateApp 使用的 VersionID，供断言校验。
+	lastAppLocale              null.String // 记录最近一次 CreateApp 使用的 Locale，供断言校验。
+	lastAppKnowledgeQuotaBytes int64       // 记录最近一次 CreateApp 使用的知识库配额，供断言校验继承企业默认值。
+	lastCreateUserParams       sqlc.CreateUserParams // 记录最近一次 CreateUser 的完整入参，供断言校验。
 }
 
 type counters struct{ users, apps, bindings, audits, jobs int }
@@ -397,6 +398,8 @@ func (s *onboardingStub) CreateApp(_ context.Context, arg sqlc.CreateAppParams) 
 	s.lastAppVersionID = arg.VersionID.String
 	// Locale 快照：记录创建时传入的 locale，供断言校验。
 	s.lastAppLocale = arg.Locale
+	// 记录传入的知识库配额，验证新实例继承所属企业的默认配额。
+	s.lastAppKnowledgeQuotaBytes = arg.KnowledgeQuotaBytes
 	return nil
 }
 
@@ -697,6 +700,46 @@ func TestOnboardMemberInheritsCreatorLocale(t *testing.T) {
 	require.True(t, store.lastAppLocale.Valid, "apps.locale 应被写入（非 NULL）")
 	assert.Equal(t, "zh", store.lastAppLocale.String,
 		"新实例 apps.locale 应等于创建者 locale")
+}
+
+// TestOnboardMember_InheritsOrgDefaultAppKnowledgeQuota 验证新成员实例继承所属企业的个人知识库默认配额。
+// 覆盖正常路径：企业默认配额非 1GB 时，新建实例的 knowledge_quota_bytes 应等于企业设置值而非 DB 默认。
+func TestOnboardMember_InheritsOrgDefaultAppKnowledgeQuota(t *testing.T) {
+	store := newOnboardingStub(t)
+	// 设置企业默认知识库配额为 8GB，验证新建实例是否继承该值。
+	store.org.DefaultAppKnowledgeQuotaBytes = 8 * 1024 * 1024 * 1024
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash)
+
+	_, err := svc.OnboardMember(context.Background(), orgOnboardingAdmin(), testOrgID, OnboardMemberInput{
+		Username: "alice", DisplayName: "Alice", Password: "pwd", AppName: "alice-bot",
+		VersionID: testVersionID,
+	})
+
+	require.NoError(t, err)
+	require.True(t, tx.committed)
+	// 新实例 knowledge_quota_bytes 应等于企业 default_app_knowledge_quota_bytes，而非 DB 默认 1GB。
+	assert.Equal(t, int64(8*1024*1024*1024), store.lastAppKnowledgeQuotaBytes)
+}
+
+// TestCreateAppForMember_InheritsOrgDefaultAppKnowledgeQuota 验证为已有成员补建实例时同样继承企业默认配额。
+// 覆盖正常路径：CreateAppForMember 路径下 knowledge_quota_bytes 亦来自企业设置值。
+func TestCreateAppForMember_InheritsOrgDefaultAppKnowledgeQuota(t *testing.T) {
+	store := newOnboardingStub(t)
+	// 设置企业默认知识库配额为 8GB，验证补建实例是否继承该值。
+	store.org.DefaultAppKnowledgeQuotaBytes = 8 * 1024 * 1024 * 1024
+	tx := &txRunnerStub{store: store}
+	svc := NewMemberOnboardingService(tx, fakeHash)
+
+	_, err := svc.CreateAppForMember(context.Background(), platformAdmin(), testOrgID, store.user.ID, CreateAppForMemberInput{
+		AppName:   "alice-new-bot",
+		VersionID: testVersionID,
+	})
+
+	require.NoError(t, err)
+	require.True(t, tx.committed)
+	// 补建实例 knowledge_quota_bytes 应等于企业 default_app_knowledge_quota_bytes，而非 DB 默认 1GB。
+	assert.Equal(t, int64(8*1024*1024*1024), store.lastAppKnowledgeQuotaBytes)
 }
 
 // TestOnboardMemberFallsBackToDefaultLocale 验证 OnboardMember 时，

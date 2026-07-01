@@ -182,6 +182,8 @@ func (s *MemberOnboardingService) OnboardMember(ctx context.Context, principal a
 			ApiKeyStatus: domain.APIKeyStatusPending,
 			VersionID:    null.StringFrom(input.VersionID),
 			Locale:       null.StringFrom(memberLocale),
+			// 新实例知识库配额继承所属企业的默认配额（default_app_knowledge_quota_bytes）。
+			KnowledgeQuotaBytes: org.DefaultAppKnowledgeQuotaBytes,
 		}); err != nil {
 			return fmt.Errorf("创建应用失败: %w", err)
 		}
@@ -368,6 +370,8 @@ func (s *MemberOnboardingService) CreateAppForMember(ctx context.Context, princi
 			ApiKeyStatus: domain.APIKeyStatusPending,
 			VersionID:    null.StringFrom(input.VersionID),
 			Locale:       null.StringFrom(appLocale),
+			// 新实例知识库配额继承所属企业的默认配额（default_app_knowledge_quota_bytes）。
+			KnowledgeQuotaBytes: org.DefaultAppKnowledgeQuotaBytes,
 		}); err != nil {
 			if isAppsOwnerActiveUniqueViolation(err) {
 				return fmt.Errorf("%w: 成员已有未删除实例", ErrMemberCreateInvalid)
