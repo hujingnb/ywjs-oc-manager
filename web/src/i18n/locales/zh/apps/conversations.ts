@@ -16,4 +16,22 @@ export default {
   empty: '暂无会话',
   // 附件按钮文案
   attach: '文件',
+  // 发送按钮（任务进行中，点击入队而非立即发送）
+  queueSend: '排队发送',
+  // 待发送队列面板标题
+  queueTitle: '待发送队列',
+  // 任务进行中的状态提示（队列面板内）
+  generating: '回复生成中…',
+  // 队列项编辑操作
+  queueEdit: '编辑',
+  // 队列项编辑态保存
+  queueSave: '保存',
+  // 队列项编辑态取消
+  queueCancel: '取消',
+  // 队列项删除操作
+  queueRemove: '删除',
+  // 失败队列项重试操作
+  queueRetry: '重试',
+  // 失败队列项状态标记
+  queueFailed: '发送失败',
 } as const
