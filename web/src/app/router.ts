@@ -3,7 +3,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import { getStoredAccessToken } from '@/api/client'
-import AuthLayout from '@/layouts/AuthLayout.vue'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import AppAuditTab from '@/pages/apps/AppAuditTab.vue'
 import AppChannelsTab from '@/pages/apps/AppChannelsTab.vue'
@@ -19,7 +18,7 @@ import AppEmptyPage from '@/pages/apps/AppEmptyPage.vue'
 import AppsPage from '@/pages/apps/AppsPage.vue'
 import AuditLogsPage from '@/pages/audit/AuditLogsPage.vue'
 import RoleAwareHome from '@/pages/dashboard/RoleAwareHome.vue'
-import LoginPage from '@/pages/login/LoginPage.vue'
+import LoginHost from '@/pages/login/LoginHost.vue'
 import CreateMemberPage from '@/pages/org/CreateMemberPage.vue'
 import MembersPage from '@/pages/org/MembersPage.vue'
 import PublishedSitesPage from '@/pages/org/PublishedSitesPage.vue'
@@ -50,9 +49,8 @@ export const router = createRouter({
   routes: [
     {
       path: '/login',
-      component: AuthLayout,
+      component: LoginHost,
       meta: { public: true },
-      children: [{ path: '', component: LoginPage }],
     },
     {
       path: '/',
