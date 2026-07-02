@@ -49,6 +49,8 @@ type App struct {
 	RuntimePhase string `db:"runtime_phase" json:"runtime_phase"`
 	// 最近一次 bootstrap 是否注入 web-publish 发布能力：1=已注入，0=未注入（与企业开通态比对判定是否需重启）
 	WebPublishApplied bool `db:"web_publish_applied" json:"web_publish_applied"`
+	// 最近一次 bootstrap 写入 input 的平台层 prompt 文本 sha256（hex）：与当前常量 hash 比对判定是否需重启生效；空=存量/未 bootstrap，视为需重启
+	AppliedPlatformPromptHash string `db:"applied_platform_prompt_hash" json:"applied_platform_prompt_hash"`
 }
 
 // 实例级 skill 安装清单，自包含快照，运行时唯一来源

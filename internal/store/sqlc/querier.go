@@ -274,6 +274,10 @@ type Querier interface {
 	RetryJob(ctx context.Context, arg RetryJobParams) error
 	RevokeRefreshToken(ctx context.Context, id string) error
 	RevokeRefreshTokensByUser(ctx context.Context, userID string) error
+	// bootstrap 渲染时记录本次写入 input 的平台层 prompt sha256，用于「平台提示词已更新需重启」检测。
+	// 不更新 updated_at：bootstrap 每次 pod 启动都会调用（与 SetAppWebPublishApplied 同因），
+	// 避免无意义地刷新 updated_at。
+	SetAppAppliedPlatformPromptHash(ctx context.Context, arg SetAppAppliedPlatformPromptHashParams) error
 	// 初始化/重启成功后记录已应用的版本修订与镜像 ref，用于 version_synced 检测。
 	SetAppAppliedVersion(ctx context.Context, arg SetAppAppliedVersionParams) error
 	// worker app_health_check handler 写最近一次健康检查结果；用于自动重启窗口计数。

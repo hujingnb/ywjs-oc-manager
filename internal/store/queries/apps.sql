@@ -206,6 +206,14 @@ UPDATE apps
 SET web_publish_applied = ?
 WHERE id = ?;
 
+-- name: SetAppAppliedPlatformPromptHash :exec
+-- bootstrap 渲染时记录本次写入 input 的平台层 prompt sha256，用于「平台提示词已更新需重启」检测。
+-- 不更新 updated_at：bootstrap 每次 pod 启动都会调用（与 SetAppWebPublishApplied 同因），
+-- 避免无意义地刷新 updated_at。
+UPDATE apps
+SET applied_platform_prompt_hash = ?
+WHERE id = ?;
+
 -- name: SetAppVersion :exec
 -- 切换实例绑定的助手版本，并把 applied_version_revision / applied_image_ref 清零。
 -- 不同版本各自维护独立的 revision 计数，若切换后保留旧 applied_*，当新旧版本
