@@ -24,7 +24,7 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     proxy: {
-      '/api': 'http://manager-api:8080',
+      '/api': { target: 'http://ocm.localhost', changeOrigin: true },
     },
   },
   // vitest 与 playwright 共存：playwright 用 .spec.ts 文件名也会被 vitest 默认匹配，
