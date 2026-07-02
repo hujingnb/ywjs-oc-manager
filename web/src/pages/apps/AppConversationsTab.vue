@@ -229,7 +229,7 @@ import { useI18n } from 'vue-i18n'
 import { NButton, NInput, NModal, NSpace, NTag, useMessage } from 'naive-ui'
 import * as api from '@/api/conversations'
 import type { ConversationSession, ConversationPart } from '@/api/conversations'
-import { isDialogueMessage } from '@/domain/conversation'
+import { isDialogueMessage, deriveSessionTitle } from '@/domain/conversation'
 import {
   nextPending,
   removeById,
@@ -252,6 +252,9 @@ const sessions = ref<api.ConversationSession[]>([])
 const messages = ref<api.ConversationMessage[]>([])
 // currentId 是当前选中的会话 id；空字符串表示未选中。
 const currentId = ref('')
+// autoTitleAttempted 记录本页内已尝试过自动命名的会话 id，避免每次打开会话重复 PATCH；
+// 失败（如只读角色无重命名权限被拒 403）也计入，防止反复请求。纯内存、不持久化。
+const autoTitleAttempted = new Set<string>()
 // draft 是输入框当前文本。
 const draft = ref('')
 // sending 为 true 时表示流式发送进行中，禁用输入和发送按钮。
@@ -364,8 +367,30 @@ async function selectSession(sid: string) {
     const all = await api.listMessages(props.appId, sid)
     messages.value = all.filter(isDialogueMessage)
     await scrollToBottom()
+    // 消息就绪后尝试用首句自动命名空标题会话（新会话发完首句、旧会话点开时均在此收敛）。
+    await maybeAutoTitle(sid)
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
+  }
+}
+
+// maybeAutoTitle 在会话消息加载完成后，尝试用「用户发起的第一句话」自动补全空标题：
+// 仅当该会话 title 为空、本页尚未尝试过、且能从当前消息派生出标题时才触发；
+// 命中即调用已有的重命名接口回填 title，并就地更新左栏会话对象（响应式，无需整表刷新）。
+// 自动命名属锦上添花：无论成功与否都先记入 autoTitleAttempted 防重复；失败（如只读角色
+// 无重命名权限被拒 403）一律静默吞掉，不弹错误、不影响查看会话。
+async function maybeAutoTitle(sid: string) {
+  if (autoTitleAttempted.has(sid)) return
+  const s = sessions.value.find((x) => x.id === sid)
+  if (!s || s.title) return
+  const title = deriveSessionTitle(messages.value)
+  if (!title) return
+  autoTitleAttempted.add(sid)
+  try {
+    await api.renameConversation(props.appId, sid, title)
+    s.title = title
+  } catch {
+    // 静默：自动命名失败不影响查看会话（如无重命名权限）。
   }
 }
 
