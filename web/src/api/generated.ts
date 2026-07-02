@@ -13798,6 +13798,11 @@ export interface components {
             org_id?: string;
             owner_user_id?: string;
             /**
+             * @description PlatformPromptPendingRestart 标记「平台层身份 prompt 常量已更新，但本实例上次 bootstrap
+             *     写入的是旧文本」——需重启重渲染 SOUL.md 平台层才能生效。
+             */
+            platform_prompt_pending_restart?: boolean;
+            /**
              * @description ProgressCurrent 当前 status 阶段的已完成量,单位由 status 决定(字节 / 秒);
              *     0 或缺省表示未知 / 不显示进度条。
              */

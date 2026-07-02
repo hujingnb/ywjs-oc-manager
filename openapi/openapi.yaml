@@ -1303,6 +1303,11 @@ components:
           type: string
         owner_user_id:
           type: string
+        platform_prompt_pending_restart:
+          description: |-
+            PlatformPromptPendingRestart 标记「平台层身份 prompt 常量已更新，但本实例上次 bootstrap
+            写入的是旧文本」——需重启重渲染 SOUL.md 平台层才能生效。
+          type: boolean
         progress_current:
           description: |-
             ProgressCurrent 当前 status 阶段的已完成量,单位由 status 决定(字节 / 秒);
