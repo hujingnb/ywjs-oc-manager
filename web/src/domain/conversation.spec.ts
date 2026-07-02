@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { hasRenderableContent, isDialogueMessage, parseFileMarkers } from './conversation'
+import { hasRenderableContent, isDialogueMessage, parseFileMarkers, deriveSessionTitle } from './conversation'
 import type { ConversationMessage } from '@/api/conversations'
 
 describe('hasRenderableContent', () => {
@@ -94,5 +94,76 @@ describe('parseFileMarkers', () => {
     const r = parseFileMarkers('hi <oc-file:f2>')
     expect(r.files).toEqual([{ fileId: 'f2', filename: '' }])
     expect(r.clean).toBe('hi')
+  })
+})
+
+describe('deriveSessionTitle', () => {
+  // mk 构造一条消息，简化用例书写；默认 user 角色。
+  const mk = (m: Partial<ConversationMessage>): ConversationMessage =>
+    ({ role: 'user', content: '', ...m }) as ConversationMessage
+
+  it('取第一条 user 消息的纯文本作为标题', () => {
+    // 最常见形态：首条 user 文字直接作会话名。
+    expect(deriveSessionTitle([mk({ content: '查一下我的订单' })])).toBe('查一下我的订单')
+  })
+
+  it('折叠换行与连续空白为单个空格', () => {
+    // 首句含换行/多空格时归一化为单空格，避免标题里出现断行与大段空白。
+    expect(deriveSessionTitle([mk({ content: '第一行\n第二行   有空格' })])).toBe('第一行 第二行 有空格')
+  })
+
+  it('超过 20 字符时截断并补省略号', () => {
+    // 21 字符输入应截到前 20 字符并追加 …（省略号不计入 20）。
+    const long = '一二三四五六七八九十一二三四五六七八九十甲' // 21 个字符
+    expect(deriveSessionTitle([mk({ content: long })])).toBe('一二三四五六七八九十一二三四五六七八九十…')
+  })
+
+  it('恰好 20 字符不加省略号', () => {
+    // 边界：长度等于上限时原样返回，不截断、不加省略号。
+    const exact = '一二三四五六七八九十一二三四五六七八九十' // 20 个字符
+    expect(deriveSessionTitle([mk({ content: exact })])).toBe(exact)
+  })
+
+  it('content 为数组时取第一个非空 text part', () => {
+    // 多模态消息优先用文字 part 作标题。
+    const parts = [{ type: 'text', text: '来自数组的标题' }]
+    expect(deriveSessionTitle([mk({ content: parts })])).toBe('来自数组的标题')
+  })
+
+  it('纯附件数组取第一个 input_file 的文件名', () => {
+    // 首句只发了文件、没有文字时，用文件名当会话名。
+    const parts = [{ type: 'input_file', file_id: 'f1', filename: '季度报告.pdf' }]
+    expect(deriveSessionTitle([mk({ content: parts })])).toBe('季度报告.pdf')
+  })
+
+  it('字符串含 oc-file 标记与正文时剥标记后取正文', () => {
+    // 服务端回读的带文件消息，标记需剥除，只保留用户正文。
+    const enc = encodeURIComponent('发票.pdf')
+    const content = `<oc-file:f1:${enc}>\n帮我看看这个文件`
+    expect(deriveSessionTitle([mk({ content })])).toBe('帮我看看这个文件')
+  })
+
+  it('字符串仅含 oc-file 标记（纯附件回读）时取文件名', () => {
+    // 纯附件消息回读后只剩标记，正文为空，退回用解码后的文件名。
+    const enc = encodeURIComponent('发票.pdf')
+    expect(deriveSessionTitle([mk({ content: `<oc-file:f1:${enc}>` })])).toBe('发票.pdf')
+  })
+
+  it('跳过引擎开场白 assistant，取第一条 user 消息', () => {
+    // 首条是引擎自动问候（assistant），标题应取用户真正发起的第一句。
+    const msgs = [mk({ role: 'assistant', content: '您好，有什么可以帮您？' }), mk({ content: '我要退货' })]
+    expect(deriveSessionTitle(msgs)).toBe('我要退货')
+  })
+
+  it('没有 user 消息时返回 null', () => {
+    // 只有 assistant / 无对话时无法派生标题。
+    expect(deriveSessionTitle([mk({ role: 'assistant', content: '在的' })])).toBeNull()
+    expect(deriveSessionTitle([])).toBeNull()
+  })
+
+  it('首条 user 内容为空或全空白时返回 null', () => {
+    // 空内容不派生标题，调用方保持 id 兜底显示。
+    expect(deriveSessionTitle([mk({ content: '   \n\t ' })])).toBeNull()
+    expect(deriveSessionTitle([mk({ content: [] })])).toBeNull()
   })
 })

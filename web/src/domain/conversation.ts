@@ -87,3 +87,53 @@ export function isDialogueMessage(m: ConversationMessage): boolean {
   if (m.role === 'tool') return false
   return hasRenderableContent(m.content)
 }
+
+// MAX_TITLE_LEN 自动派生标题的最大字符数，超过则截断并补省略号。
+const MAX_TITLE_LEN = 20
+
+// extractTitleText 从单条消息的 content 取用于标题的原始文本（未归一化），取不到返回 null：
+//   - 字符串：先 parseFileMarkers 剥离服务端回写的 <oc-file:...> 标记与英文注记，
+//     clean 正文非空则用 clean；否则退回第一个带文件名的附件 filename（纯附件回读场景）；
+//   - ConversationPart[] 数组：优先第一个非空 text part 的文本，否则第一个 input_file 的 filename。
+function extractTitleText(content: unknown): string | null {
+  if (typeof content === 'string') {
+    const { clean, files } = parseFileMarkers(content)
+    if (clean) return clean
+    const named = files.find((f) => f.filename)
+    return named ? named.filename : null
+  }
+  if (Array.isArray(content)) {
+    // 优先文字 part。
+    for (const p of content) {
+      if (!p || typeof p !== 'object') continue
+      const part = p as { type?: string; text?: unknown }
+      if (part.type === 'text' && typeof part.text === 'string' && part.text.trim() !== '') {
+        return part.text
+      }
+    }
+    // 无文字则退回第一个有文件名的附件。
+    for (const p of content) {
+      if (!p || typeof p !== 'object') continue
+      const part = p as { type?: string; filename?: unknown }
+      if (part.type === 'input_file' && typeof part.filename === 'string' && part.filename !== '') {
+        return part.filename
+      }
+    }
+    return null
+  }
+  return null
+}
+
+// deriveSessionTitle 从会话消息派生一个可读标题，供自动命名 title 为空的会话使用。
+// 取第一条 role==='user' 的消息（跳过引擎开场白 assistant，标题应是用户发起的第一句）；
+// 归一化（折叠空白 + trim）后超过 MAX_TITLE_LEN 则截断补 '…'；无法派生（无 user 消息、
+// 内容为空/全空白）时返回 null，由调用方保持原有 id 兜底显示、不触发命名。
+export function deriveSessionTitle(messages: ConversationMessage[]): string | null {
+  const first = messages.find((m) => m.role === 'user')
+  if (!first) return null
+  const raw = extractTitleText(first.content)
+  if (!raw) return null
+  const normalized = raw.replace(/\s+/g, ' ').trim()
+  if (!normalized) return null
+  return normalized.length > MAX_TITLE_LEN ? `${normalized.slice(0, MAX_TITLE_LEN)}…` : normalized
+}
