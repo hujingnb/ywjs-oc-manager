@@ -12,6 +12,7 @@ import (
 	"github.com/guregu/null/v5"
 
 	"oc-manager/internal/auth"
+	"oc-manager/internal/config"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/ocops"
 	"oc-manager/internal/store/sqlc"
@@ -93,12 +94,12 @@ func (s *AppService) SetOcOps(ops configOps, resolver OcOpsResolver) {
 // AppResult 是对外的应用视图。
 // spec-A2b：runtime_node_id / container_id / container_name 已从 schema 删除，本结构体亦不再携带。
 type AppResult struct {
-	ID           string `json:"id"`
-	OrgID        string `json:"org_id"`
-	OwnerUserID  string `json:"owner_user_id"`
-	Name         string `json:"name"`
-	Description  string `json:"description,omitempty"`
-	Status       string `json:"status"`
+	ID          string `json:"id"`
+	OrgID       string `json:"org_id"`
+	OwnerUserID string `json:"owner_user_id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Status      string `json:"status"`
 	// RuntimePhase 是运行时就绪维度(与 status 正交):ready/starting/restarting/unknown。
 	// 前端发起闸门 = status allowlist 且 runtime_phase==ready;非 ready 时按 phase 展示
 	// 正在启动 / 重启中 / 状态确认中。
@@ -133,6 +134,9 @@ type AppResult struct {
 	// 即实例在企业开通前就已运行，需重启重新 bootstrap 才能获得发布能力。
 	// true 时前端在概览页提示「能力已开通，需重启实例生效」并提供重启入口。
 	WebPublishPendingRestart bool `json:"web_publish_pending_restart"`
+	// PlatformPromptPendingRestart 标记「平台层身份 prompt 常量已更新，但本实例上次 bootstrap
+	// 写入的是旧文本」——需重启重渲染 SOUL.md 平台层才能生效。
+	PlatformPromptPendingRestart bool `json:"platform_prompt_pending_restart"`
 	// Locale 是 hermes bot 对终端用户说话的语言（en/zh）；
 	// 空表示使用平台默认语言（历史数据或未设置）。
 	Locale string `json:"locale,omitempty"`
@@ -158,6 +162,9 @@ func (s *AppService) Get(ctx context.Context, principal auth.Principal, appID st
 	// 上次 bootstrap 未注入发布能力（web_publish_applied=false）→ 需重启使能力生效。
 	// 企业未配置/未开通（含 sql.ErrNoRows）或查询出错时一律视为不需提示，避免误报。
 	result.WebPublishPendingRestart = s.computeWebPublishPendingRestart(ctx, row.App)
+	// platform_prompt_pending_restart：实例上次 bootstrap stamp 的平台 prompt hash 与当前常量
+	// hash 不一致（含存量实例 applied 为空）→ 需重启重渲染 SOUL.md 平台层。
+	result.PlatformPromptPendingRestart = computePlatformPromptPendingRestart(row.App)
 	// runtime_image_ref / sha256 含节点内部镜像信息，仅对平台管理员开放。
 	if principal.Role == domain.UserRolePlatformAdmin {
 		result.RuntimeImageRef = row.App.RuntimeImageRef
@@ -264,6 +271,13 @@ func (s *AppService) computeWebPublishPendingRestart(ctx context.Context, app sq
 		return false // 含 sql.ErrNoRows（企业未配置）：不提示
 	}
 	return cfg.Enabled && cfg.ProvisioningStatus == domain.ProvisioningReady
+}
+
+// computePlatformPromptPendingRestart 判断实例是否「平台 prompt 已更新需重启」：
+// 上次 bootstrap stamp 的 applied_platform_prompt_hash 与当前常量 hash 不等即为真
+// （空 hash 的存量实例天然不等，一律判为需重启）。
+func computePlatformPromptPendingRestart(app sqlc.App) bool {
+	return app.AppliedPlatformPromptHash != config.PlatformPromptHash()
 }
 
 // SwitchAppVersion 切换实例绑定的助手版本。

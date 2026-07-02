@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"oc-manager/internal/auth"
+	"oc-manager/internal/config"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/ocops"
 	"oc-manager/internal/store/sqlc"
@@ -24,6 +25,17 @@ const (
 	// testSwitchVersionID2 是第二个助手版本 id，不在组织 allowlist 内，用于拒绝场景测试。
 	testSwitchVersionID2 = "00000000-0000-0000-0000-000000003002"
 )
+
+// TestComputePlatformPromptPendingRestart 校验「平台 prompt 需重启」判定：
+// applied hash 等于当前常量 hash→不需；不等或为空（存量实例）→需重启。
+func TestComputePlatformPromptPendingRestart(t *testing.T) {
+	// 与当前常量 hash 一致：实例已是最新平台 prompt，不提示。
+	assert.False(t, computePlatformPromptPendingRestart(sqlc.App{AppliedPlatformPromptHash: config.PlatformPromptHash()}))
+	// hash 不同（旧文本）：需重启。
+	assert.True(t, computePlatformPromptPendingRestart(sqlc.App{AppliedPlatformPromptHash: "deadbeef"}))
+	// 空 hash（migration 默认，存量/未 bootstrap 实例）：需重启。
+	assert.True(t, computePlatformPromptPendingRestart(sqlc.App{AppliedPlatformPromptHash: ""}))
+}
 
 // TestGetAppExposeRuntimeImageOnlyToPlatformAdmin 验证 RuntimeImageRef 和 RuntimeImageSha256
 // 仅在平台管理员调用 Get 时返回；组织管理员调用时两字段应为空。
