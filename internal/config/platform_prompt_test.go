@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 
@@ -31,4 +33,14 @@ func TestDefaultSystemPromptTemplate_Invariants(t *testing.T) {
 	// 无花括号：RenderRuleText 会把 {var} 当占位符替换，误伤会导致渲染报错。
 	assert.NotContains(t, tpl, "{")
 	assert.NotContains(t, tpl, "}")
+}
+
+// TestPlatformPromptHash 校验平台 prompt hash 稳定、64 位 hex、且严格等于常量的 sha256——
+// 它是 bootstrap stamp 与概览 compare 的唯一期望来源，必须与常量绑定（改常量则 hash 变）。
+func TestPlatformPromptHash(t *testing.T) {
+	h := PlatformPromptHash()
+	require.Len(t, h, 64)                     // sha256 hex 定长 64
+	require.Equal(t, h, PlatformPromptHash()) // 幂等：同输入同输出
+	sum := sha256.Sum256([]byte(DefaultSystemPromptTemplate))
+	assert.Equal(t, hex.EncodeToString(sum[:]), h) // 严格等于常量的 sha256
 }

@@ -1,5 +1,10 @@
 package config
 
+import (
+	"crypto/sha256"
+	"encoding/hex"
+)
+
 // DefaultSystemPromptTemplate 是平台层 prompt（SOUL.md 的「## 平台层」段内容），
 // 现固化在代码中，不再由 manager.yaml 的 hermes.system_prompt_template 配置。
 //
@@ -41,3 +46,12 @@ const DefaultSystemPromptTemplate = `你是 AiGoWork 智能助手。
 
 这个目录通过宿主机映射,平台后台可以浏览 / 下载用户授权后的文件,放对位置才能交付。
 `
+
+// PlatformPromptHash 返回固化平台层 prompt 常量的 sha256（hex）。
+// 作为「当前期望平台 prompt」的单一 hash 来源：bootstrap 渲染时把它 stamp 进
+// apps.applied_platform_prompt_hash；概览按「applied hash != 本值」判定实例是否
+// 需重启重渲染 SOUL.md 平台层。平台 prompt 现为常量、无 per-app 变体，故全局一个值即可。
+func PlatformPromptHash() string {
+	sum := sha256.Sum256([]byte(DefaultSystemPromptTemplate))
+	return hex.EncodeToString(sum[:])
+}
