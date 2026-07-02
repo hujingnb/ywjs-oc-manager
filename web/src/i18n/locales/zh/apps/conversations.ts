@@ -34,4 +34,52 @@ export default {
   queueRetry: '重试',
   // 失败队列项状态标记
   queueFailed: '发送失败',
+  // ─── 语音输入 ───────────────────────────────────────────────────────────────
+  voice: {
+    // 麦克风按钮：空闲态提示(开始录音)
+    start: '语音输入',
+    // 录音中提示(再次点击结束)
+    recording: '录音中，点击结束',
+    // 识别处理中提示
+    transcribing: '识别中…',
+    // 下载模型进度(带百分比参数)
+    downloading: '下载模型 {percent}%',
+    // 模型选择弹层标题
+    pickTitle: '选择语音识别模型',
+    // 下载源分组标签
+    sourceLabel: '下载源',
+    // 下载源选项：国内 ModelScope(魔搭)
+    sourceDomestic: 'ModelScope（魔搭）',
+    // 下载源选项：官方站点
+    sourceOfficial: 'HuggingFace 官方',
+    // 模型档位分组标签
+    tierLabel: '模型档位',
+    // 档位说明：tiny
+    tierTiny: '轻量（最快，中文一般）',
+    // 档位说明：base
+    tierBase: '均衡（推荐）',
+    // 档位说明：small
+    tierSmall: '精准（最准，最大最慢）',
+    // 档位说明：turbo(large-v3-turbo)
+    tierTurbo: '旗舰（最准，需 WebGPU，约 760MB）',
+    // 弹层确认按钮
+    confirm: '下载并使用',
+    // 切换模型入口
+    switch: '切换模型',
+    // 档位已下载到本地缓存的标记
+    downloaded: '已下载',
+    // 错误文案
+    errors: {
+      // 麦克风权限被拒或非安全上下文
+      permissionDenied: '无法访问麦克风，请检查浏览器权限',
+      // 浏览器不支持所需能力
+      notSupported: '当前浏览器不支持语音输入',
+      // 未识别到有效语音
+      noSpeech: '未识别到语音',
+      // 模型下载失败
+      downloadFailed: '模型下载失败，可切换下载源后重试',
+      // 识别过程出错
+      transcribeFailed: '语音识别失败，请重试',
+    },
+  },
 } as const
