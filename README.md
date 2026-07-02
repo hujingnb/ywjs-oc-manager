@@ -255,6 +255,7 @@ docker compose run --rm manager-api seed-admin <username> <password> [display_na
 - [Hermes 容器运行机制](./docs/hermes-container.md) — 创建链路、挂载、注入、知识库
 - [知识库（RAG）](./docs/knowledge-base.md) — RAGFlow 主库、企业/实例双层、文档进出、检索、权限
 - [runtime-agent 工作原理](./docs/runtime-agent.md) — 注册、心跳、探测
+- [按域名白标登录页](./docs/login-branding.md) — hostname→登录变体机制、如何新增白标变体
 - [配置参考](./docs/configuration.md) — manager.yaml / agent.yaml / .env
 - [用户手册](./docs/user-manual.md) — 三类角色操作
 - [API 契约](./openapi/openapi.yaml) — OpenAPI 3.0
