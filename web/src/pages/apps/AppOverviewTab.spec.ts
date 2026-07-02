@@ -118,6 +118,8 @@ const appRef = ref({
   // version_id 默认绑定 version-001，供助手版本展示与切换测试使用。
   version_id: 'version-001',
   version_synced: true,
+  // platform_prompt_pending_restart 默认 false，避免其他用例读到 undefined 误触发横幅。
+  platform_prompt_pending_restart: false,
 })
 
 // makeStubs 返回共用 stub 对象，NModal / NSelect 简化渲染以方便断言。
@@ -316,6 +318,18 @@ describe('AppOverviewTab 助手版本', () => {
     const buttons = wrapper.findAll('button')
     const restartBtn = buttons.find(b => b.text() === '立即重启')
     expect(restartBtn).toBeUndefined()
+  })
+
+  // platform_prompt_pending_restart=true 时应渲染「平台提示词已更新」需重启横幅。
+  it('platform_prompt_pending_restart=true 时展示需重启横幅', () => {
+    const wrapper = mountWithApp({ platform_prompt_pending_restart: true })
+    expect(wrapper.text()).toContain('平台提示词已更新')
+  })
+
+  // 字段为 false/缺省时不应出现该横幅，避免误导。
+  it('platform_prompt_pending_restart 非 true 时不展示横幅', () => {
+    const wrapper = mountWithApp({ platform_prompt_pending_restart: false })
+    expect(wrapper.text()).not.toContain('平台提示词已更新')
   })
 
   // 点击「立即重启」按钮应该提交 restart 任务；断言 mutation 以 'restart' 参数调用。

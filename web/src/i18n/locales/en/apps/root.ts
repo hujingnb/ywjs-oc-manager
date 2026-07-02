@@ -77,6 +77,11 @@ export default {
       pendingTitle: 'Web publish enabled — restart the instance to take effect',
       pendingDesc: 'This instance was already running before web publish was enabled for the organization, so it does not have the publishing capability yet. After a restart, you can ask the assistant to publish a website in chat.',
     },
+    // Platform identity prompt updated but the instance still uses the old text; restart to re-render and apply
+    prompt: {
+      pendingTitle: 'Platform prompt updated — restart to apply',
+      pendingDesc: 'The platform updated the assistant identity prompt. This instance is still running the previous version; restart to apply it.',
+    },
     // Switch version modal
     switchVersionTitle: 'Switch assistant version',
     switchVersionPlaceholder: 'Select a version',

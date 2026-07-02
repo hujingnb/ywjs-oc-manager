@@ -77,6 +77,11 @@ export default {
       pendingTitle: 'Web 发布能力已开通，需重启实例生效',
       pendingDesc: '本实例在企业开通 Web 发布之前已运行，尚未具备发布能力。重启后即可在对话中让助手发布网站。',
     },
+    // 平台身份 prompt 已更新但实例仍在用旧文本，需重启重渲染后生效的提示
+    prompt: {
+      pendingTitle: '平台提示词已更新，需重启实例生效',
+      pendingDesc: '平台已更新助手的身份提示词，本实例仍在使用旧版本，重启后即可生效。',
+    },
     // 版本切换弹窗
     switchVersionTitle: '切换助手版本',
     switchVersionPlaceholder: '请选择助手版本',

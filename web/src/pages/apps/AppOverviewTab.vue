@@ -38,6 +38,28 @@
       </n-space>
     </n-alert>
 
+    <!-- 平台层身份 prompt 常量已更新，但本实例上次 bootstrap 写入的是旧文本：
+         提示需重启重渲染 SOUL.md，并提供直接重启入口（复用 restart 操作）。 -->
+    <n-alert
+      v-if="app && app.platform_prompt_pending_restart"
+      type="warning"
+      :title="t('apps.overview.prompt.pendingTitle')"
+      style="margin-bottom: 12px"
+    >
+      <n-space align="center" :size="12">
+        <span>{{ t('apps.overview.prompt.pendingDesc') }}</span>
+        <n-button
+          v-if="canRestartForPlatformPrompt"
+          size="small"
+          type="primary"
+          :disabled="restartMutation.isPending.value"
+          @click="onRestartForVersionSync"
+        >
+          {{ restartMutation.isPending.value ? t('apps.overview.restartNowPending') : t('apps.overview.restartNow') }}
+        </n-button>
+      </n-space>
+    </n-alert>
+
     <p v-if="!app" class="state-text">{{ t('apps.overview.noApp') }}</p>
     <n-descriptions v-else :column="2" bordered size="small">
       <n-descriptions-item :label="t('apps.overview.labelStatus')">
@@ -302,6 +324,17 @@ const canRestartForWebPublish = computed(() => {
   if (!app?.value) return false
   if (!canTriggerRuntimeOperation(auth.user, app.value)) return false
   if (app.value.web_publish_pending_restart !== true) return false
+  const status = app.value.status
+  return status === 'running' || status === 'binding_waiting'
+})
+
+// canRestartForPlatformPrompt 控制平台 prompt「需重启」横幅里的重启按钮：
+// 口径与 canRestartForVersionSync 一致（有运行时操作权限 + 实例 running/binding_waiting），
+// 仅触发条件换成 platform_prompt_pending_restart=true。
+const canRestartForPlatformPrompt = computed(() => {
+  if (!app?.value) return false
+  if (!canTriggerRuntimeOperation(auth.user, app.value)) return false
+  if (app.value.platform_prompt_pending_restart !== true) return false
   const status = app.value.status
   return status === 'running' || status === 'binding_waiting'
 })

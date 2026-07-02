@@ -45,6 +45,8 @@ export interface AppDTO {
   version_synced?: boolean
   // web_publish_pending_restart 标记「企业已开通 Web 发布，但本实例尚未注入发布能力」，需重启生效。
   web_publish_pending_restart?: boolean
+  // platform_prompt_pending_restart 标记「平台身份提示词已更新，但本实例仍在用旧文本」，需重启重渲染生效。
+  platform_prompt_pending_restart?: boolean
   // version_id 是实例绑定的助手版本 id；空表示未绑定（仅历史数据）。
   version_id?: string
   // knowledge_quota_bytes 是实例知识库累计容量上限，单位字节。
