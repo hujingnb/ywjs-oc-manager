@@ -2,6 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **实现修订（2026-07-03，已落地 `a5e4cb8c`）**：本计划 Task 1/2 的「改配置文件」方式
+> 已被取代。最终实现把平台层 prompt **固化为代码常量** `config.DefaultSystemPromptTemplate`
+> 并**移除** `HermesConfig.SystemPromptTemplate` 配置字段（原因：真实 config/secret 为
+> gitignore 真值文件，配置改动无法入库、各部署易漂移）。因 loader `KnownFields(true)` 严格
+> 解码，已删净所有配置文件里的 `system_prompt_template` key。**Task 3（真实浏览器三角色
+> 验收）依然有效且待做**——只是被验证的身份文本来源从配置变成了代码常量。
+
 **Goal:** 让部署出去的实例被问身份时自称 AiGoWork，不暴露 Hermes / Nous Research，仅改平台层 prompt，不动引擎源码。
 
 **Architecture:** 软覆盖方案。在平台层 prompt（`config/manager.yaml` 与 `deploy/k8s/prod/secret.yaml` 的 `system_prompt_template`）注入同一段 AiGoWork 身份 + 抑制指令。平台层每次 bootstrap 从 config 现渲染 → 全平台生效、无需 DB migration。引擎那句 `You run on Hermes Agent` 保持原状，靠身份块压制（对抗追问下的残余泄漏已被接受）。

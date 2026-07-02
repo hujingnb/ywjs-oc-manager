@@ -1,8 +1,16 @@
 # 实例自我身份白标：Hermes → AiGoWork（设计）
 
 - 日期：2026-07-03
-- 状态：待实现
+- 状态：已实现（代码侧），浏览器验收待做
 - 范围：全平台统一改名，仅改平台层 prompt，不动引擎源码
+
+> **实现修订（2026-07-03）**：落地时不再走「改配置文件 system_prompt_template」，
+> 而是把平台层 prompt **固化为代码常量** `config.DefaultSystemPromptTemplate`，并
+> **移除** `HermesConfig.SystemPromptTemplate` 配置字段。原因：真实 `config/manager.yaml`
+> 与线上 `secret.yaml` 均为 gitignore 的真值文件，配置改动无法随代码入库、各部署易漂移；
+> 固化进二进制才能保证所有部署形态行为一致。因 loader 用 `KnownFields(true)` 严格解码，
+> 已删净所有配置文件里残留的 `system_prompt_template` key。下文 §4「具体改动」描述的
+> 配置文件注入方式已被本修订取代，身份块文本本身不变。见提交 `a5e4cb8c`。
 
 ## 1. 背景与问题
 
