@@ -44,15 +44,18 @@ hash 的对象是常量本身而非渲染后文本：当前平台 prompt 无 `{v
 （`RenderRuleText` 为恒等），二者相等，hash 常量最简单稳定。若将来引入占位符，需改为
 hash 渲染后文本，见 §7 非目标。
 
-## 4. 写入点（stamp）
+## 4. 写入点（stamp）—— 单点
 
-平台 prompt 只在「写 platform-rules.md 到实例 input」时进入实例，故在这两处
-stamp `hash(cfg.PlatformPrompt)`，与 `applied_version_revision` 的双写点一致：
+实现核实：k8s 下 **restart 不写 platform-rules**（`cmd/server/main.go:515-518` 注释——
+`RefreshAppInput` 只解析绑定版本的镜像 ref/revision，不再向节点写 manifest）。平台层
+重渲染发生在 **pod 重建时 initContainer 调 `BootstrapService.Build`**；restart 触发 pod
+重建 → 再次走 `Build` → 再次 stamp。因此**只需一个 stamp 点**即覆盖 bootstrap 与 restart：
 
-1. **bootstrap**：`internal/service/bootstrap_service.go` 的 `Build`，紧挨现有
-   `SetAppWebPublishApplied` 调用处写入。
-2. **restart 刷新**：restart 走的 `RefreshAppInput` 实现路径（实测 restart 会重渲染
-   平台层，故必须同 stamp，否则重启后仍误报 pending）。
+- `internal/service/bootstrap_service.go` 的 `Build`，紧挨现有 `SetAppWebPublishApplied`
+  调用处，stamp `config.PlatformPromptHash()`（best-effort：写失败只 warn，不阻断启动）。
+
+这与 `web_publish_applied` 的单点写法完全一致（后者同样只在 `Build` 里 stamp，靠 pod
+重建覆盖 restart）。
 
 新增 sqlc 查询 `SetAppAppliedPlatformPromptHash(app_id, hash)`，仿现有
 `SetAppWebPublishApplied`。
