@@ -266,6 +266,8 @@ onBeforeUnmount(() => {
   font-size: clamp(46px, 6vw, 84px);
   line-height: 1.16;
   font-weight: 760;
+  /* balance 让多行标题各行宽度尽量均分，避免英文长文案在大字号下断成参差的多行。 */
+  text-wrap: balance;
 }
 
 .auth-title-hot {

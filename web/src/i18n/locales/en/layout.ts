@@ -13,7 +13,7 @@ export default {
     // titleHot：主标题中渐变高亮的品牌热词
     titleHot: 'AI Agents',
     // titleSuffix：主标题品牌热词后的结语
-    titleSuffix: ' into Your Enterprise Workflows',
+    titleSuffix: ' into Enterprise Workflows',
     // lead：平台简介引导段落
     lead: 'Enterprise AI employee management platform — connect cloud resources, corporate knowledge bases, and multi-model capabilities with Agents to automate daily employee tasks.',
     // metrics：三列能力卡片
