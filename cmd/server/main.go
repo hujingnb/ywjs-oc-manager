@@ -370,8 +370,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 				SecretAccessKey:  cfg.Storage.S3.SecretAccessKey,
 				NewAPIBaseURL:    cfg.NewAPI.BaseURL,
 				KnowledgeBaseURL: cfg.Hermes.ManagerRuntimeBaseURL,
-				PlatformPrompt:   cfg.Hermes.SystemPromptTemplate,
-				PresignTTL:       cfg.Storage.S3.PresignTTL.Duration,
+				// 平台层 prompt 已固化为代码常量，不再来自配置文件。
+				PlatformPrompt: config.DefaultSystemPromptTemplate,
+				PresignTTL:     cfg.Storage.S3.PresignTTL.Duration,
 			},
 		)
 		// workspace 数据读 S3（spec-A2a），与 bootstrap 共用同一 objStore 实例
@@ -474,8 +475,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		dbStore.Queries,
 		newapiFactory,
 		handlers.AppInitializeConfig{
-			SystemPromptTemplate: cfg.Hermes.SystemPromptTemplate,
-			PlatformPrompt:       cfg.Hermes.SystemPromptTemplate,
+			// 平台层 prompt 已固化为代码常量，不再来自配置文件。
+			SystemPromptTemplate: config.DefaultSystemPromptTemplate,
+			PlatformPrompt:       config.DefaultSystemPromptTemplate,
 			Cipher:               cipher,
 			// DataDir 字段保留供其他特定场景使用；Hermes 文件分发已走 UploadAppInputFile
 			// (apps/<id>/input/)，不再在 manager 本机 DataDir 下写入配置文件。

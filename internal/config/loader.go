@@ -168,9 +168,6 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.Security.MasterKey) == "" {
 		missing = append(missing, "security.master_key")
 	}
-	if strings.TrimSpace(c.Hermes.SystemPromptTemplate) == "" {
-		missing = append(missing, "hermes.system_prompt_template")
-	}
 	if c.Captcha.Enabled && strings.TrimSpace(c.Captcha.HMACSecret) == "" {
 		missing = append(missing, "captcha.hmac_secret")
 	}

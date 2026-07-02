@@ -42,8 +42,6 @@ auth:
 security:
   master_key: "` + validBase64MasterKey + `"
 hermes:
-  system_prompt_template: |
-    你是 Hermes 智能助手。
   workspace:
     archive_retention_days: 14
 `
@@ -84,7 +82,7 @@ func TestValidateReportsRequiredFields(t *testing.T) {
 		"app.http_addr", "app.data_root", "database.url", "redis.addr",
 		"auth.access_token_ttl", "auth.refresh_token_ttl",
 		"auth.jwt_access_secret", "auth.jwt_refresh_secret", "auth.csrf_secret",
-		"security.master_key", "hermes.system_prompt_template",
+		"security.master_key",
 	}
 	for _, field := range required {
 		require.True(t, strings.Contains(err.Error(), field))
@@ -109,9 +107,6 @@ auth:
   csrf_secret: "csrf-secret"
 security:
   master_key: "`+validBase64MasterKey+`"
-hermes:
-  system_prompt_template: |
-    你是 Hermes 智能助手。
 `)
 
 	_, err := LoadFile(path)
@@ -151,28 +146,12 @@ func TestLoad_RejectsBadBase64MasterKey(t *testing.T) {
 	}
 }
 
-// TestLoad_RejectsEmptySystemPromptTemplate 校验 hermes.system_prompt_template 为空时 fail-fast。
-// Hermes 时代不再要求 {{workspace_dir}} 等占位符，但模板本身不能为空。
-func TestLoad_RejectsEmptySystemPromptTemplate(t *testing.T) {
-	// 用例：system_prompt_template 仅含空白时应被拒绝。
-	yaml := strings.Replace(fullValidYAML(),
-		"system_prompt_template: |\n    你是 Hermes 智能助手。",
-		"system_prompt_template: \"\"", 1)
-	path := writeTempConfig(t, yaml)
-	_, err := LoadFile(path)
-	if err == nil || !strings.Contains(err.Error(), "hermes.system_prompt_template") {
-		t.Fatalf("LoadFile() err = %v, 期望含 hermes.system_prompt_template 错误", err)
-	}
-}
-
 // TestLoad_AcceptsValidConfig 校验完整合法配置可被加载。
 func TestLoad_AcceptsValidConfig(t *testing.T) {
 	path := writeTempConfig(t, fullValidYAML())
 	cfg, err := LoadFile(path)
 	require.NoError(t, err)
 	require.Equal(t, validBase64MasterKey, cfg.Security.MasterKey)
-	// Hermes 时代模板不要求占位符，只要非空即可。
-	require.NotEmpty(t, cfg.Hermes.SystemPromptTemplate)
 }
 
 // TestLoad_AllowsMissingRAGFlowConfig 验证本地未启用 RAGFlow 时 manager 仍可启动，知识库请求由 service 层返回未配置。
@@ -224,9 +203,9 @@ func TestLoad_DefaultsHermesRuntimeBaseURL(t *testing.T) {
 // 保证旧部署在引入 logging 段后行为不变。
 func TestLoad_DefaultsLogging(t *testing.T) {
 	cfg := loadConfigFromString(t, fullValidYAML())
-	assert.Equal(t, "info", cfg.Logging.Level)     // 默认级别 info
-	assert.Equal(t, "json", cfg.Logging.Format)    // 默认格式 json
-	assert.Equal(t, 200, cfg.Logging.SlowQueryMS)  // 默认慢查询阈值 200ms
+	assert.Equal(t, "info", cfg.Logging.Level)    // 默认级别 info
+	assert.Equal(t, "json", cfg.Logging.Format)   // 默认格式 json
+	assert.Equal(t, 200, cfg.Logging.SlowQueryMS) // 默认慢查询阈值 200ms
 }
 
 // TestLoad_LoggingExplicitValues 验证显式配置的 logging 字段被原样保留，不被默认覆盖。
@@ -237,9 +216,9 @@ logging:
   format: "text"
   slow_query_ms: 50
 `)
-	assert.Equal(t, "debug", cfg.Logging.Level)   // 显式 debug 保留
-	assert.Equal(t, "text", cfg.Logging.Format)   // 显式 text 保留
-	assert.Equal(t, 50, cfg.Logging.SlowQueryMS)  // 显式阈值 50ms 保留
+	assert.Equal(t, "debug", cfg.Logging.Level)  // 显式 debug 保留
+	assert.Equal(t, "text", cfg.Logging.Format)  // 显式 text 保留
+	assert.Equal(t, 50, cfg.Logging.SlowQueryMS) // 显式阈值 50ms 保留
 }
 
 // TestLoad_DefaultsRAGFlowOptions 验证 RAGFlow 启用后未显式配置的请求选项会使用保守默认值。
@@ -538,7 +517,6 @@ func validBaseConfig() Config {
 	c.Auth.JWTRefreshSecret = "b"
 	c.Auth.CSRFSecret = "c"
 	c.Security.MasterKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEE=" // 32 字节 base64
-	c.Hermes.SystemPromptTemplate = "tmpl"
 	return c
 }
 
@@ -565,7 +543,7 @@ func TestCaptchaEnabledAppliesDefaults(t *testing.T) {
 // TestLoad_DefaultsI18nLocale 覆盖：未配置 i18n.default_locale 时回退 en，
 // 显式配置 zh 时保留，保证平台默认语言可由配置文件控制。
 func TestLoad_DefaultsI18nLocale(t *testing.T) {
-	var c Config            // 未配置
+	var c Config // 未配置
 	c.applyDefaults()
 	assert.Equal(t, "en", c.I18n.DefaultLocale) // 缺省回退 en
 

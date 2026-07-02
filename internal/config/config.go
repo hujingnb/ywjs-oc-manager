@@ -130,9 +130,9 @@ type HermesConfig struct {
 	// RuntimeImages 是平台可选的 Hermes 镜像列表，助手版本的 image_id 引用其中的 id。
 	// 实例初始化/重启的运行时镜像严格由绑定的助手版本经 ResolveRuntimeImage 从此列表解析。
 	RuntimeImages []RuntimeImageConfig `yaml:"runtime_images"`
-	// SystemPromptTemplate 是平台级 prompt 模板，作为 input/resources/platform-rules.md
-	// 的内容写入 manager 端 input 目录，由节点 oc-entrypoint 在容器启动时翻译进 SOUL.md。
-	SystemPromptTemplate string `yaml:"system_prompt_template"`
+	// 平台层 prompt 已固化为代码常量 DefaultSystemPromptTemplate，不再由配置提供；
+	// 原 system_prompt_template 字段已移除。因 loader 用 KnownFields(true) 严格解码，
+	// 任何仍残留该 key 的配置文件都必须同步删除，否则加载即报未知字段错误。
 	// Workspace 仅保留同名段（WorkspaceConfig 是通用类型，不绑 Hermes）。
 	Workspace WorkspaceConfig `yaml:"workspace"`
 	// ContainerNetworks 是 hermes 容器接入的 docker network 清单。
