@@ -1,5 +1,5 @@
 <template>
-  <!-- 登录卡片：嵌入 AuthLayout 的右侧登录控制台外框中，承载本地账号登录表单。 -->
+  <!-- 登录卡片：嵌入默认变体 DefaultLoginPage 的右侧登录控制台外框中，承载本地账号登录表单。 -->
   <form class="login-card" @submit.prevent="onSubmit">
     <div class="login-locale-row">
       <LocaleSwitcher :persist="false" />
