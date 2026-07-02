@@ -17,29 +17,36 @@ type InMsg = LoadMsg | TranscribeMsg
 let asr: AutomaticSpeechRecognitionPipeline | null = null
 let loadedKey = ''
 
-// pickDevice WebGPU 可用则用之(快很多)，否则退回 wasm。
-function pickDevice(): 'webgpu' | 'wasm' {
-  return typeof navigator !== 'undefined' && 'gpu' in navigator ? 'webgpu' : 'wasm'
+// pickDevice 选择推理后端：仅当确有可用 WebGPU adapter 时才用 webgpu(快很多)，否则单线程 wasm。
+// 关键：`'gpu' in navigator` 为真只代表浏览器暴露了 WebGPU API，并不代表有可用适配器——
+// headless、用户禁用 WebGPU、GPU 在黑名单、部分 Linux 环境下 requestAdapter() 会返回 null。
+// 若此时仍选 webgpu，pipeline 加载会失败，用户会看到「下载失败」而其实 wasm 完全可用。
+// 因此必须实际探测 adapter；任何异常也按 wasm 处理。
+async function pickDevice(): Promise<'webgpu' | 'wasm'> {
+  try {
+    const nav = typeof navigator !== 'undefined' ? (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown> } }) : undefined
+    if (nav?.gpu) {
+      const adapter = await nav.gpu.requestAdapter()
+      if (adapter) return 'webgpu'
+    }
+  } catch {
+    // 探测过程本身抛错(极少数环境)，按 wasm 处理。
+  }
+  return 'wasm'
 }
 
-// loadModel 按源+仓库加载 pipeline；进度经 progress_callback 归一化后回传主线程。
-async function loadModel(repo: string, host: string) {
-  const key = `${host}::${repo}`
-  if (asr && loadedKey === key) {
-    postMessage({ type: 'ready' })
-    return
-  }
-  env.remoteHost = host
-  // pipeline 泛型在推导 AllTasks 联合类型时复杂度超出 TypeScript 上限(TS2590)。
-  // 用局部类型断言把 pipeline 收窄为只返回 AutomaticSpeechRecognitionPipeline 的函数，
-  // 运行时行为完全不变：仍传相同的 task/model/options 参数。
+// buildPipeline 按指定后端构建 ASR pipeline；进度经 progress_callback 归一化后回传主线程。
+// pipeline 泛型在推导 AllTasks 联合类型时复杂度超出 TypeScript 上限(TS2590)。
+// 用局部类型断言把 pipeline 收窄为只返回 AutomaticSpeechRecognitionPipeline 的函数，
+// 运行时行为完全不变：仍传相同的 task/model/options 参数。
+async function buildPipeline(repo: string, device: 'webgpu' | 'wasm') {
   type PipelineFn = (
     task: string,
     model: string,
     opts?: Record<string, unknown>,
   ) => Promise<AutomaticSpeechRecognitionPipeline>
-  asr = await (pipeline as unknown as PipelineFn)('automatic-speech-recognition', repo, {
-    device: pickDevice(),
+  return (pipeline as unknown as PipelineFn)('automatic-speech-recognition', repo, {
+    device,
     dtype: 'q8',
     // progress_callback 参数类型为 ProgressCallback=(p: ProgressInfo)=>void，
     // 用 unknown 接收可绕过 strictFunctionTypes 约束(unknown 是 ProgressInfo 的超类型，
@@ -52,6 +59,27 @@ async function loadModel(repo: string, host: string) {
       }
     },
   })
+}
+
+// loadModel 按源+仓库加载 pipeline；优先 webgpu，若 webgpu 构建失败(如适配器探测漏网的边缘情况)兜底重试 wasm。
+async function loadModel(repo: string, host: string) {
+  const key = `${host}::${repo}`
+  if (asr && loadedKey === key) {
+    postMessage({ type: 'ready' })
+    return
+  }
+  env.remoteHost = host
+  const device = await pickDevice()
+  try {
+    asr = await buildPipeline(repo, device)
+  } catch (e) {
+    // webgpu 探测通过但实际构建仍失败时(驱动/适配器边缘问题)，回退单线程 wasm 再试一次。
+    if (device === 'webgpu') {
+      asr = await buildPipeline(repo, 'wasm')
+    } else {
+      throw e
+    }
+  }
   loadedKey = key
   postMessage({ type: 'ready' })
 }
