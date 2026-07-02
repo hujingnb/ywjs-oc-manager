@@ -31,9 +31,9 @@ describe('voiceSettings', () => {
     expect(repoForTier('small')).toBe('Xenova/whisper-small')
   })
 
-  // 下载源到 remoteHost 的映射：国内镜像与官方
-  it('hostForSource 映射国内镜像与官方站点', () => {
-    expect(hostForSource('domestic')).toBe('https://hf-mirror.com')
+  // 下载源到 remoteHost 的映射：国内 ModelScope 与官方
+  it('hostForSource 映射国内 ModelScope 与官方站点', () => {
+    expect(hostForSource('domestic')).toBe('https://www.modelscope.cn')
     expect(hostForSource('official')).toBe('https://huggingface.co')
   })
 

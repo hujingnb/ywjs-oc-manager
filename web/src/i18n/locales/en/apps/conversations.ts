@@ -48,8 +48,8 @@ export default {
     pickTitle: 'Choose speech model',
     // Download source group label
     sourceLabel: 'Download source',
-    // Source option: domestic mirror
-    sourceDomestic: 'Domestic mirror',
+    // Source option: domestic ModelScope
+    sourceDomestic: 'ModelScope (CN)',
     // Source option: official site
     sourceOfficial: 'HuggingFace official',
     // Model tier group label

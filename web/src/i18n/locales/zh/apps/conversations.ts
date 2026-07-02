@@ -48,8 +48,8 @@ export default {
     pickTitle: '选择语音识别模型',
     // 下载源分组标签
     sourceLabel: '下载源',
-    // 下载源选项：国内镜像
-    sourceDomestic: '国内镜像',
+    // 下载源选项：国内 ModelScope(魔搭)
+    sourceDomestic: 'ModelScope（魔搭）',
     // 下载源选项：官方站点
     sourceOfficial: 'HuggingFace 官方',
     // 模型档位分组标签

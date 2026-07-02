@@ -36,14 +36,19 @@ export const MODEL_OPTIONS: ModelOption[] = [
 ]
 
 // SOURCE_OPTIONS 两个下载源；domestic 在前作为默认。
+// domestic 用 ModelScope(魔搭)：国内直连、对模型文件返回 access-control-allow-origin:* 且无重定向，
+// 浏览器可直接 fetch。注意不能用 hf-mirror.com——它把 /resolve/ 请求 308 重定向到被墙的
+// huggingface.co 且重定向跳不带 CORS 头，浏览器会 net::ERR_FAILED(hf-mirror 仅供 Python CLI 设
+// HF_ENDPOINT，不适配浏览器 fetch)。ModelScope 镜像了 Xenova/whisper-* 同名仓库与路径布局，
+// 故 repoForTier 无需改动，默认 remotePathTemplate 也可直接工作。
 export const SOURCE_OPTIONS: SourceOption[] = [
-  { id: 'domestic', host: 'https://hf-mirror.com' },
+  { id: 'domestic', host: 'https://www.modelscope.cn' },
   { id: 'official', host: 'https://huggingface.co' },
 ]
 
 // DEFAULT_TIER popover 首次打开时预选的档位(base 是中文准确率与体积的折中)。
 export const DEFAULT_TIER: ModelTier = 'base'
-// DEFAULT_SOURCE 默认下载源，面向大陆用户默认走国内镜像。
+// DEFAULT_SOURCE 默认下载源，面向大陆用户默认走国内 ModelScope。
 export const DEFAULT_SOURCE: SourceId = 'domestic'
 // STORAGE_KEY localStorage 键名，带 oc 前缀避免与其它键冲突。
 export const STORAGE_KEY = 'oc.voiceInput.settings'
