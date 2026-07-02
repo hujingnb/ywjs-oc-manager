@@ -11,17 +11,18 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"oc-manager/internal/auth"
+	"oc-manager/internal/config"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
 )
 
 // fakeBootstrapStore 实现 bootstrapStore，返回预置的 app/org/owner/version/appSkills/webPublishConfig。
 type fakeBootstrapStore struct {
-	app             sqlc.App
-	org             sqlc.Organization
-	owner           sqlc.User
-	version         sqlc.AssistantVersion
-	appSkills       []sqlc.AppSkill
+	app       sqlc.App
+	org       sqlc.Organization
+	owner     sqlc.User
+	version   sqlc.AssistantVersion
+	appSkills []sqlc.AppSkill
 	// webPublishConfig 按 orgID 返回的 OrgWebPublishConfig；零值 Enabled=false 表示未开通。
 	// webPublishErr 为非 nil 时 GetWebPublishConfig 返回该错误（模拟 sql.ErrNoRows 等）。
 	webPublishConfig sqlc.OrgWebPublishConfig
@@ -29,6 +30,8 @@ type fakeBootstrapStore struct {
 	// webPublishApplied / webPublishAppliedSet 记录 SetAppWebPublishApplied 最近写入值，供断言。
 	webPublishApplied    bool
 	webPublishAppliedSet bool
+	// 捕获 stamp 的平台 prompt hash，供断言 Build 是否用当前常量 hash 写入。
+	capturedPlatformPromptHash string
 }
 
 // GetApp 按 ID 返回预置 app。
@@ -74,6 +77,12 @@ func (f *fakeBootstrapStore) GetWebPublishConfig(_ context.Context, _ string) (s
 func (f *fakeBootstrapStore) SetAppWebPublishApplied(_ context.Context, arg sqlc.SetAppWebPublishAppliedParams) error {
 	f.webPublishApplied = arg.WebPublishApplied
 	f.webPublishAppliedSet = true
+	return nil
+}
+
+// SetAppAppliedPlatformPromptHash 记录 bootstrap 写入的平台 prompt hash。
+func (f *fakeBootstrapStore) SetAppAppliedPlatformPromptHash(_ context.Context, arg sqlc.SetAppAppliedPlatformPromptHashParams) error {
+	f.capturedPlatformPromptHash = arg.AppliedPlatformPromptHash
 	return nil
 }
 
@@ -155,6 +164,8 @@ func TestBootstrapBuildHappyPath(t *testing.T) {
 	assert.Empty(t, res.Restore.WorkspaceURL)
 	assert.Empty(t, res.Restore.StateDBURL)
 	assert.Empty(t, res.Restore.SessionsURL)
+	// bootstrap 应把当前平台 prompt 常量 hash stamp 进 apps，供概览需重启检测。
+	assert.Equal(t, config.PlatformPromptHash(), store.capturedPlatformPromptHash)
 }
 
 // TestBootstrapSkillsFromAppSkills 验证 skill 来源已切换为 app_skills（运行时只看实例 skill）：

@@ -12,6 +12,7 @@ import (
 	"github.com/guregu/null/v5"
 
 	"oc-manager/internal/auth"
+	"oc-manager/internal/config"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/hermes"
 	"oc-manager/internal/integrations/storage"
@@ -95,6 +96,8 @@ type bootstrapStore interface {
 	GetWebPublishConfig(ctx context.Context, orgID string) (sqlc.OrgWebPublishConfig, error)
 	// SetAppWebPublishApplied 记录本次 bootstrap 是否注入了 web-publish 发布能力，用于「能力已开通需重启」检测。
 	SetAppWebPublishApplied(ctx context.Context, arg sqlc.SetAppWebPublishAppliedParams) error
+	// SetAppAppliedPlatformPromptHash 记录本次 bootstrap 写入 input 的平台 prompt hash，用于「平台提示词已更新需重启」检测。
+	SetAppAppliedPlatformPromptHash(ctx context.Context, arg sqlc.SetAppAppliedPlatformPromptHashParams) error
 }
 
 // bootstrapSkillSource 提供 skill 预签名 URL（由 S3SkillBlobStore 实现）。
@@ -292,6 +295,16 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 	}); err != nil {
 		slog.WarnContext(ctx, "记录 web_publish_applied 失败", "app_id", app.ID, mlog.Err(err))
 	}
+	// 记录本次 bootstrap 写入 input 的平台层 prompt hash，用于「平台提示词已更新需重启」检测。
+	// k8s 下 restart 会触发 pod 重建 → initContainer 再次走本 Build → 此处重新 stamp，
+	// 故单点即覆盖 bootstrap 与 restart 两条路径（与 SetAppWebPublishApplied 单点同理）。
+	// best-effort：写失败只 warn，不阻断实例启动（仅影响 needs-restart 提示）。
+	if err := s.store.SetAppAppliedPlatformPromptHash(ctx, sqlc.SetAppAppliedPlatformPromptHashParams{
+		AppliedPlatformPromptHash: config.PlatformPromptHash(),
+		ID:                        app.ID,
+	}); err != nil {
+		slog.WarnContext(ctx, "记录 applied_platform_prompt_hash 失败", "app_id", app.ID, mlog.Err(err))
+	}
 	manifestYAML, persona, platform, err := s.renderer.Render(in)
 	if err != nil {
 		return BootstrapResult{}, err
@@ -397,4 +410,3 @@ func (s *BootstrapService) presignRestore(ctx context.Context, appID string) (Bo
 	}
 	return r, nil
 }
-
