@@ -1,5 +1,5 @@
 <template>
-  <!-- AuthLayout 承载登录相关页面：背景层铺满视口，内容层负责 hero 与登录卡片整体居中。 -->
+  <!-- DefaultLoginPage 默认登录变体整页：背景层铺满视口，内容层负责 hero 与登录卡片整体居中。 -->
   <main class="auth-stage">
     <!-- 背景层：神经网络粒子画布 + 极光 + 网格 + 扫描光带，全部为纯装饰，不参与交互。 -->
     <canvas ref="neural" class="auth-neural" aria-hidden="true"></canvas>
