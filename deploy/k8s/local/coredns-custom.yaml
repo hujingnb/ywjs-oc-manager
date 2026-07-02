@@ -17,6 +17,11 @@ metadata:
   name: coredns-custom
   namespace: kube-system
 data:
+  # 注意：另有一个 host-k3d.server 键不在此文件，而是由 Makefile 的 local-up 在
+  # 运行时动态注入（把 host.k3d.internal 静态解析到 k3d 网络网关，兜住集群重启后
+  # CoreDNS NodeHosts 丢失该名、经宿主代理出网的 pod DNS 失败的问题）。网关 IP 随
+  # 集群重建可能变化（曾见 172.18/172.19），故不在此写死。
+  #
   # 文件名以 .server 结尾才会被 CoreDNS 作为独立 server block 导入。
   clawhub.server: |
     clawhubcn.com:53 {
