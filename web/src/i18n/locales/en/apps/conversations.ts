@@ -64,6 +64,8 @@ export default {
     confirm: 'Download & use',
     // Switch model entry
     switch: 'Switch model',
+    // Badge marking a tier already downloaded to local cache
+    downloaded: 'Downloaded',
     // Error messages
     errors: {
       // Mic permission denied or insecure context

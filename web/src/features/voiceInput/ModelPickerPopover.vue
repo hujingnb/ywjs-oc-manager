@@ -25,6 +25,10 @@
           <n-space vertical>
             <n-radio v-for="opt in MODEL_OPTIONS" :key="opt.tier" :value="opt.tier">
               {{ tierHint(opt.tier) }}（{{ opt.sizeLabel }}）
+              <!-- 该档位在当前所选源下已完整缓存到本地时标记，提示无需再次下载 -->
+              <n-tag v-if="cached[opt.tier]" size="tiny" type="success" :bordered="false" class="downloaded-tag">
+                {{ t('apps.conversations.voice.downloaded') }}
+              </n-tag>
             </n-radio>
           </n-space>
         </n-radio-group>
@@ -58,8 +62,9 @@
 // 模型选择弹层：受控组件，选择结果通过 confirm 事件回传父组件驱动 voiceController。
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NModal, NSpace, NRadioGroup, NRadioButton, NRadio, NProgress, NButton } from 'naive-ui'
+import { NModal, NSpace, NRadioGroup, NRadioButton, NRadio, NProgress, NButton, NTag } from 'naive-ui'
 import { MODEL_OPTIONS, DEFAULT_TIER, DEFAULT_SOURCE, type ModelTier, type SourceId } from './voiceSettings'
+import { cachedTiers } from './modelCache'
 
 const props = defineProps<{
   show: boolean
@@ -80,15 +85,37 @@ const { t } = useI18n()
 // 本地选择态，用初始值(或默认)预填，便于用户直接确认。
 const tier = ref<ModelTier>(props.initialTier ?? DEFAULT_TIER)
 const source = ref<SourceId>(props.initialSource ?? DEFAULT_SOURCE)
+// cached 记录各档位在「当前所选源」下是否已下载到本地缓存（缓存按源区分），用于打「已下载」标记。
+const cached = ref<Record<string, boolean>>({})
 
-// 弹层每次打开时把单选回填为最新持久化值，避免沿用上次未提交/已取消的临时选择。
+// refreshCached 重新查询当前源下各档位的本地缓存状态。
+async function refreshCached() {
+  cached.value = await cachedTiers(
+    MODEL_OPTIONS.map((o) => o.tier),
+    source.value,
+  )
+}
+
+// 弹层每次打开时把单选回填为最新持久化值，避免沿用上次未提交/已取消的临时选择，并刷新缓存标记。
 watch(
   () => props.show,
   (visible) => {
     if (visible) {
       tier.value = props.initialTier ?? DEFAULT_TIER
       source.value = props.initialSource ?? DEFAULT_SOURCE
+      void refreshCached()
     }
+  },
+)
+
+// 切换下载源时重算缓存标记（同一档位不同源是不同缓存条目）。
+watch(source, () => void refreshCached())
+
+// 一次下载结束（downloading 由 true 变 false）后刷新，让刚下好的档位立即显示「已下载」。
+watch(
+  () => props.downloading,
+  (now, prev) => {
+    if (prev && !now) void refreshCached()
   },
 )
 
@@ -112,5 +139,8 @@ function onConfirm() {
 .picker-label {
   margin-bottom: 8px;
   font-weight: 600;
+}
+.downloaded-tag {
+  margin-left: 6px;
 }
 </style>

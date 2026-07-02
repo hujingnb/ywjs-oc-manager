@@ -64,6 +64,8 @@ export default {
     confirm: '下载并使用',
     // 切换模型入口
     switch: '切换模型',
+    // 档位已下载到本地缓存的标记
+    downloaded: '已下载',
     // 错误文案
     errors: {
       // 麦克风权限被拒或非安全上下文
