@@ -125,6 +125,7 @@ function tierHint(tv: ModelTier): string {
     tiny: t('apps.conversations.voice.tierTiny'),
     base: t('apps.conversations.voice.tierBase'),
     small: t('apps.conversations.voice.tierSmall'),
+    turbo: t('apps.conversations.voice.tierTurbo'),
   }
   return map[tv]
 }

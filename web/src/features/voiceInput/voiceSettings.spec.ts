@@ -3,6 +3,8 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import {
   repoForTier,
   hostForSource,
+  dtypeForTier,
+  decoderFileForTier,
   loadVoiceSettings,
   saveVoiceSettings,
   DEFAULT_SOURCE,
@@ -24,11 +26,24 @@ function fakeStorage(init: Record<string, string> = {}): Storage {
 }
 
 describe('voiceSettings', () => {
-  // 档位到 Xenova whisper 仓库名的映射，三档齐全
-  it('repoForTier 映射三档到对应 Xenova 仓库', () => {
+  // 档位到 whisper 仓库名的映射，四档齐全(turbo 走 onnx-community large-v3-turbo)
+  it('repoForTier 映射四档到对应仓库', () => {
     expect(repoForTier('tiny')).toBe('Xenova/whisper-tiny')
     expect(repoForTier('base')).toBe('Xenova/whisper-base')
     expect(repoForTier('small')).toBe('Xenova/whisper-small')
+    expect(repoForTier('turbo')).toBe('onnx-community/whisper-large-v3-turbo')
+  })
+
+  // 各档位量化精度：tiny/base/small 用 q8 字符串，turbo 用 q4 的分子模型对象
+  it('dtypeForTier 按档位返回量化精度', () => {
+    expect(dtypeForTier('base')).toBe('q8')
+    expect(dtypeForTier('turbo')).toEqual({ encoder_model: 'q4', decoder_model_merged: 'q4' })
+  })
+
+  // decoder 文件名随量化命名变化：q8→*_quantized.onnx，q4→*_q4.onnx(供缓存判定)
+  it('decoderFileForTier 按档位返回 decoder 文件名', () => {
+    expect(decoderFileForTier('base')).toBe('decoder_model_merged_quantized.onnx')
+    expect(decoderFileForTier('turbo')).toBe('decoder_model_merged_q4.onnx')
   })
 
   // 下载源到 remoteHost 的映射：国内 ModelScope 与官方

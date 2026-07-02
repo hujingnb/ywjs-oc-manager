@@ -60,6 +60,8 @@ export default {
     tierBase: '均衡（推荐）',
     // 档位说明：small
     tierSmall: '精准（最准，最大最慢）',
+    // 档位说明：turbo(large-v3-turbo)
+    tierTurbo: '旗舰（最准，需 WebGPU，约 760MB）',
     // 弹层确认按钮
     confirm: '下载并使用',
     // 切换模型入口

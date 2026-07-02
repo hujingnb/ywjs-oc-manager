@@ -19,6 +19,13 @@ describe('modelCache', () => {
     )
   })
 
+  // turbo 档 decoder 量化命名不同(_q4)，标记 URL 应指向 turbo 仓库的 q4 decoder
+  it('modelMarkerUrl turbo 档用 q4 decoder 文件', () => {
+    expect(modelMarkerUrl('turbo', 'domestic')).toBe(
+      'https://www.modelscope.cn/onnx-community/whisper-large-v3-turbo/resolve/main/onnx/decoder_model_merged_q4.onnx',
+    )
+  })
+
   // 同一档位在不同源下 URL 不同（缓存按 host 区分，故「已下载」需按当前所选源判定）
   it('同档位不同源的标记 URL 不同', () => {
     expect(modelMarkerUrl('small', 'domestic')).not.toBe(modelMarkerUrl('small', 'official'))

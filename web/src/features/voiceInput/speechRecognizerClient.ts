@@ -2,7 +2,7 @@
 // 把 postMessage/onmessage 协议转成 Promise + 进度回调，并实现 Recognizer 接口
 // (与 voiceController 对接)。识别请求用自增 id 关联响应。
 import type { ModelTier, SourceId } from './voiceSettings'
-import { repoForTier, hostForSource } from './voiceSettings'
+import { repoForTier, hostForSource, dtypeForTier } from './voiceSettings'
 import type { Recognizer } from './voiceController'
 
 // createRecognizer 创建一个基于 Worker 的识别器实例。
@@ -45,7 +45,7 @@ export function createRecognizer(): Recognizer {
           }
         }
         w.addEventListener('message', handler)
-        w.postMessage({ type: 'load', repo: repoForTier(tier), host: hostForSource(source) })
+        w.postMessage({ type: 'load', repo: repoForTier(tier), host: hostForSource(source), dtype: dtypeForTier(tier) })
       })
     },
 

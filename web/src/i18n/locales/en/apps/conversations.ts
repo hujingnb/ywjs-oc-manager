@@ -60,6 +60,8 @@ export default {
     tierBase: 'Balanced (recommended)',
     // Tier hint: small
     tierSmall: 'Small (most accurate, largest/slowest)',
+    // Tier hint: turbo (large-v3-turbo)
+    tierTurbo: 'Turbo (best accuracy, needs WebGPU, ~760MB)',
     // Popover confirm button
     confirm: 'Download & use',
     // Switch model entry
