@@ -17,6 +17,39 @@ type InMsg = LoadMsg | TranscribeMsg
 let asr: AutomaticSpeechRecognitionPipeline | null = null
 let loadedKey = ''
 
+// ── 下载总进度聚合 ──
+// Transformers.js 的 progress 事件是「按文件」各自 0→100 的，且多文件并发下载、乱序穿插；
+// 直接转发单个文件的百分比会在文件切换时从高跳回低（进度条倒退，即用户看到的现象）。
+// 改为按字节聚合所有文件的 loaded/total 得到一条总进度，并做「单调不回退」+ 下载阶段封顶 99%
+// （满格 100% 留给加载完成时收口），既消除倒退，也避免小文件先下完导致过早满格。
+const fileBytes = new Map<string, { loaded: number; total: number }>()
+let lastProgress = 0
+
+// resetProgress 每次开始加载新模型时清空聚合状态。
+function resetProgress() {
+  fileBytes.clear()
+  lastProgress = 0
+}
+
+// reportAggregateProgress 累计各文件字节并回传总进度（单调递增、封顶 0.99）。
+function reportAggregateProgress(info: { file?: string; name?: string; loaded?: number; total?: number }) {
+  const file = info.file ?? info.name
+  if (!file || typeof info.total !== 'number' || info.total <= 0) return
+  fileBytes.set(file, { loaded: info.loaded ?? 0, total: info.total })
+  let loaded = 0
+  let total = 0
+  for (const v of fileBytes.values()) {
+    loaded += v.loaded
+    total += v.total
+  }
+  if (total <= 0) return
+  const frac = Math.min(0.99, loaded / total)
+  if (frac > lastProgress) {
+    lastProgress = frac
+    postMessage({ type: 'progress', progress: frac })
+  }
+}
+
 // pickDevice 选择推理后端：仅当确有可用 WebGPU adapter 时才用 webgpu(快很多)，否则单线程 wasm。
 // 关键：`'gpu' in navigator` 为真只代表浏览器暴露了 WebGPU API，并不代表有可用适配器——
 // headless、用户禁用 WebGPU、GPU 在黑名单、部分 Linux 环境下 requestAdapter() 会返回 null。
@@ -50,13 +83,11 @@ async function buildPipeline(repo: string, device: 'webgpu' | 'wasm', dtype: str
     dtype,
     // progress_callback 参数类型为 ProgressCallback=(p: ProgressInfo)=>void，
     // 用 unknown 接收可绕过 strictFunctionTypes 约束(unknown 是 ProgressInfo 的超类型，
-    // 满足参数逆变要求)；内部通过类型缩窄安全访问 status/progress 字段。
+    // 满足参数逆变要求)；内部通过类型缩窄安全访问字段，按字节聚合成总进度。
     progress_callback: (p: unknown) => {
-      // ProgressInfo 的 DownloadProgressInfo 成员满足 status==='progress' 且含 progress(0..100)。
-      const info = p as { status?: string; progress?: number }
-      if (info.status === 'progress' && typeof info.progress === 'number') {
-        postMessage({ type: 'progress', progress: Math.max(0, Math.min(1, info.progress / 100)) })
-      }
+      const info = p as { status?: string; file?: string; name?: string; loaded?: number; total?: number }
+      // 仅下载中的 progress 事件带 loaded/total 字节，用于聚合总进度。
+      if (info.status === 'progress') reportAggregateProgress(info)
     },
   })
 }
@@ -69,6 +100,7 @@ async function loadModel(repo: string, host: string, dtype: string | Record<stri
     return
   }
   env.remoteHost = host
+  resetProgress()
   const device = await pickDevice()
   try {
     asr = await buildPipeline(repo, device, dtype)
