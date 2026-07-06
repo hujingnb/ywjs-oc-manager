@@ -269,7 +269,8 @@ func (s *RuntimeOperationService) RequestInitialize(ctx context.Context, princip
 	if err := s.ensurePrincipalActive(ctx, principal); err != nil {
 		return RuntimeOperationResult{}, err
 	}
-	// RequestInitialize 对应"重新初始化"操作，不属于常规启停运维；平台管理员不开放此入口。
+	// RequestInitialize 对应"重新初始化"操作，沿用应用管理权限 CanManageApp：
+	// 平台管理员可运维介入任意组织实例的重新初始化，组织管理员/owner 限本组织/本人应用。
 	if !auth.CanManageApp(principal, app.OrgID, app.OwnerUserID) {
 		return RuntimeOperationResult{}, ErrRuntimeOperationDenied
 	}

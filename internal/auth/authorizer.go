@@ -111,11 +111,14 @@ func CanViewAppAudit(p Principal, appOrgID, appOwnerUserID string) bool {
 // 下面按“读权限”和“写/运行时权限”拆分应用相关谓词：
 // 读取类谓词保留 CanViewApp 的跨组织观察语义，写入/运行时类谓词则收紧到组织管理员或 owner 成员。
 
-// CanManageApp 判断主体是否可对应用执行管理写操作（如渠道绑定）。
-// 平台管理员只有跨组织观察权限，不继承任何应用写权限；
+// CanManageApp 判断主体是否可对应用执行管理写操作（如渠道绑定、实例启停/删除、API key、
+// 应用知识库写入、重新初始化等）。
+// 平台管理员需要运维介入任意组织的实例，故对全部应用写操作恒可管理（含跨组织）；
 // 组织管理员仅能管理本组织应用，组织成员仅能管理自己拥有的应用。
 func CanManageApp(p Principal, appOrgID, appOwnerUserID string) bool {
 	switch p.Role {
+	case domain.UserRolePlatformAdmin:
+		return true
 	case domain.UserRoleOrgAdmin:
 		return p.OrgID == appOrgID
 	case domain.UserRoleOrgMember:
@@ -206,8 +209,8 @@ func CanUpdateAppKnowledgeQuota(p Principal, appOrgID string) bool {
 }
 
 // CanWriteAppKnowledge 判断主体是否可写入指定应用的知识库。
-// 应用知识库写入属于应用写操作，沿用应用管理权限；
-// 平台管理员仍可读，但不能直接写入任意组织应用的知识库。
+// 应用知识库写入属于应用写操作，沿用应用管理权限（CanManageApp）：
+// 平台管理员可运维介入写入任意组织应用的知识库，组织管理员/owner 限本组织/本人应用。
 func CanWriteAppKnowledge(p Principal, appOrgID, appOwnerUserID string) bool {
 	return CanManageApp(p, appOrgID, appOwnerUserID)
 }

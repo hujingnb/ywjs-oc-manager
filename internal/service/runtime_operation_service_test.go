@@ -123,14 +123,18 @@ func TestRequestInitialize_RejectsRunningStatus(t *testing.T) {
 	require.ErrorIs(t, err, ErrAppNotReinitializable)
 }
 
-// TestRequestInitialize_RejectsPlatformAdminWrite 验证请求初始化拒绝平台管理员写入的异常或拒绝路径场景。
-func TestRequestInitialize_RejectsPlatformAdminWrite(t *testing.T) {
+// TestRequestInitialize_AllowsPlatformAdmin 验证平台管理员可运维介入重新初始化：
+// CanManageApp 放开 platform_admin 后不再返回 ErrRuntimeOperationDenied，error 态实例可被重置。
+func TestRequestInitialize_AllowsPlatformAdmin(t *testing.T) {
 	store := newRuntimeOperationStub(t)
 	store.app.Status = domain.AppStatusError
-	svc := NewRuntimeOperationService(store, newDiscardLogger())
+	notifier := &fakeNotifier{}
+	svc := NewRuntimeOperationService(store, newDiscardLogger(), notifier)
 
-	_, err := svc.RequestInitialize(context.Background(), platformAdmin(), testRuntimeOpAppID)
-	require.ErrorIs(t, err, ErrRuntimeOperationDenied)
+	result, err := svc.RequestInitialize(context.Background(), platformAdmin(), testRuntimeOpAppID)
+	require.NoError(t, err)
+	require.NotEmpty(t, result.JobID)
+	require.Equal(t, domain.AppStatusPullingRuntimeImage, store.app.Status)
 }
 
 // TestInspectApp_ReturnsDBStatus 验证 InspectApp 直接返回库内 apps.status，不经 docker inspect。

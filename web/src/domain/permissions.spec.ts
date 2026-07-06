@@ -92,9 +92,9 @@ describe('canManageApp', () => {
     expect(canManageApp({ role: 'org_member', id: 'user-2' }, orgApp)).toBe(false)
   })
 
-  // 覆盖 platform_admin 不可管理应用（无写权限）。
-  it('platform_admin 返回 false', () => {
-    expect(canManageApp({ role: 'platform_admin' }, orgApp)).toBe(false)
+  // 覆盖 platform_admin 恒可管理应用（运维介入，跨组织也放开写权限）。
+  it('platform_admin 跨企业也返回 true', () => {
+    expect(canManageApp({ role: 'platform_admin' }, orgApp)).toBe(true)
   })
 })
 

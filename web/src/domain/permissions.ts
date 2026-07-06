@@ -38,8 +38,10 @@ export function canManageOrgKnowledge(user: PermissionUser | null | undefined, o
 }
 
 // 应用写操作包含运行时、渠道、API key 与应用知识库变更。
+// 平台管理员需运维介入任意组织实例（协助排障 / 代客接入），故恒可管理；与后端 CanManageApp 一致。
 export function canManageApp(user: PermissionUser | null | undefined, app: PermissionApp | null | undefined): boolean {
   if (!user || !app) return false
+  if (user.role === 'platform_admin') return true
   if (user.role === 'org_admin') return user.org_id === app.org_id
   if (user.role === 'org_member') return user.id === app.owner_user_id
   return false

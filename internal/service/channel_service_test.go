@@ -69,15 +69,22 @@ func TestChannelServiceBeginAuthForbidden(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
-// TestChannelServiceBeginAuthPlatformAdminForbidden 验证渠道服务开始认证平台管理员禁止访问的异常或拒绝路径场景。
-func TestChannelServiceBeginAuthPlatformAdminForbidden(t *testing.T) {
+// TestChannelServiceBeginAuthPlatformAdminAllowed 验证平台管理员可运维介入发起渠道登录：
+// 权限从 CanManageApp 收紧改为 CanManageAppChannel 后，platform_admin 不再被拒，
+// 与 owner / org_admin 同样能触发登录挑战（协助排障 / 代客接入场景）。
+func TestChannelServiceBeginAuthPlatformAdminAllowed(t *testing.T) {
 	store := newChannelStub(t)
 	registry := channel.NewRegistry()
-	registry.MustRegister(&fakeAdapter{})
+	registry.MustRegister(&fakeAdapter{
+		challenge: channel.AuthChallenge{Type: "qrcode", QRCode: "data:image/png;base64,xxx", ExpiresAt: time.Now().Add(time.Hour)},
+	})
 	svc := NewChannelService(store, registry)
 
-	_, err := svc.BeginAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat)
-	require.ErrorIs(t, err, ErrForbidden)
+	result, err := svc.BeginAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat)
+	require.NoError(t, err)
+	require.NotEqual(t, "", result.JobID)
+	require.True(t, store.statusUpdated)
+	require.Equal(t, domain.ChannelStatusPendingAuth, store.lastStatus)
 }
 
 // TestChannelServicePollAuthMarksBound 验证渠道服务轮询认证Marks已绑定的预期行为场景。
@@ -326,13 +333,15 @@ func TestChannelServiceUnbindWechatUnchanged(t *testing.T) {
 	require.False(t, restarter.restarted)
 }
 
-// TestChannelServiceUnbindPlatformAdminForbidden 验证渠道服务解绑平台管理员禁止访问的异常或拒绝路径场景。
-func TestChannelServiceUnbindPlatformAdminForbidden(t *testing.T) {
+// TestChannelServiceUnbindPlatformAdminAllowed 验证平台管理员可运维介入解绑渠道：
+// 与发起登录同口径改用 CanManageAppChannel 授权后，platform_admin 不再被拒，可正常解绑。
+func TestChannelServiceUnbindPlatformAdminAllowed(t *testing.T) {
 	store := newChannelStub(t)
 	svc := NewChannelService(store, channel.NewRegistry())
 
 	err := svc.Unbind(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat)
-	require.ErrorIs(t, err, ErrForbidden)
+	require.NoError(t, err)
+	require.Equal(t, domain.ChannelStatusUnboundByUser, store.lastStatus)
 }
 
 // TestChannelServiceBeginAuthFeishuScanCreatesBinding 验证飞书扫码：

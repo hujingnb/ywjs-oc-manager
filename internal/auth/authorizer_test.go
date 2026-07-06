@@ -170,7 +170,7 @@ func runAppCases(t *testing.T, fn func(Principal, string, string) bool, cases []
 // TestCanManageApp 验证管理权限应用的预期行为场景。
 func TestCanManageApp(t *testing.T) {
 	cases := []memberCase{
-		{"platform_admin 跨组织不可管应用", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, false}, // 场景：platform_admin 跨组织不可管应用
+		{"platform_admin 跨组织可管应用", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true}, // 场景：platform_admin 运维介入，跨组织也可管理应用写操作
 		{"org_admin 同组织可管应用", domain.UserRoleOrgAdmin, orgA, userA, orgA, userB, true},             // 场景：org_admin 同组织可管应用
 		{"org_admin 跨组织不可管", domain.UserRoleOrgAdmin, orgA, userA, orgB, userB, false},             // 场景：org_admin 跨组织不可管
 		{"org_member 仅可管自己应用", domain.UserRoleOrgMember, orgA, userA, orgA, userA, true},           // 场景：org_member 仅可管自己应用
@@ -239,7 +239,7 @@ func TestCanUpdateAppKnowledgeQuota(t *testing.T) {
 // TestCanWriteAppKnowledge 验证写入权限应用知识库的预期行为场景。
 func TestCanWriteAppKnowledge(t *testing.T) {
 	cases := []memberCase{
-		{"platform_admin 跨组织不可写应用知识库", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, false}, // 场景：platform_admin 跨组织不可写应用知识库
+		{"platform_admin 跨组织可写应用知识库", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true}, // 场景：platform_admin 运维介入，跨组织也可写应用知识库
 		{"org_admin 同组织可写知识库", domain.UserRoleOrgAdmin, orgA, userA, orgA, userB, true},               // 场景：org_admin 同组织可写知识库
 		{"org_admin 跨组织不可写", domain.UserRoleOrgAdmin, orgA, userA, orgB, userB, false},                // 场景：org_admin 跨组织不可写
 		{"org_member 仅可写自己应用知识库", domain.UserRoleOrgMember, orgA, userA, orgA, userA, true},           // 场景：org_member 仅可写自己应用知识库

@@ -675,7 +675,8 @@ func (s *ChannelService) loadViewableApp(ctx context.Context, principal auth.Pri
 }
 
 // loadManageableApp 校验主体是否可修改应用渠道绑定。
-// BeginAuth / Unbind 都会写 channel_bindings，因此平台管理员不可越权执行。
+// BeginAuth / Unbind 都会写 channel_bindings，沿用应用管理权限 CanManageApp：
+// 除 owner 本人 / 本 org 的 org_admin 外，平台管理员也可运维介入（协助排障 / 代客接入）。
 func (s *ChannelService) loadManageableApp(ctx context.Context, principal auth.Principal, appID string) (sqlc.App, error) {
 	app, err := s.loadViewableApp(ctx, principal, appID)
 	if err != nil {
