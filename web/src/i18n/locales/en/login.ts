@@ -9,7 +9,7 @@ export default {
   },
   // 账号字段
   username: {
-    label: 'Username',
+    label: 'Account',
   },
   // 密码字段
   password: {
