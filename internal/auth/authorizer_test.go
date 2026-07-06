@@ -228,12 +228,15 @@ func TestCanManageKnowledgeRAGFlowDataset(t *testing.T) {
 	assert.False(t, CanManageKnowledgeRAGFlowDataset(Principal{}))
 }
 
-// TestCanUpdateAppKnowledgeQuota 验证实例知识库容量允许平台管理员和本企业管理员修改。
+// TestCanUpdateAppKnowledgeQuota 验证实例知识库容量仅允许平台管理员修改，
+// 企业管理员与普通成员均无实例级容量编辑入口。
 func TestCanUpdateAppKnowledgeQuota(t *testing.T) {
-	assert.True(t, CanUpdateAppKnowledgeQuota(Principal{Role: domain.UserRolePlatformAdmin}, "org-1"))
-	assert.True(t, CanUpdateAppKnowledgeQuota(Principal{Role: domain.UserRoleOrgAdmin, OrgID: "org-1"}, "org-1"))
-	assert.False(t, CanUpdateAppKnowledgeQuota(Principal{Role: domain.UserRoleOrgAdmin, OrgID: "org-2"}, "org-1"))
-	assert.False(t, CanUpdateAppKnowledgeQuota(Principal{Role: domain.UserRoleOrgMember, OrgID: "org-1"}, "org-1"))
+	// 场景：平台管理员是唯一可编辑实例知识库容量的角色。
+	assert.True(t, CanUpdateAppKnowledgeQuota(Principal{Role: domain.UserRolePlatformAdmin}))
+	// 场景：企业管理员即便归属本企业也不能单独在实例页面调整知识库大小。
+	assert.False(t, CanUpdateAppKnowledgeQuota(Principal{Role: domain.UserRoleOrgAdmin, OrgID: "org-1"}))
+	// 场景：普通成员不可编辑容量。
+	assert.False(t, CanUpdateAppKnowledgeQuota(Principal{Role: domain.UserRoleOrgMember, OrgID: "org-1"}))
 }
 
 // TestCanWriteAppKnowledge 验证写入权限应用知识库的预期行为场景。

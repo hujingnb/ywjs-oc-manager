@@ -329,7 +329,7 @@ func (s *AppService) UpdateAppKnowledgeQuota(ctx context.Context, principal auth
 	if err := validateKnowledgeQuotaBytes(quotaBytes); err != nil {
 		return AppResult{}, err
 	}
-	// 先读取实例所属组织，用于容量编辑权限校验和更新后的版本同步计算。
+	// 先确认实例存在，读取结果同时用于更新后的版本同步计算。
 	row, err := s.store.GetAppWithVersion(ctx, appID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AppResult{}, ErrNotFound
@@ -337,7 +337,8 @@ func (s *AppService) UpdateAppKnowledgeQuota(ctx context.Context, principal auth
 	if err != nil {
 		return AppResult{}, fmt.Errorf("查询应用失败: %w", err)
 	}
-	if !auth.CanUpdateAppKnowledgeQuota(principal, row.App.OrgID) {
+	// 容量属于平台侧配额，只允许平台管理员修改；企业管理员无实例级容量入口。
+	if !auth.CanUpdateAppKnowledgeQuota(principal) {
 		return AppResult{}, ErrForbidden
 	}
 	if err := s.store.SetAppKnowledgeQuota(ctx, sqlc.SetAppKnowledgeQuotaParams{
