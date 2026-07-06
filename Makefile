@@ -46,7 +46,7 @@ WEB_IMAGE_REPO   ?= $(PROD_REGISTRY)/$(PROD_APP_NS)/oc-manager-web
 # hermes runtime 生产镜像仓库，与上方三个服务保持一致命名风格。
 # HERMES_VARIANT 选择 runtime/hermes/ 下的 versioned variant 子目录（自包含 Dockerfile + 资产）。
 # 镜像 tag 从该 variant 的 version.txt 派生，禁止 main / master / latest / dev 等浮动 ref。
-HERMES_VARIANT       ?= hermes-v2026.6.5
+HERMES_VARIANT       ?= hermes-v2026.7.1
 # HERMES_VARIANT_DIR 只能由 HERMES_VARIANT 派生，避免命令行直接指向任意目录绕过版本校验。
 override HERMES_VARIANT_DIR := runtime/hermes/$(HERMES_VARIANT)
 override HERMES_VERSION := $(strip $(shell if [ -f "$(HERMES_VARIANT_DIR)/version.txt" ]; then cat "$(HERMES_VARIANT_DIR)/version.txt"; fi))
