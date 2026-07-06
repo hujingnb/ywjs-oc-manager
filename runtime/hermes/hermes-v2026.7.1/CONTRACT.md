@@ -4,7 +4,8 @@
 - 锁定 ref: 见同目录 version.txt
 - 安装方式: install.sh + uv (FHS layout，代码装到 /usr/local/lib/hermes-agent/)
 - 上游引擎语义版本: v0.18.0（上游 git tag `v2026.7.1` 的 pyproject.toml version；上一版 `hermes-v2026.6.5` 为 v0.16.0）
-- 数据迁移: 本 variant 由上一版 `hermes-v2026.6.5` 整体复制并升级 version.txt 而来。跨 variant 数据过渡由 `migrator/` 基于文件检测完成（按 data_root 自身 `.oc-state.json` 记录的版本判断，而非按来源版本名 dispatch），对升级 / 降级、任意来源版本通用，不需要为 `hermes-v2026.6.5` 单独写 `from_hermes_v2026_6_5.py` 迁移模块。当前各 variant 的 on-disk 布局一致，从 `hermes-v2026.6.5` 切换到本 variant 为 no-op 过渡。
+- variant 由来: 以上一版 `hermes-v2026.6.5` 为基线复制，除升级 version.txt 外，还针对上游引擎 v0.16.0 → v0.18.0 的源码变更做了 harness 侧适配：命令前缀参数化（`/approve` → `{prefix}approve`）、run.py 被上游拆出 `slash_commands.py` / `kanban_watchers.py` 后 i18n patch 改用跨文件锚点组、上游删除的 STT 语音提示与媒体路径回显锚点整体移除、kanban 通知新增 `board_tag`。详见 `patches/patch_i18n_literals.py` 与 `locales/oc_overlay.yaml`。
+- 数据迁移: on-disk 数据布局未随引擎升级变化。跨 variant 数据过渡由 `migrator/` 基于文件检测完成（按 data_root 自身 `.oc-state.json` 记录的版本判断，而非按来源版本名 dispatch），对升级 / 降级、任意来源版本通用，不需要为 `hermes-v2026.6.5` 单独写 `from_hermes_v2026_6_5.py` 迁移模块。当前各 variant 的 on-disk 布局一致，从 `hermes-v2026.6.5` 切换到本 variant 为 no-op 过渡。
 
 # 镜像对外命令
 - oc-healthcheck（HEALTHCHECK）

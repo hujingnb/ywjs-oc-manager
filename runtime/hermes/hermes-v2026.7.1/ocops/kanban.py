@@ -91,7 +91,7 @@ def run_hermes(args: list[str], timeout: int = HERMES_TIMEOUT) -> subprocess.Com
 def hermes_json(args: list[str]):
     """执行 hermes 读命令并解析 --json 输出，失败抛 KanbanError。
 
-    hermes-v2026.7.1 v0.14.0 已确认：某些业务错误（如 show 不存在的任务）以退出码 0 +
+    hermes v0.14.0 已确认：某些业务错误（如 show 不存在的任务）以退出码 0 +
     空 stdout + stderr 错误文本的形式返回，而非非零退出码。对这两种形式都做统一处理：
     - returncode != 0：用 stderr 分类错误码；
     - returncode == 0 但 stdout 为空或非 JSON：同样用 stderr 分类（此时 stderr 含
@@ -116,7 +116,7 @@ def hermes_ok(args: list[str]) -> None:
     """执行 hermes 写命令，仅校验成功，不解析输出。
 
     注意：本函数仅靠 returncode 判断成败，不防御「exit 0 + 空 stdout + stderr」式
-    业务错误（hermes-v2026.7.1 v0.14.0 已确认某些错误如此返回）。当前所有写 verb 在
+    业务错误（hermes v0.14.0 已确认某些错误如此返回）。当前所有写 verb 在
     hermes_ok 之后都会调用 _show_detail，不存在的 task 会在该 show 阶段经
     hermes_json 捕获为 NOT_FOUND——新增写 verb 时须保持这一「写后必 show」的兜底约定。
     """
@@ -213,7 +213,7 @@ _WATCH_LINE_RE = re.compile(
 def parse_watch_line(line: str):
     """把 hermes kanban watch 的一行人读文本解析成契约 Event。
 
-    hermes-v2026.7.1 v0.14.0 已确认：kanban watch 子命令无 --json 选项，输出
+    hermes v0.14.0 已确认：kanban watch 子命令无 --json 选项，输出
     人读文本（横幅 "Watching kanban events..." + 事件行如上面正则所示）。
     无法解析的行返回 None，由调用方跳过。
 
