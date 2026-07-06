@@ -235,9 +235,17 @@ describe('AppKnowledgeTab', () => {
     expect(wrapper.find('.header-name').text()).toBe('文件名称')
   })
 
-  // 覆盖实例知识库容量编辑入口：企业管理员可看到编辑空间按钮。
-  it('企业管理员可看到实例知识库空间编辑入口', () => {
+  // 覆盖实例知识库容量编辑入口：企业管理员不能单独在实例页面调整知识库大小，入口已关闭。
+  it('企业管理员看不到实例知识库空间编辑入口', () => {
     mocks.authUser = { id: 'admin-1', role: 'org_admin', org_id: 'org-1' }
+    const wrapper = mountTab()
+
+    expect(wrapper.text()).not.toContain('编辑空间')
+  })
+
+  // 覆盖实例知识库容量编辑入口：容量属于平台侧配额，仅平台管理员可见编辑空间按钮。
+  it('平台管理员可看到实例知识库空间编辑入口', () => {
+    mocks.authUser = { id: 'platform-1', role: 'platform_admin', org_id: undefined }
     const wrapper = mountTab()
 
     expect(wrapper.text()).toContain('编辑空间')
@@ -253,7 +261,7 @@ describe('AppKnowledgeTab', () => {
     expect(wrapper.find('.ragflow-dialog').text()).toBe('app:app-1:测试实例')
   })
 
-  // 企业管理员仍可管理文件或容量，但不能触发 RAGFlow dataset 运维弹框。
+  // 企业管理员仍可管理文件，但不能触发 RAGFlow dataset 运维弹框。
   it('org_admin 看不到实例知识库 RAGFlow 信息入口', () => {
     mocks.authUser = { id: 'admin-1', role: 'org_admin', org_id: 'org-1' }
     const wrapper = mountTab()

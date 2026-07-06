@@ -156,8 +156,8 @@ const message = useMessage()
 
 // canManage 控制上传和删除入口，后端仍会基于应用归属做最终权限校验。
 const canManage = computed(() => canManageApp(auth.user, app?.value))
-// canEditQuota 单独控制容量入口，平台管理员可编辑容量但不一定拥有应用写操作入口。
-const canEditQuota = computed(() => canUpdateAppKnowledgeQuota(auth.user, app?.value))
+// canEditQuota 单独控制容量入口，仅平台管理员可编辑；企业管理员无实例级容量入口。
+const canEditQuota = computed(() => canUpdateAppKnowledgeQuota(auth.user))
 // canManageRAGFlowInfo 控制远端 dataset 运维入口，仅平台管理员可见。
 const canManageRAGFlowInfo = computed(() => canManageRAGFlowDatasetInfo(auth.user))
 // ragflowTargetName 给运维弹框展示实例名；注入值缺失时保留稳定兜底文案。

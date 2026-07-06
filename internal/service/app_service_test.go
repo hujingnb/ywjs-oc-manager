@@ -103,18 +103,33 @@ func TestGetAppExposeRuntimeImageOnlyToPlatformAdmin(t *testing.T) {
 	assert.Empty(t, orgResult.RuntimeImageSha256)
 }
 
-// TestUpdateAppKnowledgeQuotaAllowsOrgAdmin 验证企业管理员可修改本企业实例知识库容量。
-func TestUpdateAppKnowledgeQuotaAllowsOrgAdmin(t *testing.T) {
+// TestUpdateAppKnowledgeQuotaAllowsPlatformAdmin 验证平台管理员可修改实例知识库容量。
+// 容量属于平台侧配额，平台管理员是唯一有权调整实例知识库大小的角色。
+func TestUpdateAppKnowledgeQuotaAllowsPlatformAdmin(t *testing.T) {
 	svc, store := newAppServiceWithStore(t)
 	app := store.mustSeedApp(t)
 	app.KnowledgeQuotaBytes = KnowledgeQuotaDefaultBytes
 	store.app = app
 
-	result, err := svc.UpdateAppKnowledgeQuota(context.Background(), appOrgAdminPrincipal(store.organization), testAppServiceAppID, 2*1024*1024*1024)
+	result, err := svc.UpdateAppKnowledgeQuota(context.Background(), platformAdmin(), testAppServiceAppID, 2*1024*1024*1024)
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(2*1024*1024*1024), store.app.KnowledgeQuotaBytes)
 	assert.Equal(t, int64(2*1024*1024*1024), result.KnowledgeQuotaBytes)
+}
+
+// TestUpdateAppKnowledgeQuotaRejectsOrgAdmin 验证企业管理员不能单独在实例页面调整知识库大小。
+// 入口已关闭，即便归属本企业也返回 ErrForbidden，容量保持不变。
+func TestUpdateAppKnowledgeQuotaRejectsOrgAdmin(t *testing.T) {
+	svc, store := newAppServiceWithStore(t)
+	app := store.mustSeedApp(t)
+	app.KnowledgeQuotaBytes = KnowledgeQuotaDefaultBytes
+	store.app = app
+
+	_, err := svc.UpdateAppKnowledgeQuota(context.Background(), appOrgAdminPrincipal(store.organization), testAppServiceAppID, 2*1024*1024*1024)
+
+	require.ErrorIs(t, err, ErrForbidden)
+	assert.Equal(t, KnowledgeQuotaDefaultBytes, store.app.KnowledgeQuotaBytes)
 }
 
 // TestUpdateAppKnowledgeQuotaRejectsMember 验证普通成员不能修改实例知识库容量。

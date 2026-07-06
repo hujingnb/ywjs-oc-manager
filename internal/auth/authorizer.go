@@ -196,16 +196,10 @@ func CanUpdateAppLocale(p Principal, appOrgID, appOwnerUserID string) bool {
 }
 
 // CanUpdateAppKnowledgeQuota 判断主体是否可编辑实例知识库容量。
-// 平台管理员可运维兜底；企业管理员仅能调整本企业实例；普通成员不可修改容量。
-func CanUpdateAppKnowledgeQuota(p Principal, appOrgID string) bool {
-	switch p.Role {
-	case domain.UserRolePlatformAdmin:
-		return true
-	case domain.UserRoleOrgAdmin:
-		return p.OrgID == appOrgID
-	default:
-		return false
-	}
+// 容量属于平台侧租户配额，只允许平台管理员修改；企业管理员不能单独在实例页面调整
+// 知识库大小（入口关闭），普通成员同样不可修改容量。
+func CanUpdateAppKnowledgeQuota(p Principal) bool {
+	return p.Role == domain.UserRolePlatformAdmin
 }
 
 // CanWriteAppKnowledge 判断主体是否可写入指定应用的知识库。

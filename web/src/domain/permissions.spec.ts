@@ -116,23 +116,19 @@ describe('canCreateAppForOrg', () => {
 })
 
 describe('canUpdateAppKnowledgeQuota', () => {
-  // 覆盖平台管理员可作为运维兜底编辑任意实例知识库容量。
+  // 覆盖平台管理员可编辑任意实例知识库容量（唯一有权角色）。
   it('allows platform admin', () => {
-    expect(canUpdateAppKnowledgeQuota({ role: 'platform_admin' }, { org_id: 'org-1' })).toBe(true)
+    expect(canUpdateAppKnowledgeQuota({ role: 'platform_admin' })).toBe(true)
   })
 
-  // 覆盖企业管理员只能编辑本企业实例知识库容量。
-  it('allows only same-org org admin', () => {
-    expect(canUpdateAppKnowledgeQuota({ role: 'org_admin', org_id: 'org-1' }, { org_id: 'org-1' })).toBe(true)
-    expect(canUpdateAppKnowledgeQuota({ role: 'org_admin', org_id: 'org-2' }, { org_id: 'org-1' })).toBe(false)
+  // 覆盖企业管理员不可单独在实例页面调整知识库大小，入口已关闭。
+  it('rejects org admin', () => {
+    expect(canUpdateAppKnowledgeQuota({ role: 'org_admin', org_id: 'org-1' })).toBe(false)
   })
 
   // 覆盖普通成员不可编辑容量，即使是自己的实例也不允许。
   it('rejects org member', () => {
-    expect(canUpdateAppKnowledgeQuota(
-      { role: 'org_member', id: 'u1', org_id: 'org-1' },
-      { org_id: 'org-1', owner_user_id: 'u1' },
-    )).toBe(false)
+    expect(canUpdateAppKnowledgeQuota({ role: 'org_member', id: 'u1', org_id: 'org-1' })).toBe(false)
   })
 })
 
