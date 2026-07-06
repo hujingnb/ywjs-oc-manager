@@ -177,7 +177,8 @@
             :disabled="!currentId"
             @keydown.enter.exact.prevent="onComposerSubmit"
           />
-          <VoiceInputButton :disabled="!currentId" @text="appendVoiceText" />
+          <!-- 语音输入暂时关闭：功能保留待后续开启，勿删实现 -->
+          <!-- <VoiceInputButton :disabled="!currentId" @text="appendVoiceText" /> -->
           <!-- 附件选择：用 label 包裹隐藏 input，点击 label 触发文件选择框 -->
           <label
             class="attach-button"
@@ -240,7 +241,8 @@ import {
   type QueuedMessage,
 } from '@/domain/messageQueue'
 import ConversationMessageView from './ConversationMessageView.vue'
-import VoiceInputButton from '@/features/voiceInput/VoiceInputButton.vue'
+// 语音输入暂时关闭：功能保留待后续开启，勿删实现
+// import VoiceInputButton from '@/features/voiceInput/VoiceInputButton.vue'
 
 // appId 由路由 props: true 注入，标识当前实例。
 const props = defineProps<{ appId: string }>()
@@ -287,9 +289,10 @@ const renameTitle = ref('')
 const renameTargetId = ref('')
 
 // appendVoiceText 把语音识别结果追加到 draft：非空草稿以空格拼接，保留用户已输入内容。
-function appendVoiceText(text: string) {
-  draft.value = draft.value ? `${draft.value} ${text}` : text
-}
+// 语音输入暂时关闭：功能保留待后续开启，勿删实现
+// function appendVoiceText(text: string) {
+//   draft.value = draft.value ? `${draft.value} ${text}` : text
+// }
 
 // onPickFiles 处理 file input change 事件，把新选文件追加到 pendingFiles，并重置 input 值
 // 允许再次选同名文件。
