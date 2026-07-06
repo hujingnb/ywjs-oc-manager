@@ -269,7 +269,7 @@ describe('OrganizationsPage', () => {
     expect(clipboardMock).toHaveBeenCalledWith([
       '标识： test-org',
       '名称： 测试企业',
-      '管理员用户名： org-admin',
+      '管理员账号： org-admin',
       '管理员密码： <创建时设置，系统不保存明文；如忘记请重置密码>',
     ].join('\n'))
   })
@@ -285,7 +285,7 @@ describe('OrganizationsPage', () => {
     await nextTick()
 
     const inputs = wrapper.findAll('input')
-    // 按表单字段顺序填写：名称、组织标识、管理员用户名、管理员姓名、管理员密码
+    // 按表单字段顺序填写：名称、组织标识、管理员账号、管理员姓名、管理员密码
     await inputs[0].setValue('新企业')
     await inputs[1].setValue('new-org')
     await inputs[2].setValue('org-admin')
@@ -374,9 +374,9 @@ describe('OrganizationsPage', () => {
     await quotaInput!.setValue('3')
     await quotaInput!.trigger('blur')
 
-    // 编辑模式下不应存在管理员用户名输入项（create-only 字段）
+    // 编辑模式下不应存在管理员账号输入项（create-only 字段）
     const labels = wrapper.findAll('label span')
-    expect(labels.some(l => l.text().includes('管理员用户名'))).toBe(false)
+    expect(labels.some(l => l.text().includes('管理员账号'))).toBe(false)
 
     // 提交表单
     await wrapper.find('form').trigger('submit')

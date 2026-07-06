@@ -48,12 +48,12 @@ export default {
     // form 创建成员内联表单标题与字段标签。
     form: {
       createTitle: '创建成员',
-      username: '用户名 *',
-      displayName: '显示名 *',
+      username: '账号 *',
+      displayName: '姓名 *',
       password: '初始密码 *',
       role: '角色',
       usernamePlaceholder: 'username',
-      displayNamePlaceholder: '显示名称',
+      displayNamePlaceholder: '姓名',
       passwordPlaceholder: '至少 8 位',
     },
     // createApp 补建实例表单标题与字段。
@@ -71,7 +71,7 @@ export default {
     },
     // table 成员列表列名。
     table: {
-      username: '用户名',
+      username: '账号',
       displayName: '姓名',
       role: '角色',
       status: '状态',
@@ -186,14 +186,14 @@ export default {
     },
     // form 字段标签与占位符。
     form: {
-      username: '用户名 *',
-      displayName: '显示名 *',
+      username: '账号 *',
+      displayName: '姓名 *',
       password: '初始密码 *',
       role: '角色',
       appName: '实例名 *',
       assistantVersion: '助手版本 *',
       usernamePlaceholder: 'username',
-      displayNamePlaceholder: '显示名称',
+      displayNamePlaceholder: '姓名',
       passwordPlaceholder: '至少 8 位',
       appNamePlaceholder: '实例名称',
       assistantVersionPlaceholder: '请选择助手版本',

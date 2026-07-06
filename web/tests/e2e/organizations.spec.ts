@@ -15,8 +15,8 @@ test('platform_admin 可创建组织', async ({ page }) => {
   // Naive UI 的表单项标题不直接作为 input label，使用稳定的 placeholder 定位输入框。
   await page.getByPlaceholder('组织名称').fill(name)
   await page.getByPlaceholder('test-org').fill(name)
-  await page.getByPlaceholder('登录用户名').fill(`${name}-admin`)
-  await page.getByPlaceholder('管理员显示名').fill('E2E 管理员')
+  await page.getByPlaceholder('登录账号').fill(`${name}-admin`)
+  await page.getByPlaceholder('管理员姓名').fill('E2E 管理员')
   await page.getByPlaceholder('初始登录密码').fill('secret-password')
   await page.getByRole('button', { name: '保存' }).click()
   // 列表展示新组织行；名称和组织标识相同，因此断言整行避免 strict mode 匹配到两个单元格。

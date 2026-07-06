@@ -12,7 +12,7 @@ package apierror
 const (
 	// MsgAuthInvalidLocale 不支持的语言（UpdateLocale 单独文案，与 app domain 的 locale 文案措辞不同）。
 	MsgAuthInvalidLocale MsgKey = "err.auth.invalid_locale"
-	// MsgAuthInvalidCredentials 用户名或密码错误，也可能是未填写组织标识。
+	// MsgAuthInvalidCredentials 账号或密码错误，也可能是未填写组织标识。
 	MsgAuthInvalidCredentials MsgKey = "err.auth.invalid_credentials"
 	// MsgAuthInvalidToken 登录凭证无效。
 	MsgAuthInvalidToken MsgKey = "err.auth.invalid_token"
@@ -36,7 +36,7 @@ const (
 func init() {
 	Register(map[MsgKey]map[string]string{
 		MsgAuthInvalidLocale:          {"zh": "不支持的语言", "en": "Unsupported language"},
-		MsgAuthInvalidCredentials:     {"zh": "用户名或密码错误，也可能是未填写组织标识", "en": "Incorrect username or password, or the organization identifier may be missing"},
+		MsgAuthInvalidCredentials:     {"zh": "账号或密码错误，也可能是未填写组织标识", "en": "Incorrect account or password, or the organization identifier may be missing"},
 		MsgAuthInvalidToken:           {"zh": "登录凭证无效", "en": "Invalid login credential"},
 		MsgAuthCaptchaRequired:        {"zh": "请先完成人机验证", "en": "Please complete the human verification first"},
 		MsgAuthCaptchaExpired:         {"zh": "人机验证已失效，请重试", "en": "Human verification has expired. Please try again"},
