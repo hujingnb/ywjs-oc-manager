@@ -12,6 +12,7 @@
         <n-radio-group v-model:value="mode">
           <n-radio-button value="markdown">{{ t('components.deliverCustomSkillModal.modeMarkdown') }}</n-radio-button>
           <n-radio-button value="folder">{{ t('components.deliverCustomSkillModal.modeFolder') }}</n-radio-button>
+          <n-radio-button value="zip">{{ t('components.deliverCustomSkillModal.modeZip') }}</n-radio-button>
         </n-radio-group>
       </n-form-item>
       <n-form-item v-if="mode === 'markdown'" :label="t('components.deliverCustomSkillModal.fieldSkillMd')">
@@ -22,10 +23,15 @@
           :placeholder="t('components.deliverCustomSkillModal.skillMdPlaceholder')"
         />
       </n-form-item>
-      <n-form-item v-else :label="t('components.deliverCustomSkillModal.fieldSkillFolder')">
+      <n-form-item v-else-if="mode === 'folder'" :label="t('components.deliverCustomSkillModal.fieldSkillFolder')">
         <input ref="folderInput" type="file" multiple class="folder-input" @change="onFolderChange" />
         <n-button @click="folderInput?.click()">{{ t('components.deliverCustomSkillModal.selectFolderBtn') }}</n-button>
         <span v-if="folderFiles.length" class="folder-count">{{ t('components.deliverCustomSkillModal.folderFileCount', { count: folderFiles.length }) }}</span>
+      </n-form-item>
+      <n-form-item v-else :label="t('components.deliverCustomSkillModal.fieldSkillZip')">
+        <input ref="zipInput" type="file" accept=".zip" class="folder-input" @change="onZipChange" />
+        <n-button @click="zipInput?.click()">{{ t('components.deliverCustomSkillModal.selectZipBtn') }}</n-button>
+        <span v-if="zipName" class="folder-count">{{ t('components.deliverCustomSkillModal.zipFileName', { name: zipName }) }}</span>
       </n-form-item>
       <n-form-item :label="t('components.deliverCustomSkillModal.fieldVisibility')">
         <ticket-targets-editor v-model="targets" :orgs="orgs" />
@@ -55,7 +61,7 @@ import {
 import { useI18n } from 'vue-i18n'
 
 import type { SkillTicketDetail } from '@/api'
-import { packFromFolder, packFromMarkdown, type UploadedFile } from '@/domain/skillPackaging'
+import { packFromFolder, packFromMarkdown, packFromZip, type UploadedFile } from '@/domain/skillPackaging'
 import { useDeliverCustomSkill, type DeliverTarget } from '@/api/hooks/useSkillTickets'
 import TicketTargetsEditor from './TicketTargetsEditor.vue'
 
@@ -79,10 +85,13 @@ const emit = defineEmits<{
 const message = useMessage()
 const { t } = useI18n()
 const deliverMut = useDeliverCustomSkill()
-const mode = ref<'markdown' | 'folder'>('markdown')
+const mode = ref<'markdown' | 'folder' | 'zip'>('markdown')
 const mdText = ref('')
 const folderInput = ref<HTMLInputElement | null>(null)
 const folderFiles = ref<UploadedFile[]>([])
+const zipInput = ref<HTMLInputElement | null>(null)
+const zipBytes = ref<Uint8Array | null>(null)
+const zipName = ref('')
 const targets = ref<DeliverTarget[]>([])
 
 watch(
@@ -92,6 +101,8 @@ watch(
     mode.value = 'markdown'
     mdText.value = ''
     folderFiles.value = []
+    zipBytes.value = null
+    zipName.value = ''
     targets.value = defaultTargets(props.ticket)
   },
   { immediate: true },
@@ -114,12 +125,23 @@ async function onFolderChange(event: Event) {
   )
 }
 
+// onZipChange 读入所选 zip 文件的字节，供交付时 packFromZip 解析/打包。
+async function onZipChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  zipBytes.value = file ? new Uint8Array(await file.arrayBuffer()) : null
+  zipName.value = file?.name ?? ''
+}
+
 async function onDeliver() {
   if (!props.ticket?.id) return
   try {
-    const pack = mode.value === 'markdown'
-      ? packFromMarkdown(mdText.value)
-      : packFromFolder(folderFiles.value)
+    const pack =
+      mode.value === 'markdown'
+        ? packFromMarkdown(mdText.value)
+        : mode.value === 'zip'
+          ? packFromZip(zipBytes.value!)
+          : packFromFolder(folderFiles.value)
     const file = new File([toArrayBuffer(pack.tar)], `${pack.name}.tar`, { type: 'application/x-tar' })
     await deliverMut.mutateAsync({
       ticketId: props.ticket.id,
