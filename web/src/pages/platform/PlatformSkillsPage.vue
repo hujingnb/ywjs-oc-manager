@@ -75,6 +75,10 @@
 
         <n-form-item :label="t('platform.skills.versionLabel')">
           <n-input v-model:value="version" :placeholder="t('platform.skills.versionPlaceholder')" style="max-width: 240px" />
+          <!-- 已填写但格式非法时给出内联提示，格式限定为 x.x.x 或 x.x -->
+          <template v-if="version.trim() && !versionValid" #feedback>
+            <span class="state-text danger">{{ t('platform.skills.versionInvalid') }}</span>
+          </template>
         </n-form-item>
         <n-form-item :label="t('platform.skills.descLabel')">
           <n-input v-model:value="description" type="textarea" :rows="2" :placeholder="t('platform.skills.descPlaceholder')" />
@@ -197,9 +201,16 @@ watch(
   },
 )
 
-// canUpload 在解析成功（拿到 name）且版本号已填、且不在上传中时才允许提交。
+// SKILL_VERSION_PATTERN 与后端 skillVersionPattern 保持一致：仅允许 x.x.x 或 x.x（各段纯数字）。
+// 前端先校验只为即时反馈，后端才是权威防线（curl / 旧客户端可绕过前端）。
+const SKILL_VERSION_PATTERN = /^\d+\.\d+(\.\d+)?$/
+
+// versionValid 判断已填写的版本号是否符合格式；空串视为「未填」不在此处报错（交给 canUpload 的必填约束）。
+const versionValid = computed(() => SKILL_VERSION_PATTERN.test(version.value.trim()))
+
+// canUpload 在解析成功（拿到 name）、版本号已填且格式合法、且不在上传中时才允许提交。
 const canUpload = computed(
-  () => !uploadMutation.isPending.value && parsed.value.meta !== null && Boolean(version.value.trim()),
+  () => !uploadMutation.isPending.value && parsed.value.meta !== null && versionValid.value,
 )
 
 // triggerFolderInput 在点击前动态设置 webkitdirectory，触发浏览器目录选择框。

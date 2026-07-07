@@ -291,4 +291,25 @@ describe('PlatformSkillsPage', () => {
     // 未填版本号，按钮应禁用。
     expect(findUploadButton(wrapper).attributes('disabled')).toBeDefined()
   })
+
+  // 覆盖格式校验：版本号非 x.x.x / x.x 格式（此处为单段「1」）时展示提示并禁用上传。
+  it('版本号格式非法时展示提示并禁用上传', async () => {
+    const wrapper = mountPage()
+    await findByPlaceholder(wrapper, 'SKILL.md').setValue('---\nname: x\n---\n正文')
+    await findByPlaceholder(wrapper, '如 1.0.0').setValue('1')
+    await wrapper.vm.$nextTick()
+    // 格式非法：展示内联提示且按钮禁用。
+    expect(wrapper.text()).toContain('版本号必须为 x.x.x 或 x.x 格式')
+    expect(findUploadButton(wrapper).attributes('disabled')).toBeDefined()
+  })
+
+  // 覆盖格式合法：两段 x.x 版本号应通过校验，按钮启用。
+  it('版本号为合法 x.x 格式时启用上传', async () => {
+    const wrapper = mountPage()
+    await findByPlaceholder(wrapper, 'SKILL.md').setValue('---\nname: x\n---\n正文')
+    await findByPlaceholder(wrapper, '如 1.0.0').setValue('1.0')
+    await wrapper.vm.$nextTick()
+    // 格式合法：按钮不再禁用。
+    expect(findUploadButton(wrapper).attributes('disabled')).toBeUndefined()
+  })
 })

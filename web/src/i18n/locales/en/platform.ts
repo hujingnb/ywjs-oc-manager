@@ -406,6 +406,8 @@ export default {
     markdownExample: '---\nname: my-skill\ndescription: One-line description of what this skill does\n---\n\n# My Skill\n\nDescribe this skill in Markdown: when it triggers, what it does, how to use it.',
     versionLabel: 'Version *',
     versionPlaceholder: 'e.g. 1.0.0',
+    // versionInvalid: inline hint when the version format is invalid; format restricted to x.x.x or x.x (numeric segments)
+    versionInvalid: 'Version must be in x.x.x or x.x format',
     descLabel: 'Description',
     descPlaceholder: 'Skill description (defaults to SKILL.md, editable)',
     uploadButton: 'Upload',
