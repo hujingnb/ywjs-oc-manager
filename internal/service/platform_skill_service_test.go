@@ -149,7 +149,7 @@ func TestPlatformSkillService_Upload_OK(t *testing.T) {
 // 非平台管理员上传被拒。
 func TestPlatformSkillService_Upload_Denied(t *testing.T) {
 	svc := NewPlatformSkillService(newFakePlatformSkillStore(), &fakeLibraryBlob{})
-	_, err := svc.Upload(context.Background(), psvcOrgMemberPrincipal(), PlatformSkillUploadInput{Name: "x", Version: "1", Data: []byte("a")})
+	_, err := svc.Upload(context.Background(), psvcOrgMemberPrincipal(), PlatformSkillUploadInput{Name: "x", Version: "1.0", Data: []byte("a")})
 	require.ErrorIs(t, err, ErrPlatformSkillDenied)
 }
 
@@ -160,10 +160,44 @@ func TestPlatformSkillService_Upload_Invalid(t *testing.T) {
 	require.ErrorIs(t, err, ErrPlatformSkillInvalid)
 }
 
+// 版本号格式校验：合法的 x.x / x.x.x 通过，其余（缺段、多段、含前缀、非数字、含空格）一律 Invalid。
+func TestPlatformSkillService_Upload_VersionFormat(t *testing.T) {
+	// table-driven：覆盖两段/三段合法与各类非法输入组合。
+	cases := []struct {
+		name    string // 子测试场景名
+		version string // 待校验版本号
+		ok      bool   // 是否应通过格式校验
+	}{
+		{"two-segment", "1.0", true},        // 合法两段：x.x
+		{"three-segment", "1.2.3", true},    // 合法三段：x.x.x
+		{"multi-digit", "10.20.30", true},   // 合法：各段允许多位数字
+		{"single-segment", "1", false},      // 非法：只有一段，不满足 x.x
+		{"four-segment", "1.2.3.4", false},  // 非法：超过三段
+		{"v-prefix", "v1.0", false},         // 非法：带 v 前缀
+		{"non-numeric", "1.0-beta", false},  // 非法：含非数字后缀
+		{"trailing-dot", "1.0.", false},     // 非法：结尾多余的点
+		{"trimmed-space", " 1.0 ", true},    // 合法：service 先 TrimSpace，去空格后 1.0 满足格式
+		{"letters", "abc", false},           // 非法：纯字母
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			svc := NewPlatformSkillService(newFakePlatformSkillStore(), &fakeLibraryBlob{})
+			// 用合法扁平归档，确保上传只可能因版本格式失败，隔离校验点。
+			in := PlatformSkillUploadInput{Name: "weather", Version: c.version, Data: makeFlatSkillTar(t, "weather")}
+			_, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), in)
+			if c.ok {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, ErrPlatformSkillInvalid)
+			}
+		})
+	}
+}
+
 // 非 tar 字节（无法解析为归档）→ Invalid（后端扁平契约校验防线）。
 func TestPlatformSkillService_Upload_RejectsNonTar(t *testing.T) {
 	svc := NewPlatformSkillService(newFakePlatformSkillStore(), &fakeLibraryBlob{})
-	_, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "x", Version: "1", Data: []byte("not a tar at all")})
+	_, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "x", Version: "1.0", Data: []byte("not a tar at all")})
 	require.ErrorIs(t, err, ErrPlatformSkillInvalid)
 }
 
@@ -179,7 +213,7 @@ func TestPlatformSkillService_Upload_RejectsNestedLayout(t *testing.T) {
 	require.NoError(t, tw.Close())
 
 	svc := NewPlatformSkillService(newFakePlatformSkillStore(), &fakeLibraryBlob{})
-	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "weather", Version: "1", Data: buf.Bytes()})
+	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "weather", Version: "1.0", Data: buf.Bytes()})
 	require.ErrorIs(t, err, ErrPlatformSkillInvalid)
 }
 
@@ -194,7 +228,7 @@ func TestPlatformSkillService_Upload_RejectsMissingSkillMD(t *testing.T) {
 	require.NoError(t, tw.Close())
 
 	svc := NewPlatformSkillService(newFakePlatformSkillStore(), &fakeLibraryBlob{})
-	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "x", Version: "1", Data: buf.Bytes()})
+	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "x", Version: "1.0", Data: buf.Bytes()})
 	require.ErrorIs(t, err, ErrPlatformSkillInvalid)
 }
 
@@ -214,13 +248,13 @@ func TestPlatformSkillService_Delete_OK(t *testing.T) {
 	store := newFakePlatformSkillStore()
 	blob := &fakeLibraryBlob{}
 	svc := NewPlatformSkillService(store, blob)
-	res, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "w", Version: "1", Data: makeFlatSkillTar(t, "w")})
+	res, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "w", Version: "1.0", Data: makeFlatSkillTar(t, "w")})
 	require.NoError(t, err)
 
 	require.NoError(t, svc.Delete(context.Background(), psvcPlatformPrincipal(), res.ID))
 	_, ok := store.rows[res.ID]
 	assert.False(t, ok)
-	assert.Equal(t, []string{"library/platform/w/1.tar"}, blob.deleted)
+	assert.Equal(t, []string{"library/platform/w/1.0.tar"}, blob.deleted)
 }
 
 // 删除不存在的 id → NotFound。
@@ -237,18 +271,18 @@ func TestPlatformSkillService_Upload_RollbackOnDBError(t *testing.T) {
 	blob := &fakeLibraryBlob{}
 	svc := NewPlatformSkillService(store, blob)
 
-	_, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "w", Version: "1", Data: makeFlatSkillTar(t, "w")})
+	_, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "w", Version: "1.0", Data: makeFlatSkillTar(t, "w")})
 	require.Error(t, err)
-	assert.Equal(t, []string{"library/platform/w/1.tar"}, blob.deleted) // 回滚删除了刚写入的归档
+	assert.Equal(t, []string{"library/platform/w/1.0.tar"}, blob.deleted) // 回滚删除了刚写入的归档
 }
 
 // List 成功：平台管理员获取全部平台库 skill。
 func TestPlatformSkillService_List_OK(t *testing.T) {
 	store := newFakePlatformSkillStore()
 	svc := NewPlatformSkillService(store, &fakeLibraryBlob{})
-	_, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "a", Version: "1", Data: makeFlatSkillTar(t, "a")})
+	_, err := svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "a", Version: "1.0", Data: makeFlatSkillTar(t, "a")})
 	require.NoError(t, err)
-	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "b", Version: "1", Data: makeFlatSkillTar(t, "b")})
+	_, err = svc.Upload(context.Background(), psvcPlatformPrincipal(), PlatformSkillUploadInput{Name: "b", Version: "1.0", Data: makeFlatSkillTar(t, "b")})
 	require.NoError(t, err)
 
 	out, err := svc.List(context.Background(), psvcPlatformPrincipal())

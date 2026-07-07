@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 
 	"github.com/guregu/null/v5"
@@ -38,6 +39,12 @@ type PlatformSkillService struct {
 func NewPlatformSkillService(store PlatformSkillStore, blobs LibraryBlobStore) *PlatformSkillService {
 	return &PlatformSkillService{store: store, blobs: blobs}
 }
+
+// skillVersionPattern 约束平台库 skill 版本号格式：仅允许 x.x.x 或 x.x（各段为纯数字）。
+// 版本号会拼进对象存储路径（library/platform/<name>/<version>.tar）并用于同名同版本查重，
+// 放开格式会让同一 skill 出现「1.0」「v1.0」「1.0.0」等等价却不互斥的版本，破坏查重与排序语义，
+// 故在上传入口强约束为规范的两段 / 三段数字版本。
+var skillVersionPattern = regexp.MustCompile(`^\d+\.\d+(\.\d+)?$`)
 
 // PlatformSkillUploadInput 是上传平台库 skill 的入参（归档原始字节）。
 type PlatformSkillUploadInput struct {
@@ -110,6 +117,10 @@ func (s *PlatformSkillService) Upload(ctx context.Context, principal auth.Princi
 	version := strings.TrimSpace(in.Version)
 	if name == "" || version == "" || len(in.Data) == 0 {
 		return PlatformSkillResult{}, fmt.Errorf("%w: name/version/内容不能为空", ErrPlatformSkillInvalid)
+	}
+	// 版本号必须为规范的 x.x.x 或 x.x（纯数字段）格式，避免等价但不互斥的版本写入。
+	if !skillVersionPattern.MatchString(version) {
+		return PlatformSkillResult{}, fmt.Errorf("%w: 版本号必须为 x.x.x 或 x.x 格式", ErrPlatformSkillInvalid)
 	}
 	// 后端结构校验防线：归档必须遵循扁平契约（根级 SKILL.md + frontmatter 含非空 name + 无越界路径）。
 	// 前端已在打包阶段校验，但 curl / 旧客户端可能绕过前端传入坏包；坏包若放过，会到「安装到实例」
