@@ -282,8 +282,6 @@ type Querier interface {
 	SetAppAppliedVersion(ctx context.Context, arg SetAppAppliedVersionParams) error
 	// worker app_health_check handler 写最近一次健康检查结果；用于自动重启窗口计数。
 	SetAppHealthState(ctx context.Context, arg SetAppHealthStateParams) error
-	// 更新单个实例知识库累计容量上限；允许低于当前已用，后续上传由 KnowledgeService 拒绝。
-	SetAppKnowledgeQuota(ctx context.Context, arg SetAppKnowledgeQuotaParams) error
 	SetAppNewAPIKey(ctx context.Context, arg SetAppNewAPIKeyParams) error
 	// progressReporter 节流后写入；NULL/NULL 表示阶段切换或未知。
 	SetAppProgress(ctx context.Context, arg SetAppProgressParams) error

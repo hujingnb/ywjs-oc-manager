@@ -11,7 +11,6 @@ const mocks = vi.hoisted(() => ({
   error: vi.fn(),
   warning: vi.fn(),
   mutateAsync: vi.fn(),
-  updateQuotaMutateAsync: vi.fn(),
   canManage: vi.fn(() => true),
   authUser: { id: 'user-1', role: 'org_member', org_id: 'org-1' } as { id: string; role: string; org_id?: string },
   downloadAppKnowledgeFile: vi.fn(),
@@ -98,17 +97,6 @@ vi.mock('@/domain/permissions', async () => {
   return {
     ...actual,
     canManageApp: mocks.canManage,
-  }
-})
-
-vi.mock('@/api/hooks/useApps', async () => {
-  const actual = await vi.importActual<typeof import('@/api/hooks/useApps')>('@/api/hooks/useApps')
-  return {
-    ...actual,
-    useUpdateAppKnowledgeQuota: () => ({
-      mutateAsync: mocks.updateQuotaMutateAsync,
-      isPending: ref(false),
-    }),
   }
 })
 
@@ -225,7 +213,6 @@ describe('AppKnowledgeTab', () => {
       }
     })
     mocks.mutateAsync.mockReset()
-    mocks.updateQuotaMutateAsync.mockReset()
   })
 
   // 覆盖实例知识库文件列表列头文案：文件名列必须明确显示为「文件名称」。
@@ -235,12 +222,13 @@ describe('AppKnowledgeTab', () => {
     expect(wrapper.find('.header-name').text()).toBe('文件名称')
   })
 
-  // 覆盖实例知识库容量编辑入口：企业管理员可看到编辑空间按钮。
-  it('企业管理员可看到实例知识库空间编辑入口', () => {
+  // 覆盖实例知识库容量入口下线：容量只能在企业管理处调整，实例页不再暴露编辑空间入口，
+  // 企业管理员（拥有最高实例可见权限的角色）也看不到该按钮。
+  it('实例知识库页不再展示空间编辑入口', () => {
     mocks.authUser = { id: 'admin-1', role: 'org_admin', org_id: 'org-1' }
     const wrapper = mountTab()
 
-    expect(wrapper.text()).toContain('编辑空间')
+    expect(wrapper.text()).not.toContain('编辑空间')
   })
 
   // 平台管理员需要通过入口查看实例知识库远端 dataset 名称并调整 embedding 模型。
@@ -253,7 +241,7 @@ describe('AppKnowledgeTab', () => {
     expect(wrapper.find('.ragflow-dialog').text()).toBe('app:app-1:测试实例')
   })
 
-  // 企业管理员仍可管理文件或容量，但不能触发 RAGFlow dataset 运维弹框。
+  // 企业管理员仍可管理文件，但不能触发 RAGFlow dataset 运维弹框。
   it('org_admin 看不到实例知识库 RAGFlow 信息入口', () => {
     mocks.authUser = { id: 'admin-1', role: 'org_admin', org_id: 'org-1' }
     const wrapper = mountTab()

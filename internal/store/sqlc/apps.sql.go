@@ -679,24 +679,6 @@ func (q *Queries) SetAppHealthState(ctx context.Context, arg SetAppHealthStatePa
 	return err
 }
 
-const setAppKnowledgeQuota = `-- name: SetAppKnowledgeQuota :exec
-UPDATE apps
-SET knowledge_quota_bytes = ?,
-    updated_at = now()
-WHERE id = ? AND deleted_at IS NULL
-`
-
-type SetAppKnowledgeQuotaParams struct {
-	KnowledgeQuotaBytes int64  `db:"knowledge_quota_bytes" json:"knowledge_quota_bytes"`
-	ID                  string `db:"id" json:"id"`
-}
-
-// 更新单个实例知识库累计容量上限；允许低于当前已用，后续上传由 KnowledgeService 拒绝。
-func (q *Queries) SetAppKnowledgeQuota(ctx context.Context, arg SetAppKnowledgeQuotaParams) error {
-	_, err := q.db.ExecContext(ctx, setAppKnowledgeQuota, arg.KnowledgeQuotaBytes, arg.ID)
-	return err
-}
-
 const setAppNewAPIKey = `-- name: SetAppNewAPIKey :exec
 UPDATE apps
 SET

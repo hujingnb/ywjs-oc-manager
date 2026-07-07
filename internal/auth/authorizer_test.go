@@ -228,14 +228,6 @@ func TestCanManageKnowledgeRAGFlowDataset(t *testing.T) {
 	assert.False(t, CanManageKnowledgeRAGFlowDataset(Principal{}))
 }
 
-// TestCanUpdateAppKnowledgeQuota 验证实例知识库容量允许平台管理员和本企业管理员修改。
-func TestCanUpdateAppKnowledgeQuota(t *testing.T) {
-	assert.True(t, CanUpdateAppKnowledgeQuota(Principal{Role: domain.UserRolePlatformAdmin}, "org-1"))
-	assert.True(t, CanUpdateAppKnowledgeQuota(Principal{Role: domain.UserRoleOrgAdmin, OrgID: "org-1"}, "org-1"))
-	assert.False(t, CanUpdateAppKnowledgeQuota(Principal{Role: domain.UserRoleOrgAdmin, OrgID: "org-2"}, "org-1"))
-	assert.False(t, CanUpdateAppKnowledgeQuota(Principal{Role: domain.UserRoleOrgMember, OrgID: "org-1"}, "org-1"))
-}
-
 // TestCanWriteAppKnowledge 验证写入权限应用知识库的预期行为场景。
 func TestCanWriteAppKnowledge(t *testing.T) {
 	cases := []memberCase{

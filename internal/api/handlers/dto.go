@@ -369,12 +369,6 @@ type SwitchAppVersionRequest struct {
 	VersionID string `json:"version_id" binding:"required"`
 }
 
-// UpdateAppKnowledgeQuotaRequest 更新实例知识库累计容量上限的请求体。
-type UpdateAppKnowledgeQuotaRequest struct {
-	// QuotaBytes 是实例知识库累计容量上限，单位字节，必须大于 0。
-	QuotaBytes int64 `json:"quota_bytes" binding:"required"`
-}
-
 // UpdateAppLocaleRequest 是 PATCH /api/v1/apps/:appId/locale 的请求体。
 type UpdateAppLocaleRequest struct {
 	// Locale 是 hermes bot 对终端用户说话的语言（en/zh）；取值集合由 service 层校验。

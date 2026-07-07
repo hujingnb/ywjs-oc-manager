@@ -242,15 +242,11 @@ export default {
   knowledge: {
     heading: '实例知识库',
     ragflowInfo: 'RAGFlow 信息',
-    editQuota: '编辑空间',
     upload: '上传文件',
     searchPlaceholder: '搜索文件名称',
     statusAll: '全部状态',
     noApp: '尚未加载实例信息',
     queryError: '查询失败：',
-    quotaTitle: '编辑实例知识库空间',
-    quotaLabel: '空间大小 (GB)',
-    quotaError: '更新空间失败',
     // 文件列表列头
     colName: '文件名称',
     colSize: '大小',

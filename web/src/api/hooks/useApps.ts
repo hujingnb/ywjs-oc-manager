@@ -347,24 +347,5 @@ export function useSwitchAppVersion(appId: Ref<string | undefined>) {
   })
 }
 
-// useUpdateAppKnowledgeQuota 更新单个实例知识库容量，并刷新实例详情与知识库列表。
-export function useUpdateAppKnowledgeQuota(appId: Ref<string | undefined>) {
-  const client = useQueryClient()
-  return useMutation({
-    mutationFn: async (quotaBytes: number) => {
-      if (!appId.value) throw new Error(i18n.global.t('common.errors.missingAppId'))
-      const response = await apiRequest<{ app: AppDTO }>(
-        `/api/v1/apps/${appId.value}/knowledge/quota`,
-        { method: 'PATCH', body: { quota_bytes: quotaBytes } },
-      )
-      return response.app
-    },
-    onSuccess: () => {
-      void client.invalidateQueries({ queryKey: appKey(appId.value) })
-      void client.invalidateQueries({ queryKey: ['knowledge', 'app', appId.value] })
-    },
-  })
-}
-
 // 占位导出，避免 tree-shake 时丢失类型。
 export const _appsKeys = { orgKey, appKey, runtimeKey, localeStatusKey, jobKey }

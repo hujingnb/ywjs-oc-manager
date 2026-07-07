@@ -15,11 +15,10 @@
       </div>
     </template>
     <template #header-extra>
-      <div v-if="canManage || canEditQuota" class="upload-actions">
+      <div v-if="canManage || canManageRAGFlowInfo" class="upload-actions">
         <n-button v-if="canManageRAGFlowInfo" size="small" @click="ragflowDialogOpen = true">
           {{ t('apps.knowledge.ragflowInfo') }}
         </n-button>
-        <n-button v-if="canEditQuota" size="small" @click="openQuotaModal">{{ t('apps.knowledge.editQuota') }}</n-button>
         <template v-if="canManage">
           <span class="upload-limit">{{ t('knowledge.messages.uploadAcceptedTypes', { label: KNOWLEDGE_ALLOWED_EXTENSIONS_LABEL }) }}</span>
           <span class="upload-limit">{{ t('knowledge.messages.uploadMaxMessage', { label: KNOWLEDGE_UPLOAD_MAX_LABEL }) }}</span>
@@ -64,19 +63,6 @@
       :row-key="(row) => row.id"
     />
 
-    <n-modal v-model:show="showQuotaModal" preset="card" :title="t('apps.knowledge.quotaTitle')" style="width: 420px">
-      <n-form label-placement="top" @submit.prevent="submitQuota">
-        <n-form-item :label="t('apps.knowledge.quotaLabel')">
-          <n-input-number v-model:value="quotaGB" :min="1" :precision="0" style="width: 100%" />
-        </n-form-item>
-        <n-space justify="end">
-          <n-button @click="showQuotaModal = false">{{ t('common.actions.cancel') }}</n-button>
-          <n-button type="primary" attr-type="submit" :loading="updateQuotaMutation.isPending.value">{{ t('common.actions.save') }}</n-button>
-        </n-space>
-        <p v-if="quotaFeedback" class="state-text" :class="{ danger: quotaError }">{{ quotaFeedback }}</p>
-      </n-form>
-    </n-modal>
-
     <RAGFlowDatasetInfoDialog
       v-model:visible="ragflowDialogOpen"
       scope="app"
@@ -88,10 +74,10 @@
 
 <script setup lang="ts">
 import { computed, h, inject, ref, watch, type Ref } from 'vue'
-import { NButton, NCard, NDataTable, NForm, NFormItem, NInput, NInputNumber, NModal, NSelect, NSpace, NTag, useMessage, type DataTableColumns } from 'naive-ui'
+import { NButton, NCard, NDataTable, NInput, NSelect, NSpace, NTag, useMessage, type DataTableColumns } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 
-import { useUpdateAppKnowledgeQuota, type AppDTO } from '@/api/hooks/useApps'
+import { type AppDTO } from '@/api/hooks/useApps'
 import {
   KNOWLEDGE_ALLOWED_EXTENSIONS_LABEL,
   KNOWLEDGE_UPLOAD_ACCEPT,
@@ -104,7 +90,7 @@ import {
   useUploadAppKnowledge,
   type KnowledgeDocument,
 } from '@/api/hooks/useKnowledge'
-import { canManageApp, canManageRAGFlowDatasetInfo, canUpdateAppKnowledgeQuota } from '@/domain/permissions'
+import { canManageApp, canManageRAGFlowDatasetInfo } from '@/domain/permissions'
 import { useAuthStore } from '@/stores/auth'
 import { useUploadProgressStore } from '@/stores/uploadProgress'
 import {
@@ -122,7 +108,6 @@ import RAGFlowDatasetInfoDialog from '@/components/RAGFlowDatasetInfoDialog.vue'
 // AppKnowledgeTab 管理单个应用的 RAGFlow 知识库文件，权限来自应用详情注入。
 const props = defineProps<{ appId: string }>()
 const { t } = useI18n()
-const bytesPerGB = 1024 * 1024 * 1024
 const appIdRef = computed<string | undefined>(() => props.appId)
 const auth = useAuthStore()
 
@@ -144,20 +129,13 @@ const listing = useAppKnowledgeQuery(appIdRef, {
 const uploadMutation = useUploadAppKnowledge(appIdRef)
 const deleteMutation = useDeleteAppKnowledge(appIdRef)
 const reparseMutation = useReparseAppKnowledge(appIdRef)
-const updateQuotaMutation = useUpdateAppKnowledgeQuota(appIdRef)
 const errorMessage = ref<string>('')
-const showQuotaModal = ref(false)
 const ragflowDialogOpen = ref(false)
-const quotaGB = ref<number>(1)
-const quotaFeedback = ref('')
-const quotaError = ref(false)
 const uploadProgress = useUploadProgressStore()
 const message = useMessage()
 
 // canManage 控制上传和删除入口，后端仍会基于应用归属做最终权限校验。
 const canManage = computed(() => canManageApp(auth.user, app?.value))
-// canEditQuota 单独控制容量入口，平台管理员可编辑容量但不一定拥有应用写操作入口。
-const canEditQuota = computed(() => canUpdateAppKnowledgeQuota(auth.user, app?.value))
 // canManageRAGFlowInfo 控制远端 dataset 运维入口，仅平台管理员可见。
 const canManageRAGFlowInfo = computed(() => canManageRAGFlowDatasetInfo(auth.user))
 // ragflowTargetName 给运维弹框展示实例名；注入值缺失时保留稳定兜底文案。
@@ -273,27 +251,6 @@ async function onDropUpload(event: DragEvent) {
   dragActive.value = false
   if (!canManage.value) return
   await uploadFiles(knowledgeFilesFromDrop(event))
-}
-
-// openQuotaModal 将后端 bytes 上限转换成管理员可编辑的 GB 单位，并重置上次提交反馈。
-function openQuotaModal() {
-  quotaGB.value = Math.max(1, Math.round((app?.value?.knowledge_quota_bytes ?? bytesPerGB) / bytesPerGB))
-  quotaFeedback.value = ''
-  quotaError.value = false
-  showQuotaModal.value = true
-}
-
-// submitQuota 提交前把 GB 转回 bytes；失败时保留弹窗并展示后端错误。
-async function submitQuota() {
-  quotaFeedback.value = ''
-  quotaError.value = false
-  try {
-    await updateQuotaMutation.mutateAsync(Math.max(1, Math.round(quotaGB.value)) * bytesPerGB)
-    showQuotaModal.value = false
-  } catch (err) {
-    quotaError.value = true
-    quotaFeedback.value = err instanceof Error ? err.message : t('apps.knowledge.quotaError')
-  }
 }
 
 // deleteEntry 删除知识库条目并把 mutation 错误转为页面内反馈文案。

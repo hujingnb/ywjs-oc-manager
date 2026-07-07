@@ -26,8 +26,6 @@ type AppStore interface {
 	// ListAppsByOrgWithVersion 批量联查组织实例及绑定版本信息，用于 version_synced 批量计算。
 	ListAppsByOrgWithVersion(ctx context.Context, arg sqlc.ListAppsByOrgWithVersionParams) ([]sqlc.ListAppsByOrgWithVersionRow, error)
 	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) error
-	// SetAppKnowledgeQuota 更新单个实例知识库容量上限。
-	SetAppKnowledgeQuota(ctx context.Context, arg sqlc.SetAppKnowledgeQuotaParams) error
 	SoftDeleteApp(ctx context.Context, id string) error
 	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) error
 	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) error
@@ -320,44 +318,6 @@ func (s *AppService) SwitchAppVersion(ctx context.Context, principal auth.Princi
 	}
 	result := toAppResult(newRow.App)
 	result.VersionSynced = computeVersionSynced(newRow.App, newRow.VersionRevision, newRow.VersionImageID, s.imageResolver)
-	return result, nil
-}
-
-// UpdateAppKnowledgeQuota 更新单个实例的知识库累计容量上限。
-func (s *AppService) UpdateAppKnowledgeQuota(ctx context.Context, principal auth.Principal, appID string, quotaBytes int64) (AppResult, error) {
-	// 容量上限必须为正数；允许低于当前已用，后续上传路径负责拦截超额写入。
-	if err := validateKnowledgeQuotaBytes(quotaBytes); err != nil {
-		return AppResult{}, err
-	}
-	// 先读取实例所属组织，用于容量编辑权限校验和更新后的版本同步计算。
-	row, err := s.store.GetAppWithVersion(ctx, appID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return AppResult{}, ErrNotFound
-	}
-	if err != nil {
-		return AppResult{}, fmt.Errorf("查询应用失败: %w", err)
-	}
-	if !auth.CanUpdateAppKnowledgeQuota(principal, row.App.OrgID) {
-		return AppResult{}, ErrForbidden
-	}
-	if err := s.store.SetAppKnowledgeQuota(ctx, sqlc.SetAppKnowledgeQuotaParams{
-		ID:                  row.App.ID,
-		KnowledgeQuotaBytes: quotaBytes,
-	}); err != nil {
-		return AppResult{}, fmt.Errorf("更新实例知识库容量失败: %w", err)
-	}
-	// 重新读取数据库结果，确保返回值包含数据库触发器或并发更新后的最新实例状态。
-	newRow, err := s.store.GetAppWithVersion(ctx, appID)
-	if err != nil {
-		return AppResult{}, fmt.Errorf("重新查询应用失败: %w", err)
-	}
-	result := toAppResult(newRow.App)
-	result.VersionSynced = computeVersionSynced(newRow.App, newRow.VersionRevision, newRow.VersionImageID, s.imageResolver)
-	// runtime image 信息只暴露给平台管理员，用于运维排障；企业管理员不能看到节点内部镜像细节。
-	if principal.Role == domain.UserRolePlatformAdmin {
-		result.RuntimeImageRef = newRow.App.RuntimeImageRef
-		result.RuntimeImageSha256 = newRow.App.RuntimeImageSha256
-	}
 	return result, nil
 }
 

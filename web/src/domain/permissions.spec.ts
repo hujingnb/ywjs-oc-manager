@@ -7,7 +7,6 @@ import {
   canManageApp,
   canManageOrgKnowledge,
   canManageRAGFlowDatasetInfo,
-  canUpdateAppKnowledgeQuota,
 } from './permissions'
 
 describe('canManageOrgKnowledge', () => {
@@ -112,27 +111,6 @@ describe('canCreateAppForOrg', () => {
   // 覆盖 platform_admin 不可通过组织管理员入口创建应用。
   it('platform_admin 返回 false', () => {
     expect(canCreateAppForOrg({ role: 'platform_admin' }, 'org-1')).toBe(false)
-  })
-})
-
-describe('canUpdateAppKnowledgeQuota', () => {
-  // 覆盖平台管理员可作为运维兜底编辑任意实例知识库容量。
-  it('allows platform admin', () => {
-    expect(canUpdateAppKnowledgeQuota({ role: 'platform_admin' }, { org_id: 'org-1' })).toBe(true)
-  })
-
-  // 覆盖企业管理员只能编辑本企业实例知识库容量。
-  it('allows only same-org org admin', () => {
-    expect(canUpdateAppKnowledgeQuota({ role: 'org_admin', org_id: 'org-1' }, { org_id: 'org-1' })).toBe(true)
-    expect(canUpdateAppKnowledgeQuota({ role: 'org_admin', org_id: 'org-2' }, { org_id: 'org-1' })).toBe(false)
-  })
-
-  // 覆盖普通成员不可编辑容量，即使是自己的实例也不允许。
-  it('rejects org member', () => {
-    expect(canUpdateAppKnowledgeQuota(
-      { role: 'org_member', id: 'u1', org_id: 'org-1' },
-      { org_id: 'org-1', owner_user_id: 'u1' },
-    )).toBe(false)
   })
 })
 

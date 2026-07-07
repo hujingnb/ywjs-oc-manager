@@ -242,15 +242,11 @@ export default {
   knowledge: {
     heading: 'Knowledge base',
     ragflowInfo: 'RAGFlow info',
-    editQuota: 'Edit quota',
     upload: 'Upload files',
     searchPlaceholder: 'Search file name',
     statusAll: 'All statuses',
     noApp: 'Instance not loaded yet',
     queryError: 'Load failed: ',
-    quotaTitle: 'Edit knowledge base quota',
-    quotaLabel: 'Quota (GB)',
-    quotaError: 'Failed to update quota',
     // File list columns
     colName: 'File name',
     colSize: 'Size',

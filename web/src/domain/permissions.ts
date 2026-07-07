@@ -47,18 +47,6 @@ export function canManageApp(user: PermissionUser | null | undefined, app: Permi
   return false
 }
 
-// canUpdateAppKnowledgeQuota：实例知识库容量由企业管理员设置，平台管理员可运维兜底。
-// 普通成员不能编辑容量，即使该实例属于自己。
-export function canUpdateAppKnowledgeQuota(
-  user: PermissionUser | null | undefined,
-  app: PermissionApp | null | undefined,
-): boolean {
-  if (!user || !app) return false
-  if (user.role === 'platform_admin') return true
-  if (user.role === 'org_admin') return user.org_id === app.org_id
-  return false
-}
-
 // canManageRAGFlowDatasetInfo 控制 RAGFlow dataset 运维弹框入口；后端仍是最终权限边界。
 export function canManageRAGFlowDatasetInfo(user: PermissionUser | null | undefined): boolean {
   return user?.role === 'platform_admin'

@@ -3961,100 +3961,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/apps/{appId}/knowledge/quota": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /**
-         * 更新实例知识库容量
-         * @description 更新单个实例知识库累计容量上限，允许低于当前已用，后续上传会被拦截
-         */
-        patch: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description 应用 ID */
-                    appId: string;
-                };
-                cookie?: never;
-            };
-            /** @description 容量上限 */
-            requestBody: {
-                content: {
-                    "application/json": Record<string, never> | components["schemas"]["handlers.UpdateAppKnowledgeQuotaRequest"];
-                };
-            };
-            responses: {
-                /** @description OK */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            [key: string]: components["schemas"]["service.AppResult"];
-                        };
-                    };
-                };
-                /** @description Bad Request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Unauthorized */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Not Found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Internal Server Error */
-                500: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-            };
-        };
-        trace?: never;
-    };
     "/apps/{appId}/knowledge/ragflow-dataset": {
         parameters: {
             query?: never;
@@ -13363,10 +13269,6 @@ export interface components {
         "handlers.SwitchAppVersionRequest": {
             /** @description VersionID 是目标助手版本 id，必须在实例所属企业的 allowlist 内。 */
             version_id: string;
-        };
-        "handlers.UpdateAppKnowledgeQuotaRequest": {
-            /** @description QuotaBytes 是实例知识库累计容量上限，单位字节，必须大于 0。 */
-            quota_bytes: number;
         };
         "handlers.UpdateAppLocaleRequest": {
             /** @description Locale 是 hermes bot 对终端用户说话的语言（en/zh）；取值集合由 service 层校验。 */
