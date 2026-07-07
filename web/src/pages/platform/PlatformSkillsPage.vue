@@ -14,6 +14,7 @@
           <n-radio-group v-model:value="mode">
             <n-radio-button value="markdown">{{ t('platform.skills.uploadMode.markdown') }}</n-radio-button>
             <n-radio-button value="folder">{{ t('platform.skills.uploadMode.folder') }}</n-radio-button>
+            <n-radio-button value="zip">{{ t('platform.skills.uploadMode.zip') }}</n-radio-button>
           </n-radio-group>
         </n-form-item>
 
@@ -65,6 +66,17 @@
           <li>{{ t('platform.skills.folderMode.tipSubdir') }}</li>
           <li>{{ t('platform.skills.folderMode.tipName') }}</li>
         </ul>
+
+        <!-- 上传压缩包：选择一个 zip，内部含 skill 全部文件（须含 SKILL.md） -->
+        <n-form-item v-if="mode === 'zip'" :label="t('platform.skills.zipMode.label')">
+          <input ref="zipInputRef" type="file" accept=".zip" style="display: none" @change="onZipChange" />
+          <div style="display: flex; align-items: center; gap: 12px">
+            <n-button @click="zipInputRef?.click()">{{ t('platform.skills.zipMode.selectButton') }}</n-button>
+            <span v-if="zipName" class="state-text" style="margin: 0">{{ t('platform.skills.zipMode.selectedInfo', { name: zipName }) }}</span>
+            <span v-else class="state-text" style="margin: 0">{{ t('platform.skills.zipMode.noZip') }}</span>
+          </div>
+          <p class="upload-hint" style="margin: 8px 0 0">{{ t('platform.skills.zipMode.hint') }}</p>
+        </n-form-item>
 
         <!-- 解析预览：成功展示识别到的技能 name/description，失败展示红色错误提示 -->
         <p v-if="parsed.error" class="state-text danger" style="margin: 4px 0">{{ parsed.error }}</p>
@@ -132,6 +144,7 @@ import { usePlatformSkillsQuery, useUploadPlatformSkill, useDeletePlatformSkill 
 import {
   packFromFolder,
   packFromMarkdown,
+  packFromZip,
   parseSkillFrontmatter,
   type SkillMeta,
   type UploadedFile,
@@ -148,13 +161,16 @@ const deleteMutation = useDeletePlatformSkill()
 const message = useMessage()
 const dialog = useDialog()
 
-// 上传方式：markdown=粘贴 SKILL.md 全文；folder=上传 skill 文件夹。
-const mode = ref<'markdown' | 'folder'>('markdown')
+// 上传方式：markdown=粘贴 SKILL.md 全文；folder=上传 skill 文件夹；zip=上传压缩包。
+const mode = ref<'markdown' | 'folder' | 'zip'>('markdown')
 // 粘贴 Markdown 模式的 SKILL.md 文本。
 const mdText = ref('')
 // 上传文件夹模式：已读入的文件列表与所选文件夹名（仅用于展示）。
 const folderFiles = ref<UploadedFile[]>([])
 const folderName = ref('')
+// 上传压缩包模式：已读入的 zip 字节与文件名（仅用于展示）。
+const zipBytes = ref<Uint8Array | null>(null)
+const zipName = ref('')
 // 手填版本号；描述默认取自 frontmatter，可手动修改。
 const version = ref('')
 const description = ref('')
@@ -175,6 +191,9 @@ const uploadFeedbackError = ref(false)
 // 隐藏的目录选择 input 引用。
 const folderInputRef = ref<HTMLInputElement | null>(null)
 
+// 隐藏的 zip 文件选择 input 引用。
+const zipInputRef = ref<HTMLInputElement | null>(null)
+
 // parsed 实时解析当前输入，得到 frontmatter 的 name/description 或校验错误，供预览与提交按钮使用。
 // markdown 模式只解析 frontmatter（不打包）；folder 模式调用 packFromFolder 以同时校验扁平布局。
 const parsed = computed<{ meta: SkillMeta | null; error: string }>(() => {
@@ -182,6 +201,11 @@ const parsed = computed<{ meta: SkillMeta | null; error: string }>(() => {
     if (mode.value === 'markdown') {
       if (!mdText.value.trim()) return { meta: null, error: '' }
       return { meta: parseSkillFrontmatter(mdText.value), error: '' }
+    }
+    if (mode.value === 'zip') {
+      if (!zipBytes.value) return { meta: null, error: '' }
+      const r = packFromZip(zipBytes.value)
+      return { meta: { name: r.name, description: r.description }, error: '' }
     }
     if (folderFiles.value.length === 0) return { meta: null, error: '' }
     const r = packFromFolder(folderFiles.value)
@@ -246,6 +270,23 @@ async function onFolderChange(event: Event) {
   uploadFeedbackError.value = false
 }
 
+// onZipChange 读入所选 zip 文件的字节，供后续 packFromZip 解析/打包。
+async function onZipChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) {
+    zipBytes.value = null
+    zipName.value = ''
+    return
+  }
+  zipBytes.value = new Uint8Array(await file.arrayBuffer())
+  zipName.value = file.name
+  // 重置后允许再次选择同一文件。
+  input.value = ''
+  uploadFeedback.value = ''
+  uploadFeedbackError.value = false
+}
+
 // onUpload 在浏览器内把输入打包成扁平 tar，再走 multipart 上传到平台库。
 // 成功后重置表单并刷新列表（hook onSuccess 自动 invalidate 缓存）。
 async function onUpload() {
@@ -254,7 +295,12 @@ async function onUpload() {
   uploadFeedbackError.value = false
   try {
     // 提交时再打包：拿到 name/description（来自 frontmatter）与扁平 tar 字节。
-    const result = mode.value === 'markdown' ? packFromMarkdown(mdText.value) : packFromFolder(folderFiles.value)
+    const result =
+      mode.value === 'markdown'
+        ? packFromMarkdown(mdText.value)
+        : mode.value === 'zip'
+          ? packFromZip(zipBytes.value!)
+          : packFromFolder(folderFiles.value)
     // result.tar 是 Uint8Array，作为 BlobPart 传入 File；显式标注规避新版 TS lib 对
     // ArrayBufferLike vs ArrayBuffer 的泛型差异告警。
     const file = new File([result.tar as BlobPart], `${result.name}.tar`, { type: 'application/x-tar' })
@@ -271,6 +317,8 @@ async function onUpload() {
     mdText.value = ''
     folderFiles.value = []
     folderName.value = ''
+    zipBytes.value = null
+    zipName.value = ''
     version.value = ''
     description.value = ''
   } catch (err) {

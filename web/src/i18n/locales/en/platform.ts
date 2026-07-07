@@ -379,6 +379,7 @@ export default {
       label: 'Upload method',
       markdown: 'Paste Markdown',
       folder: 'Upload folder',
+      zip: 'Upload zip',
     },
     markdownMode: {
       label: 'SKILL.md content *',
@@ -400,6 +401,13 @@ export default {
       tipSelectSkillFolder: "Select the skill's own folder, which must directly contain SKILL.md (i.e. selected-folder/SKILL.md — do not select its parent).",
       tipSubdir: 'Subdirectories and attached files are preserved (e.g. scripts/, assets/, reference.md).',
       tipName: 'Skill name comes from the SKILL.md name field, not the folder name. Packaging strips the top-level directory.',
+    },
+    zipMode: {
+      label: 'Skill zip archive *',
+      selectButton: 'Select zip file',
+      selectedInfo: '{name}',
+      noZip: 'No archive selected',
+      hint: 'Select a zip archive containing all skill files (must include SKILL.md). If everything is wrapped in a single top-level directory (e.g. my-coffee/SKILL.md), it is stripped automatically on upload.',
     },
     parsedPreview: 'Detected skill: ',
     // markdownExample: SKILL.md format example shown in the UI and used by the fill example button
