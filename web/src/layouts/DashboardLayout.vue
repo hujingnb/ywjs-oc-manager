@@ -8,9 +8,9 @@
     >
       <!-- Logo -->
       <div class="brand-block">
-        <div class="brand-mark">OC</div>
+        <div class="brand-mark">AGW</div>
         <div class="logo-text">
-          <strong>FlashAI</strong>
+          <strong>AiGoWork</strong>
           <span>Manager</span>
         </div>
       </div>

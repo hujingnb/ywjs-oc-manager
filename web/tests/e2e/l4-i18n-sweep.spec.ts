@@ -34,7 +34,7 @@ const APP_TABS = ['overview', 'kanban', 'cron', 'channels', 'knowledge', 'skills
 // zh 页允许残留的拉丁串白名单（品牌名 / 技术术语 / 协议名 / 模型名等，非漏译）。
 // 命中其一即视为合理英文，不计入疑似漏译。大小写不敏感的「包含」匹配。
 const LATIN_ALLOW = [
-  'OC', 'FlashAI', 'Manager', 'AGENT RUNTIME MANAGER', 'ENTERPRISE AI AGENT PLATFORM',
+  'OC', 'AGW', 'AiGoWork', 'Manager', 'AGENT RUNTIME MANAGER', 'ENTERPRISE AI AGENT PLATFORM',
   'Verified', 'Token', 'API', 'AI', 'Agent', 'ID', 'URL', 'CPU', 'GPU', 'RAM', 'S3',
   'MinIO', 'RAGFlow', 'Hermes', 'GB', 'MB', 'KB', 'http', 'gpt', 'claude', 'qwen',
   'embedding', 'rerank', 'admin', 'wechat', 'WeChat', 'v1', 'JSON', 'YAML', 'Markdown',
