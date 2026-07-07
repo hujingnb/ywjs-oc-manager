@@ -261,6 +261,7 @@ export default {
       createButton: '新建行业库',
     },
     fileSection: {
+      backButton: '返回列表',
       clearButton: '清空文件',
       uploadButton: '上传文件',
       overwriteAlert: '同名文件会覆盖当前行业库内的旧文件。',

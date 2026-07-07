@@ -243,6 +243,7 @@ export default {
       createButton: 'New knowledge base',
     },
     fileSection: {
+      backButton: 'Back to list',
       clearButton: 'Clear files',
       uploadButton: 'Upload files',
       overwriteAlert: 'Files with the same name will overwrite existing files in this knowledge base.',

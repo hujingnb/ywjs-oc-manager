@@ -27,9 +27,16 @@
 
     <n-card v-if="selectedBase" :bordered="true">
       <template #header>
-        <div>
-          <p class="eyebrow">Industry</p>
-          <h2 style="margin: 0">{{ selectedBase.name }}</h2>
+        <div style="display: flex; align-items: center; gap: 12px">
+          <!-- 返回按钮：清空选中，回到纯行业库列表视图 -->
+          <n-button quaternary size="small" @click="selectedBaseId = undefined">
+            <template #icon><ArrowLeft :size="16" /></template>
+            {{ t('platform.industry.fileSection.backButton') }}
+          </n-button>
+          <div>
+            <p class="eyebrow">Industry</p>
+            <h2 style="margin: 0">{{ selectedBase.name }}</h2>
+          </div>
         </div>
       </template>
       <template #header-extra>
@@ -93,7 +100,9 @@
       />
     </n-card>
 
-    <n-card v-else :bordered="true">
+    <!-- 空态卡片仅在「确实没有任何行业库」时展示；
+         「有库但未选中」不再落到这里（否则会误报暂无），此时下方不渲染任何卡片，只保留上方列表。 -->
+    <n-card v-else-if="bases && bases.items.length === 0" :bordered="true">
       <div class="state-text">{{ t('platform.industry.empty') }}</div>
     </n-card>
 
@@ -213,7 +222,7 @@
 <script setup lang="ts">
 import { computed, h, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Plus } from 'lucide-vue-next'
+import { ArrowLeft, Plus } from 'lucide-vue-next'
 import { NAlert, NButton, NCard, NDataTable, NDatePicker, NInput, NModal, NSelect, NSpace, NTag, useMessage, type DataTableColumns } from 'naive-ui'
 
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
@@ -358,12 +367,10 @@ const industryExternalUploadMarkdown = computed(() =>
 watch(
   () => bases.value?.items ?? [],
   (items) => {
-    if (items.length === 0) {
-      selectedBaseId.value = undefined
-      return
-    }
+    // 仅在「当前选中的行业库不存在于最新列表」时清空选中（列表为空、或选中的库被删除/被搜索过滤掉）。
+    // 不再自动选中第一个：进入页面默认只展示行业库列表，需用户主动点击「文件」才展开文件面板。
     if (!items.some(item => item.id === selectedBaseId.value)) {
-      selectedBaseId.value = items[0].id
+      selectedBaseId.value = undefined
     }
   },
   { immediate: true },
