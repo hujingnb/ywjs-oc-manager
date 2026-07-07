@@ -2,11 +2,13 @@
 // 覆盖：frontmatter 解析（正常/缺 fence/缺 name/引号）、扁平 tar 打包 round-trip、
 // 文件夹剥层与根级 SKILL.md 校验、Markdown 打包。
 import { describe, expect, it } from 'vitest'
+import { zipSync, strToU8 } from 'fflate'
 
 import {
   buildTar,
   packFromFolder,
   packFromMarkdown,
+  packFromZip,
   parseSkillFrontmatter,
   type TarEntry,
   type UploadedFile,
@@ -171,5 +173,90 @@ describe('packFromFolder', () => {
       { relativePath: 'skill/../escape.txt', data: enc('evil') },
     ]
     expect(() => packFromFolder(files)).toThrow(/非法路径/)
+  })
+})
+
+describe('packFromZip', () => {
+  // 带顶层目录的 zip（zip 一个文件夹的常见形态）：剥掉最外层 my-coffee/ 后 SKILL.md 落到归档根，
+  // 附属文件同样落到根级，name/description 取自 frontmatter。
+  it('剥掉单层顶层目录并打成扁平 tar', () => {
+    const zip = zipSync({
+      'my-coffee/SKILL.md': strToU8('---\nname: my-coffee\ndescription: 冲咖啡\n---\n正文'),
+      'my-coffee/LICENSE': strToU8('MIT'),
+      'my-coffee/scripts/run.sh': strToU8('echo hi'),
+    })
+    const res = packFromZip(zip)
+    expect(res.name).toBe('my-coffee')
+    expect(res.description).toBe('冲咖啡')
+    const parsed = readTar(res.tar)
+    // 顶层 my-coffee/ 被剥离：SKILL.md 落到归档根，子目录 scripts/ 保留。
+    expect(parsed['SKILL.md']).toBe('---\nname: my-coffee\ndescription: 冲咖啡\n---\n正文')
+    expect(parsed['LICENSE']).toBe('MIT')
+    expect(parsed['scripts/run.sh']).toBe('echo hi')
+    expect(parsed['my-coffee/SKILL.md']).toBeUndefined()
+  })
+
+  // zip 内已经是扁平结构（根级即 SKILL.md）：原样打包，不误剥。
+  it('已扁平的 zip 原样打包', () => {
+    const zip = zipSync({
+      'SKILL.md': strToU8('---\nname: flat\n---\n正文'),
+      'notes.md': strToU8('n'),
+    })
+    const res = packFromZip(zip)
+    expect(res.name).toBe('flat')
+    const parsed = readTar(res.tar)
+    expect(parsed['SKILL.md']).toBe('---\nname: flat\n---\n正文')
+    expect(parsed['notes.md']).toBe('n')
+  })
+
+  // 剥层后根级仍无 SKILL.md（嵌在更深一层）应抛错。
+  it('找不到根级 SKILL.md 抛错', () => {
+    const zip = zipSync({
+      'pkg/inner/SKILL.md': strToU8('---\nname: x\n---\n'),
+    })
+    expect(() => packFromZip(zip)).toThrow(/根级 SKILL.md/)
+  })
+
+  // macOS 打包残留（__MACOSX/、.DS_Store）应被过滤，不进 tar。
+  it('过滤 __MACOSX 与 .DS_Store', () => {
+    const zip = zipSync({
+      'my-coffee/SKILL.md': strToU8('---\nname: my-coffee\n---\n正文'),
+      'my-coffee/.DS_Store': strToU8('junk'),
+      '__MACOSX/my-coffee/._SKILL.md': strToU8('junk'),
+    })
+    const res = packFromZip(zip)
+    const parsed = readTar(res.tar)
+    expect(parsed['SKILL.md']).toBe('---\nname: my-coffee\n---\n正文')
+    expect(parsed['.DS_Store']).toBeUndefined()
+    expect(Object.keys(parsed)).toEqual(['SKILL.md'])
+  })
+
+  // 含越界路径条目（..）应被拒绝。
+  it('越界路径抛错', () => {
+    const zip = zipSync({
+      'SKILL.md': strToU8('---\nname: x\n---\n'),
+      '../evil.sh': strToU8('rm -rf /'),
+    })
+    expect(() => packFromZip(zip)).toThrow(/非法路径/)
+  })
+
+  // frontmatter 缺 name 应抛错（复用 parseSkillFrontmatter 的校验）。
+  it('frontmatter 缺 name 抛错', () => {
+    const zip = zipSync({
+      'my-coffee/SKILL.md': strToU8('---\ndescription: 无名\n---\n正文'),
+    })
+    expect(() => packFromZip(zip)).toThrow(/name/)
+  })
+
+  // 传入非 zip 的随机字节：unzipSync 失败应抛「zip 解压失败」提示。
+  it('损坏/非 zip 字节抛解压失败', () => {
+    const garbage = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8])
+    expect(() => packFromZip(garbage)).toThrow(/解压失败/)
+  })
+
+  // 空 zip（无任何条目）：过滤后没有可用文件应抛「zip 内没有可用文件」。
+  it('空 zip 抛无可用文件', () => {
+    const zip = zipSync({})
+    expect(() => packFromZip(zip)).toThrow(/没有可用文件/)
   })
 })

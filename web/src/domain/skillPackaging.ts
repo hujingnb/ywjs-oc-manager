@@ -5,6 +5,8 @@
 // SKILLS_DIR/<技能名>/。因此打包时绝不能再套一层 <技能名>/ 目录，否则解压后 SKILL.md
 // 落不到技能目录根，实例对账永远 pending。后端 hermes.InspectFlatSkillArchive 会再校验一次。
 
+import { unzipSync } from 'fflate'
+
 // SkillMeta 是从 SKILL.md frontmatter 解析出的元信息。
 export interface SkillMeta {
   // name：技能规范名，取自 frontmatter 的 name 字段（必填）；同时作为平台库 name。
@@ -155,8 +157,30 @@ export interface UploadedFile {
   data: Uint8Array
 }
 
+// finalizePack 对「已剥离到归档根」的条目做统一收尾：路径安全校验 + 根级 SKILL.md 校验 +
+// 解析 frontmatter + 打成扁平 tar。packFromFolder 与 packFromZip 共用，避免重复校验逻辑。
+// 错误文案保留「非法路径」「根级 SKILL.md」关键词，供上层页面直接展示、也被单测断言。
+function finalizePack(entries: TarEntry[]): PackResult {
+  let skillMD: TarEntry | undefined
+  for (const e of entries) {
+    // 拒绝空路径、绝对路径、含 .. 的越界路径，防止解压时写出归档根之外。
+    if (!e.path || e.path.startsWith('/') || e.path.split('/').includes('..')) {
+      throw new Error(`归档含非法路径条目：${e.path || '(空路径)'}`)
+    }
+    if (e.path === 'SKILL.md') {
+      skillMD = e
+    }
+  }
+  if (!skillMD) {
+    throw new Error('未找到根级 SKILL.md（其应直接位于归档根或单层目录内）')
+  }
+  const meta = parseSkillFrontmatter(new TextDecoder().decode(skillMD.data))
+  const tar = buildTar(entries)
+  return { name: meta.name, description: meta.description, tar }
+}
+
 // packFromFolder 处理「上传文件夹」：剥掉所选目录的顶层目录名，使内容落到归档根（满足扁平契约），
-// 校验根级存在 SKILL.md 后按扁平契约打包（保留子目录结构）。
+// 再交给 finalizePack 校验根级 SKILL.md 并打成扁平 tar。
 // 任何非法路径（越界 / 缺目录层级）或根级缺 SKILL.md 时抛出带中文说明的 Error。
 export function packFromFolder(files: UploadedFile[]): PackResult {
   if (files.length === 0) {
@@ -172,22 +196,59 @@ export function packFromFolder(files: UploadedFile[]): PackResult {
     }
     return { path: norm.slice(idx + 1), data: f.data }
   })
-  // 路径安全 + 根级 SKILL.md 校验。
-  let hasRootSkillMD = false
-  for (const e of stripped) {
-    if (!e.path || e.path.startsWith('/') || e.path.split('/').includes('..')) {
-      throw new Error(`文件夹含非法路径条目：${e.path || '(空路径)'}`)
-    }
-    if (e.path === 'SKILL.md') {
-      hasRootSkillMD = true
-    }
+  return finalizePack(stripped)
+}
+
+// stripSingleTopDir 处理 zip 的顶层目录：
+// - 若根级已存在 SKILL.md，视为已扁平，原样返回；
+// - 否则当所有文件都位于「同一个」顶层目录下（每条路径都含 '/' 且首段相同）时，剥掉该顶层段
+//   （对应「zip 一个文件夹」得到 my-coffee/SKILL.md 的常见形态）；
+// - 其余情况原样返回，交给 finalizePack 因根级缺 SKILL.md 报错。
+function stripSingleTopDir(files: TarEntry[]): TarEntry[] {
+  if (files.some((f) => f.path === 'SKILL.md')) {
+    return files
   }
-  if (!hasRootSkillMD) {
-    throw new Error('未找到根级 SKILL.md，请选择 skill 自身的文件夹（其中应直接包含 SKILL.md）')
+  const tops = new Set<string>()
+  for (const f of files) {
+    const idx = f.path.indexOf('/')
+    // 有文件直接落在根级（且不是 SKILL.md），不属于「单层目录」形态，不剥。
+    if (idx < 0) {
+      return files
+    }
+    tops.add(f.path.slice(0, idx))
   }
-  // 解析根级 SKILL.md 的 frontmatter 得到 name/description。
-  const skillMD = stripped.find((e) => e.path === 'SKILL.md')!
-  const meta = parseSkillFrontmatter(new TextDecoder().decode(skillMD.data))
-  const tar = buildTar(stripped)
-  return { name: meta.name, description: meta.description, tar }
+  if (tops.size !== 1) {
+    return files
+  }
+  const top = [...tops][0]
+  return files.map((f) => ({ path: f.path.slice(top.length + 1), data: f.data }))
+}
+
+// packFromZip 处理「上传压缩包」：在浏览器内解压 zip，过滤目录/垃圾条目，剥掉单层顶层目录后
+// 交给 finalizePack 校验并打成扁平 tar（与粘贴 MD / 上传文件夹产出同一种扁平 tar）。
+// zip 损坏、无文件、缺根级 SKILL.md、含越界路径或 frontmatter 缺 name 时抛出带中文说明的 Error。
+export function packFromZip(zipBytes: Uint8Array): PackResult {
+  let unzipped: Record<string, Uint8Array>
+  try {
+    unzipped = unzipSync(zipBytes)
+  } catch {
+    throw new Error('zip 解压失败：文件可能已损坏或不是有效的 zip')
+  }
+  const files: TarEntry[] = []
+  for (const [rawPath, data] of Object.entries(unzipped)) {
+    const path = rawPath.replace(/\\/g, '/')
+    // 跳过目录条目（fflate 以 '/' 结尾的键表示目录）。
+    if (path.endsWith('/')) {
+      continue
+    }
+    // 跳过 macOS 打包残留：__MACOSX/ 资源分叉目录与任意层级的 .DS_Store。
+    if (path.startsWith('__MACOSX/') || path.split('/').pop() === '.DS_Store') {
+      continue
+    }
+    files.push({ path, data })
+  }
+  if (files.length === 0) {
+    throw new Error('zip 内没有可用文件')
+  }
+  return finalizePack(stripSingleTopDir(files))
 }
