@@ -6,6 +6,7 @@
 // 落不到技能目录根，实例对账永远 pending。后端 hermes.InspectFlatSkillArchive 会再校验一次。
 
 import { unzipSync } from 'fflate'
+import { parse as parseYaml } from 'yaml'
 
 // SkillMeta 是从 SKILL.md frontmatter 解析出的元信息。
 export interface SkillMeta {
@@ -16,7 +17,10 @@ export interface SkillMeta {
 }
 
 // parseSkillFrontmatter 解析 SKILL.md 的 YAML frontmatter，取 name（必填）与 description（可选）。
-// 约定与后端 parseSkillMDName 一致：必须以 `---` 行开头、再以 `---` 行结束。
+// 约定与后端 parseSkillMDName 一致：先按 `---` 行界定 frontmatter 边界，再用真正的 YAML 解析器
+// 解析其内容（后端用 gopkg.in/yaml.v3，前端用等价的 yaml 库），保证块标量 `|` / 折叠 `>` /
+// 引号 / 多行等所有 YAML 标量写法都能被正确识别——朴素的逐行截取会把 `description: |` 误读成
+// 字面量 "|"，丢掉真正的多行描述。
 // frontmatter 非法或缺少 name 时抛出带中文说明的 Error，供页面直接展示给用户。
 export function parseSkillFrontmatter(md: string): SkillMeta {
   const body = md.replace(/\r\n/g, '\n')
@@ -30,28 +34,23 @@ export function parseSkillFrontmatter(md: string): SkillMeta {
     throw new Error('SKILL.md frontmatter 未正确闭合（缺少结束的 --- 行）')
   }
   const fm = rest.slice(0, end)
-  let name = ''
-  let description = ''
-  for (const raw of fm.split('\n')) {
-    const line = raw.trim()
-    if (line.startsWith('name:')) {
-      name = stripQuotes(line.slice('name:'.length).trim())
-    } else if (line.startsWith('description:')) {
-      description = stripQuotes(line.slice('description:'.length).trim())
-    }
+  // 用真正的 YAML 解析器解析 frontmatter；语法非法（如缩进错误、未闭合引号）时给出中文提示。
+  let doc: unknown
+  try {
+    doc = parseYaml(fm)
+  } catch {
+    throw new Error('SKILL.md frontmatter 不是合法的 YAML')
   }
+  // 非映射（如空 frontmatter 解析为 null，或写成纯标量/数组）时按缺 name 处理。
+  const map = (doc && typeof doc === 'object' ? (doc as Record<string, unknown>) : {})
+  // name 必填：非字符串（如误写成数字）也用 String 兜底，trim 后为空即视为缺失。
+  const name = map.name == null ? '' : String(map.name).trim()
   if (!name) {
     throw new Error('SKILL.md frontmatter 缺少 name 字段')
   }
+  // description 可选：块标量 `|` 解析后尾部常带换行，trim 去掉外围空白；内部换行保留。
+  const description = map.description == null ? '' : String(map.description).trim()
   return { name, description }
-}
-
-// stripQuotes 去掉值两端配对的单/双引号（YAML 标量常见写法）；无引号时原样返回。
-function stripQuotes(s: string): string {
-  if (s.length >= 2 && (s[0] === '"' || s[0] === "'") && s[s.length - 1] === s[0]) {
-    return s.slice(1, -1)
-  }
-  return s
 }
 
 // TarEntry 是 buildTar 的单个文件条目；path 为归档内相对路径，data 为文件字节。

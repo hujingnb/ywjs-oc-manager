@@ -84,6 +84,49 @@ describe('parseSkillFrontmatter', () => {
     const meta = parseSkillFrontmatter('---\r\nname: crlf-skill\r\n---\r\n正文')
     expect(meta.name).toBe('crlf-skill')
   })
+
+  // 回归本次上报的 bug：description 用 YAML 字面块标量 `|` 写多行，应解析出完整多行文本，
+  // 绝不能退化成字面量 "|"（旧逐行解析器的错误行为）；尾部换行被 trim 去掉，内部换行保留。
+  it('解析 | 字面块标量的多行 description', () => {
+    const md =
+      '---\n' +
+      'name: analogical-reasoning\n' +
+      'description: |\n' +
+      '  当AI智能体需要处理以下情形时触发本技能：\n' +
+      '  1. 当前案件在现行法律中没有直接规定；\n' +
+      '  2. 需要参考已有判例来推导处理方案。\n' +
+      '---\n' +
+      '# 类比推理\n正文'
+    const meta = parseSkillFrontmatter(md)
+    expect(meta.name).toBe('analogical-reasoning')
+    // 关键断言：不是 "|"，而是块标量的真实内容。
+    expect(meta.description).not.toBe('|')
+    expect(meta.description).toBe(
+      '当AI智能体需要处理以下情形时触发本技能：\n1. 当前案件在现行法律中没有直接规定；\n2. 需要参考已有判例来推导处理方案。',
+    )
+  })
+
+  // 边界：description 用 YAML 折叠块标量 `>`，换行被折叠成空格，得到单行文本。
+  it('解析 > 折叠块标量的 description', () => {
+    const md =
+      '---\n' +
+      'name: folded\n' +
+      'description: >\n' +
+      '  第一行\n' +
+      '  第二行\n' +
+      '---\n正文'
+    const meta = parseSkillFrontmatter(md)
+    // 折叠标量把换行折成空格，尾部换行被 trim。
+    expect(meta.description).toBe('第一行 第二行')
+  })
+
+  // 异常：frontmatter 内容不是合法 YAML（如未闭合引号 + 错误缩进）应抛「合法的 YAML」提示。
+  it('非法 YAML frontmatter 抛错', () => {
+    // description 值有一个未闭合的双引号，YAML 解析必然失败。
+    expect(() => parseSkillFrontmatter('---\nname: x\ndescription: "未闭合\n---\n正文')).toThrow(
+      /YAML/,
+    )
+  })
 })
 
 describe('buildTar', () => {
