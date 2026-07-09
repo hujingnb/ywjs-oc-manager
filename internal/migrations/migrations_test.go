@@ -1,13 +1,20 @@
-// Package migrations 的测试只校验 embed.FS 内容，不连接真实数据库。
+// Package migrations 的默认测试主要校验 embed.FS 内容；
+// 真实 MySQL 迁移执行测试通过环境变量显式开启，避免影响日常单元测试速度。
 package migrations
 
 import (
+	"database/sql"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/go-sql-driver/mysql"
+	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/mysql"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -169,6 +176,9 @@ func TestAICCMigrationGuardrails(t *testing.T) {
 	assert.Contains(t, up, "scope_identity_key CHAR(36) GENERATED ALWAYS AS")
 	assert.Contains(t, up, "UNIQUE KEY uk_aicc_agent_knowledge_scope (agent_id, scope_type, scope_identity_key)")
 	assert.Contains(t, up, "CONSTRAINT aicc_agent_knowledge_scope_target_check CHECK")
+	assert.Contains(t, up, "agent_org_id CHAR(36) NOT NULL")
+	assert.Contains(t, up, "CONSTRAINT fk_aicc_agent_knowledge_agent_scope FOREIGN KEY (agent_id, agent_org_id)")
+	assert.Contains(t, up, "org_id = agent_org_id")
 	assert.Contains(t, up, "org_id CHAR(36) NULL")
 	assert.Contains(t, up, "app_id CHAR(36) NULL")
 	assert.Contains(t, up, "industry_knowledge_base_id CHAR(36) NULL")
@@ -195,4 +205,112 @@ func TestAICCMigrationGuardrails(t *testing.T) {
 	assert.Contains(t, up, "CONSTRAINT aicc_lead_values_lead_org_check CHECK")
 	assert.Contains(t, up, "CONSTRAINT fk_aicc_lead_values_field_agent FOREIGN KEY (field_id, agent_id)")
 	assert.Contains(t, up, "CONSTRAINT fk_aicc_feedback_message_session FOREIGN KEY (message_id, session_id)")
+
+	downBytes, err := FS.ReadFile("000028_aicc.down.sql")
+	require.NoError(t, err)
+	down := string(downBytes)
+	// down 必须先删除依赖 ragflow_documents 复合索引的 AICC 表，再删除 parent 索引，避免 MySQL 因 FK 依赖拒绝回滚。
+	assert.Greater(t, strings.Index(down, "ALTER TABLE ragflow_documents\n    DROP INDEX uk_ragflow_documents_aicc_app_doc_identity;"), strings.Index(down, "DROP TABLE IF EXISTS aicc_agent_knowledge;"))
+}
+
+// TestAICCMigrationExecutesOnMySQL 验证 AICC 迁移在真实 MySQL 8 上能建立约束、拒绝跨作用域脏数据并成功回滚。
+func TestAICCMigrationExecutesOnMySQL(t *testing.T) {
+	baseURL := os.Getenv("AICC_MIGRATION_TEST_DSN")
+	if baseURL == "" {
+		t.Skip("AICC_MIGRATION_TEST_DSN not set")
+	}
+
+	adminCfg := parseMigrationTestDSN(t, baseURL)
+	adminDB, err := sql.Open("mysql", adminCfg.FormatDSN())
+	require.NoError(t, err)
+	defer adminDB.Close()
+	require.NoError(t, adminDB.Ping())
+
+	dbName := fmt.Sprintf("aicc_migration_test_%d", time.Now().UnixNano())
+	mustExecMigrationSQL(t, adminDB, fmt.Sprintf("DROP DATABASE IF EXISTS `%s`", dbName))
+	mustExecMigrationSQL(t, adminDB, fmt.Sprintf("CREATE DATABASE `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci", dbName))
+	defer mustExecMigrationSQL(t, adminDB, fmt.Sprintf("DROP DATABASE IF EXISTS `%s`", dbName))
+
+	testCfg := *adminCfg
+	testCfg.DBName = dbName
+	testDB, err := sql.Open("mysql", testCfg.FormatDSN())
+	require.NoError(t, err)
+	defer testDB.Close()
+	require.NoError(t, testDB.Ping())
+
+	src, err := iofs.New(FS, ".")
+	require.NoError(t, err)
+	defer src.Close()
+
+	migrator, err := migrate.NewWithSourceInstance("iofs", src, "mysql://"+testCfg.FormatDSN())
+	require.NoError(t, err)
+	defer func() {
+		sourceErr, databaseErr := migrator.Close()
+		require.NoError(t, sourceErr)
+		require.NoError(t, databaseErr)
+	}()
+
+	err = migrator.Up()
+	require.NoError(t, err)
+
+	// 准备两个组织、两个 owner 与两个 app，构造跨组织/跨 app 文档作用域场景。
+	mustExecMigrationSQL(t, testDB, "INSERT INTO organizations (id, name, code, status) VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
+		"org-a", "Org A", "orga", "active",
+		"org-b", "Org B", "orgb", "active",
+	)
+	mustExecMigrationSQL(t, testDB, "INSERT INTO users (id, org_id, username, password_hash, display_name, role, status) VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)",
+		"user-a", "org-a", "user-a", "hash", "User A", "org_admin", "active",
+		"user-b", "org-b", "user-b", "hash", "User B", "org_admin", "active",
+	)
+	mustExecMigrationSQL(t, testDB, "INSERT INTO apps (id, org_id, owner_user_id, name, description, status, api_key_status, version_id, locale, knowledge_quota_bytes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"app-a", "org-a", "user-a", "App A", nil, "draft", "pending", nil, nil, int64(1024),
+		"app-b", "org-b", "user-b", "App B", nil, "draft", "pending", nil, nil, int64(1024),
+	)
+	mustExecMigrationSQL(t, testDB, "INSERT INTO aicc_agents (id, org_id, app_id, name, status, public_token, widget_token) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"agent-a", "org-a", "app-a", "Agent A", "draft", "public-a", "widget-a",
+	)
+	mustExecMigrationSQL(t, testDB, "INSERT INTO industry_knowledge_bases (id, name, created_by) VALUES (?, ?, ?)", "industry-1", "Industry 1", "system")
+	mustExecMigrationSQL(t, testDB, "INSERT INTO ragflow_datasets (id, scope_type, org_id, app_id, ragflow_dataset_id, name, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"dataset-b", "app", "org-b", "app-b", "remote-dataset-b", "Dataset B", "active",
+	)
+	mustExecMigrationSQL(t, testDB, "INSERT INTO ragflow_documents (id, dataset_id, scope_type, org_id, app_id, ragflow_document_id, name, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		"doc-b", "dataset-b", "app", "org-b", "app-b", "remote-doc-b", "Doc B", "system",
+	)
+
+	// 不存在的 agent 即使挂行业库 scope，也必须被 agent 所属 FK 拒绝。
+	_, err = testDB.Exec("INSERT INTO aicc_agent_knowledge (id, agent_id, agent_org_id, scope_type, industry_knowledge_base_id) VALUES (?, ?, ?, ?, ?)",
+		"knowledge-bad-agent", "missing-agent", "org-a", "industry", "industry-1",
+	)
+	require.Error(t, err)
+
+	// 已存在 agent 的行业知识行应能成功写入，证明 ownership anchor 与 industry scope 可以共存。
+	mustExecMigrationSQL(t, testDB, "INSERT INTO aicc_agent_knowledge (id, agent_id, agent_org_id, scope_type, industry_knowledge_base_id) VALUES (?, ?, ?, ?, ?)",
+		"knowledge-industry-ok", "agent-a", "org-a", "industry", "industry-1",
+	)
+
+	// app_document scope 不能借用其他组织/应用的文档；org_id=agent_org_id + 文档复合 FK 会共同兜底。
+	_, err = testDB.Exec(`INSERT INTO aicc_agent_knowledge (
+		id, agent_id, agent_org_id, scope_type, org_id, app_id, ragflow_document_id
+	) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"knowledge-cross-doc", "agent-a", "org-a", "app_document", "org-b", "app-b", "doc-b",
+	)
+	require.Error(t, err)
+
+	// down 迁移必须能在真实 MySQL 上成功回滚 000028，避免 parent 索引因 FK 依赖删除失败。
+	require.NoError(t, migrator.Steps(-1))
+}
+
+// parseMigrationTestDSN 把 mysql:// URL 规整为 go-sql-driver/mysql 可直接使用的 DSN。
+func parseMigrationTestDSN(t *testing.T, databaseURL string) *mysql.Config {
+	t.Helper()
+	cfg, err := mysql.ParseDSN(strings.TrimPrefix(databaseURL, "mysql://"))
+	require.NoError(t, err)
+	return cfg
+}
+
+// mustExecMigrationSQL 在集成迁移测试里执行建数 SQL，失败即中止测试。
+func mustExecMigrationSQL(t *testing.T, db *sql.DB, query string, args ...any) {
+	t.Helper()
+	_, err := db.Exec(query, args...)
+	require.NoError(t, err)
 }

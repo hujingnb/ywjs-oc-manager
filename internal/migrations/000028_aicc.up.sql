@@ -43,6 +43,7 @@ CREATE TABLE aicc_agents (
 CREATE TABLE aicc_agent_knowledge (
     id CHAR(36) PRIMARY KEY,
     agent_id CHAR(36) NOT NULL,
+    agent_org_id CHAR(36) NOT NULL,
     scope_type VARCHAR(32) NOT NULL,
     org_id CHAR(36) NULL,
     app_id CHAR(36) NULL,
@@ -63,6 +64,7 @@ CREATE TABLE aicc_agent_knowledge (
     CONSTRAINT aicc_agent_knowledge_scope_target_check CHECK (
         (scope_type = 'org'
             AND org_id IS NOT NULL
+            AND org_id = agent_org_id
             AND app_id IS NULL
             AND industry_knowledge_base_id IS NULL
             AND ragflow_document_id IS NULL)
@@ -73,11 +75,12 @@ CREATE TABLE aicc_agent_knowledge (
             AND ragflow_document_id IS NULL)
         OR (scope_type = 'app_document'
             AND org_id IS NOT NULL
+            AND org_id = agent_org_id
             AND app_id IS NOT NULL
             AND industry_knowledge_base_id IS NULL
             AND ragflow_document_id IS NOT NULL)
     ),
-    CONSTRAINT fk_aicc_agent_knowledge_agent_org FOREIGN KEY (agent_id, org_id)
+    CONSTRAINT fk_aicc_agent_knowledge_agent_scope FOREIGN KEY (agent_id, agent_org_id)
         REFERENCES aicc_agents(id, org_id) ON DELETE CASCADE,
     CONSTRAINT fk_aicc_agent_knowledge_industry FOREIGN KEY (industry_knowledge_base_id)
         REFERENCES industry_knowledge_bases(id),

@@ -35,6 +35,7 @@ type AiccAgent struct {
 type AiccAgentKnowledge struct {
 	ID                       string      `db:"id" json:"id"`
 	AgentID                  string      `db:"agent_id" json:"agent_id"`
+	AgentOrgID               string      `db:"agent_org_id" json:"agent_org_id"`
 	ScopeType                string      `db:"scope_type" json:"scope_type"`
 	OrgID                    null.String `db:"org_id" json:"org_id"`
 	AppID                    null.String `db:"app_id" json:"app_id"`
