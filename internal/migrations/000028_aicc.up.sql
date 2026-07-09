@@ -38,6 +38,7 @@ CREATE TABLE aicc_agents (
     UNIQUE KEY uk_aicc_agents_widget_token (widget_token),
     UNIQUE KEY uk_aicc_agents_org_identity (id, org_id),
     KEY idx_aicc_agents_app_org (app_id, org_id),
+    KEY idx_aicc_agents_org_deleted_created (org_id, deleted_at, created_at DESC, id DESC),
     KEY idx_aicc_agents_org_status (org_id, status, deleted_at)
 );
 
@@ -83,6 +84,8 @@ CREATE TABLE aicc_agent_knowledge (
     ),
     CONSTRAINT fk_aicc_agent_knowledge_agent_scope FOREIGN KEY (agent_id, agent_org_id)
         REFERENCES aicc_agents(id, org_id) ON DELETE CASCADE,
+    CONSTRAINT fk_aicc_agent_knowledge_app_org FOREIGN KEY (app_id, org_id)
+        REFERENCES apps(id, org_id),
     CONSTRAINT fk_aicc_agent_knowledge_industry FOREIGN KEY (industry_knowledge_base_id)
         REFERENCES industry_knowledge_bases(id),
     CONSTRAINT fk_aicc_agent_knowledge_document_scope FOREIGN KEY (
@@ -90,6 +93,7 @@ CREATE TABLE aicc_agent_knowledge (
     ) REFERENCES ragflow_documents(id, scope_type, org_id, app_id),
     UNIQUE KEY uk_aicc_agent_knowledge_scope (agent_id, scope_type, scope_identity_key),
     KEY idx_aicc_agent_knowledge_agent_scope (agent_id, agent_org_id),
+    KEY idx_aicc_agent_knowledge_app_org (app_id, org_id),
     KEY idx_aicc_agent_knowledge_industry_scope (industry_knowledge_base_id),
     KEY idx_aicc_agent_knowledge_document_scope (ragflow_document_id, ragflow_document_scope_type, org_id, app_id)
 );

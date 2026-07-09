@@ -174,11 +174,14 @@ func TestAICCMigrationGuardrails(t *testing.T) {
 	assert.Contains(t, up, "UNIQUE KEY uk_aicc_agents_widget_token")
 	assert.Contains(t, up, "CONSTRAINT fk_aicc_agents_app_org FOREIGN KEY (app_id, org_id) REFERENCES apps(id, org_id)")
 	assert.Contains(t, up, "KEY idx_aicc_agents_app_org (app_id, org_id)")
+	assert.Contains(t, up, "KEY idx_aicc_agents_org_deleted_created (org_id, deleted_at, created_at DESC, id DESC)")
 	assert.Contains(t, up, "scope_identity_key CHAR(36) GENERATED ALWAYS AS")
 	assert.Contains(t, up, "UNIQUE KEY uk_aicc_agent_knowledge_scope (agent_id, scope_type, scope_identity_key)")
 	assert.Contains(t, up, "CONSTRAINT aicc_agent_knowledge_scope_target_check CHECK")
 	assert.Contains(t, up, "agent_org_id CHAR(36) NOT NULL")
 	assert.Contains(t, up, "CONSTRAINT fk_aicc_agent_knowledge_agent_scope FOREIGN KEY (agent_id, agent_org_id)")
+	assert.Contains(t, up, "CONSTRAINT fk_aicc_agent_knowledge_app_org FOREIGN KEY (app_id, org_id)")
+	assert.Contains(t, up, "REFERENCES apps(id, org_id)")
 	assert.Contains(t, up, "org_id = agent_org_id")
 	assert.Contains(t, up, "org_id CHAR(36) NULL")
 	assert.Contains(t, up, "app_id CHAR(36) NULL")
@@ -189,6 +192,7 @@ func TestAICCMigrationGuardrails(t *testing.T) {
 	assert.Contains(t, up, "UNIQUE KEY uk_ragflow_documents_aicc_app_doc_identity (id, scope_type, org_id, app_id)")
 	assert.Contains(t, up, "CONSTRAINT fk_aicc_agent_knowledge_document_scope FOREIGN KEY")
 	assert.Contains(t, up, "KEY idx_aicc_agent_knowledge_agent_scope (agent_id, agent_org_id)")
+	assert.Contains(t, up, "KEY idx_aicc_agent_knowledge_app_org (app_id, org_id)")
 	assert.Contains(t, up, "KEY idx_aicc_agent_knowledge_industry_scope (industry_knowledge_base_id)")
 	assert.Contains(t, up, "KEY idx_aicc_agent_knowledge_document_scope (ragflow_document_id, ragflow_document_scope_type, org_id, app_id)")
 	assert.Contains(t, up, "CREATE TABLE aicc_sessions")
@@ -288,10 +292,29 @@ func TestAICCMigrationExecutesOnMySQL(t *testing.T) {
 		"dataset-a", "app", "org-a", "app-a", "remote-dataset-a", "Dataset A", "active",
 		"dataset-b", "app", "org-b", "app-b", "remote-dataset-b", "Dataset B", "active",
 	)
+	forgedDatasetAccepted := true
+	if _, err := testDB.Exec(
+		"INSERT INTO ragflow_datasets (id, scope_type, org_id, app_id, ragflow_dataset_id, name, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"dataset-forged", "app", "org-a", "app-b", "remote-dataset-forged", "Dataset Forged", "active",
+	); err != nil {
+		forgedDatasetAccepted = false
+		t.Logf("forged ragflow dataset already rejected by lower schema: %v", err)
+	}
 	mustExecMigrationSQL(t, testDB, "INSERT INTO ragflow_documents (id, dataset_id, scope_type, org_id, app_id, ragflow_document_id, name, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?)",
 		"doc-a", "dataset-a", "app", "org-a", "app-a", "remote-doc-a", "Doc A", "system",
 		"doc-b", "dataset-b", "app", "org-b", "app-b", "remote-doc-b", "Doc B", "system",
 	)
+	forgedDocumentAccepted := false
+	if forgedDatasetAccepted {
+		if _, err := testDB.Exec(
+			"INSERT INTO ragflow_documents (id, dataset_id, scope_type, org_id, app_id, ragflow_document_id, name, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+			"doc-forged", "dataset-forged", "app", "org-a", "app-b", "remote-doc-forged", "Doc Forged", "system",
+		); err != nil {
+			t.Logf("forged ragflow document already rejected by lower schema: %v", err)
+		} else {
+			forgedDocumentAccepted = true
+		}
+	}
 
 	// 不存在的 agent 即使挂行业库 scope，也必须被 agent 所属 FK 拒绝。
 	_, err = testDB.Exec("INSERT INTO aicc_agent_knowledge (id, agent_id, agent_org_id, scope_type, industry_knowledge_base_id) VALUES (?, ?, ?, ?, ?)",
@@ -318,6 +341,16 @@ func TestAICCMigrationExecutesOnMySQL(t *testing.T) {
 		"knowledge-cross-doc", "agent-a", "org-a", "app_document", "org-a", "app-a", "doc-b",
 	)
 	require.Error(t, err)
+
+	// 即使下游 ragflow 表容纳了 forged 的 org/app 混搭文档，AICC 也必须用 app/org 复合 FK 拒绝该归属。
+	if forgedDocumentAccepted {
+		_, err = testDB.Exec(`INSERT INTO aicc_agent_knowledge (
+			id, agent_id, agent_org_id, scope_type, org_id, app_id, ragflow_document_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			"knowledge-forged-app", "agent-a", "org-a", "app_document", "org-a", "app-b", "doc-forged",
+		)
+		require.Error(t, err)
+	}
 
 	// 准备 lead_values 场景：会话、字段和两条不同组织的 lead。
 	mustExecMigrationSQL(t, testDB, "INSERT INTO aicc_sessions (id, agent_id, org_id, session_token, expires_at) VALUES (?, ?, ?, ?, ?)",
