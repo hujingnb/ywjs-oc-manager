@@ -150,3 +150,24 @@ func TestIndustryKnowledgeMigrationDeclaresDatasetScopeIntegrity(t *testing.T) {
 	assert.Contains(t, up, "FOREIGN KEY (dataset_id, scope_type, industry_knowledge_base_id)")
 	assert.Contains(t, up, "REFERENCES ragflow_datasets(id, scope_type, industry_knowledge_base_id) ON DELETE CASCADE")
 }
+
+// TestAICCMigrationGuardrails 验证 AICC 迁移包含核心租户开关、公开 token 唯一性、
+// 会话归属外键和保留期查询索引，避免后续匿名访客入口缺少必要安全边界。
+func TestAICCMigrationGuardrails(t *testing.T) {
+	upBytes, err := FS.ReadFile("000028_aicc.up.sql")
+	require.NoError(t, err)
+	up := string(upBytes)
+
+	assert.Contains(t, up, "ADD COLUMN aicc_enabled BOOLEAN NOT NULL DEFAULT FALSE")
+	assert.Contains(t, up, "ADD COLUMN aicc_agent_limit INT NULL")
+	assert.Contains(t, up, "CREATE TABLE aicc_agents")
+	assert.Contains(t, up, "UNIQUE KEY uk_aicc_agents_public_token")
+	assert.Contains(t, up, "UNIQUE KEY uk_aicc_agents_widget_token")
+	assert.Contains(t, up, "CONSTRAINT fk_aicc_agents_app_id FOREIGN KEY (app_id) REFERENCES apps(id)")
+	assert.Contains(t, up, "CREATE TABLE aicc_sessions")
+	assert.Contains(t, up, "UNIQUE KEY uk_aicc_sessions_token")
+	assert.Contains(t, up, "KEY idx_aicc_sessions_retention (expires_at, agent_id)")
+	assert.Contains(t, up, "CREATE TABLE aicc_messages")
+	assert.Contains(t, up, "CREATE TABLE aicc_leads")
+	assert.Contains(t, up, "CREATE TABLE aicc_feedback")
+}

@@ -250,6 +250,29 @@ func CanViewOrgUsage(p Principal, orgID string) bool {
 	return p.Role == domain.UserRolePlatformAdmin || (p.Role == domain.UserRoleOrgAdmin && p.OrgID == orgID)
 }
 
+// AICC 能力 ----------------------------------------------------------
+
+// CanManageAICCConfig 判断主体能否开通/关闭企业 AICC 能力并设置智能体数量上限。
+// AICC 开通属于平台租户配置，只允许平台管理员维护。
+func CanManageAICCConfig(p Principal) bool {
+	return p.Role == domain.UserRolePlatformAdmin
+}
+
+// CanManageAICCAgent 判断主体能否管理指定企业的 AICC 智能体、投放、留资字段和运营数据。
+// AICC 是企业侧客服业务，本期仅本企业 org_admin 可管理；平台管理员只保留只读排障能力。
+func CanManageAICCAgent(p Principal, orgID string) bool {
+	return p.Role == domain.UserRoleOrgAdmin && p.OrgID == orgID
+}
+
+// CanViewAICC 判断主体能否查看指定企业的 AICC 数据。
+// 平台管理员可跨企业只读排障；企业管理员可看本企业；普通成员无 AICC 入口。
+func CanViewAICC(p Principal, orgID string) bool {
+	if p.Role == domain.UserRolePlatformAdmin {
+		return true
+	}
+	return p.Role == domain.UserRoleOrgAdmin && p.OrgID == orgID
+}
+
 // CanViewMemberUsage 判断主体是否可查看成员用量。
 // 平台管理员可跨组织查看，组织管理员仅限本组织，普通成员仅可查看自己的成员维度。
 func CanViewMemberUsage(p Principal, orgID, memberID string) bool {

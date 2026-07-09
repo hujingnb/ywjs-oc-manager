@@ -23,6 +23,7 @@ type Querier interface {
 	ClaimRAGFlowDatasetCreation(ctx context.Context, arg ClaimRAGFlowDatasetCreationParams) error
 	// transitionTo / RequestInitialize 强制清空进度字段。
 	ClearAppProgress(ctx context.Context, id string) error
+	CountAICCAgentsByOrg(ctx context.Context, orgID string) (int64, error)
 	// 统计企业当前未删除实例数（apps.deleted_at IS NULL），用于企业实例数量上限校验。
 	CountActiveAppsByOrg(ctx context.Context, orgID string) (int64, error)
 	// 平台总览组织计数：剔除 soft-deleted；status='active' 与 'disabled' 都算入册组织。
@@ -50,6 +51,9 @@ type Querier interface {
 	CountRAGFlowDocumentsByScope(ctx context.Context, arg CountRAGFlowDocumentsByScopeParams) (int64, error)
 	// 统计行业知识库文件总数，过滤条件必须与 ListRAGFlowIndustryDocuments 保持一致。
 	CountRAGFlowIndustryDocuments(ctx context.Context, arg CountRAGFlowIndustryDocumentsParams) (int64, error)
+	CreateAICCAgent(ctx context.Context, arg CreateAICCAgentParams) error
+	CreateAICCMessage(ctx context.Context, arg CreateAICCMessageParams) error
+	CreateAICCSession(ctx context.Context, arg CreateAICCSessionParams) error
 	// k8s 模型下 app 对应 Deployment，pod 落点由调度器决定，不再写 runtime_node_id。
 	// locale 在创建时快照 owner 的用户语言偏好（NULL=平台回退默认）。
 	// knowledge_quota_bytes 由 service 传入所属企业的默认配额，替代 DB 默认 1GB。
@@ -84,6 +88,7 @@ type Querier interface {
 	CreateSkillTicket(ctx context.Context, arg CreateSkillTicketParams) error
 	CreateSkillTicketMessage(ctx context.Context, arg CreateSkillTicketMessageParams) error
 	CreateUser(ctx context.Context, arg CreateUserParams) error
+	DeleteAICCSession(ctx context.Context, id string) error
 	DeleteAppSkillByAppAndName(ctx context.Context, arg DeleteAppSkillByAppAndNameParams) error
 	DeleteCustomSkillTargetsByName(ctx context.Context, customSkillName string) error
 	DeleteExpiredRefreshTokens(ctx context.Context) error
@@ -92,6 +97,9 @@ type Querier interface {
 	DeleteRAGFlowDatasetMapping(ctx context.Context, id string) error
 	// 删除本地 document 缓存；RAGFlow 远端删除由 service 在同一业务流程中处理。
 	DeleteRAGFlowDocumentMapping(ctx context.Context, id string) error
+	GetAICCAgent(ctx context.Context, id string) (AiccAgent, error)
+	GetAICCAgentByPublicToken(ctx context.Context, publicToken string) (AiccAgent, error)
+	GetAICCSessionByToken(ctx context.Context, sessionToken string) (AiccSession, error)
 	GetActiveAppByOwner(ctx context.Context, ownerUserID string) (App, error)
 	GetApp(ctx context.Context, id string) (App, error)
 	// 按 control token（per-app 三用：bootstrap / oc-kb / oc-ops）的 hash 反查当前 app；
@@ -156,6 +164,8 @@ type Querier interface {
 	// 用于组织创建链路失败时回滚刚刚 INSERT 的孤儿记录。
 	// 正常生命周期不可见此查询；普通"删除"必须走 SoftDeleteOrganization。
 	HardDeleteOrganization(ctx context.Context, id string) error
+	ListAICCAgentsByOrg(ctx context.Context, arg ListAICCAgentsByOrgParams) ([]AiccAgent, error)
+	ListAICCMessagesBySession(ctx context.Context, sessionID string) ([]AiccMessage, error)
 	ListActiveSites(ctx context.Context) ([]ListActiveSitesRow, error)
 	// 全量返回活跃组织（deleted_at IS NULL），不分页；
 	// 仅供平台内部聚合使用（如 GetOrgUsageBreakdown），请勿用于用户可见的列表接口。
@@ -188,6 +198,7 @@ type Querier interface {
 	// init job 推进到 running；pod 真坏则保持 error 不动。reaper 只扫 init 子状态、不管 error，
 	// 此查询补上「init 失败成 error 后无法自愈」的洞。
 	ListErrorApps(ctx context.Context) ([]string, error)
+	ListExpiredAICCSessions(ctx context.Context, limit int32) ([]AiccSession, error)
 	ListExpiredActiveSites(ctx context.Context) ([]PublishedSite, error)
 	// 分页列出行业知识库，并统计行业 scope 下已缓存的 RAGFlow 文档数量。
 	ListIndustryKnowledgeBases(ctx context.Context, arg ListIndustryKnowledgeBasesParams) ([]ListIndustryKnowledgeBasesRow, error)
@@ -243,6 +254,7 @@ type Querier interface {
 	// 平台管理员全局视图：列出所有企业的发布能力配置。
 	ListWebPublishConfigs(ctx context.Context) ([]OrgWebPublishConfig, error)
 	LockJobForUpdate(ctx context.Context, id string) (Job, error)
+	MarkAICCSessionConsented(ctx context.Context, sessionToken string) error
 	// 任意状态 → error 时同时写入来源状态与错误文本，保留"在哪一步失败"与"为什么失败"语义。
 	// last_error_status 不加 CHECK 约束，值由调用方在 Go 层负责合法性。
 	MarkAppFailed(ctx context.Context, arg MarkAppFailedParams) error
@@ -274,6 +286,7 @@ type Querier interface {
 	RetryJob(ctx context.Context, arg RetryJobParams) error
 	RevokeRefreshToken(ctx context.Context, id string) error
 	RevokeRefreshTokensByUser(ctx context.Context, userID string) error
+	SetAICCAgentStatus(ctx context.Context, arg SetAICCAgentStatusParams) error
 	// bootstrap 渲染时记录本次写入 input 的平台层 prompt sha256，用于「平台提示词已更新需重启」检测。
 	// 不更新 updated_at：bootstrap 每次 pod 启动都会调用（与 SetAppWebPublishApplied 同因），
 	// 避免无意义地刷新 updated_at。
@@ -325,6 +338,7 @@ type Querier interface {
 	SetWebPublishEnabled(ctx context.Context, arg SetWebPublishEnabledParams) error
 	// 状态机更新 provisioning 结果：状态 + 摘要 + 证书 Secret 名。
 	SetWebPublishProvisioning(ctx context.Context, arg SetWebPublishProvisioningParams) error
+	SoftDeleteAICCAgent(ctx context.Context, id string) error
 	SoftDeleteApp(ctx context.Context, id string) error
 	SoftDeleteAssistantVersion(ctx context.Context, id string) error
 	// 软删除未被助手版本引用的行业知识库；删除后名称可被重新使用。
@@ -342,6 +356,7 @@ type Querier interface {
 	// 不改 status 或其它字段。
 	TouchApp(ctx context.Context, id string) error
 	TouchSkillTicket(ctx context.Context, id string) error
+	UpdateAICCAgentProfile(ctx context.Context, arg UpdateAICCAgentProfileParams) error
 	// 更新实例语言偏好（hermes 对终端用户说话的语言）。locale 由 service 层校验合法取值后传入。
 	UpdateAppLocale(ctx context.Context, arg UpdateAppLocaleParams) error
 	// phasePullRuntimeImage 成功后写入镜像引用与 sha256。

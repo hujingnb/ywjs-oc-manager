@@ -11,6 +11,115 @@ import (
 	null "github.com/guregu/null/v5"
 )
 
+type AiccAgent struct {
+	ID                 string      `db:"id" json:"id"`
+	OrgID              string      `db:"org_id" json:"org_id"`
+	AppID              string      `db:"app_id" json:"app_id"`
+	Name               string      `db:"name" json:"name"`
+	Status             string      `db:"status" json:"status"`
+	Scenario           null.String `db:"scenario" json:"scenario"`
+	Greeting           null.String `db:"greeting" json:"greeting"`
+	AnswerBoundary     null.String `db:"answer_boundary" json:"answer_boundary"`
+	PrivacyMode        string      `db:"privacy_mode" json:"privacy_mode"`
+	PrivacyText        null.String `db:"privacy_text" json:"privacy_text"`
+	RetentionDays      int32       `db:"retention_days" json:"retention_days"`
+	ThemeJson          []byte      `db:"theme_json" json:"theme_json"`
+	AllowedDomainsJson []byte      `db:"allowed_domains_json" json:"allowed_domains_json"`
+	PublicToken        string      `db:"public_token" json:"public_token"`
+	WidgetToken        string      `db:"widget_token" json:"widget_token"`
+	CreatedAt          time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt          time.Time   `db:"updated_at" json:"updated_at"`
+	DeletedAt          null.Time   `db:"deleted_at" json:"deleted_at"`
+}
+
+type AiccAgentKnowledge struct {
+	ID        string      `db:"id" json:"id"`
+	AgentID   string      `db:"agent_id" json:"agent_id"`
+	ScopeType string      `db:"scope_type" json:"scope_type"`
+	ScopeID   null.String `db:"scope_id" json:"scope_id"`
+	CreatedAt time.Time   `db:"created_at" json:"created_at"`
+}
+
+type AiccFeedback struct {
+	ID        string    `db:"id" json:"id"`
+	SessionID string    `db:"session_id" json:"session_id"`
+	MessageID string    `db:"message_id" json:"message_id"`
+	Helpful   bool      `db:"helpful" json:"helpful"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+}
+
+type AiccLead struct {
+	ID                 string      `db:"id" json:"id"`
+	OrgID              string      `db:"org_id" json:"org_id"`
+	PrimaryContactHash string      `db:"primary_contact_hash" json:"primary_contact_hash"`
+	DisplayName        null.String `db:"display_name" json:"display_name"`
+	Unread             bool        `db:"unread" json:"unread"`
+	LatestSessionID    null.String `db:"latest_session_id" json:"latest_session_id"`
+	CreatedAt          time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt          time.Time   `db:"updated_at" json:"updated_at"`
+}
+
+type AiccLeadField struct {
+	ID         string      `db:"id" json:"id"`
+	AgentID    string      `db:"agent_id" json:"agent_id"`
+	FieldKey   string      `db:"field_key" json:"field_key"`
+	Label      string      `db:"label" json:"label"`
+	FieldType  string      `db:"field_type" json:"field_type"`
+	Required   bool        `db:"required" json:"required"`
+	PromptText null.String `db:"prompt_text" json:"prompt_text"`
+	SortOrder  int32       `db:"sort_order" json:"sort_order"`
+	CreatedAt  time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt  time.Time   `db:"updated_at" json:"updated_at"`
+}
+
+type AiccLeadValue struct {
+	ID        string      `db:"id" json:"id"`
+	SessionID string      `db:"session_id" json:"session_id"`
+	LeadID    null.String `db:"lead_id" json:"lead_id"`
+	FieldID   string      `db:"field_id" json:"field_id"`
+	ValueText string      `db:"value_text" json:"value_text"`
+	ValueHash null.String `db:"value_hash" json:"value_hash"`
+	CreatedAt time.Time   `db:"created_at" json:"created_at"`
+}
+
+type AiccMessage struct {
+	ID              string      `db:"id" json:"id"`
+	SessionID       string      `db:"session_id" json:"session_id"`
+	AgentID         string      `db:"agent_id" json:"agent_id"`
+	Direction       string      `db:"direction" json:"direction"`
+	ContentType     string      `db:"content_type" json:"content_type"`
+	TextContent     null.String `db:"text_content" json:"text_content"`
+	ImageObjectKey  null.String `db:"image_object_key" json:"image_object_key"`
+	ImageMime       null.String `db:"image_mime" json:"image_mime"`
+	ImageSizeBytes  null.Int    `db:"image_size_bytes" json:"image_size_bytes"`
+	HermesMessageID null.String `db:"hermes_message_id" json:"hermes_message_id"`
+	IsFallback      bool        `db:"is_fallback" json:"is_fallback"`
+	IsRefusal       bool        `db:"is_refusal" json:"is_refusal"`
+	ErrorSummary    null.String `db:"error_summary" json:"error_summary"`
+	CreatedAt       time.Time   `db:"created_at" json:"created_at"`
+}
+
+type AiccSession struct {
+	ID                 string      `db:"id" json:"id"`
+	AgentID            string      `db:"agent_id" json:"agent_id"`
+	OrgID              string      `db:"org_id" json:"org_id"`
+	SessionToken       string      `db:"session_token" json:"session_token"`
+	Channel            string      `db:"channel" json:"channel"`
+	SourceUrl          null.String `db:"source_url" json:"source_url"`
+	Referrer           null.String `db:"referrer" json:"referrer"`
+	Region             null.String `db:"region" json:"region"`
+	IpHash             null.String `db:"ip_hash" json:"ip_hash"`
+	UserAgentHash      null.String `db:"user_agent_hash" json:"user_agent_hash"`
+	PrivacyNoticeShown bool        `db:"privacy_notice_shown" json:"privacy_notice_shown"`
+	PrivacyConsentedAt null.Time   `db:"privacy_consented_at" json:"privacy_consented_at"`
+	ResolutionStatus   string      `db:"resolution_status" json:"resolution_status"`
+	LeadStatus         string      `db:"lead_status" json:"lead_status"`
+	LastActiveAt       time.Time   `db:"last_active_at" json:"last_active_at"`
+	ExpiresAt          time.Time   `db:"expires_at" json:"expires_at"`
+	CreatedAt          time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt          time.Time   `db:"updated_at" json:"updated_at"`
+}
+
 type App struct {
 	ID                     string          `db:"id" json:"id"`
 	OrgID                  string          `db:"org_id" json:"org_id"`
@@ -51,6 +160,8 @@ type App struct {
 	WebPublishApplied bool `db:"web_publish_applied" json:"web_publish_applied"`
 	// 最近一次 bootstrap 写入 input 的平台层 prompt 文本 sha256（hex）：与当前常量 hash 比对判定是否需重启生效；空=存量/未 bootstrap，视为需重启
 	AppliedPlatformPromptHash string `db:"applied_platform_prompt_hash" json:"applied_platform_prompt_hash"`
+	// 是否为 AICC 自动创建的隐藏 app
+	AiccHidden bool `db:"aicc_hidden" json:"aicc_hidden"`
 }
 
 // 实例级 skill 安装清单，自包含快照，运行时唯一来源
@@ -287,6 +398,10 @@ type Organization struct {
 	KnowledgeQuotaBytes int64           `db:"knowledge_quota_bytes" json:"knowledge_quota_bytes"`
 	// 该企业新建实例的默认个人知识库空间上限（字节），默认 1GB
 	DefaultAppKnowledgeQuotaBytes int64 `db:"default_app_knowledge_quota_bytes" json:"default_app_knowledge_quota_bytes"`
+	// 是否开通 AICC（AI Contact Center）能力
+	AiccEnabled bool `db:"aicc_enabled" json:"aicc_enabled"`
+	// AICC 智能体数量上限，NULL 表示不限
+	AiccAgentLimit null.Int `db:"aicc_agent_limit" json:"aicc_agent_limit"`
 }
 
 // 平台库 skill，平台管理员维护，多版本共存

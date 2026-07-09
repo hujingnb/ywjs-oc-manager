@@ -171,10 +171,10 @@ func runAppCases(t *testing.T, fn func(Principal, string, string) bool, cases []
 func TestCanManageApp(t *testing.T) {
 	cases := []memberCase{
 		{"platform_admin 跨组织可管应用", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true}, // 场景：platform_admin 运维介入，跨组织也可管理应用写操作
-		{"org_admin 同组织可管应用", domain.UserRoleOrgAdmin, orgA, userA, orgA, userB, true},             // 场景：org_admin 同组织可管应用
-		{"org_admin 跨组织不可管", domain.UserRoleOrgAdmin, orgA, userA, orgB, userB, false},             // 场景：org_admin 跨组织不可管
-		{"org_member 仅可管自己应用", domain.UserRoleOrgMember, orgA, userA, orgA, userA, true},           // 场景：org_member 仅可管自己应用
-		{"org_member 不可管他人应用", domain.UserRoleOrgMember, orgA, userA, orgA, userB, false},          // 场景：org_member 不可管他人应用
+		{"org_admin 同组织可管应用", domain.UserRoleOrgAdmin, orgA, userA, orgA, userB, true},           // 场景：org_admin 同组织可管应用
+		{"org_admin 跨组织不可管", domain.UserRoleOrgAdmin, orgA, userA, orgB, userB, false},           // 场景：org_admin 跨组织不可管
+		{"org_member 仅可管自己应用", domain.UserRoleOrgMember, orgA, userA, orgA, userA, true},         // 场景：org_member 仅可管自己应用
+		{"org_member 不可管他人应用", domain.UserRoleOrgMember, orgA, userA, orgA, userB, false},        // 场景：org_member 不可管他人应用
 	}
 	runAppCases(t, CanManageApp, cases)
 }
@@ -232,10 +232,10 @@ func TestCanManageKnowledgeRAGFlowDataset(t *testing.T) {
 func TestCanWriteAppKnowledge(t *testing.T) {
 	cases := []memberCase{
 		{"platform_admin 跨组织可写应用知识库", domain.UserRolePlatformAdmin, orgA, userA, orgB, userB, true}, // 场景：platform_admin 运维介入，跨组织也可写应用知识库
-		{"org_admin 同组织可写知识库", domain.UserRoleOrgAdmin, orgA, userA, orgA, userB, true},               // 场景：org_admin 同组织可写知识库
-		{"org_admin 跨组织不可写", domain.UserRoleOrgAdmin, orgA, userA, orgB, userB, false},                // 场景：org_admin 跨组织不可写
-		{"org_member 仅可写自己应用知识库", domain.UserRoleOrgMember, orgA, userA, orgA, userA, true},           // 场景：org_member 仅可写自己应用知识库
-		{"org_member 不可写他人应用知识库", domain.UserRoleOrgMember, orgA, userA, orgA, userB, false},          // 场景：org_member 不可写他人应用知识库
+		{"org_admin 同组织可写知识库", domain.UserRoleOrgAdmin, orgA, userA, orgA, userB, true},             // 场景：org_admin 同组织可写知识库
+		{"org_admin 跨组织不可写", domain.UserRoleOrgAdmin, orgA, userA, orgB, userB, false},              // 场景：org_admin 跨组织不可写
+		{"org_member 仅可写自己应用知识库", domain.UserRoleOrgMember, orgA, userA, orgA, userA, true},         // 场景：org_member 仅可写自己应用知识库
+		{"org_member 不可写他人应用知识库", domain.UserRoleOrgMember, orgA, userA, orgA, userB, false},        // 场景：org_member 不可写他人应用知识库
 	}
 	runAppCases(t, CanWriteAppKnowledge, cases)
 }
@@ -262,6 +262,37 @@ func TestCanTriggerRuntimeOperation(t *testing.T) {
 		{"org_member 不可触发他人应用的运行操作", domain.UserRoleOrgMember, orgA, userA, orgA, userB, false},      // 场景：org_member 不可触发他人应用的运行操作
 	}
 	runAppCases(t, CanTriggerRuntimeOperation, cases)
+}
+
+// TestAICCAuthorizerPredicates 覆盖 AICC 平台开通、企业管理和只读查看权限边界。
+func TestAICCAuthorizerPredicates(t *testing.T) {
+	platform := Principal{Role: domain.UserRolePlatformAdmin, OrgID: "platform"}
+	orgAdmin := Principal{Role: domain.UserRoleOrgAdmin, OrgID: "org-1"}
+	otherAdmin := Principal{Role: domain.UserRoleOrgAdmin, OrgID: "org-2"}
+	member := Principal{Role: domain.UserRoleOrgMember, OrgID: "org-1"}
+
+	// 平台管理员独占企业 AICC 开通与配额配置权限。
+	assert.True(t, CanManageAICCConfig(platform))
+	// 企业管理员不能越权修改平台级租户开通配置。
+	assert.False(t, CanManageAICCConfig(orgAdmin))
+
+	// 本企业管理员可管理本企业 AICC 智能体和相关运营配置。
+	assert.True(t, CanManageAICCAgent(orgAdmin, "org-1"))
+	// 跨企业管理员不能管理其他企业的 AICC 智能体。
+	assert.False(t, CanManageAICCAgent(otherAdmin, "org-1"))
+	// 普通成员没有 AICC 管理入口。
+	assert.False(t, CanManageAICCAgent(member, "org-1"))
+	// 平台管理员对 AICC 业务数据保留只读排障能力，不参与企业侧管理写操作。
+	assert.False(t, CanManageAICCAgent(platform, "org-1"))
+
+	// 平台管理员可跨企业只读查看 AICC 数据用于排障。
+	assert.True(t, CanViewAICC(platform, "org-1"))
+	// 本企业管理员可查看本企业 AICC 数据。
+	assert.True(t, CanViewAICC(orgAdmin, "org-1"))
+	// 跨企业管理员不可查看其他企业 AICC 数据。
+	assert.False(t, CanViewAICC(otherAdmin, "org-1"))
+	// 普通成员没有 AICC 查看入口。
+	assert.False(t, CanViewAICC(member, "org-1"))
 }
 
 // TestCanCreateAppForOrg 验证创建权限应用针对组织的预期行为场景。
