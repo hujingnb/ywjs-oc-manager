@@ -14,14 +14,17 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
+var aiccPublicTestNow = time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
+
 // TestAICCPublicChatRequiresConsent 覆盖隐私强同意模式：未同意前拒绝访客继续聊天。
 func TestAICCPublicChatRequiresConsent(t *testing.T) {
 	store := &fakeAICCPublicStore{
 		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
 		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeConsentRequired},
-		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok"},
+		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 	}
 	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
 
 	_, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "你好"})
 
@@ -33,10 +36,11 @@ func TestAICCPublicChatRequiresLeadFields(t *testing.T) {
 	store := &fakeAICCPublicStore{
 		org:                sqlc.Organization{ID: "org-1", AiccEnabled: true},
 		agent:              sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
-		session:            sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true},
+		session:            sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 		requiredLeadFields: []sqlc.AiccLeadField{{ID: "field-phone", Required: true, FieldKey: "phone", Label: "手机号"}},
 	}
 	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
 
 	_, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "报价多少"})
 
@@ -48,10 +52,11 @@ func TestAICCPublicChatStoresVisitorAndAssistantMessages(t *testing.T) {
 	store := &fakeAICCPublicStore{
 		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
 		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
-		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true},
+		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 	}
 	chat := &fakeAICCHermesChat{reply: "您好，这是报价说明。"}
 	svc := NewAICCPublicService(store, chat)
+	svc.now = func() time.Time { return aiccPublicTestNow }
 
 	result, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "报价多少"})
 
@@ -67,13 +72,45 @@ func TestAICCPublicChatStopsWhenOrgDisabled(t *testing.T) {
 	store := &fakeAICCPublicStore{
 		org:     sqlc.Organization{ID: "org-1", AiccEnabled: false},
 		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
-		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true},
+		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 	}
 	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
 
 	_, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "报价多少"})
 
 	require.ErrorIs(t, err, ErrAICCOffline)
+}
+
+// TestAICCPublicChatRejectsExpiredSession 覆盖会话过期边界：过期 session token 不能继续发送消息。
+func TestAICCPublicChatRejectsExpiredSession(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(-time.Minute)},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	_, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "报价多少"})
+
+	require.ErrorIs(t, err, ErrAICCInvalidSession)
+}
+
+// TestAICCPublicChatRejectsImageMessage 覆盖当前文字切片边界：图片消息未实现前不能写入空文本消息。
+func TestAICCPublicChatRejectsImageMessage(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	_, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", ImageFileID: "image-1"})
+
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	assert.Empty(t, store.createdMessages)
 }
 
 // TestAICCPublicCreateSessionCreatesExpiringSession 覆盖公开会话创建：active 智能体会生成 session token，
@@ -91,7 +128,7 @@ func TestAICCPublicCreateSessionCreatesExpiringSession(t *testing.T) {
 		},
 	}
 	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
-	svc.now = func() time.Time { return time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC) }
+	svc.now = func() time.Time { return aiccPublicTestNow }
 
 	result, err := svc.CreateSession(context.Background(), "pub", AICCPublicSessionInput{Channel: domain.AICCChannelWebLink, SourceURL: "https://example.com/pricing"})
 
@@ -101,6 +138,19 @@ func TestAICCPublicCreateSessionCreatesExpiringSession(t *testing.T) {
 	assert.Equal(t, "org-1", store.createdSession.OrgID)
 	assert.True(t, store.createdSession.PrivacyNoticeShown)
 	assert.Equal(t, time.Date(2026, 8, 8, 10, 0, 0, 0, time.UTC), store.createdSession.ExpiresAt)
+}
+
+// TestAICCPublicConsentRejectsInvalidSession 覆盖隐私同意接口：无效或已过期 token 不能伪造成功响应。
+func TestAICCPublicConsentRejectsInvalidSession(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		session: sqlc.AiccSession{ID: "session-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	err := svc.Consent(context.Background(), "bad-token")
+
+	require.ErrorIs(t, err, ErrAICCInvalidSession)
 }
 
 // TestAICCPublicConfigStopsWhenOrgDisabled 覆盖公开配置读取：企业被平台关闭 AICC 后公开入口返回下线。
@@ -175,12 +225,12 @@ func (f *fakeAICCPublicStore) CreateAICCSession(_ context.Context, arg sqlc.Crea
 	return nil
 }
 
-func (f *fakeAICCPublicStore) MarkAICCSessionConsented(_ context.Context, sessionToken string) error {
-	if f.session.SessionToken != sessionToken {
-		return sql.ErrNoRows
+func (f *fakeAICCPublicStore) MarkAICCSessionConsented(_ context.Context, sessionToken string) (int64, error) {
+	if f.session.SessionToken != sessionToken || !f.session.ExpiresAt.After(aiccPublicTestNow) {
+		return 0, nil
 	}
 	f.session.PrivacyConsentedAt = null.TimeFrom(time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC))
-	return nil
+	return 1, nil
 }
 
 func (f *fakeAICCPublicStore) CreateAICCMessage(_ context.Context, arg sqlc.CreateAICCMessageParams) error {

@@ -650,6 +650,22 @@ components:
         quote_amount_cents:
           type: integer
       type: object
+    handlers.SubmitAICCFeedbackRequest:
+      properties:
+        helpful:
+          description: Helpful 表示该回答是否有帮助。
+          type: boolean
+      type: object
+    handlers.SubmitAICCLeadValuesRequest:
+      properties:
+        values:
+          additionalProperties:
+            type: string
+          description: Values 是 field_key 到访客填写值的映射。
+          type: object
+      required:
+      - values
+      type: object
     handlers.SubmitSkillTicketRequest:
       properties:
         description:
@@ -10743,6 +10759,37 @@ paths:
       summary: 创建 AICC 公开会话
       tags:
       - public-aicc
+  /public/aicc/messages/{messageId}/feedback:
+    post:
+      description: 反馈写入能力后续接入，当前返回 501
+      parameters:
+      - description: 消息 ID
+        in: path
+        name: messageId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.SubmitAICCFeedbackRequest'
+                description: 反馈内容
+                summary: body
+        description: 反馈内容
+        required: true
+      responses:
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Implemented
+      summary: 提交 AICC 回复反馈
+      tags:
+      - public-aicc
   /public/aicc/sessions/{sessionToken}/consent:
     post:
       description: 访客通过 session token 记录隐私同意时间
@@ -10769,6 +10816,57 @@ paths:
                 $ref: '#/components/schemas/handlers.ErrorResponse'
           description: Internal Server Error
       summary: 同意 AICC 隐私说明
+      tags:
+      - public-aicc
+  /public/aicc/sessions/{sessionToken}/images:
+    post:
+      description: 图片消息能力后续接入，当前返回 501
+      parameters:
+      - description: 会话 token
+        in: path
+        name: sessionToken
+        required: true
+        schema:
+          type: string
+      responses:
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Implemented
+      summary: 上传 AICC 公开图片
+      tags:
+      - public-aicc
+  /public/aicc/sessions/{sessionToken}/lead-values:
+    post:
+      description: 留资写入能力后续接入，当前返回 501
+      parameters:
+      - description: 会话 token
+        in: path
+        name: sessionToken
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.SubmitAICCLeadValuesRequest'
+                description: 留资字段
+                summary: body
+        description: 留资字段
+        required: true
+      responses:
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Implemented
+      summary: 提交 AICC 留资字段
       tags:
       - public-aicc
   /public/aicc/sessions/{sessionToken}/messages:

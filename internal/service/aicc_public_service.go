@@ -27,7 +27,7 @@ type AICCPublicStore interface {
 	// CreateAICCSession 创建公开访客会话。
 	CreateAICCSession(ctx context.Context, arg sqlc.CreateAICCSessionParams) error
 	// MarkAICCSessionConsented 记录访客已同意隐私说明。
-	MarkAICCSessionConsented(ctx context.Context, sessionToken string) error
+	MarkAICCSessionConsented(ctx context.Context, sessionToken string) (int64, error)
 	// CreateAICCMessage 写入访客消息或助手回复镜像。
 	CreateAICCMessage(ctx context.Context, arg sqlc.CreateAICCMessageParams) error
 	// ListRequiredAICCLeadFieldsMissing 查询当前会话尚未提交的必填留资字段。
@@ -149,10 +149,12 @@ func (s *AICCPublicService) Consent(ctx context.Context, sessionToken string) er
 	if strings.TrimSpace(sessionToken) == "" {
 		return ErrAICCInvalidSession
 	}
-	if err := s.store.MarkAICCSessionConsented(ctx, strings.TrimSpace(sessionToken)); errors.Is(err, sql.ErrNoRows) {
-		return ErrAICCInvalidSession
-	} else if err != nil {
+	affected, err := s.store.MarkAICCSessionConsented(ctx, strings.TrimSpace(sessionToken))
+	if err != nil {
 		return fmt.Errorf("记录 AICC 隐私同意失败: %w", err)
+	}
+	if affected == 0 {
+		return ErrAICCInvalidSession
 	}
 	return nil
 }
@@ -161,6 +163,9 @@ func (s *AICCPublicService) Consent(ctx context.Context, sessionToken string) er
 func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMessageInput) (AICCPublicMessageResult, error) {
 	session, err := s.store.GetAICCSessionByToken(ctx, strings.TrimSpace(input.SessionToken))
 	if err != nil {
+		return AICCPublicMessageResult{}, ErrAICCInvalidSession
+	}
+	if !session.ExpiresAt.After(s.now()) {
 		return AICCPublicMessageResult{}, ErrAICCInvalidSession
 	}
 	agent, err := s.store.GetAICCAgent(ctx, session.AgentID)
@@ -184,7 +189,10 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 		return AICCPublicMessageResult{}, ErrAICCLeadRequired
 	}
 	text := strings.TrimSpace(input.Text)
-	if text == "" && strings.TrimSpace(input.ImageFileID) == "" {
+	if strings.TrimSpace(input.ImageFileID) != "" {
+		return AICCPublicMessageResult{}, fmt.Errorf("%w: 当前仅支持文字消息", ErrInvalidArgument)
+	}
+	if text == "" {
 		return AICCPublicMessageResult{}, fmt.Errorf("%w: 消息内容不能为空", ErrInvalidArgument)
 	}
 	visitorMessageID := newUUID()

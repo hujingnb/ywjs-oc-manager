@@ -53,12 +53,12 @@ INSERT INTO aicc_sessions (
 -- name: GetAICCSessionByToken :one
 SELECT *
 FROM aicc_sessions
-WHERE session_token = ?;
+WHERE session_token = ? AND expires_at > now();
 
--- name: MarkAICCSessionConsented :exec
+-- name: MarkAICCSessionConsented :execrows
 UPDATE aicc_sessions
 SET privacy_consented_at = now(), updated_at = now()
-WHERE session_token = ?;
+WHERE session_token = ? AND expires_at > now();
 
 -- name: CreateAICCMessage :exec
 INSERT INTO aicc_messages (

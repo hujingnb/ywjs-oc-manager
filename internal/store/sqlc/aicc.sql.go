@@ -232,7 +232,7 @@ func (q *Queries) GetAICCAgentByPublicToken(ctx context.Context, publicToken str
 const getAICCSessionByToken = `-- name: GetAICCSessionByToken :one
 SELECT id, agent_id, org_id, session_token, channel, source_url, referrer, region, ip_hash, user_agent_hash, privacy_notice_shown, privacy_consented_at, resolution_status, lead_status, last_active_at, expires_at, created_at, updated_at
 FROM aicc_sessions
-WHERE session_token = ?
+WHERE session_token = ? AND expires_at > now()
 `
 
 func (q *Queries) GetAICCSessionByToken(ctx context.Context, sessionToken string) (AiccSession, error) {
@@ -455,15 +455,18 @@ func (q *Queries) ListRequiredAICCLeadFieldsMissing(ctx context.Context, id stri
 	return items, nil
 }
 
-const markAICCSessionConsented = `-- name: MarkAICCSessionConsented :exec
+const markAICCSessionConsented = `-- name: MarkAICCSessionConsented :execrows
 UPDATE aicc_sessions
 SET privacy_consented_at = now(), updated_at = now()
-WHERE session_token = ?
+WHERE session_token = ? AND expires_at > now()
 `
 
-func (q *Queries) MarkAICCSessionConsented(ctx context.Context, sessionToken string) error {
-	_, err := q.db.ExecContext(ctx, markAICCSessionConsented, sessionToken)
-	return err
+func (q *Queries) MarkAICCSessionConsented(ctx context.Context, sessionToken string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markAICCSessionConsented, sessionToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const setAICCAgentStatus = `-- name: SetAICCAgentStatus :exec

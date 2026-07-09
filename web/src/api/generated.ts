@@ -12293,6 +12293,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/public/aicc/messages/{messageId}/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 提交 AICC 回复反馈
+         * @description 反馈写入能力后续接入，当前返回 501
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 消息 ID */
+                    messageId: string;
+                };
+                cookie?: never;
+            };
+            /** @description 反馈内容 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.SubmitAICCFeedbackRequest"];
+                };
+            };
+            responses: {
+                /** @description Not Implemented */
+                501: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/public/aicc/sessions/{sessionToken}/consent": {
         parameters: {
             query?: never;
@@ -12336,6 +12383,95 @@ export interface paths {
                 };
                 /** @description Internal Server Error */
                 500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/public/aicc/sessions/{sessionToken}/images": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 上传 AICC 公开图片
+         * @description 图片消息能力后续接入，当前返回 501
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 会话 token */
+                    sessionToken: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Not Implemented */
+                501: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/public/aicc/sessions/{sessionToken}/lead-values": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 提交 AICC 留资字段
+         * @description 留资写入能力后续接入，当前返回 501
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 会话 token */
+                    sessionToken: string;
+                };
+                cookie?: never;
+            };
+            /** @description 留资字段 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.SubmitAICCLeadValuesRequest"];
+                };
+            };
+            responses: {
+                /** @description Not Implemented */
+                501: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -14212,6 +14348,16 @@ export interface components {
         };
         "handlers.SetSkillTicketQuoteRequest": {
             quote_amount_cents?: number;
+        };
+        "handlers.SubmitAICCFeedbackRequest": {
+            /** @description Helpful 表示该回答是否有帮助。 */
+            helpful?: boolean;
+        };
+        "handlers.SubmitAICCLeadValuesRequest": {
+            /** @description Values 是 field_key 到访客填写值的映射。 */
+            values: {
+                [key: string]: string;
+            };
         };
         "handlers.SubmitSkillTicketRequest": {
             description?: string;

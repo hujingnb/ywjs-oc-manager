@@ -146,16 +146,44 @@ func (h *PublicAICCHandler) SendMessage(c *gin.Context) {
 }
 
 // UploadImage 暂保留路由契约，图片对象存储将在后续小任务接入。
+//
+// @Summary      上传 AICC 公开图片
+// @Description  图片消息能力后续接入，当前返回 501
+// @Tags         public-aicc
+// @Produce      json
+// @Param        sessionToken  path      string  true  "会话 token"
+// @Failure      501           {object}  ErrorResponse
+// @Router       /public/aicc/sessions/{sessionToken}/images [post]
 func (h *PublicAICCHandler) UploadImage(c *gin.Context) {
 	apierror.JSON(c, http.StatusNotImplemented, "AICC_IMAGE_NOT_IMPLEMENTED", apierror.MsgBadRequestGeneric)
 }
 
 // SubmitLeadValues 暂保留路由契约，留资提交将在后续小任务接入。
+//
+// @Summary      提交 AICC 留资字段
+// @Description  留资写入能力后续接入，当前返回 501
+// @Tags         public-aicc
+// @Accept       json
+// @Produce      json
+// @Param        sessionToken  path      string                       true  "会话 token"
+// @Param        body          body      SubmitAICCLeadValuesRequest  true  "留资字段"
+// @Failure      501           {object}  ErrorResponse
+// @Router       /public/aicc/sessions/{sessionToken}/lead-values [post]
 func (h *PublicAICCHandler) SubmitLeadValues(c *gin.Context) {
 	apierror.JSON(c, http.StatusNotImplemented, "AICC_LEAD_VALUES_NOT_IMPLEMENTED", apierror.MsgBadRequestGeneric)
 }
 
 // Feedback 暂保留路由契约，反馈写入将在后续小任务接入。
+//
+// @Summary      提交 AICC 回复反馈
+// @Description  反馈写入能力后续接入，当前返回 501
+// @Tags         public-aicc
+// @Accept       json
+// @Produce      json
+// @Param        messageId  path      string                     true  "消息 ID"
+// @Param        body       body      SubmitAICCFeedbackRequest  true  "反馈内容"
+// @Failure      501        {object}  ErrorResponse
+// @Router       /public/aicc/messages/{messageId}/feedback [post]
 func (h *PublicAICCHandler) Feedback(c *gin.Context) {
 	apierror.JSON(c, http.StatusNotImplemented, "AICC_FEEDBACK_NOT_IMPLEMENTED", apierror.MsgBadRequestGeneric)
 }
