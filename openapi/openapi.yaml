@@ -10776,57 +10776,6 @@ paths:
       summary: 创建 AICC 公开会话
       tags:
       - public-aicc
-  /public/aicc/messages/{messageId}/feedback:
-    post:
-      description: 访客反馈助手回复是否有帮助，并同步会话解决状态
-      parameters:
-      - description: 消息 ID
-        in: path
-        name: messageId
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              oneOf:
-              - type: object
-              - $ref: '#/components/schemas/handlers.SubmitAICCFeedbackRequest'
-                description: 反馈内容
-                summary: body
-        description: 反馈内容
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                additionalProperties:
-                  $ref: '#/components/schemas/service.AICCPublicFeedbackResult'
-                type: object
-          description: OK
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Bad Request
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Not Found
-        "500":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Internal Server Error
-      summary: 提交 AICC 回复反馈
-      tags:
-      - public-aicc
   /public/aicc/sessions/{sessionToken}/consent:
     post:
       description: 访客通过 session token 记录隐私同意时间
@@ -10987,6 +10936,63 @@ paths:
                 $ref: '#/components/schemas/handlers.ErrorResponse'
           description: Internal Server Error
       summary: 发送 AICC 公开消息
+      tags:
+      - public-aicc
+  /public/aicc/sessions/{sessionToken}/messages/{messageId}/feedback:
+    post:
+      description: 访客反馈助手回复是否有帮助，并同步会话解决状态
+      parameters:
+      - description: 会话 token
+        in: path
+        name: sessionToken
+        required: true
+        schema:
+          type: string
+      - description: 消息 ID
+        in: path
+        name: messageId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.SubmitAICCFeedbackRequest'
+                description: 反馈内容
+                summary: body
+        description: 反馈内容
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AICCPublicFeedbackResult'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      summary: 提交 AICC 回复反馈
       tags:
       - public-aicc
   /published-sites/{siteId}/disable:

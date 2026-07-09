@@ -99,7 +99,7 @@ type Querier interface {
 	DeleteRAGFlowDocumentMapping(ctx context.Context, id string) error
 	GetAICCAgent(ctx context.Context, id string) (AiccAgent, error)
 	GetAICCAgentByPublicToken(ctx context.Context, publicToken string) (AiccAgent, error)
-	GetAICCAssistantMessageForFeedback(ctx context.Context, id string) (AiccMessage, error)
+	GetAICCAssistantMessageForFeedback(ctx context.Context, arg GetAICCAssistantMessageForFeedbackParams) (AiccMessage, error)
 	GetAICCSessionByToken(ctx context.Context, sessionToken string) (AiccSession, error)
 	GetActiveAppByOwner(ctx context.Context, ownerUserID string) (App, error)
 	GetApp(ctx context.Context, id string) (App, error)

@@ -42,7 +42,7 @@ type AICCPublicStore interface {
 	// UpdateAICCSessionLeadStatus 同步会话留资完成状态。
 	UpdateAICCSessionLeadStatus(ctx context.Context, arg sqlc.UpdateAICCSessionLeadStatusParams) error
 	// GetAICCAssistantMessageForFeedback 查询可反馈的未过期助手消息。
-	GetAICCAssistantMessageForFeedback(ctx context.Context, id string) (sqlc.AiccMessage, error)
+	GetAICCAssistantMessageForFeedback(ctx context.Context, arg sqlc.GetAICCAssistantMessageForFeedbackParams) (sqlc.AiccMessage, error)
 	// UpsertAICCFeedback 写入或覆盖单条助手消息反馈。
 	UpsertAICCFeedback(ctx context.Context, arg sqlc.UpsertAICCFeedbackParams) error
 	// UpdateAICCSessionResolutionStatus 根据反馈同步会话解决状态。
@@ -113,8 +113,9 @@ type AICCPublicLeadValuesResult struct {
 
 // AICCPublicFeedbackInput 是访客提交助手回复反馈的入参。
 type AICCPublicFeedbackInput struct {
-	MessageID string
-	Helpful   bool
+	SessionToken string
+	MessageID    string
+	Helpful      bool
 }
 
 // AICCPublicFeedbackResult 描述反馈提交后的会话解决状态。
@@ -352,11 +353,30 @@ func (s *AICCPublicService) submitLeadValues(ctx context.Context, input AICCPubl
 
 // SubmitFeedback 写入助手回复反馈，并同步会话解决状态。
 func (s *AICCPublicService) SubmitFeedback(ctx context.Context, input AICCPublicFeedbackInput) (AICCPublicFeedbackResult, error) {
+	if s.tx != nil {
+		var result AICCPublicFeedbackResult
+		err := s.tx.WithAICCPublicTx(ctx, func(store AICCPublicStore) error {
+			next := *s
+			next.store = store
+			var runErr error
+			result, runErr = next.submitFeedback(ctx, input)
+			return runErr
+		})
+		return result, err
+	}
+	return s.submitFeedback(ctx, input)
+}
+
+func (s *AICCPublicService) submitFeedback(ctx context.Context, input AICCPublicFeedbackInput) (AICCPublicFeedbackResult, error) {
 	messageID := strings.TrimSpace(input.MessageID)
-	if messageID == "" {
+	sessionToken := strings.TrimSpace(input.SessionToken)
+	if messageID == "" || sessionToken == "" {
 		return AICCPublicFeedbackResult{}, ErrAICCInvalidMessage
 	}
-	message, err := s.store.GetAICCAssistantMessageForFeedback(ctx, messageID)
+	message, err := s.store.GetAICCAssistantMessageForFeedback(ctx, sqlc.GetAICCAssistantMessageForFeedbackParams{
+		ID:           messageID,
+		SessionToken: sessionToken,
+	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return AICCPublicFeedbackResult{}, ErrAICCInvalidMessage
 	}

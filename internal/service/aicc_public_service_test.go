@@ -218,11 +218,12 @@ func TestAICCPublicSubmitFeedbackUpdatesResolution(t *testing.T) {
 	store := &fakeAICCPublicStore{
 		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
 		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive},
+		session: sqlc.AiccSession{ID: "session-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 		message: sqlc.AiccMessage{ID: "msg-1", SessionID: "session-1", AgentID: "agent-1", Direction: domain.AICCMessageDirectionAssistant},
 	}
 	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
 
-	result, err := svc.SubmitFeedback(context.Background(), AICCPublicFeedbackInput{MessageID: "msg-1", Helpful: false})
+	result, err := svc.SubmitFeedback(context.Background(), AICCPublicFeedbackInput{SessionToken: "tok", MessageID: "msg-1", Helpful: false})
 
 	require.NoError(t, err)
 	assert.Equal(t, domain.AICCResolutionUnresolved, result.ResolutionStatus)
@@ -235,13 +236,30 @@ func TestAICCPublicSubmitFeedbackRejectsVisitorMessage(t *testing.T) {
 	store := &fakeAICCPublicStore{
 		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
 		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive},
+		session: sqlc.AiccSession{ID: "session-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 		message: sqlc.AiccMessage{ID: "msg-1", SessionID: "session-1", AgentID: "agent-1", Direction: domain.AICCMessageDirectionVisitor},
 	}
 	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
 
-	_, err := svc.SubmitFeedback(context.Background(), AICCPublicFeedbackInput{MessageID: "msg-1", Helpful: true})
+	_, err := svc.SubmitFeedback(context.Background(), AICCPublicFeedbackInput{SessionToken: "tok", MessageID: "msg-1", Helpful: true})
 
 	require.ErrorIs(t, err, ErrAICCInvalidMessage)
+}
+
+// TestAICCPublicSubmitFeedbackRejectsWrongSession 覆盖反馈授权边界：只有持有该会话 token 的访客可反馈消息。
+func TestAICCPublicSubmitFeedbackRejectsWrongSession(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive},
+		session: sqlc.AiccSession{ID: "session-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+		message: sqlc.AiccMessage{ID: "msg-1", SessionID: "session-1", AgentID: "agent-1", Direction: domain.AICCMessageDirectionAssistant},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+
+	_, err := svc.SubmitFeedback(context.Background(), AICCPublicFeedbackInput{SessionToken: "other-token", MessageID: "msg-1", Helpful: true})
+
+	require.ErrorIs(t, err, ErrAICCInvalidMessage)
+	assert.Equal(t, "", store.resolutionStatus)
 }
 
 type fakeAICCPublicStore struct {
@@ -358,8 +376,8 @@ func (f *fakeAICCPublicStore) UpdateAICCSessionLeadStatus(_ context.Context, arg
 	return nil
 }
 
-func (f *fakeAICCPublicStore) GetAICCAssistantMessageForFeedback(_ context.Context, id string) (sqlc.AiccMessage, error) {
-	if f.message.ID != id || f.message.Direction != domain.AICCMessageDirectionAssistant {
+func (f *fakeAICCPublicStore) GetAICCAssistantMessageForFeedback(_ context.Context, arg sqlc.GetAICCAssistantMessageForFeedbackParams) (sqlc.AiccMessage, error) {
+	if f.message.ID != arg.ID || f.session.SessionToken != arg.SessionToken || f.message.Direction != domain.AICCMessageDirectionAssistant {
 		return sqlc.AiccMessage{}, sql.ErrNoRows
 	}
 	return f.message, nil

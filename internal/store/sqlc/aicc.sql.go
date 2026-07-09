@@ -233,11 +233,16 @@ const getAICCAssistantMessageForFeedback = `-- name: GetAICCAssistantMessageForF
 SELECT m.id, m.session_id, m.agent_id, m.direction, m.content_type, m.text_content, m.image_object_key, m.image_mime, m.image_size_bytes, m.hermes_message_id, m.is_fallback, m.is_refusal, m.error_summary, m.created_at
 FROM aicc_messages m
 JOIN aicc_sessions s ON s.id = m.session_id
-WHERE m.id = ? AND m.direction = 'assistant' AND s.expires_at > now()
+WHERE m.id = ? AND s.session_token = ? AND m.direction = 'assistant' AND s.expires_at > now()
 `
 
-func (q *Queries) GetAICCAssistantMessageForFeedback(ctx context.Context, id string) (AiccMessage, error) {
-	row := q.db.QueryRowContext(ctx, getAICCAssistantMessageForFeedback, id)
+type GetAICCAssistantMessageForFeedbackParams struct {
+	ID           string `db:"id" json:"id"`
+	SessionToken string `db:"session_token" json:"session_token"`
+}
+
+func (q *Queries) GetAICCAssistantMessageForFeedback(ctx context.Context, arg GetAICCAssistantMessageForFeedbackParams) (AiccMessage, error) {
+	row := q.db.QueryRowContext(ctx, getAICCAssistantMessageForFeedback, arg.ID, arg.SessionToken)
 	var i AiccMessage
 	err := row.Scan(
 		&i.ID,

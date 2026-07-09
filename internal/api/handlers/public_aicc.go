@@ -40,7 +40,7 @@ func RegisterPublicAICCRoutes(router gin.IRouter, handler *PublicAICCHandler) {
 	group.POST("/sessions/:sessionToken/images", handler.UploadImage)
 	group.POST("/sessions/:sessionToken/messages", handler.SendMessage)
 	group.POST("/sessions/:sessionToken/lead-values", handler.SubmitLeadValues)
-	group.POST("/messages/:messageId/feedback", handler.Feedback)
+	group.POST("/sessions/:sessionToken/messages/:messageId/feedback", handler.Feedback)
 }
 
 // Config 返回访客端公开配置。
@@ -199,13 +199,14 @@ func (h *PublicAICCHandler) SubmitLeadValues(c *gin.Context) {
 // @Tags         public-aicc
 // @Accept       json
 // @Produce      json
-// @Param        messageId  path      string                     true  "消息 ID"
-// @Param        body       body      SubmitAICCFeedbackRequest  true  "反馈内容"
-// @Success      200        {object}  map[string]service.AICCPublicFeedbackResult
-// @Failure      400        {object}  ErrorResponse
-// @Failure      404        {object}  ErrorResponse
-// @Failure      500        {object}  ErrorResponse
-// @Router       /public/aicc/messages/{messageId}/feedback [post]
+// @Param        sessionToken  path      string                     true  "会话 token"
+// @Param        messageId     path      string                     true  "消息 ID"
+// @Param        body          body      SubmitAICCFeedbackRequest  true  "反馈内容"
+// @Success      200           {object}  map[string]service.AICCPublicFeedbackResult
+// @Failure      400           {object}  ErrorResponse
+// @Failure      404           {object}  ErrorResponse
+// @Failure      500           {object}  ErrorResponse
+// @Router       /public/aicc/sessions/{sessionToken}/messages/{messageId}/feedback [post]
 func (h *PublicAICCHandler) Feedback(c *gin.Context) {
 	var req SubmitAICCFeedbackRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -213,8 +214,9 @@ func (h *PublicAICCHandler) Feedback(c *gin.Context) {
 		return
 	}
 	result, err := h.service.SubmitFeedback(c.Request.Context(), service.AICCPublicFeedbackInput{
-		MessageID: c.Param("messageId"),
-		Helpful:   *req.Helpful,
+		SessionToken: c.Param("sessionToken"),
+		MessageID:    c.Param("messageId"),
+		Helpful:      *req.Helpful,
 	})
 	if err != nil {
 		writePublicAICCError(c, err)

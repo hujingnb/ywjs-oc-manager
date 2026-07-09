@@ -104,7 +104,7 @@ WHERE id = ?;
 SELECT m.*
 FROM aicc_messages m
 JOIN aicc_sessions s ON s.id = m.session_id
-WHERE m.id = ? AND m.direction = 'assistant' AND s.expires_at > now();
+WHERE m.id = ? AND s.session_token = ? AND m.direction = 'assistant' AND s.expires_at > now();
 
 -- name: UpsertAICCFeedback :exec
 INSERT INTO aicc_feedback (id, session_id, message_id, helpful)

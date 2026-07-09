@@ -104,18 +104,19 @@ func TestPublicAICCHandlerSubmitLeadValues(t *testing.T) {
 	assert.Equal(t, "13800000000", svc.lastLeadInput.Values["phone"])
 }
 
-// TestPublicAICCHandlerSubmitFeedback 覆盖公开反馈入口：message id 来自路径，helpful 来自请求体。
+// TestPublicAICCHandlerSubmitFeedback 覆盖公开反馈入口：session token/message id 来自路径，helpful 来自请求体。
 func TestPublicAICCHandlerSubmitFeedback(t *testing.T) {
 	svc := &publicAICCServiceStub{feedbackResult: service.AICCPublicFeedbackResult{ResolutionStatus: "resolved"}}
 	router := newPublicAICCTestRouter(t, svc)
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/messages/msg-1/feedback", bytes.NewBufferString(`{"helpful":true}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/sessions/sess-1/messages/msg-1/feedback", bytes.NewBufferString(`{"helpful":true}`))
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), "resolved")
+	assert.Equal(t, "sess-1", svc.lastFeedbackInput.SessionToken)
 	assert.Equal(t, "msg-1", svc.lastFeedbackInput.MessageID)
 	assert.True(t, svc.lastFeedbackInput.Helpful)
 }
@@ -125,7 +126,7 @@ func TestPublicAICCHandlerSubmitFeedbackRequiresHelpful(t *testing.T) {
 	router := newPublicAICCTestRouter(t, &publicAICCServiceStub{})
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/messages/msg-1/feedback", bytes.NewBufferString(`{}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/sessions/sess-1/messages/msg-1/feedback", bytes.NewBufferString(`{}`))
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, request)
 
@@ -162,7 +163,7 @@ func TestPublicAICCHandlerMapsInvalidMessage(t *testing.T) {
 	router := newPublicAICCTestRouter(t, &publicAICCServiceStub{feedbackErr: service.ErrAICCInvalidMessage})
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/messages/msg-1/feedback", bytes.NewBufferString(`{"helpful":false}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/sessions/sess-1/messages/msg-1/feedback", bytes.NewBufferString(`{"helpful":false}`))
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, request)
 
