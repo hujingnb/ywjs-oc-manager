@@ -763,6 +763,8 @@ components:
         enabled:
           description: Enabled 表示是否开通 AICC。
           type: boolean
+      required:
+      - enabled
       type: object
     ocops.ConversationChatResult:
       properties:

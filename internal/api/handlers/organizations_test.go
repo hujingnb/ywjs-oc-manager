@@ -184,6 +184,38 @@ func TestOrganizationsHandlerUpdateAICCConfig(t *testing.T) {
 	assert.Equal(t, int32(5), *svc.lastAICCConfigInput.AgentLimit)
 }
 
+// TestOrganizationsHandlerUpdateAICCConfigAllowsDisable 覆盖正常路径：显式 enabled=false 应合法透传，不能被必填校验误拒绝。
+func TestOrganizationsHandlerUpdateAICCConfigAllowsDisable(t *testing.T) {
+	svc := &organizationServiceStub{
+		updateAICCConfigResult: service.OrganizationResult{ID: "org-1", Name: "测试组织", Status: domain.StatusActive, AICCEnabled: false},
+	}
+	router := newOrganizationsTestRouter(t, svc)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/organizations/org-1/aicc-config", bytes.NewBufferString(`{"enabled":false,"agent_limit":null}`))
+	request.Header.Set("Content-Type", "application/json")
+	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.False(t, svc.lastAICCConfigInput.Enabled)
+	assert.Nil(t, svc.lastAICCConfigInput.AgentLimit)
+}
+
+// TestOrganizationsHandlerUpdateAICCConfigRequiresEnabled 覆盖异常路径：缺省 enabled 必须返回 400，避免空请求体误关闭企业 AICC。
+func TestOrganizationsHandlerUpdateAICCConfigRequiresEnabled(t *testing.T) {
+	router := newOrganizationsTestRouter(t, &organizationServiceStub{})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/organizations/org-1/aicc-config", bytes.NewBufferString(`{"agent_limit":5}`))
+	request.Header.Set("Content-Type", "application/json")
+	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "BAD_REQUEST")
+}
+
 // TestOrganizationsHandlerUpdateAICCConfigBadJSON 覆盖异常路径：非法 JSON 返回 400，避免空请求体误关闭企业 AICC。
 func TestOrganizationsHandlerUpdateAICCConfigBadJSON(t *testing.T) {
 	router := newOrganizationsTestRouter(t, &organizationServiceStub{})
@@ -196,6 +228,33 @@ func TestOrganizationsHandlerUpdateAICCConfigBadJSON(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.Contains(t, recorder.Body.String(), "BAD_REQUEST")
+}
+
+// TestOrganizationsHandlerUpdateAICCConfigMapsServiceErrors 覆盖新路由的 service sentinel 错误映射。
+func TestOrganizationsHandlerUpdateAICCConfigMapsServiceErrors(t *testing.T) {
+	cases := []struct {
+		name string // 子场景说明
+		err  error  // service 返回的错误
+		code int    // 期望 HTTP 状态码
+	}{
+		{name: "无权限映射为 403", err: service.ErrForbidden, code: http.StatusForbidden},                                      // 场景：非平台管理员调用 service 后被拒绝。
+		{name: "企业不存在映射为 404", err: service.ErrNotFound, code: http.StatusNotFound},                                      // 场景：目标企业不存在。
+		{name: "业务参数错误映射为 400", err: fmt.Errorf("%w: 上限不能为负数", service.ErrInvalidArgument), code: http.StatusBadRequest}, // 场景：上限通过 HTTP 绑定但违反业务边界。
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &organizationServiceStub{updateAICCConfigErr: tc.err}
+			router := newOrganizationsTestRouter(t, svc)
+
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPatch, "/api/v1/organizations/org-1/aicc-config", bytes.NewBufferString(`{"enabled":true}`))
+			request.Header.Set("Content-Type", "application/json")
+			request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
+			router.ServeHTTP(recorder, request)
+
+			require.Equal(t, tc.code, recorder.Code)
+		})
+	}
 }
 
 // TestOrganizationsCreateRequiredFields 验证组织创建仅需必填字段即可成功，
@@ -279,6 +338,7 @@ type organizationServiceStub struct {
 	createResult           service.OrganizationResult
 	createErr              error
 	updateAICCConfigResult service.OrganizationResult
+	updateAICCConfigErr    error
 	lastPrincipal          auth.Principal
 	lastCreateInput        service.OrganizationInput
 	lastUpdateOrgID        string
@@ -322,6 +382,9 @@ func (s *organizationServiceStub) UpdateAICCConfig(_ context.Context, principal 
 	s.lastPrincipal = principal
 	s.lastAICCConfigOrgID = orgID
 	s.lastAICCConfigInput = input
+	if s.updateAICCConfigErr != nil {
+		return service.OrganizationResult{}, s.updateAICCConfigErr
+	}
 	if s.updateAICCConfigResult.ID != "" {
 		return s.updateAICCConfigResult, nil
 	}

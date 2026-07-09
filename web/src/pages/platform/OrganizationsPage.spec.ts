@@ -408,13 +408,7 @@ describe('OrganizationsPage', () => {
       }),
     }))
     expect(updateOrganization.mock.calls.at(-1)?.[0].payload).not.toHaveProperty('knowledge_quota_gb')
-    expect(updateOrganizationAICCConfig).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'org-1',
-      payload: {
-        enabled: true,
-        agent_limit: 5,
-      },
-    }))
+    expect(updateOrganizationAICCConfig).not.toHaveBeenCalled()
   })
 
   // 编辑其他字段但未改动知识库容量时，保留后端原始 bytes，避免整 GB 展示造成静默舍入。
@@ -456,8 +450,8 @@ describe('OrganizationsPage', () => {
     expect(updateOrganization.mock.calls.at(-1)?.[0].payload).not.toHaveProperty('knowledge_quota_gb')
   })
 
-  // 编辑企业 AICC 配置时，开关和智能体上限通过独立 mutation 保存。
-  it('编辑企业时提交 AICC 开通配置', async () => {
+  // 编辑企业 AICC 配置时，开关和智能体上限通过独立按钮保存，不跟基础资料编辑混成一次非原子提交。
+  it('编辑企业时通过独立按钮提交 AICC 开通配置', async () => {
     updateOrganization.mockResolvedValue({
       id: 'org-1',
       name: '测试企业',
@@ -481,7 +475,9 @@ describe('OrganizationsPage', () => {
 
     expect(wrapper.text()).toContain('开通 AICC')
     expect(wrapper.text()).toContain('AICC 智能体数量上限')
-    await wrapper.find('form').trigger('submit')
+    const saveAICCButton = wrapper.findAll('button').find(button => button.text().includes('保存 AICC 配置'))
+    expect(saveAICCButton).toBeTruthy()
+    await saveAICCButton!.trigger('click')
 
     expect(updateOrganizationAICCConfig).toHaveBeenCalledWith(expect.objectContaining({
       id: 'org-1',

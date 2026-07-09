@@ -13439,7 +13439,7 @@ export interface components {
             /** @description AgentLimit 是智能体数量上限；nil 表示不限。 */
             agent_limit?: number;
             /** @description Enabled 表示是否开通 AICC。 */
-            enabled?: boolean;
+            enabled: boolean;
         };
         "ocops.ConversationChatResult": {
             message?: components["schemas"]["ocops.ConversationMessage"];

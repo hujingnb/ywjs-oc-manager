@@ -182,6 +182,17 @@
                 />
               </n-form-item>
             </n-grid-item>
+            <n-grid-item :span="2">
+              <n-space justify="end">
+                <n-button
+                  attr-type="button"
+                  :loading="aiccConfigSubmitting"
+                  :disabled="aiccConfigSubmitting"
+                  @click="submitAICCConfig"
+                >{{ t('platform.orgs.form.saveAICCConfig') }}</n-button>
+              </n-space>
+              <p v-if="aiccConfigError" class="state-text danger">{{ aiccConfigError }}</p>
+            </n-grid-item>
           </template>
           <n-grid-item :span="2">
             <n-form-item :label="t('platform.orgs.form.labelRemark')">
@@ -427,6 +438,10 @@ const editForm = reactive({
 const editSubmitting = ref(false)
 // editError 保存编辑提交的错误信息。
 const editError = ref<string | null>(null)
+// aiccConfigSubmitting 控制 AICC 配置独立保存按钮的 loading 状态。
+const aiccConfigSubmitting = ref(false)
+// aiccConfigError 保存 AICC 配置独立保存失败时的错误信息。
+const aiccConfigError = ref<string | null>(null)
 
 // openEditForm 打开编辑模式，将当前组织的资料预填到 editForm。
 function openEditForm(org: Organization) {
@@ -455,6 +470,7 @@ function openEditForm(org: Organization) {
   editForm.aicc_agent_limit = typeof org.aicc_agent_limit === 'number'
     ? org.aicc_agent_limit : undefined
   editError.value = null
+  aiccConfigError.value = null
   editFormVisible.value = true
 }
 
@@ -496,6 +512,21 @@ async function submitEditOrganization() {
         assistant_version_ids: editForm.assistant_version_ids,
       },
     })
+    editFormVisible.value = false
+    modalMode.value = 'create'
+  } catch (err) {
+    editError.value = err instanceof Error ? err.message : t('platform.orgs.editError')
+  } finally {
+    editSubmitting.value = false
+  }
+}
+
+// submitAICCConfig 独立保存企业 AICC 开通配置，避免基础资料保存与 AICC 配置出现非原子双提交。
+async function submitAICCConfig() {
+  if (!editingOrg.value) return
+  aiccConfigError.value = null
+  aiccConfigSubmitting.value = true
+  try {
     await updateAICCConfigMutation.mutateAsync({
       id: editingOrg.value.id,
       payload: {
@@ -503,12 +534,10 @@ async function submitEditOrganization() {
         agent_limit: typeof editForm.aicc_agent_limit === 'number' ? editForm.aicc_agent_limit : null,
       },
     })
-    editFormVisible.value = false
-    modalMode.value = 'create'
   } catch (err) {
-    editError.value = err instanceof Error ? err.message : t('platform.orgs.editError')
+    aiccConfigError.value = err instanceof Error ? err.message : t('platform.orgs.aiccConfigError')
   } finally {
-    editSubmitting.value = false
+    aiccConfigSubmitting.value = false
   }
 }
 // selectedOrg 保存当前充值弹框的目标组织，关闭弹框不会修改列表数据。

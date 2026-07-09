@@ -23,6 +23,7 @@ export default {
       personalKnowledgeQuotaHint: 'Default personal knowledge base quota for new instances in this organization. Applies only to instances created afterward; existing instances are unaffected and can still be adjusted individually.',
       labelAICCEnabled: 'Enable AICC',
       labelAICCAgentLimit: 'AICC agent limit',
+      saveAICCConfig: 'Save AICC config',
       labelRemark: 'Remark',
       labelVersions: 'Available assistant versions',
       placeholderName: 'Organization name',
@@ -67,6 +68,7 @@ export default {
       formatAdminPassword: 'Admin password: {hint}',
     },
     editError: 'Edit failed',
+    aiccConfigError: 'AICC config save failed',
     rechargeModal: {
       title: 'Recharge organization',
       currentBalance: 'Current balance:',

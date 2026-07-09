@@ -187,7 +187,7 @@ func (h *OrganizationsHandler) UpdateAICCConfig(c *gin.Context) {
 		return
 	}
 	result, err := h.service.UpdateAICCConfig(c.Request.Context(), principal, c.Param("orgId"), service.AICCConfigInput{
-		Enabled:    req.Enabled,
+		Enabled:    *req.Enabled,
 		AgentLimit: req.AgentLimit,
 	})
 	if err != nil {

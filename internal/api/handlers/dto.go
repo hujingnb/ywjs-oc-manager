@@ -106,7 +106,7 @@ type OrganizationRequest struct {
 // UpdateOrganizationAICCConfigRequest 是平台管理员维护企业 AICC 开通状态的请求体。
 type UpdateOrganizationAICCConfigRequest struct {
 	// Enabled 表示是否开通 AICC。
-	Enabled bool `json:"enabled"`
+	Enabled *bool `json:"enabled" binding:"required"`
 	// AgentLimit 是智能体数量上限；nil 表示不限。
 	AgentLimit *int32 `json:"agent_limit"`
 }

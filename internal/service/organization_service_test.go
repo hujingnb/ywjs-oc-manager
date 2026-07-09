@@ -403,6 +403,46 @@ func TestOrganizationServiceUpdateAICCConfigRejectsNegativeLimit(t *testing.T) {
 	assert.False(t, store.updateAICCConfigCalled)
 }
 
+// TestOrganizationServiceUpdateAICCConfigClearsLimit 验证 nil 智能体上限会写入 NULL，表示企业 AICC 智能体数量不限。
+func TestOrganizationServiceUpdateAICCConfigClearsLimit(t *testing.T) {
+	store := &organizationStoreStub{org: sqlc.Organization{ID: "org-1", Name: "Org", Code: "org", Status: domain.StatusActive, AiccEnabled: true}}
+	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
+
+	result, err := svc.UpdateAICCConfig(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, "org-1", AICCConfigInput{
+		Enabled:    false,
+		AgentLimit: nil,
+	})
+
+	require.NoError(t, err)
+	require.True(t, store.updateAICCConfigCalled)
+	assert.False(t, store.updatedAICCConfig.AiccEnabled)
+	assert.False(t, store.updatedAICCConfig.AiccAgentLimit.Valid)
+	assert.False(t, result.AICCEnabled)
+	assert.Nil(t, result.AICCAgentLimit)
+}
+
+// TestOrganizationServiceUpdateAICCConfigMapsMissingOrg 验证更新后回读不到企业时映射为 ErrNotFound。
+func TestOrganizationServiceUpdateAICCConfigMapsMissingOrg(t *testing.T) {
+	store := &organizationStoreStub{org: sqlc.Organization{ID: "org-1", Name: "Org", Code: "org", Status: domain.StatusActive}}
+	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
+
+	_, err := svc.UpdateAICCConfig(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, "missing-org", AICCConfigInput{Enabled: true})
+
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
+// TestOrganizationServiceUpdateAICCConfigWrapsStoreError 验证数据库更新失败时保留底层错误上下文。
+func TestOrganizationServiceUpdateAICCConfigWrapsStoreError(t *testing.T) {
+	storeErr := errors.New("db unavailable")
+	store := &organizationStoreStub{updateAICCConfigErr: storeErr}
+	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
+
+	_, err := svc.UpdateAICCConfig(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, "org-1", AICCConfigInput{Enabled: true})
+
+	require.ErrorIs(t, err, storeErr)
+	require.ErrorContains(t, err, "更新企业 AICC 配置失败")
+}
+
 func mustCipher(t *testing.T) *auth.Cipher {
 	t.Helper()
 	key := make([]byte, 32)
@@ -468,6 +508,7 @@ type organizationStoreStub struct {
 	updateCalled           bool
 	updateProfileCalled    bool
 	updateAICCConfigCalled bool
+	updateAICCConfigErr    error
 	createUserCalled       bool
 	hardDeleted            bool
 	updatedProfile         sqlc.UpdateOrganizationProfileParams
@@ -552,6 +593,9 @@ func (s *organizationStoreStub) SetOrganizationStatus(_ context.Context, arg sql
 }
 
 func (s *organizationStoreStub) UpdateOrganizationAICCConfig(_ context.Context, arg sqlc.UpdateOrganizationAICCConfigParams) error {
+	if s.updateAICCConfigErr != nil {
+		return s.updateAICCConfigErr
+	}
 	s.updatedAICCConfig = arg
 	s.updateAICCConfigCalled = true
 	s.org.AiccEnabled = arg.AiccEnabled
