@@ -139,6 +139,9 @@ func (s *UsageService) GetAppUsage(ctx context.Context, principal auth.Principal
 		}
 		return LogsPage{}, ErrUsageUnavailable
 	}
+	if app.AiccHidden {
+		return LogsPage{}, ErrNotFound
+	}
 	if !auth.CanReadAppKnowledge(principal, app.OrgID, app.OwnerUserID) {
 		return LogsPage{}, ErrForbidden
 	}

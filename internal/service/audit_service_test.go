@@ -112,6 +112,26 @@ func TestAuditServiceListByTargetAllowsMemberOwnApp(t *testing.T) {
 	require.Equal(t, testAuditAppID, results[0].TargetID)
 }
 
+// TestAuditServiceListByTargetRejectsAICCHiddenApp 覆盖普通 app 审计入口隔离：AICC 隐藏 app
+// 不允许通过普通应用审计目标接口暴露。
+func TestAuditServiceListByTargetRejectsAICCHiddenApp(t *testing.T) {
+	store := &auditStoreStub{
+		apps: map[string]sqlc.App{
+			testAuditAppID: {
+				ID:          mustUUID(t, testAuditAppID),
+				OrgID:       mustUUID(t, testOrgID),
+				OwnerUserID: mustUUID(t, testMemUID),
+				AiccHidden:  true,
+			},
+		},
+	}
+	svc := NewAuditService(store)
+
+	_, err := svc.ListByTarget(context.Background(), platformAdmin(), "app", testAuditAppID, 0, 0)
+
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
 // TestAuditServiceListByTargetRejectsMemberOtherApp 验证审计服务列表通过目标拒绝成员其他应用的异常或拒绝路径场景。
 func TestAuditServiceListByTargetRejectsMemberOtherApp(t *testing.T) {
 	store := &auditStoreStub{

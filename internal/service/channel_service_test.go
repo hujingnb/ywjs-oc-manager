@@ -87,6 +87,20 @@ func TestChannelServiceBeginAuthPlatformAdminAllowed(t *testing.T) {
 	require.Equal(t, domain.ChannelStatusPendingAuth, store.lastStatus)
 }
 
+// TestChannelServiceRejectsAICCHiddenApp 覆盖普通渠道入口隔离：AICC 隐藏 app
+// 不允许通过普通 app 渠道绑定入口发起认证。
+func TestChannelServiceRejectsAICCHiddenApp(t *testing.T) {
+	store := newChannelStub(t)
+	store.app.AiccHidden = true
+	registry := channel.NewRegistry()
+	registry.MustRegister(&fakeAdapter{})
+	svc := NewChannelService(store, registry)
+
+	_, err := svc.BeginAuth(context.Background(), platformAdmin(), testChannelAppID, domain.ChannelTypeWeChat)
+
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
 // TestChannelServicePollAuthMarksBound 验证渠道服务轮询认证Marks已绑定的预期行为场景。
 func TestChannelServicePollAuthMarksBound(t *testing.T) {
 	store := newChannelStub(t)

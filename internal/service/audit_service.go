@@ -30,18 +30,18 @@ type AuditStore interface {
 // AuditResult 表示对外返回的审计日志记录。
 // IP 与元数据以字符串形式输出，避免暴露内部类型结构。
 type AuditResult struct {
-	ID           string    `json:"id"`
-	ActorID      string    `json:"actor_id,omitempty"`
-	ActorRole    string    `json:"actor_role"`
-	OrgID        string    `json:"org_id,omitempty"`
-	TargetType   string    `json:"target_type"`
-	TargetID     string    `json:"target_id"`
-	Action       string    `json:"action"`
-	Result       string    `json:"result"`
-	ErrorMessage string    `json:"error_message,omitempty"`
-	IPAddress    string    `json:"ip_address,omitempty"`
+	ID           string         `json:"id"`
+	ActorID      string         `json:"actor_id,omitempty"`
+	ActorRole    string         `json:"actor_role"`
+	OrgID        string         `json:"org_id,omitempty"`
+	TargetType   string         `json:"target_type"`
+	TargetID     string         `json:"target_id"`
+	Action       string         `json:"action"`
+	Result       string         `json:"result"`
+	ErrorMessage string         `json:"error_message,omitempty"`
+	IPAddress    string         `json:"ip_address,omitempty"`
 	Metadata     map[string]any `json:"metadata,omitempty"`
-	CreatedAt    time.Time `json:"created_at" swaggertype:"string" format:"date-time"`
+	CreatedAt    time.Time      `json:"created_at" swaggertype:"string" format:"date-time"`
 	// 以下为展示用翻译字段，由 toAuditResult() 填充，未知值 fallback 到原始字符串。
 	ActionLabel     string `json:"action_label"`
 	TargetTypeLabel string `json:"target_type_label"`
@@ -217,6 +217,9 @@ func (s *AuditService) authorizeAppTarget(ctx context.Context, principal auth.Pr
 		}
 		return fmt.Errorf("查询应用失败: %w", err)
 	}
+	if app.AiccHidden {
+		return ErrNotFound
+	}
 	if !auth.CanViewAppAudit(principal, app.OrgID, app.OwnerUserID) {
 		return ErrForbidden
 	}
@@ -241,14 +244,14 @@ func (s *AuditService) normalizePagination(limit, offset int32) (int32, int32) {
 // ActionDetail 直接读 detail_message。
 func toAuditResult(row sqlc.AuditLog) AuditResult {
 	result := AuditResult{
-		ID:              row.ID,
-		ActorID:         strOrEmpty(row.ActorID),
-		ActorRole:       row.ActorRole,
-		OrgID:           strOrEmpty(row.OrgID),
-		TargetType:      row.TargetType,
-		TargetID:        row.TargetID,
-		Action:          row.Action,
-		Result:          row.Result,
+		ID:         row.ID,
+		ActorID:    strOrEmpty(row.ActorID),
+		ActorRole:  row.ActorRole,
+		OrgID:      strOrEmpty(row.OrgID),
+		TargetType: row.TargetType,
+		TargetID:   row.TargetID,
+		Action:     row.Action,
+		Result:     row.Result,
 		// CreatedAt 是 time.Time（MySQL 侧为 DATETIME/TIMESTAMP）。
 		CreatedAt:       row.CreatedAt,
 		ActionLabel:     labelAction(row.TargetType, row.Action),

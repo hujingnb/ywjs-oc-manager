@@ -82,6 +82,21 @@ func TestUsageServiceAppZeroKeyReturnsEmpty(t *testing.T) {
 	require.Equal(t, 0, client.tokenLogsCalls)
 }
 
+// TestUsageServiceAppRejectsAICCHiddenApp 覆盖普通 app 用量入口隔离：AICC 隐藏 app
+// 不允许通过普通应用用量接口读取 new-api token 日志。
+func TestUsageServiceAppRejectsAICCHiddenApp(t *testing.T) {
+	client := &fakeUsageClient{}
+	store := &fakeUsageStore{appByID: map[string]sqlc.App{
+		"app": {ID: "app", OrgID: "org-1", OwnerUserID: "owner-user", AiccHidden: true, NewapiKeyName: null.StringFrom("app-token")},
+	}}
+	svc := NewUsageService(store, client, nil)
+
+	_, err := svc.GetAppUsage(context.Background(), platformAdmin(), "app", 1, LogsQueryOptions{})
+
+	require.ErrorIs(t, err, ErrNotFound)
+	require.Equal(t, 0, client.tokenLogsCalls)
+}
+
 // TestUsageServiceMissingClient 校验 client=nil 时 ErrUsageUnavailable。
 func TestUsageServiceMissingClient(t *testing.T) {
 	svc := NewUsageService(&fakeUsageStore{}, nil, nil)
@@ -323,13 +338,13 @@ func (c *fakeUsageClient) GetAllQuotaDates(_ context.Context, _, _ int64) ([]new
 // 的 happy path；未注入时 GetApp 仍然返回 sql.ErrNoRows，保证现有走回退路径
 // 的用例行为不变。
 type fakeUsageStore struct {
-	activeApp         sqlc.App
-	activeAppCalled   bool
+	activeApp       sqlc.App
+	activeAppCalled bool
 	// lastActiveOwner 记录最近一次 GetActiveAppByOwner 调用传入的 ownerUserID（string）。
-	lastActiveOwner   string
-	org               sqlc.Organization
-	appByID           map[string]sqlc.App
-	allActiveOrgs     []sqlc.Organization
+	lastActiveOwner string
+	org             sqlc.Organization
+	appByID         map[string]sqlc.App
+	allActiveOrgs   []sqlc.Organization
 }
 
 func (s *fakeUsageStore) GetApp(_ context.Context, id string) (sqlc.App, error) {
