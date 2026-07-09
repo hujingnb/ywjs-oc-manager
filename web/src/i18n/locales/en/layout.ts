@@ -54,6 +54,8 @@ export default {
     // webPublishConfig: platform admin entry for enabling and configuring org web-publish
     webPublishConfig: 'Web Publish Setup',
     members: 'Members',
+    // aicc: org-admin entry for online customer-service agents and public reception links.
+    aicc: 'AICC Service',
     // publishedSites: org-management entry for the published sites list (org_admin & platform_admin)
     publishedSites: 'Published Sites',
     instance: 'Instance',

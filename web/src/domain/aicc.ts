@@ -58,6 +58,50 @@ export interface AICCAgentPayload {
   retention_days?: number
 }
 
+// AICCPublicConfig 是访客打开公开链接后可读取的非敏感展示配置。
+export interface AICCPublicConfig {
+  // 智能体公开展示名。
+  name?: string
+  // 访客欢迎语。
+  greeting?: string
+  // 隐私提示模式。
+  privacy_mode?: AICCPrivacyMode
+  // 隐私说明文本。
+  privacy_text?: string
+  // 数据保留天数。
+  retention_days?: number
+}
+
+// AICCPublicSession 是公开访客会话的临时凭证和隐私状态。
+export interface AICCPublicSession {
+  // 会话短期 token；只保存在当前浏览器页面内。
+  session_token?: string
+  // 隐私提示模式。
+  privacy_mode?: AICCPrivacyMode
+  // 隐私说明文本。
+  privacy_text?: string
+  // 本会话是否已经展示隐私提示。
+  privacy_notice_shown?: boolean
+}
+
+// AICCPublicMessageResult 是公开消息接口返回的助手回复。
+export interface AICCPublicMessageResult {
+  // 消息 ID，用于后续反馈绑定。
+  message_id?: string
+  // 助手回复文本。
+  text?: string
+}
+
+// AICCPublicImageResult 是公开图片上传后返回的文件引用。
+export interface AICCPublicImageResult {
+  // 图片文件 ID；发送消息时作为 image_file_id 提交。
+  image_file_id?: string
+  // 服务端识别出的 MIME。
+  mime?: string
+  // 图片大小，单位字节。
+  size?: number
+}
+
 // isAICCAgentRunning 判断智能体是否处于可对外接待状态。
 export function isAICCAgentRunning(agent: Pick<AICCAgent, 'status'>): boolean {
   return agent.status === 'active'

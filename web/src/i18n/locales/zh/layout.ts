@@ -54,6 +54,8 @@ export default {
     // webPublishConfig：平台管理员开通配置企业 web-publish 能力的导航入口。
     webPublishConfig: 'Web 发布配置',
     members: '成员',
+    // aicc：企业管理员维护在线客服智能体和公开接待入口。
+    aicc: 'AICC 客服',
     // publishedSites：组织管理视角的已发布站点入口，org_admin 与 platform_admin 可见
     publishedSites: '已发布站点',
     instance: '实例',

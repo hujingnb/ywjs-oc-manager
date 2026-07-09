@@ -3,8 +3,15 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { Ref } from 'vue'
 import { computed } from 'vue'
 
-import { apiRequest } from '@/api/client'
-import type { AICCAgent, AICCAgentPayload } from '@/domain/aicc'
+import { apiRequest, getCsrfToken } from '@/api/client'
+import type {
+  AICCAgent,
+  AICCAgentPayload,
+  AICCPublicConfig,
+  AICCPublicImageResult,
+  AICCPublicMessageResult,
+  AICCPublicSession,
+} from '@/domain/aicc'
 
 const AICC_AGENTS_KEY = ['aicc', 'agents'] as const
 const aiccAgentsKey = (orgId?: string) => [...AICC_AGENTS_KEY, orgId ?? 'current'] as const
@@ -101,4 +108,86 @@ export function useDeleteAICCAgent() {
       void client.removeQueries({ queryKey: aiccAgentKey(agentId) })
     },
   })
+}
+
+// fetchAICCPublicConfig 读取访客公开配置；该接口不带 Authorization，避免公开链接受登录态影响。
+export async function fetchAICCPublicConfig(publicToken: string): Promise<AICCPublicConfig> {
+  const response = await apiRequest<{ config: AICCPublicConfig }>(`/api/v1/public/aicc/agents/${publicToken}/config`, { withAuth: false })
+  return response.config
+}
+
+// createAICCPublicSession 为公开访客创建短期会话 token。
+export async function createAICCPublicSession(publicToken: string): Promise<AICCPublicSession> {
+  const response = await apiRequest<{ session: AICCPublicSession }>(`/api/v1/public/aicc/agents/${publicToken}/sessions`, {
+    method: 'POST',
+    withAuth: false,
+    body: {
+      channel: 'web_link',
+      referrer: typeof document === 'undefined' ? '' : document.referrer,
+      source_url: typeof window === 'undefined' ? '' : window.location.href,
+    },
+  })
+  return response.session
+}
+
+// consentAICCPublicSession 记录访客已同意隐私说明；仅 consent_required 模式需要调用。
+export async function consentAICCPublicSession(sessionToken: string): Promise<void> {
+  await apiRequest<void>(`/api/v1/public/aicc/sessions/${sessionToken}/consent`, {
+    method: 'POST',
+    withAuth: false,
+  })
+}
+
+// sendAICCPublicMessage 发送文字、图片或混合消息，并返回助手回复。
+export async function sendAICCPublicMessage(
+  sessionToken: string,
+  payload: { text?: string; image_file_id?: string },
+): Promise<AICCPublicMessageResult> {
+  const response = await apiRequest<{ message: AICCPublicMessageResult }>(`/api/v1/public/aicc/sessions/${sessionToken}/messages`, {
+    method: 'POST',
+    withAuth: false,
+    body: payload,
+  })
+  return response.message
+}
+
+// submitAICCPublicFeedback 把访客对某条助手回复的评价绑定到当前会话。
+export async function submitAICCPublicFeedback(
+  sessionToken: string,
+  messageId: string,
+  helpful: boolean,
+): Promise<void> {
+  await apiRequest<void>(`/api/v1/public/aicc/sessions/${sessionToken}/messages/${messageId}/feedback`, {
+    method: 'POST',
+    withAuth: false,
+    body: { helpful },
+  })
+}
+
+// uploadAICCPublicImage 直接用 fetch 上传二进制图片；apiRequest 只处理 JSON，不适合该接口。
+export async function uploadAICCPublicImage(sessionToken: string, file: File): Promise<AICCPublicImageResult> {
+  const params = new URLSearchParams({ filename: file.name })
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    'Content-Type': file.type || 'application/octet-stream',
+  }
+  const csrf = getCsrfToken()
+  if (csrf) headers['X-CSRF-Token'] = csrf
+
+  const response = await fetch(`/api/v1/public/aicc/sessions/${sessionToken}/images?${params.toString()}`, {
+    method: 'POST',
+    headers,
+    body: file,
+  })
+  const contentType = response.headers.get('content-type') ?? ''
+  const payload = contentType.includes('application/json')
+    ? await response.json().catch(() => undefined)
+    : await response.text().catch(() => undefined)
+  if (!response.ok) {
+    const message = typeof payload === 'object' && payload && 'message' in payload
+      ? String((payload as { message?: unknown }).message)
+      : `HTTP ${response.status}`
+    throw new Error(message)
+  }
+  return (payload as { image: AICCPublicImageResult }).image
 }
