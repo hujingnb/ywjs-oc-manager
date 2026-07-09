@@ -33,11 +33,12 @@ type AiccAgent struct {
 }
 
 type AiccAgentKnowledge struct {
-	ID        string      `db:"id" json:"id"`
-	AgentID   string      `db:"agent_id" json:"agent_id"`
-	ScopeType string      `db:"scope_type" json:"scope_type"`
-	ScopeID   null.String `db:"scope_id" json:"scope_id"`
-	CreatedAt time.Time   `db:"created_at" json:"created_at"`
+	ID               string      `db:"id" json:"id"`
+	AgentID          string      `db:"agent_id" json:"agent_id"`
+	ScopeType        string      `db:"scope_type" json:"scope_type"`
+	ScopeID          null.String `db:"scope_id" json:"scope_id"`
+	ScopeIdentityKey null.String `db:"scope_identity_key" json:"scope_identity_key"`
+	CreatedAt        time.Time   `db:"created_at" json:"created_at"`
 }
 
 type AiccFeedback struct {
@@ -55,6 +56,7 @@ type AiccLead struct {
 	DisplayName        null.String `db:"display_name" json:"display_name"`
 	Unread             bool        `db:"unread" json:"unread"`
 	LatestSessionID    null.String `db:"latest_session_id" json:"latest_session_id"`
+	LatestSessionOrgID null.String `db:"latest_session_org_id" json:"latest_session_org_id"`
 	CreatedAt          time.Time   `db:"created_at" json:"created_at"`
 	UpdatedAt          time.Time   `db:"updated_at" json:"updated_at"`
 }
@@ -75,6 +77,7 @@ type AiccLeadField struct {
 type AiccLeadValue struct {
 	ID        string      `db:"id" json:"id"`
 	SessionID string      `db:"session_id" json:"session_id"`
+	AgentID   string      `db:"agent_id" json:"agent_id"`
 	LeadID    null.String `db:"lead_id" json:"lead_id"`
 	FieldID   string      `db:"field_id" json:"field_id"`
 	ValueText string      `db:"value_text" json:"value_text"`

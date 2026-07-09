@@ -1,9 +1,11 @@
 ALTER TABLE organizations
     ADD COLUMN aicc_enabled BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否开通 AICC（AI Contact Center）能力',
-    ADD COLUMN aicc_agent_limit INT NULL COMMENT 'AICC 智能体数量上限，NULL 表示不限';
+    ADD COLUMN aicc_agent_limit INT NULL COMMENT 'AICC 智能体数量上限，NULL 表示不限',
+    ADD CONSTRAINT organizations_aicc_agent_limit_check CHECK (aicc_agent_limit IS NULL OR aicc_agent_limit >= 0);
 
 ALTER TABLE apps
-    ADD COLUMN aicc_hidden BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否为 AICC 自动创建的隐藏 app';
+    ADD COLUMN aicc_hidden BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否为 AICC 自动创建的隐藏 app',
+    ADD UNIQUE KEY uk_apps_id_org (id, org_id);
 
 CREATE TABLE aicc_agents (
     id CHAR(36) PRIMARY KEY,
@@ -28,9 +30,10 @@ CREATE TABLE aicc_agents (
     CONSTRAINT aicc_agents_privacy_mode_check CHECK (privacy_mode IN ('notice','consent_required')),
     CONSTRAINT aicc_agents_retention_days_check CHECK (retention_days BETWEEN 1 AND 3650),
     CONSTRAINT fk_aicc_agents_org_id FOREIGN KEY (org_id) REFERENCES organizations(id),
-    CONSTRAINT fk_aicc_agents_app_id FOREIGN KEY (app_id) REFERENCES apps(id),
+    CONSTRAINT fk_aicc_agents_app_org FOREIGN KEY (app_id, org_id) REFERENCES apps(id, org_id),
     UNIQUE KEY uk_aicc_agents_public_token (public_token),
     UNIQUE KEY uk_aicc_agents_widget_token (widget_token),
+    UNIQUE KEY uk_aicc_agents_org_identity (id, org_id),
     KEY idx_aicc_agents_org_status (org_id, status, deleted_at)
 );
 
@@ -39,10 +42,20 @@ CREATE TABLE aicc_agent_knowledge (
     agent_id CHAR(36) NOT NULL,
     scope_type VARCHAR(32) NOT NULL,
     scope_id CHAR(36) NULL,
+    scope_identity_key VARCHAR(64) GENERATED ALWAYS AS (
+        CASE
+            WHEN scope_type = 'org' THEN '__org__'
+            ELSE scope_id
+        END
+    ) VIRTUAL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT aicc_agent_knowledge_scope_type_check CHECK (scope_type IN ('org','industry','app_document')),
+    CONSTRAINT aicc_agent_knowledge_scope_target_check CHECK (
+        (scope_type = 'org' AND scope_id IS NULL)
+        OR (scope_type IN ('industry','app_document') AND scope_id IS NOT NULL)
+    ),
     CONSTRAINT fk_aicc_agent_knowledge_agent FOREIGN KEY (agent_id) REFERENCES aicc_agents(id) ON DELETE CASCADE,
-    UNIQUE KEY uk_aicc_agent_knowledge_scope (agent_id, scope_type, scope_id)
+    UNIQUE KEY uk_aicc_agent_knowledge_scope (agent_id, scope_type, scope_identity_key)
 );
 
 CREATE TABLE aicc_sessions (
@@ -67,11 +80,13 @@ CREATE TABLE aicc_sessions (
     CONSTRAINT aicc_sessions_channel_check CHECK (channel IN ('web_link','web_widget','voice')),
     CONSTRAINT aicc_sessions_resolution_check CHECK (resolution_status IN ('resolved','unresolved','unknown')),
     CONSTRAINT aicc_sessions_lead_status_check CHECK (lead_status IN ('pending','complete','skipped')),
-    CONSTRAINT fk_aicc_sessions_agent FOREIGN KEY (agent_id) REFERENCES aicc_agents(id),
+    CONSTRAINT fk_aicc_sessions_agent_org FOREIGN KEY (agent_id, org_id) REFERENCES aicc_agents(id, org_id),
     CONSTRAINT fk_aicc_sessions_org FOREIGN KEY (org_id) REFERENCES organizations(id),
     UNIQUE KEY uk_aicc_sessions_token (session_token),
+    UNIQUE KEY uk_aicc_sessions_agent_identity (id, agent_id),
+    UNIQUE KEY uk_aicc_sessions_org_identity (id, org_id),
     KEY idx_aicc_sessions_agent_time (agent_id, created_at DESC),
-    KEY idx_aicc_sessions_retention (expires_at, agent_id)
+    KEY idx_aicc_sessions_retention (expires_at, id)
 );
 
 CREATE TABLE aicc_messages (
@@ -91,8 +106,8 @@ CREATE TABLE aicc_messages (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT aicc_messages_direction_check CHECK (direction IN ('visitor','assistant','system')),
     CONSTRAINT aicc_messages_content_type_check CHECK (content_type IN ('text','image','mixed')),
-    CONSTRAINT fk_aicc_messages_session FOREIGN KEY (session_id) REFERENCES aicc_sessions(id) ON DELETE CASCADE,
-    CONSTRAINT fk_aicc_messages_agent FOREIGN KEY (agent_id) REFERENCES aicc_agents(id),
+    CONSTRAINT fk_aicc_messages_session_agent FOREIGN KEY (session_id, agent_id) REFERENCES aicc_sessions(id, agent_id) ON DELETE CASCADE,
+    UNIQUE KEY uk_aicc_messages_session_identity (id, session_id),
     KEY idx_aicc_messages_session_time (session_id, created_at, id)
 );
 
@@ -109,7 +124,8 @@ CREATE TABLE aicc_lead_fields (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT aicc_lead_fields_type_check CHECK (field_type IN ('text','phone','email','number')),
     CONSTRAINT fk_aicc_lead_fields_agent FOREIGN KEY (agent_id) REFERENCES aicc_agents(id) ON DELETE CASCADE,
-    UNIQUE KEY uk_aicc_lead_fields_key (agent_id, field_key)
+    UNIQUE KEY uk_aicc_lead_fields_key (agent_id, field_key),
+    UNIQUE KEY uk_aicc_lead_fields_agent_identity (id, agent_id)
 );
 
 CREATE TABLE aicc_leads (
@@ -119,9 +135,16 @@ CREATE TABLE aicc_leads (
     display_name VARCHAR(255) NULL,
     unread BOOLEAN NOT NULL DEFAULT TRUE,
     latest_session_id CHAR(36) NULL,
+    latest_session_org_id CHAR(36) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT aicc_leads_latest_session_org_check CHECK (
+        (latest_session_id IS NULL AND latest_session_org_id IS NULL)
+        OR (latest_session_id IS NOT NULL AND latest_session_org_id = org_id)
+    ),
     CONSTRAINT fk_aicc_leads_org FOREIGN KEY (org_id) REFERENCES organizations(id),
+    CONSTRAINT fk_aicc_leads_latest_session FOREIGN KEY (latest_session_id, latest_session_org_id)
+        REFERENCES aicc_sessions(id, org_id) ON DELETE SET NULL,
     UNIQUE KEY uk_aicc_leads_contact (org_id, primary_contact_hash),
     KEY idx_aicc_leads_org_unread (org_id, unread, updated_at DESC)
 );
@@ -129,15 +152,18 @@ CREATE TABLE aicc_leads (
 CREATE TABLE aicc_lead_values (
     id CHAR(36) PRIMARY KEY,
     session_id CHAR(36) NOT NULL,
+    agent_id CHAR(36) NOT NULL,
     lead_id CHAR(36) NULL,
     field_id CHAR(36) NOT NULL,
     value_text TEXT NOT NULL,
     value_hash VARCHAR(128) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_aicc_lead_values_session FOREIGN KEY (session_id) REFERENCES aicc_sessions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_aicc_lead_values_session_agent FOREIGN KEY (session_id, agent_id)
+        REFERENCES aicc_sessions(id, agent_id) ON DELETE CASCADE,
     CONSTRAINT fk_aicc_lead_values_lead FOREIGN KEY (lead_id) REFERENCES aicc_leads(id) ON DELETE SET NULL,
-    CONSTRAINT fk_aicc_lead_values_field FOREIGN KEY (field_id) REFERENCES aicc_lead_fields(id),
-    KEY idx_aicc_lead_values_session (session_id)
+    CONSTRAINT fk_aicc_lead_values_field_agent FOREIGN KEY (field_id, agent_id)
+        REFERENCES aicc_lead_fields(id, agent_id),
+    KEY idx_aicc_lead_values_session (session_id, agent_id)
 );
 
 CREATE TABLE aicc_feedback (
@@ -146,7 +172,7 @@ CREATE TABLE aicc_feedback (
     message_id CHAR(36) NOT NULL,
     helpful BOOLEAN NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_aicc_feedback_session FOREIGN KEY (session_id) REFERENCES aicc_sessions(id) ON DELETE CASCADE,
-    CONSTRAINT fk_aicc_feedback_message FOREIGN KEY (message_id) REFERENCES aicc_messages(id) ON DELETE CASCADE,
+    CONSTRAINT fk_aicc_feedback_message_session FOREIGN KEY (message_id, session_id)
+        REFERENCES aicc_messages(id, session_id) ON DELETE CASCADE,
     UNIQUE KEY uk_aicc_feedback_message (message_id)
 );

@@ -8,8 +8,10 @@ DROP TABLE IF EXISTS aicc_agent_knowledge;
 DROP TABLE IF EXISTS aicc_agents;
 
 ALTER TABLE apps
+    DROP INDEX uk_apps_id_org,
     DROP COLUMN aicc_hidden;
 
 ALTER TABLE organizations
+    DROP CHECK organizations_aicc_agent_limit_check,
     DROP COLUMN aicc_agent_limit,
     DROP COLUMN aicc_enabled;
