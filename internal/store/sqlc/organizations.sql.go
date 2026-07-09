@@ -380,6 +380,26 @@ func (q *Queries) SoftDeleteOrganization(ctx context.Context, id string) error {
 	return err
 }
 
+const updateOrganizationAICCConfig = `-- name: UpdateOrganizationAICCConfig :exec
+UPDATE organizations
+SET
+    aicc_enabled = ?,
+    aicc_agent_limit = ?,
+    updated_at = now()
+WHERE id = ?
+`
+
+type UpdateOrganizationAICCConfigParams struct {
+	AiccEnabled    bool     `db:"aicc_enabled" json:"aicc_enabled"`
+	AiccAgentLimit null.Int `db:"aicc_agent_limit" json:"aicc_agent_limit"`
+	ID             string   `db:"id" json:"id"`
+}
+
+func (q *Queries) UpdateOrganizationAICCConfig(ctx context.Context, arg UpdateOrganizationAICCConfigParams) error {
+	_, err := q.db.ExecContext(ctx, updateOrganizationAICCConfig, arg.AiccEnabled, arg.AiccAgentLimit, arg.ID)
+	return err
+}
+
 const updateOrganizationCredentialsCiphertext = `-- name: UpdateOrganizationCredentialsCiphertext :exec
 UPDATE organizations
 SET newapi_user_credentials_ciphertext = ?,

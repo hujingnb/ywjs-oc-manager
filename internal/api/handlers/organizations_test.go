@@ -163,6 +163,41 @@ func TestOrganizationsUpdateKeepsModelWhenOmitted(t *testing.T) {
 	assert.Equal(t, "org-1", svc.lastUpdateOrgID)
 }
 
+// TestOrganizationsHandlerUpdateAICCConfig 覆盖正常路径：平台管理员通过 PATCH /organizations/:orgId/aicc-config 开通 AICC。
+func TestOrganizationsHandlerUpdateAICCConfig(t *testing.T) {
+	limit := int32(5)
+	svc := &organizationServiceStub{
+		updateAICCConfigResult: service.OrganizationResult{ID: "org-1", Name: "测试组织", Status: domain.StatusActive, AICCEnabled: true, AICCAgentLimit: &limit},
+	}
+	router := newOrganizationsTestRouter(t, svc)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/organizations/org-1/aicc-config", bytes.NewBufferString(`{"enabled":true,"agent_limit":5}`))
+	request.Header.Set("Content-Type", "application/json")
+	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "org-1", svc.lastAICCConfigOrgID)
+	assert.True(t, svc.lastAICCConfigInput.Enabled)
+	require.NotNil(t, svc.lastAICCConfigInput.AgentLimit)
+	assert.Equal(t, int32(5), *svc.lastAICCConfigInput.AgentLimit)
+}
+
+// TestOrganizationsHandlerUpdateAICCConfigBadJSON 覆盖异常路径：非法 JSON 返回 400，避免空请求体误关闭企业 AICC。
+func TestOrganizationsHandlerUpdateAICCConfigBadJSON(t *testing.T) {
+	router := newOrganizationsTestRouter(t, &organizationServiceStub{})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/organizations/org-1/aicc-config", bytes.NewBufferString(`{"enabled":true`))
+	request.Header.Set("Content-Type", "application/json")
+	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "BAD_REQUEST")
+}
+
 // TestOrganizationsCreateRequiredFields 验证组织创建仅需必填字段即可成功，
 // model_id 字段已从 DTO 移除，请求体不应包含它。
 func TestOrganizationsCreateRequiredFields(t *testing.T) {
@@ -241,12 +276,15 @@ func newOrganizationsTestRouter(t *testing.T, svc *organizationServiceStub) *gin
 }
 
 type organizationServiceStub struct {
-	createResult    service.OrganizationResult
-	createErr       error
-	lastPrincipal   auth.Principal
-	lastCreateInput service.OrganizationInput
-	lastUpdateOrgID string
-	lastUpdateInput service.OrganizationInput
+	createResult           service.OrganizationResult
+	createErr              error
+	updateAICCConfigResult service.OrganizationResult
+	lastPrincipal          auth.Principal
+	lastCreateInput        service.OrganizationInput
+	lastUpdateOrgID        string
+	lastUpdateInput        service.OrganizationInput
+	lastAICCConfigOrgID    string
+	lastAICCConfigInput    service.AICCConfigInput
 }
 
 func (s *organizationServiceStub) CreateOrganization(_ context.Context, principal auth.Principal, input service.OrganizationInput) (service.OrganizationResult, error) {
@@ -277,5 +315,15 @@ func (s *organizationServiceStub) UpdateOrganization(_ context.Context, principa
 
 func (s *organizationServiceStub) SetOrganizationStatus(_ context.Context, principal auth.Principal, _, _ string) (service.OrganizationResult, error) {
 	s.lastPrincipal = principal
+	return s.createResult, nil
+}
+
+func (s *organizationServiceStub) UpdateAICCConfig(_ context.Context, principal auth.Principal, orgID string, input service.AICCConfigInput) (service.OrganizationResult, error) {
+	s.lastPrincipal = principal
+	s.lastAICCConfigOrgID = orgID
+	s.lastAICCConfigInput = input
+	if s.updateAICCConfigResult.ID != "" {
+		return s.updateAICCConfigResult, nil
+	}
 	return s.createResult, nil
 }

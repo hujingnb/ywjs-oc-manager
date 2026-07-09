@@ -10,6 +10,7 @@ import type { Organization } from '@/api'
 
 const createOrganization = vi.hoisted(() => vi.fn())
 const updateOrganization = vi.hoisted(() => vi.fn())
+const updateOrganizationAICCConfig = vi.hoisted(() => vi.fn())
 const bytesPerGB = 1024 * 1024 * 1024
 
 // organizationsState 允许单个测试覆盖组织容量，验证编辑表单不会丢失非整 GB bytes。
@@ -26,6 +27,8 @@ const organizationsState = vi.hoisted(() => {
     contact_phone: '13800138000',
     remark: '测试备注',
     assistant_version_ids: ['v-1'],
+    aicc_enabled: true,
+    aicc_agent_limit: 5,
   }
   return {
     defaultOrg,
@@ -55,6 +58,8 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
   useCreateOrganization: () => ({ mutateAsync: createOrganization, isPending: ref(false) }),
   // useUpdateOrganization mock 供编辑组织场景使用。
   useUpdateOrganization: () => ({ mutateAsync: updateOrganization, isPending: ref(false) }),
+  // useUpdateOrganizationAICCConfig mock 供编辑组织时保存 AICC 开通配置。
+  useUpdateOrganizationAICCConfig: () => ({ mutateAsync: updateOrganizationAICCConfig, isPending: ref(false) }),
   useUpdateOrganizationStatus: () => ({ mutate: vi.fn() }),
 }))
 
@@ -81,6 +86,7 @@ describe('OrganizationsPage', () => {
   beforeEach(() => {
     createOrganization.mockReset()
     updateOrganization.mockReset()
+    updateOrganizationAICCConfig.mockReset()
     clipboardMock.mockReset()
     organizationsState.items = [{ ...organizationsState.defaultOrg }]
     // 测试断言中文文案，设置 zh 语言以匹配 t() 返回值。
@@ -148,6 +154,17 @@ describe('OrganizationsPage', () => {
             return () => h('input', {
               value: props.value ?? '',
               onInput: (event: Event) => emit('update:value', Number((event.target as HTMLInputElement).value)),
+            })
+          },
+        }),
+        NSwitch: defineComponent({
+          props: ['value'],
+          emits: ['update:value'],
+          setup(props, { emit }) {
+            return () => h('input', {
+              checked: Boolean(props.value),
+              type: 'checkbox',
+              onChange: (event: Event) => emit('update:value', (event.target as HTMLInputElement).checked),
             })
           },
         }),
@@ -391,6 +408,13 @@ describe('OrganizationsPage', () => {
       }),
     }))
     expect(updateOrganization.mock.calls.at(-1)?.[0].payload).not.toHaveProperty('knowledge_quota_gb')
+    expect(updateOrganizationAICCConfig).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'org-1',
+      payload: {
+        enabled: true,
+        agent_limit: 5,
+      },
+    }))
   })
 
   // 编辑其他字段但未改动知识库容量时，保留后端原始 bytes，避免整 GB 展示造成静默舍入。
@@ -430,6 +454,42 @@ describe('OrganizationsPage', () => {
       }),
     }))
     expect(updateOrganization.mock.calls.at(-1)?.[0].payload).not.toHaveProperty('knowledge_quota_gb')
+  })
+
+  // 编辑企业 AICC 配置时，开关和智能体上限通过独立 mutation 保存。
+  it('编辑企业时提交 AICC 开通配置', async () => {
+    updateOrganization.mockResolvedValue({
+      id: 'org-1',
+      name: '测试企业',
+      code: 'test-org',
+      status: 'active',
+    })
+    updateOrganizationAICCConfig.mockResolvedValue({
+      id: 'org-1',
+      name: '测试企业',
+      code: 'test-org',
+      status: 'active',
+      aicc_enabled: false,
+      aicc_agent_limit: 8,
+    })
+    const wrapper = mountPage()
+
+    const editButton = wrapper.findAll('button').find(button => button.text().includes('编辑'))
+    expect(editButton).toBeTruthy()
+    await editButton!.trigger('click')
+    await nextTick()
+
+    expect(wrapper.text()).toContain('开通 AICC')
+    expect(wrapper.text()).toContain('AICC 智能体数量上限')
+    await wrapper.find('form').trigger('submit')
+
+    expect(updateOrganizationAICCConfig).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'org-1',
+      payload: {
+        enabled: true,
+        agent_limit: 5,
+      },
+    }))
   })
 
   // 助手版本为可选项，留空时表单仍可正常提交。

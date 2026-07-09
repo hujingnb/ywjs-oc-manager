@@ -129,6 +129,14 @@ export interface OrganizationUpdatePayload {
   assistant_version_ids: string[]
 }
 
+// OrganizationAICCConfigPayload 是平台管理员维护企业 AICC 开通状态的提交体。
+export interface OrganizationAICCConfigPayload {
+  // enabled 表示是否开通 AICC。
+  enabled: boolean
+  // agent_limit 是智能体数量上限；null/undefined 表示不限。
+  agent_limit?: number | null
+}
+
 // useUpdateOrganization 更新组织资料与助手版本 allowlist，自动失效列表缓存。
 // 传入 id（组织 id）与 payload（OrganizationUpdatePayload），调用 PATCH /api/v1/organizations/:id。
 export function useUpdateOrganization() {
@@ -137,6 +145,23 @@ export function useUpdateOrganization() {
     mutationFn: async ({ id, payload }: { id: string; payload: OrganizationUpdatePayload }) => {
       const response = await apiRequest<{ organization: Organization }>(
         `/api/v1/organizations/${id}`,
+        { method: 'PATCH', body: payload },
+      )
+      return response.organization
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ORG_LIST_KEY })
+    },
+  })
+}
+
+// useUpdateOrganizationAICCConfig 更新企业 AICC 开通配置，成功后刷新组织列表。
+export function useUpdateOrganizationAICCConfig() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, payload }: { id: string; payload: OrganizationAICCConfigPayload }) => {
+      const response = await apiRequest<{ organization: Organization }>(
+        `/api/v1/organizations/${id}/aicc-config`,
         { method: 'PATCH', body: payload },
       )
       return response.organization

@@ -755,6 +755,15 @@ components:
       required:
       - display_name
       type: object
+    handlers.UpdateOrganizationAICCConfigRequest:
+      properties:
+        agent_limit:
+          description: AgentLimit 是智能体数量上限；nil 表示不限。
+          type: integer
+        enabled:
+          description: Enabled 表示是否开通 AICC。
+          type: boolean
+      type: object
     ocops.ConversationChatResult:
       properties:
         message:
@@ -1859,6 +1868,12 @@ components:
         admin_username:
           description: AdminUsername 是企业首个可用管理员账号名，用于平台管理员复制登录信息。
           type: string
+        aicc_agent_limit:
+          description: AICCAgentLimit 是企业 AICC 智能体数量上限；nil 表示不限。
+          type: integer
+        aicc_enabled:
+          description: AICCEnabled 表示企业是否已开通 AI Contact Center。
+          type: boolean
         assistant_version_ids:
           description: AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。
           items:
@@ -8336,6 +8351,71 @@ paths:
       security:
       - BearerAuth: []
       summary: 更新企业
+      tags:
+      - organizations
+  /organizations/{orgId}/aicc-config:
+    patch:
+      description: 平台管理员开通或关闭企业 AICC，并设置智能体数量上限
+      parameters:
+      - description: 企业 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.UpdateOrganizationAICCConfigRequest'
+                description: AICC 配置
+                summary: body
+        description: AICC 配置
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.OrganizationResult'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 更新企业 AICC 配置
       tags:
       - organizations
   /organizations/{orgId}/apps:

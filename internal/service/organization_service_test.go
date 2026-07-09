@@ -355,6 +355,54 @@ func TestOrganizationServiceListIncludesAdminUsername(t *testing.T) {
 	assert.Equal(t, "org-admin", results[0].AdminUsername)
 }
 
+// TestOrganizationServiceUpdateAICCConfig 验证平台管理员可开通 AICC 并设置智能体上限。
+func TestOrganizationServiceUpdateAICCConfig(t *testing.T) {
+	store := &organizationStoreStub{org: sqlc.Organization{ID: "org-1", Name: "Org", Code: "org", Status: domain.StatusActive}}
+	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
+	limit := int32(5)
+
+	result, err := svc.UpdateAICCConfig(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, "org-1", AICCConfigInput{
+		Enabled:    true,
+		AgentLimit: &limit,
+	})
+
+	require.NoError(t, err)
+	require.True(t, store.updateAICCConfigCalled)
+	assert.Equal(t, "org-1", store.updatedAICCConfig.ID)
+	assert.True(t, store.updatedAICCConfig.AiccEnabled)
+	require.True(t, store.updatedAICCConfig.AiccAgentLimit.Valid)
+	assert.Equal(t, int64(5), store.updatedAICCConfig.AiccAgentLimit.Int64)
+	assert.True(t, result.AICCEnabled)
+	require.NotNil(t, result.AICCAgentLimit)
+	assert.Equal(t, int32(5), *result.AICCAgentLimit)
+}
+
+// TestOrganizationServiceUpdateAICCConfigRejectsOrgAdmin 验证企业管理员不能修改平台开通配置。
+func TestOrganizationServiceUpdateAICCConfigRejectsOrgAdmin(t *testing.T) {
+	store := &organizationStoreStub{org: sqlc.Organization{ID: "org-1", Name: "Org", Code: "org", Status: domain.StatusActive}}
+	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
+
+	_, err := svc.UpdateAICCConfig(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: "org-1"}, "org-1", AICCConfigInput{Enabled: true})
+
+	require.ErrorIs(t, err, ErrForbidden)
+	assert.False(t, store.updateAICCConfigCalled)
+}
+
+// TestOrganizationServiceUpdateAICCConfigRejectsNegativeLimit 验证负数智能体上限会被参数校验拒绝。
+func TestOrganizationServiceUpdateAICCConfigRejectsNegativeLimit(t *testing.T) {
+	store := &organizationStoreStub{org: sqlc.Organization{ID: "org-1", Name: "Org", Code: "org", Status: domain.StatusActive}}
+	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
+	limit := int32(-1)
+
+	_, err := svc.UpdateAICCConfig(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, "org-1", AICCConfigInput{
+		Enabled:    true,
+		AgentLimit: &limit,
+	})
+
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	assert.False(t, store.updateAICCConfigCalled)
+}
+
 func mustCipher(t *testing.T) *auth.Cipher {
 	t.Helper()
 	key := make([]byte, 32)
@@ -410,18 +458,20 @@ func (p *fakeProvisioner) DeleteUser(_ context.Context, userID int64) error {
 }
 
 type organizationStoreStub struct {
-	org                 sqlc.Organization
-	orgAdmin            sqlc.User
-	created             sqlc.CreateOrganizationParams
-	updated             sqlc.SetOrganizationNewAPIUserParams
-	createdUser         sqlc.CreateUserParams
-	createErr           error
-	createCalled        bool
-	updateCalled        bool
-	updateProfileCalled bool
-	createUserCalled    bool
-	hardDeleted         bool
-	updatedProfile      sqlc.UpdateOrganizationProfileParams
+	org                    sqlc.Organization
+	orgAdmin               sqlc.User
+	created                sqlc.CreateOrganizationParams
+	updated                sqlc.SetOrganizationNewAPIUserParams
+	createdUser            sqlc.CreateUserParams
+	createErr              error
+	createCalled           bool
+	updateCalled           bool
+	updateProfileCalled    bool
+	updateAICCConfigCalled bool
+	createUserCalled       bool
+	hardDeleted            bool
+	updatedProfile         sqlc.UpdateOrganizationProfileParams
+	updatedAICCConfig      sqlc.UpdateOrganizationAICCConfigParams
 }
 
 func (s *organizationStoreStub) CreateOrganization(_ context.Context, arg sqlc.CreateOrganizationParams) error {
@@ -498,6 +548,14 @@ func (s *organizationStoreStub) UpdateOrganizationProfile(_ context.Context, arg
 
 func (s *organizationStoreStub) SetOrganizationStatus(_ context.Context, arg sqlc.SetOrganizationStatusParams) error {
 	s.org.Status = arg.Status
+	return nil
+}
+
+func (s *organizationStoreStub) UpdateOrganizationAICCConfig(_ context.Context, arg sqlc.UpdateOrganizationAICCConfigParams) error {
+	s.updatedAICCConfig = arg
+	s.updateAICCConfigCalled = true
+	s.org.AiccEnabled = arg.AiccEnabled
+	s.org.AiccAgentLimit = arg.AiccAgentLimit
 	return nil
 }
 

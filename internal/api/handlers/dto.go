@@ -103,6 +103,14 @@ type OrganizationRequest struct {
 	AssistantVersionIDs []string `json:"assistant_version_ids"`
 }
 
+// UpdateOrganizationAICCConfigRequest 是平台管理员维护企业 AICC 开通状态的请求体。
+type UpdateOrganizationAICCConfigRequest struct {
+	// Enabled 表示是否开通 AICC。
+	Enabled bool `json:"enabled"`
+	// AgentLimit 是智能体数量上限；nil 表示不限。
+	AgentLimit *int32 `json:"agent_limit"`
+}
+
 // ===== 成员 members =====
 
 // CreateMemberRequest 创建企业成员的请求体。

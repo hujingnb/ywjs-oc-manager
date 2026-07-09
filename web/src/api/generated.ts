@@ -8913,6 +8913,100 @@ export interface paths {
         };
         trace?: never;
     };
+    "/organizations/{orgId}/aicc-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 更新企业 AICC 配置
+         * @description 平台管理员开通或关闭企业 AICC，并设置智能体数量上限
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 企业 ID */
+                    orgId: string;
+                };
+                cookie?: never;
+            };
+            /** @description AICC 配置 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.UpdateOrganizationAICCConfigRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.OrganizationResult"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
     "/organizations/{orgId}/apps": {
         parameters: {
             query?: never;
@@ -13341,6 +13435,12 @@ export interface components {
             /** @description Role 为空表示保持原角色；非空时需要管理员权限并限制在企业角色内。 */
             role?: string;
         };
+        "handlers.UpdateOrganizationAICCConfigRequest": {
+            /** @description AgentLimit 是智能体数量上限；nil 表示不限。 */
+            agent_limit?: number;
+            /** @description Enabled 表示是否开通 AICC。 */
+            enabled?: boolean;
+        };
         "ocops.ConversationChatResult": {
             message?: components["schemas"]["ocops.ConversationMessage"];
             session_id?: string;
@@ -14050,6 +14150,10 @@ export interface components {
         "service.OrganizationResult": {
             /** @description AdminUsername 是企业首个可用管理员账号名，用于平台管理员复制登录信息。 */
             admin_username?: string;
+            /** @description AICCAgentLimit 是企业 AICC 智能体数量上限；nil 表示不限。 */
+            aicc_agent_limit?: number;
+            /** @description AICCEnabled 表示企业是否已开通 AI Contact Center。 */
+            aicc_enabled?: boolean;
             /** @description AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。 */
             assistant_version_ids?: string[];
             /** @description Code 是企业登录标识，用于企业用户登录时定位企业。 */

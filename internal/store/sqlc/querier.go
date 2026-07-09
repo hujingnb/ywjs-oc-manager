@@ -367,6 +367,7 @@ type Querier interface {
 	UpdateAssistantVersion(ctx context.Context, arg UpdateAssistantVersionParams) error
 	// skill 上传/删除单独走此查询：只改 skills_json 与 revision，避免覆盖其它字段。
 	UpdateAssistantVersionSkills(ctx context.Context, arg UpdateAssistantVersionSkillsParams) error
+	UpdateOrganizationAICCConfig(ctx context.Context, arg UpdateOrganizationAICCConfigParams) error
 	// OOS-2 access_token 自愈用：仅更新 newapi_user_credentials_ciphertext，不动 newapi_user_id。
 	UpdateOrganizationCredentialsCiphertext(ctx context.Context, arg UpdateOrganizationCredentialsCiphertextParams) error
 	UpdateOrganizationProfile(ctx context.Context, arg UpdateOrganizationProfileParams) error

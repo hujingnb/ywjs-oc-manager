@@ -167,6 +167,22 @@
               </template>
             </n-form-item>
           </n-grid-item>
+          <template v-if="modalMode === 'edit'">
+            <n-grid-item>
+              <n-form-item :label="t('platform.orgs.form.labelAICCEnabled')">
+                <n-switch v-model:value="editForm.aicc_enabled" />
+              </n-form-item>
+            </n-grid-item>
+            <n-grid-item>
+              <n-form-item :label="t('platform.orgs.form.labelAICCAgentLimit')">
+                <n-input-number
+                  v-model:value="editForm.aicc_agent_limit"
+                  :min="0" :precision="0" clearable style="width: 100%"
+                  :placeholder="t('platform.orgs.form.placeholderAICCAgentLimit')"
+                />
+              </n-form-item>
+            </n-grid-item>
+          </template>
           <n-grid-item :span="2">
             <n-form-item :label="t('platform.orgs.form.labelRemark')">
               <n-input
@@ -311,12 +327,12 @@ import { useQueries, type UseMutationReturnType } from '@tanstack/vue-query'
 import { Plus, X } from 'lucide-vue-next'
 import {
   NButton, NCard, NDataTable, NForm, NFormItem, NGrid, NGridItem,
-  NInput, NInputNumber, NModal, NSelect, NSpace, NStatistic,
+  NInput, NInputNumber, NModal, NSelect, NSpace, NStatistic, NSwitch,
 } from 'naive-ui'
 
 import { formatOrgStatus } from '@/domain/status'
 import {
-  useCreateOrganization, useOrganizationsQuery, useUpdateOrganization, useUpdateOrganizationStatus,
+  useCreateOrganization, useOrganizationsQuery, useUpdateOrganization, useUpdateOrganizationAICCConfig, useUpdateOrganizationStatus,
 } from '@/api/hooks/useOrganizations'
 import type { OrganizationFormPayload } from '@/api/hooks/useOrganizations'
 import { useAssistantVersionsQuery } from '@/api/hooks/useAssistantVersions'
@@ -334,6 +350,7 @@ const { t } = useI18n()
 const { data: organizations, isLoading, error } = useOrganizationsQuery()
 const createMutation = useCreateOrganization()
 const updateMutation = useUpdateOrganization()
+const updateAICCConfigMutation = useUpdateOrganizationAICCConfig()
 const statusMutation = useUpdateOrganizationStatus()
 
 // modalMode 区分当前表单是创建模式还是编辑模式，控制字段显隐和提交目标。
@@ -403,6 +420,8 @@ const editForm = reactive({
   personal_knowledge_quota_original_gb: knowledgeQuotaGBDefault,
   personal_knowledge_quota_original_bytes: undefined as number | undefined,
   assistant_version_ids: [] as string[],
+  aicc_enabled: false,
+  aicc_agent_limit: undefined as number | undefined,
 })
 // editSubmitting 控制编辑提交中的 loading 状态。
 const editSubmitting = ref(false)
@@ -432,6 +451,9 @@ function openEditForm(org: Organization) {
   editForm.personal_knowledge_quota_original_bytes = typeof org.default_app_knowledge_quota_bytes === 'number'
     ? org.default_app_knowledge_quota_bytes : undefined
   editForm.assistant_version_ids = org.assistant_version_ids ? [...org.assistant_version_ids] : []
+  editForm.aicc_enabled = Boolean(org.aicc_enabled)
+  editForm.aicc_agent_limit = typeof org.aicc_agent_limit === 'number'
+    ? org.aicc_agent_limit : undefined
   editError.value = null
   editFormVisible.value = true
 }
@@ -472,6 +494,13 @@ async function submitEditOrganization() {
         knowledge_quota_bytes: editQuotaBytesForPayload(),
         default_app_knowledge_quota_bytes: editPersonalQuotaBytesForPayload(),
         assistant_version_ids: editForm.assistant_version_ids,
+      },
+    })
+    await updateAICCConfigMutation.mutateAsync({
+      id: editingOrg.value.id,
+      payload: {
+        enabled: editForm.aicc_enabled,
+        agent_limit: typeof editForm.aicc_agent_limit === 'number' ? editForm.aicc_agent_limit : null,
       },
     })
     editFormVisible.value = false

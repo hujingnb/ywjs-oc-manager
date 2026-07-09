@@ -26,6 +26,7 @@ type organizationService interface {
 	ListOrganizations(ctx context.Context, principal auth.Principal, limit, offset int32) ([]service.OrganizationResult, error)
 	GetOrganization(ctx context.Context, principal auth.Principal, orgID string) (service.OrganizationResult, error)
 	UpdateOrganization(ctx context.Context, principal auth.Principal, orgID string, input service.OrganizationInput) (service.OrganizationResult, error)
+	UpdateAICCConfig(ctx context.Context, principal auth.Principal, orgID string, input service.AICCConfigInput) (service.OrganizationResult, error)
 	SetOrganizationStatus(ctx context.Context, principal auth.Principal, orgID, status string) (service.OrganizationResult, error)
 }
 
@@ -42,6 +43,7 @@ func RegisterOrganizationRoutes(router gin.IRouter, handler *OrganizationsHandle
 	group.POST("", handler.Create)
 	group.GET("/:orgId", handler.Get)
 	group.PATCH("/:orgId", handler.Update)
+	group.PATCH("/:orgId/aicc-config", handler.UpdateAICCConfig)
 	group.POST("/:orgId/disable", handler.Disable)
 	group.POST("/:orgId/enable", handler.Enable)
 }
@@ -160,6 +162,41 @@ func (h *OrganizationsHandler) Update(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"organization": result})
 }
 
+// UpdateAICCConfig 更新企业 AICC 开通配置。
+//
+// @Summary      更新企业 AICC 配置
+// @Description  平台管理员开通或关闭企业 AICC，并设置智能体数量上限
+// @Tags         organizations
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId  path      string                               true  "企业 ID"
+// @Param        body   body      UpdateOrganizationAICCConfigRequest  true  "AICC 配置"
+// @Success      200    {object}  map[string]service.OrganizationResult
+// @Failure      400    {object}  ErrorResponse
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /organizations/{orgId}/aicc-config [patch]
+func (h *OrganizationsHandler) UpdateAICCConfig(c *gin.Context) {
+	principal := principalFromCtx(c)
+	var req UpdateOrganizationAICCConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeBindError(c, err)
+		return
+	}
+	result, err := h.service.UpdateAICCConfig(c.Request.Context(), principal, c.Param("orgId"), service.AICCConfigInput{
+		Enabled:    req.Enabled,
+		AgentLimit: req.AgentLimit,
+	})
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"organization": result})
+}
+
 // Disable 禁用组织。
 //
 // @Summary      禁用企业
@@ -212,16 +249,16 @@ func (h *OrganizationsHandler) setStatus(c *gin.Context, status string) {
 // AssistantVersionIDsSet 始终设为 true，以请求体中的 allowlist 为权威值；前端更新表单需完整传入列表。
 func toOrganizationInput(req OrganizationRequest) service.OrganizationInput {
 	input := service.OrganizationInput{
-		Name:                            req.Name,
-		ContactName:                     req.ContactName,
-		ContactPhone:                    req.ContactPhone,
-		Remark:                          req.Remark,
-		CreditWarningThreshold:          req.CreditWarningThreshold,
-		MaxInstanceCount:                req.MaxInstanceCount,
-		KnowledgeQuotaBytes:             req.KnowledgeQuotaBytes,
-		DefaultAppKnowledgeQuotaBytes:   req.DefaultAppKnowledgeQuotaBytes,
-		AssistantVersionIDs:             req.AssistantVersionIDs,
-		AssistantVersionIDsSet:          true,
+		Name:                          req.Name,
+		ContactName:                   req.ContactName,
+		ContactPhone:                  req.ContactPhone,
+		Remark:                        req.Remark,
+		CreditWarningThreshold:        req.CreditWarningThreshold,
+		MaxInstanceCount:              req.MaxInstanceCount,
+		KnowledgeQuotaBytes:           req.KnowledgeQuotaBytes,
+		DefaultAppKnowledgeQuotaBytes: req.DefaultAppKnowledgeQuotaBytes,
+		AssistantVersionIDs:           req.AssistantVersionIDs,
+		AssistantVersionIDsSet:        true,
 	}
 	return input
 }
@@ -229,19 +266,19 @@ func toOrganizationInput(req OrganizationRequest) service.OrganizationInput {
 // toCreateOrganizationInput 将创建 DTO 转为 service 入参，保留管理员初始化字段。
 func toCreateOrganizationInput(req CreateOrganizationRequest) service.OrganizationInput {
 	return service.OrganizationInput{
-		Name:                            req.Name,
-		Code:                            req.Code,
-		ContactName:                     req.ContactName,
-		ContactPhone:                    req.ContactPhone,
-		Remark:                          req.Remark,
-		CreditWarningThreshold:          req.CreditWarningThreshold,
-		MaxInstanceCount:                req.MaxInstanceCount,
-		KnowledgeQuotaBytes:             req.KnowledgeQuotaBytes,
-		DefaultAppKnowledgeQuotaBytes:   req.DefaultAppKnowledgeQuotaBytes,
-		AdminUsername:                   req.AdminUsername,
-		AdminDisplayName:                req.AdminDisplayName,
-		AdminPassword:                   req.AdminPassword,
-		AssistantVersionIDs:             req.AssistantVersionIDs,
+		Name:                          req.Name,
+		Code:                          req.Code,
+		ContactName:                   req.ContactName,
+		ContactPhone:                  req.ContactPhone,
+		Remark:                        req.Remark,
+		CreditWarningThreshold:        req.CreditWarningThreshold,
+		MaxInstanceCount:              req.MaxInstanceCount,
+		KnowledgeQuotaBytes:           req.KnowledgeQuotaBytes,
+		DefaultAppKnowledgeQuotaBytes: req.DefaultAppKnowledgeQuotaBytes,
+		AdminUsername:                 req.AdminUsername,
+		AdminDisplayName:              req.AdminDisplayName,
+		AdminPassword:                 req.AdminPassword,
+		AssistantVersionIDs:           req.AssistantVersionIDs,
 	}
 }
 
@@ -270,6 +307,8 @@ func writeServiceError(c *gin.Context, err error) {
 		// 透出 service 层用 "%w: 具体原因" 包装的冲突原因（如「企业标识已被占用」），
 		// 裸 ErrConflict 时回落为 sentinel 自身文案「资源冲突」。
 		c.JSON(http.StatusConflict, apierror.New("CONFLICT", validationServiceMessage(err, service.ErrConflict)))
+	case errors.Is(err, service.ErrInvalidArgument):
+		c.JSON(http.StatusBadRequest, apierror.New("INVALID_ARGUMENT", validationServiceMessage(err, service.ErrInvalidArgument)))
 	case errors.Is(err, service.ErrMemberCreateInvalid):
 		c.JSON(http.StatusBadRequest, apierror.New("MEMBER_INVALID", validationServiceMessage(err, service.ErrMemberCreateInvalid)))
 	default:

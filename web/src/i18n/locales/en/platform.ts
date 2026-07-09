@@ -21,6 +21,8 @@ export default {
       labelKnowledgeQuota: 'Knowledge quota (GB)',
       labelPersonalKnowledgeQuota: 'Personal knowledge base quota (GB)',
       personalKnowledgeQuotaHint: 'Default personal knowledge base quota for new instances in this organization. Applies only to instances created afterward; existing instances are unaffected and can still be adjusted individually.',
+      labelAICCEnabled: 'Enable AICC',
+      labelAICCAgentLimit: 'AICC agent limit',
       labelRemark: 'Remark',
       labelVersions: 'Available assistant versions',
       placeholderName: 'Organization name',
@@ -31,6 +33,7 @@ export default {
       placeholderContact: 'Contact name',
       placeholderPhone: 'Phone number',
       placeholderMaxInstance: 'Leave blank for unlimited',
+      placeholderAICCAgentLimit: 'Leave blank for unlimited',
       placeholderVersions: 'Select available assistant versions (multi-select, optional)',
     },
     columns: {

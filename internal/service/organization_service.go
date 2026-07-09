@@ -66,6 +66,8 @@ type OrganizationStore interface {
 	GetOrgAdminByOrg(ctx context.Context, id null.String) (sqlc.User, error)
 	// UpdateOrganizationProfile 更新组织资料（:exec），写入后通过 GetOrganization 读回。
 	UpdateOrganizationProfile(ctx context.Context, arg sqlc.UpdateOrganizationProfileParams) error
+	// UpdateOrganizationAICCConfig 更新企业 AICC 开通配置（:exec），写入后通过 GetOrganization 读回。
+	UpdateOrganizationAICCConfig(ctx context.Context, arg sqlc.UpdateOrganizationAICCConfigParams) error
 	// SetOrganizationStatus 更新组织状态（:exec），写入后通过 GetOrganization 读回。
 	SetOrganizationStatus(ctx context.Context, arg sqlc.SetOrganizationStatusParams) error
 }
@@ -166,6 +168,14 @@ type OrganizationInput struct {
 	AdminPassword string
 }
 
+// AICCConfigInput 是平台管理员维护企业 AICC 开通状态和智能体上限的入参。
+type AICCConfigInput struct {
+	// Enabled 表示该企业是否可使用 AICC 子系统。
+	Enabled bool
+	// AgentLimit 是智能体数量上限；nil 表示不限。
+	AgentLimit *int32
+}
+
 // OrganizationResult 是企业对外响应视图，包含必要的 new-api 绑定状态。
 type OrganizationResult struct {
 	// ID 是 manager 企业 UUID。
@@ -196,6 +206,10 @@ type OrganizationResult struct {
 	AdminUsername string `json:"admin_username,omitempty"`
 	// AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。
 	AssistantVersionIDs []string `json:"assistant_version_ids"`
+	// AICCEnabled 表示企业是否已开通 AI Contact Center。
+	AICCEnabled bool `json:"aicc_enabled"`
+	// AICCAgentLimit 是企业 AICC 智能体数量上限；nil 表示不限。
+	AICCAgentLimit *int32 `json:"aicc_agent_limit,omitempty"`
 }
 
 // CreateOrganization 创建组织：先 INSERT manager 端记录，再串联调 new-api 创业务 user 并落凭据密文。
@@ -249,14 +263,14 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 	// CreateOrganization 为 :exec；预先生成 ID，写入后通过 GetOrganization 读回。
 	orgID := newUUID()
 	if err := s.store.CreateOrganization(ctx, sqlc.CreateOrganizationParams{
-		ID:                     orgID,
-		Name:                   input.Name,
-		Code:                   code,
-		Status:                 domain.StatusActive,
-		ContactName:            nullStr(input.ContactName),
-		ContactPhone:           nullStr(input.ContactPhone),
-		Remark:                 nullStr(input.Remark),
-		CreditWarningThreshold: nullIntFromInt32Ptr(input.CreditWarningThreshold),
+		ID:                            orgID,
+		Name:                          input.Name,
+		Code:                          code,
+		Status:                        domain.StatusActive,
+		ContactName:                   nullStr(input.ContactName),
+		ContactPhone:                  nullStr(input.ContactPhone),
+		Remark:                        nullStr(input.Remark),
+		CreditWarningThreshold:        nullIntFromInt32Ptr(input.CreditWarningThreshold),
 		MaxInstanceCount:              nullIntFromInt32Ptr(input.MaxInstanceCount),
 		KnowledgeQuotaBytes:           knowledgeQuotaBytes,
 		DefaultAppKnowledgeQuotaBytes: defaultAppKnowledgeQuotaBytes,
@@ -591,12 +605,12 @@ func (s *OrganizationService) UpdateOrganization(ctx context.Context, principal 
 	}
 	// UpdateOrganizationProfile 为 :exec；写入后通过 GetOrganization 读回。
 	if err := s.store.UpdateOrganizationProfile(ctx, sqlc.UpdateOrganizationProfileParams{
-		ID:                     orgID,
-		Name:                   input.Name,
-		ContactName:            nullStr(input.ContactName),
-		ContactPhone:           nullStr(input.ContactPhone),
-		Remark:                 nullStr(input.Remark),
-		CreditWarningThreshold: nullIntFromInt32Ptr(input.CreditWarningThreshold),
+		ID:                            orgID,
+		Name:                          input.Name,
+		ContactName:                   nullStr(input.ContactName),
+		ContactPhone:                  nullStr(input.ContactPhone),
+		Remark:                        nullStr(input.Remark),
+		CreditWarningThreshold:        nullIntFromInt32Ptr(input.CreditWarningThreshold),
 		MaxInstanceCount:              nullIntFromInt32Ptr(input.MaxInstanceCount),
 		KnowledgeQuotaBytes:           knowledgeQuotaBytes,
 		DefaultAppKnowledgeQuotaBytes: defaultAppKnowledgeQuotaBytes,
@@ -612,6 +626,33 @@ func (s *OrganizationService) UpdateOrganization(ctx context.Context, principal 
 		return OrganizationResult{}, fmt.Errorf("读取更新后企业失败: %w", err)
 	}
 	return s.toOrganizationResultWithAdminUsername(ctx, org), nil
+}
+
+// UpdateAICCConfig 更新企业 AICC 开通状态和智能体数量上限。
+func (s *OrganizationService) UpdateAICCConfig(ctx context.Context, principal auth.Principal, orgID string, input AICCConfigInput) (OrganizationResult, error) {
+	// AICC 开通是平台级租户配置，权限判断统一复用 authorizer，避免 service 内散落角色判断。
+	if !auth.CanManageAICCConfig(principal) {
+		return OrganizationResult{}, ErrForbidden
+	}
+	if input.AgentLimit != nil && *input.AgentLimit < 0 {
+		return OrganizationResult{}, fmt.Errorf("%w: AICC 智能体数量上限不能为负数", ErrInvalidArgument)
+	}
+	// UpdateOrganizationAICCConfig 为 :exec；写入后回读组织，确保响应包含数据库最终状态。
+	if err := s.store.UpdateOrganizationAICCConfig(ctx, sqlc.UpdateOrganizationAICCConfigParams{
+		AiccEnabled:    input.Enabled,
+		AiccAgentLimit: nullIntFromInt32Ptr(input.AgentLimit),
+		ID:             orgID,
+	}); err != nil {
+		return OrganizationResult{}, fmt.Errorf("更新企业 AICC 配置失败: %w", err)
+	}
+	org, err := s.store.GetOrganization(ctx, orgID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return OrganizationResult{}, ErrNotFound
+	}
+	if err != nil {
+		return OrganizationResult{}, fmt.Errorf("读取企业失败: %w", err)
+	}
+	return toOrganizationResult(org), nil
 }
 
 // SetOrganizationStatus 启用或禁用企业；软删除后续由删除流程单独处理。
@@ -713,19 +754,21 @@ func toOrganizationResult(org sqlc.Organization) OrganizationResult {
 		}
 	}
 	return OrganizationResult{
-		ID:                     org.ID,
-		Name:                   org.Name,
-		Code:                   org.Code,
-		Status:                 org.Status,
-		ContactName:            strOrEmpty(org.ContactName),
-		ContactPhone:           strOrEmpty(org.ContactPhone),
-		Remark:                 strOrEmpty(org.Remark),
-		NewAPIUserID:           strOrEmpty(org.NewapiUserID),
-		CreditWarningThreshold: int32PtrFromNullInt(org.CreditWarningThreshold),
-		MaxInstanceCount:       int32PtrFromNullInt(org.MaxInstanceCount),
+		ID:                            org.ID,
+		Name:                          org.Name,
+		Code:                          org.Code,
+		Status:                        org.Status,
+		ContactName:                   strOrEmpty(org.ContactName),
+		ContactPhone:                  strOrEmpty(org.ContactPhone),
+		Remark:                        strOrEmpty(org.Remark),
+		NewAPIUserID:                  strOrEmpty(org.NewapiUserID),
+		CreditWarningThreshold:        int32PtrFromNullInt(org.CreditWarningThreshold),
+		MaxInstanceCount:              int32PtrFromNullInt(org.MaxInstanceCount),
 		KnowledgeQuotaBytes:           org.KnowledgeQuotaBytes,
 		DefaultAppKnowledgeQuotaBytes: org.DefaultAppKnowledgeQuotaBytes,
 		AssistantVersionIDs:           versionIDs,
+		AICCEnabled:                   org.AiccEnabled,
+		AICCAgentLimit:                int32PtrFromNullInt(org.AiccAgentLimit),
 	}
 }
 
