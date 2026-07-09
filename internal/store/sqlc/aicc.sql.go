@@ -200,7 +200,7 @@ func (q *Queries) GetAICCAgent(ctx context.Context, id string) (AiccAgent, error
 const getAICCAgentByPublicToken = `-- name: GetAICCAgentByPublicToken :one
 SELECT id, org_id, app_id, name, status, scenario, greeting, answer_boundary, privacy_mode, privacy_text, retention_days, theme_json, allowed_domains_json, public_token, widget_token, created_at, updated_at, deleted_at
 FROM aicc_agents
-WHERE public_token = ? AND deleted_at IS NULL
+WHERE public_token = ? AND status = 'active' AND deleted_at IS NULL
 `
 
 func (q *Queries) GetAICCAgentByPublicToken(ctx context.Context, publicToken string) (AiccAgent, error) {

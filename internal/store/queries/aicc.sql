@@ -13,7 +13,7 @@ WHERE id = ? AND deleted_at IS NULL;
 -- name: GetAICCAgentByPublicToken :one
 SELECT *
 FROM aicc_agents
-WHERE public_token = ? AND deleted_at IS NULL;
+WHERE public_token = ? AND status = 'active' AND deleted_at IS NULL;
 
 -- name: ListAICCAgentsByOrg :many
 SELECT *

@@ -228,7 +228,11 @@ func TestAICCMigrationGuardrails(t *testing.T) {
 	require.NoError(t, err)
 	down := string(downBytes)
 	// down 必须先删除依赖 ragflow_documents 复合索引的 AICC 表，再删除 parent 索引，避免 MySQL 因 FK 依赖拒绝回滚。
-	assert.Greater(t, strings.Index(down, "ALTER TABLE ragflow_documents\n    DROP INDEX uk_ragflow_documents_aicc_app_doc_identity;"), strings.Index(down, "DROP TABLE IF EXISTS aicc_agent_knowledge;"))
+	dropKnowledgeIndex := strings.Index(down, "DROP TABLE IF EXISTS aicc_agent_knowledge;")
+	dropDocumentIndex := strings.Index(down, "ALTER TABLE ragflow_documents\n    DROP INDEX uk_ragflow_documents_aicc_app_doc_identity;")
+	require.NotEqual(t, -1, dropKnowledgeIndex)
+	require.NotEqual(t, -1, dropDocumentIndex)
+	assert.Greater(t, dropDocumentIndex, dropKnowledgeIndex)
 }
 
 // TestAICCMigrationExecutesOnMySQL 验证 AICC 迁移在真实 MySQL 8 上能建立约束、拒绝跨作用域脏数据并成功回滚。
@@ -369,6 +373,14 @@ func TestAICCMigrationExecutesOnMySQL(t *testing.T) {
 		id, session_id, agent_id, org_id, lead_id, lead_org_id, field_id, value_text
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		"lead-value-cross-org", "session-a", "agent-a", "org-a", "lead-b", "org-b", "field-a", "13800138000",
+	)
+	require.Error(t, err)
+
+	// lead_id 与当前 org_id 组合不存在时，必须由 lead 复合外键拒绝，避免仅依赖 CHECK 覆盖跨租户写入。
+	_, err = testDB.Exec(`INSERT INTO aicc_lead_values (
+		id, session_id, agent_id, org_id, lead_id, lead_org_id, field_id, value_text
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		"lead-value-missing-lead-org", "session-a", "agent-a", "org-a", "lead-b", "org-a", "field-a", "13800138002",
 	)
 	require.Error(t, err)
 
