@@ -33,12 +33,16 @@ type AiccAgent struct {
 }
 
 type AiccAgentKnowledge struct {
-	ID               string      `db:"id" json:"id"`
-	AgentID          string      `db:"agent_id" json:"agent_id"`
-	ScopeType        string      `db:"scope_type" json:"scope_type"`
-	ScopeID          null.String `db:"scope_id" json:"scope_id"`
-	ScopeIdentityKey null.String `db:"scope_identity_key" json:"scope_identity_key"`
-	CreatedAt        time.Time   `db:"created_at" json:"created_at"`
+	ID                       string      `db:"id" json:"id"`
+	AgentID                  string      `db:"agent_id" json:"agent_id"`
+	ScopeType                string      `db:"scope_type" json:"scope_type"`
+	OrgID                    null.String `db:"org_id" json:"org_id"`
+	AppID                    null.String `db:"app_id" json:"app_id"`
+	IndustryKnowledgeBaseID  null.String `db:"industry_knowledge_base_id" json:"industry_knowledge_base_id"`
+	RagflowDocumentID        null.String `db:"ragflow_document_id" json:"ragflow_document_id"`
+	RagflowDocumentScopeType null.String `db:"ragflow_document_scope_type" json:"ragflow_document_scope_type"`
+	ScopeIdentityKey         null.String `db:"scope_identity_key" json:"scope_identity_key"`
+	CreatedAt                time.Time   `db:"created_at" json:"created_at"`
 }
 
 type AiccFeedback struct {
@@ -78,7 +82,9 @@ type AiccLeadValue struct {
 	ID        string      `db:"id" json:"id"`
 	SessionID string      `db:"session_id" json:"session_id"`
 	AgentID   string      `db:"agent_id" json:"agent_id"`
+	OrgID     string      `db:"org_id" json:"org_id"`
 	LeadID    null.String `db:"lead_id" json:"lead_id"`
+	LeadOrgID null.String `db:"lead_org_id" json:"lead_org_id"`
 	FieldID   string      `db:"field_id" json:"field_id"`
 	ValueText string      `db:"value_text" json:"value_text"`
 	ValueHash null.String `db:"value_hash" json:"value_hash"`

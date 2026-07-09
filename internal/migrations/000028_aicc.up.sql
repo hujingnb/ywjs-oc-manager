@@ -7,6 +7,9 @@ ALTER TABLE apps
     ADD COLUMN aicc_hidden BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否为 AICC 自动创建的隐藏 app',
     ADD UNIQUE KEY uk_apps_id_org (id, org_id);
 
+ALTER TABLE ragflow_documents
+    ADD UNIQUE KEY uk_ragflow_documents_aicc_app_doc_identity (id, scope_type, org_id, app_id);
+
 CREATE TABLE aicc_agents (
     id CHAR(36) PRIMARY KEY,
     org_id CHAR(36) NOT NULL,
@@ -41,20 +44,46 @@ CREATE TABLE aicc_agent_knowledge (
     id CHAR(36) PRIMARY KEY,
     agent_id CHAR(36) NOT NULL,
     scope_type VARCHAR(32) NOT NULL,
-    scope_id CHAR(36) NULL,
-    scope_identity_key VARCHAR(64) GENERATED ALWAYS AS (
+    org_id CHAR(36) NULL,
+    app_id CHAR(36) NULL,
+    industry_knowledge_base_id CHAR(36) NULL,
+    ragflow_document_id CHAR(36) NULL,
+    ragflow_document_scope_type VARCHAR(50) GENERATED ALWAYS AS (
+        CASE WHEN scope_type = 'app_document' THEN 'app' END
+    ) VIRTUAL,
+    scope_identity_key CHAR(36) GENERATED ALWAYS AS (
         CASE
-            WHEN scope_type = 'org' THEN '__org__'
-            ELSE scope_id
+            WHEN scope_type = 'org' THEN org_id
+            WHEN scope_type = 'industry' THEN industry_knowledge_base_id
+            WHEN scope_type = 'app_document' THEN ragflow_document_id
         END
     ) VIRTUAL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT aicc_agent_knowledge_scope_type_check CHECK (scope_type IN ('org','industry','app_document')),
     CONSTRAINT aicc_agent_knowledge_scope_target_check CHECK (
-        (scope_type = 'org' AND scope_id IS NULL)
-        OR (scope_type IN ('industry','app_document') AND scope_id IS NOT NULL)
+        (scope_type = 'org'
+            AND org_id IS NOT NULL
+            AND app_id IS NULL
+            AND industry_knowledge_base_id IS NULL
+            AND ragflow_document_id IS NULL)
+        OR (scope_type = 'industry'
+            AND org_id IS NULL
+            AND app_id IS NULL
+            AND industry_knowledge_base_id IS NOT NULL
+            AND ragflow_document_id IS NULL)
+        OR (scope_type = 'app_document'
+            AND org_id IS NOT NULL
+            AND app_id IS NOT NULL
+            AND industry_knowledge_base_id IS NULL
+            AND ragflow_document_id IS NOT NULL)
     ),
-    CONSTRAINT fk_aicc_agent_knowledge_agent FOREIGN KEY (agent_id) REFERENCES aicc_agents(id) ON DELETE CASCADE,
+    CONSTRAINT fk_aicc_agent_knowledge_agent_org FOREIGN KEY (agent_id, org_id)
+        REFERENCES aicc_agents(id, org_id) ON DELETE CASCADE,
+    CONSTRAINT fk_aicc_agent_knowledge_industry FOREIGN KEY (industry_knowledge_base_id)
+        REFERENCES industry_knowledge_bases(id),
+    CONSTRAINT fk_aicc_agent_knowledge_document_scope FOREIGN KEY (
+        ragflow_document_id, ragflow_document_scope_type, org_id, app_id
+    ) REFERENCES ragflow_documents(id, scope_type, org_id, app_id),
     UNIQUE KEY uk_aicc_agent_knowledge_scope (agent_id, scope_type, scope_identity_key)
 );
 
@@ -146,6 +175,7 @@ CREATE TABLE aicc_leads (
     CONSTRAINT fk_aicc_leads_latest_session FOREIGN KEY (latest_session_id, latest_session_org_id)
         REFERENCES aicc_sessions(id, org_id) ON DELETE SET NULL,
     UNIQUE KEY uk_aicc_leads_contact (org_id, primary_contact_hash),
+    UNIQUE KEY uk_aicc_leads_identity (id, org_id),
     KEY idx_aicc_leads_org_unread (org_id, unread, updated_at DESC)
 );
 
@@ -153,17 +183,28 @@ CREATE TABLE aicc_lead_values (
     id CHAR(36) PRIMARY KEY,
     session_id CHAR(36) NOT NULL,
     agent_id CHAR(36) NOT NULL,
+    org_id CHAR(36) NOT NULL,
     lead_id CHAR(36) NULL,
+    lead_org_id CHAR(36) NULL,
     field_id CHAR(36) NOT NULL,
     value_text TEXT NOT NULL,
     value_hash VARCHAR(128) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT aicc_lead_values_lead_org_check CHECK (
+        (lead_id IS NULL AND lead_org_id IS NULL)
+        OR (lead_id IS NOT NULL AND lead_org_id = org_id)
+    ),
+    CONSTRAINT fk_aicc_lead_values_session_org FOREIGN KEY (session_id, org_id)
+        REFERENCES aicc_sessions(id, org_id) ON DELETE CASCADE,
     CONSTRAINT fk_aicc_lead_values_session_agent FOREIGN KEY (session_id, agent_id)
         REFERENCES aicc_sessions(id, agent_id) ON DELETE CASCADE,
-    CONSTRAINT fk_aicc_lead_values_lead FOREIGN KEY (lead_id) REFERENCES aicc_leads(id) ON DELETE SET NULL,
+    CONSTRAINT fk_aicc_lead_values_lead_org FOREIGN KEY (lead_id, lead_org_id)
+        REFERENCES aicc_leads(id, org_id) ON DELETE SET NULL,
     CONSTRAINT fk_aicc_lead_values_field_agent FOREIGN KEY (field_id, agent_id)
         REFERENCES aicc_lead_fields(id, agent_id),
-    KEY idx_aicc_lead_values_session (session_id, agent_id)
+    KEY idx_aicc_lead_values_session (session_id, agent_id),
+    KEY idx_aicc_lead_values_session_org (session_id, org_id),
+    KEY idx_aicc_lead_values_lead_org (lead_id, lead_org_id)
 );
 
 CREATE TABLE aicc_feedback (

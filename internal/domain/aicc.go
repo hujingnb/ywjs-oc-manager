@@ -20,4 +20,30 @@ const (
 	AICCResolutionResolved   = "resolved"
 	AICCResolutionUnresolved = "unresolved"
 	AICCResolutionUnknown    = "unknown"
+
+	// AICCLeadStatus* 记录留资流程是否完成，供会话阻断与运营统计共用。
+	AICCLeadStatusPending  = "pending"
+	AICCLeadStatusComplete = "complete"
+	AICCLeadStatusSkipped  = "skipped"
+
+	// AICCMessageDirection* 区分访客消息、助手回复与系统提示。
+	AICCMessageDirectionVisitor   = "visitor"
+	AICCMessageDirectionAssistant = "assistant"
+	AICCMessageDirectionSystem    = "system"
+
+	// AICCMessageContentType* 描述消息载荷形态，便于后续渲染和审核。
+	AICCMessageContentTypeText  = "text"
+	AICCMessageContentTypeImage = "image"
+	AICCMessageContentTypeMixed = "mixed"
+
+	// AICCLeadFieldType* 限定留资字段类型，与数据库 CHECK 和前端表单配置保持一致。
+	AICCLeadFieldTypeText   = "text"
+	AICCLeadFieldTypePhone  = "phone"
+	AICCLeadFieldTypeEmail  = "email"
+	AICCLeadFieldTypeNumber = "number"
+
+	// AICCKnowledgeScopeType* 描述智能体可挂载的知识来源类别。
+	AICCKnowledgeScopeTypeOrg         = "org"
+	AICCKnowledgeScopeTypeIndustry    = "industry"
+	AICCKnowledgeScopeTypeAppDocument = "app_document"
 )

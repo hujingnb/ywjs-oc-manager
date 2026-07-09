@@ -1,3 +1,6 @@
+ALTER TABLE ragflow_documents
+    DROP INDEX uk_ragflow_documents_aicc_app_doc_identity;
+
 DROP TABLE IF EXISTS aicc_feedback;
 DROP TABLE IF EXISTS aicc_lead_values;
 DROP TABLE IF EXISTS aicc_leads;
