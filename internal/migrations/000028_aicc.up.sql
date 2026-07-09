@@ -37,6 +37,7 @@ CREATE TABLE aicc_agents (
     UNIQUE KEY uk_aicc_agents_public_token (public_token),
     UNIQUE KEY uk_aicc_agents_widget_token (widget_token),
     UNIQUE KEY uk_aicc_agents_org_identity (id, org_id),
+    KEY idx_aicc_agents_app_org (app_id, org_id),
     KEY idx_aicc_agents_org_status (org_id, status, deleted_at)
 );
 
@@ -51,7 +52,7 @@ CREATE TABLE aicc_agent_knowledge (
     ragflow_document_id CHAR(36) NULL,
     ragflow_document_scope_type VARCHAR(50) GENERATED ALWAYS AS (
         CASE WHEN scope_type = 'app_document' THEN 'app' END
-    ) VIRTUAL,
+    ) STORED,
     scope_identity_key CHAR(36) GENERATED ALWAYS AS (
         CASE
             WHEN scope_type = 'org' THEN org_id
