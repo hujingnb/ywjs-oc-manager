@@ -307,6 +307,8 @@ func writeServiceError(c *gin.Context, err error) {
 		// 透出 service 层用 "%w: 具体原因" 包装的冲突原因（如「企业标识已被占用」），
 		// 裸 ErrConflict 时回落为 sentinel 自身文案「资源冲突」。
 		c.JSON(http.StatusConflict, apierror.New("CONFLICT", validationServiceMessage(err, service.ErrConflict)))
+	case errors.Is(err, service.ErrQuotaExceeded):
+		c.JSON(http.StatusConflict, apierror.New("QUOTA_EXCEEDED", validationServiceMessage(err, service.ErrQuotaExceeded)))
 	case errors.Is(err, service.ErrInvalidArgument):
 		c.JSON(http.StatusBadRequest, apierror.New("INVALID_ARGUMENT", validationServiceMessage(err, service.ErrInvalidArgument)))
 	case errors.Is(err, service.ErrMemberCreateInvalid):

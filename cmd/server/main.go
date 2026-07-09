@@ -168,6 +168,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	appService.SetJobNotifier(redisQueue)
 	// 注入版本镜像解析器：AppService 计算 version_synced 时需要把版本 image_id 解析成镜像 ref。
 	appService.SetImageResolver(runtimeImageAdapter{images: cfg.Hermes.RuntimeImages})
+	// AICC 智能体复用 AppService 创建隐藏 app，并由 app_initialize worker 继续完成 runtime 初始化。
+	aiccService := service.NewAICCService(dbStore.Queries, appService)
 	runtimeOpService := service.NewRuntimeOperationService(dbStore.Queries, logger, redisQueue)
 	// usage / organization service 在装配 newapi client 之后再实例化（见下方）；
 	// 这里仅声明变量，真实赋值发生在 newapi wiring 段。
@@ -714,6 +716,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			WorkspaceService:              workspaceService,
 			RuntimeOpService:              runtimeOpService,
 			AppService:                    appService,
+			AICCService:                   aiccService,
 			UsageService:                  usageService,
 			RechargeService:               rechargeService,
 			PlatformOverview:              platformOverviewService,

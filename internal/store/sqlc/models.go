@@ -159,7 +159,6 @@ type App struct {
 	CreatedAt              time.Time       `db:"created_at" json:"created_at"`
 	UpdatedAt              time.Time       `db:"updated_at" json:"updated_at"`
 	DeletedAt              null.Time       `db:"deleted_at" json:"deleted_at"`
-	OwnerActiveKey         null.String     `db:"owner_active_key" json:"owner_active_key"`
 	RuntimeTokenActiveKey  null.String     `db:"runtime_token_active_key" json:"runtime_token_active_key"`
 	KnowledgeQuotaBytes    int64           `db:"knowledge_quota_bytes" json:"knowledge_quota_bytes"`
 	// 应用语言（hermes 对终端用户说话的语言, en/zh）；NULL=用平台默认
@@ -171,7 +170,8 @@ type App struct {
 	// 最近一次 bootstrap 写入 input 的平台层 prompt 文本 sha256（hex）：与当前常量 hash 比对判定是否需重启生效；空=存量/未 bootstrap，视为需重启
 	AppliedPlatformPromptHash string `db:"applied_platform_prompt_hash" json:"applied_platform_prompt_hash"`
 	// 是否为 AICC 自动创建的隐藏 app
-	AiccHidden bool `db:"aicc_hidden" json:"aicc_hidden"`
+	AiccHidden     bool        `db:"aicc_hidden" json:"aicc_hidden"`
+	OwnerActiveKey null.String `db:"owner_active_key" json:"owner_active_key"`
 }
 
 // 实例级 skill 安装清单，自包含快照，运行时唯一来源

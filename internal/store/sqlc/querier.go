@@ -255,6 +255,8 @@ type Querier interface {
 	ListWebPublishConfigs(ctx context.Context) ([]OrgWebPublishConfig, error)
 	LockJobForUpdate(ctx context.Context, id string) (Job, error)
 	MarkAICCSessionConsented(ctx context.Context, sessionToken string) error
+	// AICC 隐藏 app 不出现在普通实例列表中；创建时已写入 true，此查询用于幂等补标记。
+	MarkAppAICCHidden(ctx context.Context, id string) error
 	// 任意状态 → error 时同时写入来源状态与错误文本，保留"在哪一步失败"与"为什么失败"语义。
 	// last_error_status 不加 CHECK 约束，值由调用方在 Go 层负责合法性。
 	MarkAppFailed(ctx context.Context, arg MarkAppFailedParams) error

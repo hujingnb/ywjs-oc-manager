@@ -169,6 +169,7 @@ func TestAICCMigrationGuardrails(t *testing.T) {
 	assert.Contains(t, up, "ADD COLUMN aicc_agent_limit INT NULL")
 	assert.Contains(t, up, "CONSTRAINT organizations_aicc_agent_limit_check CHECK (aicc_agent_limit IS NULL OR aicc_agent_limit >= 0)")
 	assert.Contains(t, up, "UNIQUE KEY uk_apps_id_org (id, org_id)")
+	assert.Contains(t, up, "CASE WHEN deleted_at IS NULL AND aicc_hidden = FALSE THEN owner_user_id END")
 	assert.Contains(t, up, "CREATE TABLE aicc_agents")
 	assert.Contains(t, up, "UNIQUE KEY uk_aicc_agents_public_token")
 	assert.Contains(t, up, "UNIQUE KEY uk_aicc_agents_widget_token")

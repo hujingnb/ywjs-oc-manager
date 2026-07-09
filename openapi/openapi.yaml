@@ -98,6 +98,32 @@ components:
       required:
       - message
       type: object
+    handlers.CreateAICCAgentRequest:
+      properties:
+        answer_boundary:
+          description: AnswerBoundary 是智能体回答边界说明。
+          type: string
+        greeting:
+          description: Greeting 是访客进入会话时看到的欢迎语。
+          type: string
+        name:
+          description: Name 是智能体展示名。
+          type: string
+        privacy_mode:
+          description: PrivacyMode 是隐私提示模式：notice / consent_required。
+          type: string
+        privacy_text:
+          description: PrivacyText 是企业自定义隐私说明。
+          type: string
+        retention_days:
+          description: RetentionDays 是数据保留天数；0 表示使用后端默认值。
+          type: integer
+        scenario:
+          description: Scenario 是智能体适用业务场景说明。
+          type: string
+      required:
+      - name
+      type: object
     handlers.CreateAssistantVersionRequest:
       properties:
         description:
@@ -617,6 +643,32 @@ components:
           type: string
       required:
       - version_id
+      type: object
+    handlers.UpdateAICCAgentRequest:
+      properties:
+        answer_boundary:
+          description: AnswerBoundary 是智能体回答边界说明。
+          type: string
+        greeting:
+          description: Greeting 是访客进入会话时看到的欢迎语。
+          type: string
+        name:
+          description: Name 是智能体展示名。
+          type: string
+        privacy_mode:
+          description: PrivacyMode 是隐私提示模式：notice / consent_required。
+          type: string
+        privacy_text:
+          description: PrivacyText 是企业自定义隐私说明。
+          type: string
+        retention_days:
+          description: RetentionDays 是数据保留天数；0 表示使用后端默认值。
+          type: integer
+        scenario:
+          description: Scenario 是智能体适用业务场景说明。
+          type: string
+      required:
+      - name
       type: object
     handlers.UpdateAppLocaleRequest:
       properties:
@@ -1272,6 +1324,54 @@ components:
         worker_pid:
           description: WorkerPID 是 worker 进程 ID，0 表示未知或已退出。
           type: integer
+      type: object
+    service.AICCAgentResult:
+      properties:
+        answer_boundary:
+          description: AnswerBoundary 是回答边界说明。
+          type: string
+        app_id:
+          description: AppID 是该智能体绑定的隐藏 app。
+          type: string
+        created_at:
+          description: CreatedAt 是创建时间。
+          type: string
+        greeting:
+          description: Greeting 是欢迎语。
+          type: string
+        id:
+          description: ID 是智能体主键。
+          type: string
+        name:
+          description: Name 是智能体展示名。
+          type: string
+        org_id:
+          description: OrgID 是智能体所属企业，用于平台只读排障和企业侧过滤。
+          type: string
+        privacy_mode:
+          description: PrivacyMode 是隐私提示模式。
+          type: string
+        privacy_text:
+          description: PrivacyText 是隐私说明文本。
+          type: string
+        public_token:
+          description: PublicToken 是公开链接 token；仅管理面返回，访客端不反查其它租户信息。
+          type: string
+        retention_days:
+          description: RetentionDays 是数据保留天数。
+          type: integer
+        scenario:
+          description: Scenario 是业务场景说明。
+          type: string
+        status:
+          description: Status 是智能体生命周期状态：draft / active / paused / deleted。
+          type: string
+        updated_at:
+          description: UpdatedAt 是最近更新时间。
+          type: string
+        widget_token:
+          description: WidgetToken 是嵌入组件 token；仅管理面返回。
+          type: string
       type: object
     service.AppResult:
       properties:
@@ -2359,6 +2459,377 @@ paths:
       summary: 待处理工单数角标
       tags:
       - skill-tickets
+  /aicc/agents:
+    get:
+      description: 平台管理员可通过 org_id 查询，企业管理员默认查询本企业
+      parameters:
+      - description: 企业 ID（平台管理员必填）
+        in: query
+        name: org_id
+        schema:
+          type: string
+      - description: 每页条数（默认 50）
+        in: query
+        name: limit
+        schema:
+          type: integer
+      - description: 分页偏移（默认 0）
+        in: query
+        name: offset
+        schema:
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.AICCAgentResult'
+                  type: array
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: AICC 智能体列表
+      tags:
+      - aicc
+    post:
+      description: 企业管理员创建 AICC 智能体，并自动绑定隐藏 app runtime
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.CreateAICCAgentRequest'
+                description: 创建智能体请求
+                summary: body
+        description: 创建智能体请求
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AICCAgentResult'
+                type: object
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 创建 AICC 智能体
+      tags:
+      - aicc
+  /aicc/agents/{agentId}:
+    delete:
+      description: 企业管理员软删除 AICC 智能体
+      parameters:
+      - description: 智能体 ID
+        in: path
+        name: agentId
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 删除 AICC 智能体
+      tags:
+      - aicc
+    get:
+      description: 读取单个 AICC 智能体管理面资料
+      parameters:
+      - description: 智能体 ID
+        in: path
+        name: agentId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AICCAgentResult'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: AICC 智能体详情
+      tags:
+      - aicc
+    patch:
+      description: 企业管理员更新 AICC 智能体资料
+      parameters:
+      - description: 智能体 ID
+        in: path
+        name: agentId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.UpdateAICCAgentRequest'
+                description: 更新智能体请求
+                summary: body
+        description: 更新智能体请求
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AICCAgentResult'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 更新 AICC 智能体
+      tags:
+      - aicc
+  /aicc/agents/{agentId}/start:
+    post:
+      description: 企业管理员将 AICC 智能体切换为 active
+      parameters:
+      - description: 智能体 ID
+        in: path
+        name: agentId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AICCAgentResult'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 启动 AICC 智能体
+      tags:
+      - aicc
+  /aicc/agents/{agentId}/stop:
+    post:
+      description: 企业管理员将 AICC 智能体切换为 paused
+      parameters:
+      - description: 智能体 ID
+        in: path
+        name: agentId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AICCAgentResult'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 停止 AICC 智能体
+      tags:
+      - aicc
   /apps/{appId}:
     get:
       description: 按 appId 获取单个应用信息；org_member 只能查询自己的应用

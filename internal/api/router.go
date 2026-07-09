@@ -44,6 +44,8 @@ type Dependencies struct {
 	RuntimeOpService *service.RuntimeOperationService
 	// AppService 提供应用只读列表和详情路由。
 	AppService *service.AppService
+	// AICCService 提供 AICC 智能体管理路由；nil 时不注册。
+	AICCService *service.AICCService
 	// RechargeService 提供组织充值、充值记录和余额查询路由。
 	RechargeService *service.RechargeService
 	// AssistantVersionService 提供助手版本目录管理路由。
@@ -227,6 +229,9 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	}
 	if dep.AppService != nil {
 		handlers.RegisterAppRoutes(user, handlers.NewAppsHandler(dep.AppService))
+	}
+	if dep.AICCService != nil {
+		handlers.RegisterAICCRoutes(user, handlers.NewAICCHandler(dep.AICCService))
 	}
 	if dep.RechargeService != nil {
 		handlers.RegisterRechargeRoutes(user, handlers.NewRechargeHandler(dep.RechargeService))

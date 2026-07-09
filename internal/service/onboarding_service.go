@@ -479,14 +479,12 @@ func versionInOrgAllowlist(org sqlc.Organization, versionID string) bool {
 	if versionID == "" {
 		return false
 	}
-	ids := []string{}
-	if len(org.AssistantVersionIds) > 0 {
-		if err := json.Unmarshal(org.AssistantVersionIds, &ids); err != nil {
-			// allowlist 列由组织服务统一以 JSON 数组写入，理论上不会损坏；
-			// 真损坏时记日志后按「拒绝」处理（返回 false），不静默吞掉。
-			slog.Warn("解析企业 assistant_version_ids 失败", slog.String(mlog.KeyOrgID, org.ID), mlog.Err(err))
-			return false
-		}
+	ids, err := assistantVersionIDsFromOrg(org)
+	if err != nil {
+		// allowlist 列由组织服务统一以 JSON 数组写入，理论上不会损坏；
+		// 真损坏时记日志后按「拒绝」处理（返回 false），不静默吞掉。
+		slog.Warn("解析企业 assistant_version_ids 失败", slog.String(mlog.KeyOrgID, org.ID), mlog.Err(err))
+		return false
 	}
 	for _, id := range ids {
 		if id == versionID {
@@ -494,6 +492,30 @@ func versionInOrgAllowlist(org sqlc.Organization, versionID string) bool {
 		}
 	}
 	return false
+}
+
+// firstAssistantVersionID 返回企业 allowlist 中的第一个助手版本。
+// AICC 隐藏 app 没有独立版本选择 UI，本阶段使用企业已授权版本的第一个作为初始化版本；
+// 未配置 allowlist 时拒绝创建，避免 app_initialize 因 version_id 为空进入失败态。
+func firstAssistantVersionID(org sqlc.Organization) (string, error) {
+	ids, err := assistantVersionIDsFromOrg(org)
+	if err != nil {
+		return "", fmt.Errorf("%w: 企业助手版本 allowlist 格式错误", ErrInvalidArgument)
+	}
+	if len(ids) == 0 {
+		return "", fmt.Errorf("%w: 企业未配置可用助手版本", ErrVersionNotInAllowlist)
+	}
+	return ids[0], nil
+}
+
+func assistantVersionIDsFromOrg(org sqlc.Organization) ([]string, error) {
+	ids := []string{}
+	if len(org.AssistantVersionIds) > 0 {
+		if err := json.Unmarshal(org.AssistantVersionIds, &ids); err != nil {
+			return nil, err
+		}
+	}
+	return ids, nil
 }
 
 // isAppsOwnerActiveUniqueViolation 识别并发复建实例时由数据库兜底拦截的活跃实例唯一约束。
@@ -525,4 +547,3 @@ func displayNameOrUsername(user sqlc.User) string {
 	}
 	return "成员"
 }
-

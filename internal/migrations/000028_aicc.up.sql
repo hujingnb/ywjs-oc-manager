@@ -7,6 +7,14 @@ ALTER TABLE apps
     ADD COLUMN aicc_hidden BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否为 AICC 自动创建的隐藏 app',
     ADD UNIQUE KEY uk_apps_id_org (id, org_id);
 
+ALTER TABLE apps
+    DROP INDEX uk_apps_owner_active,
+    MODIFY COLUMN owner_active_key CHAR(36)
+        GENERATED ALWAYS AS (
+            CASE WHEN deleted_at IS NULL AND aicc_hidden = FALSE THEN owner_user_id END
+        ) VIRTUAL,
+    ADD UNIQUE KEY uk_apps_owner_active (owner_active_key);
+
 ALTER TABLE ragflow_documents
     ADD UNIQUE KEY uk_ragflow_documents_aicc_app_doc_identity (id, scope_type, org_id, app_id);
 

@@ -111,6 +111,42 @@ type UpdateOrganizationAICCConfigRequest struct {
 	AgentLimit *int32 `json:"agent_limit"`
 }
 
+// CreateAICCAgentRequest 是企业管理员创建 AICC 智能体的请求体。
+type CreateAICCAgentRequest struct {
+	// Name 是智能体展示名。
+	Name string `json:"name" binding:"required"`
+	// Scenario 是智能体适用业务场景说明。
+	Scenario string `json:"scenario"`
+	// Greeting 是访客进入会话时看到的欢迎语。
+	Greeting string `json:"greeting"`
+	// AnswerBoundary 是智能体回答边界说明。
+	AnswerBoundary string `json:"answer_boundary"`
+	// PrivacyMode 是隐私提示模式：notice / consent_required。
+	PrivacyMode string `json:"privacy_mode"`
+	// PrivacyText 是企业自定义隐私说明。
+	PrivacyText string `json:"privacy_text"`
+	// RetentionDays 是数据保留天数；0 表示使用后端默认值。
+	RetentionDays int32 `json:"retention_days"`
+}
+
+// UpdateAICCAgentRequest 是企业管理员更新 AICC 智能体资料的请求体。
+type UpdateAICCAgentRequest struct {
+	// Name 是智能体展示名。
+	Name string `json:"name" binding:"required"`
+	// Scenario 是智能体适用业务场景说明。
+	Scenario string `json:"scenario"`
+	// Greeting 是访客进入会话时看到的欢迎语。
+	Greeting string `json:"greeting"`
+	// AnswerBoundary 是智能体回答边界说明。
+	AnswerBoundary string `json:"answer_boundary"`
+	// PrivacyMode 是隐私提示模式：notice / consent_required。
+	PrivacyMode string `json:"privacy_mode"`
+	// PrivacyText 是企业自定义隐私说明。
+	PrivacyText string `json:"privacy_text"`
+	// RetentionDays 是数据保留天数；0 表示使用后端默认值。
+	RetentionDays int32 `json:"retention_days"`
+}
+
 // ===== 成员 members =====
 
 // CreateMemberRequest 创建企业成员的请求体。

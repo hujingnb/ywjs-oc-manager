@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/guregu/null/v5"
@@ -21,6 +22,10 @@ import (
 // AppStore 抽象 app 服务的数据访问能力。
 type AppStore interface {
 	CreateApp(ctx context.Context, arg sqlc.CreateAppParams) error
+	// MarkAppAICCHidden 将 AICC 自动创建的隐藏 app 从普通应用列表中隔离。
+	MarkAppAICCHidden(ctx context.Context, id string) error
+	// GetUser 读取创建者语言偏好，用于隐藏 app 初始化时快照 locale。
+	GetUser(ctx context.Context, id string) (sqlc.User, error)
 	// GetAppWithVersion 联查实例与绑定版本的 revision / image_id，用于计算 version_synced。
 	GetAppWithVersion(ctx context.Context, id string) (sqlc.GetAppWithVersionRow, error)
 	// ListAppsByOrgWithVersion 批量联查组织实例及绑定版本信息，用于 version_synced 批量计算。
@@ -202,6 +207,72 @@ func (s *AppService) ListByOrg(ctx context.Context, principal auth.Principal, or
 		results = append(results, r)
 	}
 	return results, nil
+}
+
+// CreateHiddenAICCApp 创建 AICC 智能体专用隐藏 app，并复用现有 app_initialize worker 初始化链路。
+//
+// 取舍说明：成员 onboarding 会同时创建成员、渠道绑定和审计，AICC 只需要一个 hermes runtime，
+// 因此这里保留最小共享边界：创建 apps 行、创建 app_initialize job、标记 aicc_hidden。
+// new-api token、runtime token、k8s Deployment、知识注入等细节继续由 app_initialize worker 统一处理。
+func (s *AppService) CreateHiddenAICCApp(ctx context.Context, principal auth.Principal, input AICCHiddenAppInput) (string, error) {
+	if input.AppID == "" || input.OrgID == "" || input.UserID == "" || strings.TrimSpace(input.Name) == "" {
+		return "", fmt.Errorf("%w: AICC 隐藏 app 缺少必要参数", ErrInvalidArgument)
+	}
+	if !auth.CanManageAICCAgent(principal, input.OrgID) {
+		return "", ErrForbidden
+	}
+	org, err := s.store.GetOrganization(ctx, input.OrgID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("查询企业失败: %w", err)
+	}
+	versionID, err := firstAssistantVersionID(org)
+	if err != nil {
+		return "", err
+	}
+	appLocale := null.String{}
+	if user, err := s.store.GetUser(ctx, input.UserID); err == nil && user.Locale.Valid && user.Locale.String != "" {
+		appLocale = null.StringFrom(user.Locale.String)
+	}
+	if err := s.store.CreateApp(ctx, sqlc.CreateAppParams{
+		ID:                  input.AppID,
+		OrgID:               input.OrgID,
+		OwnerUserID:         input.UserID,
+		Name:                strings.TrimSpace(input.Name),
+		Description:         null.String{},
+		Status:              domain.AppStatusDraft,
+		ApiKeyStatus:        domain.APIKeyStatusPending,
+		VersionID:           null.StringFrom(versionID),
+		Locale:              appLocale,
+		KnowledgeQuotaBytes: org.DefaultAppKnowledgeQuotaBytes,
+		AiccHidden:          true,
+	}); err != nil {
+		return "", fmt.Errorf("创建 AICC 隐藏 app 失败: %w", err)
+	}
+	payload, err := json.Marshal(map[string]any{"app_id": input.AppID})
+	if err != nil {
+		return "", fmt.Errorf("序列化 AICC 初始化 job payload 失败: %w", err)
+	}
+	jobID := newUUID()
+	if err := s.store.CreateJob(ctx, sqlc.CreateJobParams{
+		ID:          jobID,
+		Type:        domain.JobTypeAppInitialize,
+		Priority:    100,
+		RunAfter:    time.Now(),
+		MaxAttempts: 5,
+		PayloadJson: payload,
+	}); err != nil {
+		return "", fmt.Errorf("创建 AICC 隐藏 app 初始化任务失败: %w", err)
+	}
+	if err := s.store.MarkAppAICCHidden(ctx, input.AppID); err != nil {
+		return "", fmt.Errorf("标记 AICC 隐藏 app 失败: %w", err)
+	}
+	if s.notifier != nil {
+		_ = s.notifier.Enqueue(ctx, jobID)
+	}
+	return input.AppID, nil
 }
 
 func toAppResult(app sqlc.App) AppResult {

@@ -130,6 +130,44 @@ func appOrgAdminPrincipal(org sqlc.Organization) auth.Principal {
 	}
 }
 
+// TestCreateHiddenAICCAppCreatesHiddenAppAndInitializeJob 覆盖 AICC 隐藏 app 创建：写 app、标记隐藏并创建初始化 job。
+func TestCreateHiddenAICCAppCreatesHiddenAppAndInitializeJob(t *testing.T) {
+	svc, store := newAppServiceWithStore(t)
+	store.organization.AssistantVersionIds = []byte(`["` + testSwitchVersionID + `"]`)
+	store.user.Locale = null.StringFrom("zh")
+
+	appID, err := svc.CreateHiddenAICCApp(context.Background(), appOrgAdminPrincipal(store.organization), AICCHiddenAppInput{
+		AppID:  "app-aicc-hidden-1",
+		OrgID:  store.organization.ID,
+		UserID: store.user.ID,
+		Name:   "官网售前",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "app-aicc-hidden-1", appID)
+	assert.True(t, store.app.AiccHidden)
+	assert.Equal(t, "官网售前", store.app.Name)
+	assert.Equal(t, testSwitchVersionID, store.app.VersionID.String)
+	assert.Equal(t, "zh", store.app.Locale.String)
+	require.Len(t, store.jobs, 1)
+	assert.Equal(t, domain.JobTypeAppInitialize, store.jobs[0].Type)
+	assert.JSONEq(t, `{"app_id":"app-aicc-hidden-1"}`, string(store.jobs[0].PayloadJson))
+}
+
+// TestCreateHiddenAICCAppRejectsMissingVersionAllowlist 覆盖异常路径：企业未配置助手版本时拒绝创建隐藏 app，避免初始化必然失败。
+func TestCreateHiddenAICCAppRejectsMissingVersionAllowlist(t *testing.T) {
+	svc, store := newAppServiceWithStore(t)
+
+	_, err := svc.CreateHiddenAICCApp(context.Background(), appOrgAdminPrincipal(store.organization), AICCHiddenAppInput{
+		AppID:  "app-aicc-hidden-1",
+		OrgID:  store.organization.ID,
+		UserID: store.user.ID,
+		Name:   "官网售前",
+	})
+
+	require.ErrorIs(t, err, ErrVersionNotInAllowlist)
+}
+
 type appServiceStoreStub struct {
 	organization sqlc.Organization
 	user         sqlc.User
@@ -186,8 +224,28 @@ func (s *appServiceStoreStub) CreateApp(_ context.Context, arg sqlc.CreateAppPar
 		Description:  arg.Description,
 		Status:       arg.Status,
 		ApiKeyStatus: arg.ApiKeyStatus,
+		VersionID:    arg.VersionID,
+		Locale:       arg.Locale,
+		AiccHidden:   arg.AiccHidden,
 	}
 	return nil
+}
+
+// MarkAppAICCHidden 模拟隐藏 app 补标记，供 AppService 接口编译和隐藏 app 测试复用。
+func (s *appServiceStoreStub) MarkAppAICCHidden(_ context.Context, id string) error {
+	if s.app.ID != id {
+		return sql.ErrNoRows
+	}
+	s.app.AiccHidden = true
+	return nil
+}
+
+// GetUser 返回预置用户，用于隐藏 app 创建时快照 locale。
+func (s *appServiceStoreStub) GetUser(_ context.Context, id string) (sqlc.User, error) {
+	if s.user.ID != id {
+		return sqlc.User{}, sql.ErrNoRows
+	}
+	return s.user, nil
 }
 
 // GetAppWithVersion 返回 app 及版本 revision / image_id，模拟联查结果。

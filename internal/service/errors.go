@@ -18,6 +18,9 @@ var ErrConflict = errors.New("资源冲突")
 // ErrInvalidArgument 表示请求参数通过了 HTTP 绑定但未通过业务边界校验。
 var ErrInvalidArgument = errors.New("请求参数不合法")
 
+// ErrQuotaExceeded 表示租户级数量或容量配额已用尽，handler 层映射为 409 Conflict。
+var ErrQuotaExceeded = errors.New("已达到配额上限")
+
 // ErrInvalidResourceRange 表示资源趋势查询的时间范围或聚合粒度非法，handler 层应映射为 400。
 var ErrInvalidResourceRange = errors.New("资源查询范围不合法")
 

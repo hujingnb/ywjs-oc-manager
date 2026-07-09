@@ -11,6 +11,10 @@ ALTER TABLE ragflow_documents
     DROP INDEX uk_ragflow_documents_aicc_app_doc_identity;
 
 ALTER TABLE apps
+    DROP INDEX uk_apps_owner_active,
+    MODIFY COLUMN owner_active_key CHAR(36)
+        GENERATED ALWAYS AS (CASE WHEN deleted_at IS NULL THEN owner_user_id END) VIRTUAL,
+    ADD UNIQUE KEY uk_apps_owner_active (owner_active_key),
     DROP INDEX uk_apps_id_org,
     DROP COLUMN aicc_hidden;
 

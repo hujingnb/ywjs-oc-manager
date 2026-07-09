@@ -12,9 +12,10 @@ INSERT INTO apps (
     api_key_status,
     version_id,
     locale,
-    knowledge_quota_bytes
+    knowledge_quota_bytes,
+    aicc_hidden
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 );
 
 -- name: GetApp :one
@@ -30,9 +31,16 @@ WHERE owner_user_id = ? AND deleted_at IS NULL;
 -- name: ListAppsByOrg :many
 SELECT *
 FROM apps
-WHERE org_id = ? AND deleted_at IS NULL
+WHERE org_id = ? AND deleted_at IS NULL AND aicc_hidden = FALSE
 ORDER BY created_at DESC, id DESC
 LIMIT ? OFFSET ?;
+
+-- name: MarkAppAICCHidden :exec
+-- AICC 隐藏 app 不出现在普通实例列表中；创建时已写入 true，此查询用于幂等补标记。
+UPDATE apps
+SET aicc_hidden = TRUE,
+    updated_at = now()
+WHERE id = ? AND deleted_at IS NULL;
 
 -- name: SetAppStatus :exec
 UPDATE apps
@@ -239,7 +247,7 @@ WHERE apps.id = ?;
 SELECT sqlc.embed(apps), av.revision AS version_revision, av.image_id AS version_image_id
 FROM apps
 JOIN assistant_versions av ON av.id = apps.version_id
-WHERE apps.org_id = ? AND apps.deleted_at IS NULL
+WHERE apps.org_id = ? AND apps.deleted_at IS NULL AND apps.aicc_hidden = FALSE
 ORDER BY apps.created_at DESC, apps.id DESC
 LIMIT ? OFFSET ?;
 
