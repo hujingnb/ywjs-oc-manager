@@ -91,6 +91,44 @@ func TestRuntimeOperationAllowsPlatformAdmin(t *testing.T) {
 	require.NotEmpty(t, result.JobID, "成功触发后应返回非空 job_id")
 }
 
+// TestRuntimeOperationRejectsAICCHiddenApp 覆盖普通运行时入口隔离：AICC 隐藏 app 不允许通过
+// 普通实例启停、运行态查看或重新初始化入口操作，避免绕过 AICC 管理语义。
+func TestRuntimeOperationRejectsAICCHiddenApp(t *testing.T) {
+	// 子场景：InspectApp 不暴露 hidden app 运行态。
+	t.Run("运行态查看返回不存在", func(t *testing.T) {
+		store := newRuntimeOperationStub(t)
+		store.app.AiccHidden = true
+		svc := NewRuntimeOperationService(store, newDiscardLogger())
+
+		_, err := svc.InspectApp(context.Background(), runtimeOrgAdminPrincipal(), testRuntimeOpAppID)
+
+		require.ErrorIs(t, err, ErrNotFound)
+	})
+
+	// 子场景：Trigger 不允许对 hidden app 入队启停重启删除任务。
+	t.Run("运行操作返回不存在", func(t *testing.T) {
+		store := newRuntimeOperationStub(t)
+		store.app.AiccHidden = true
+		svc := NewRuntimeOperationService(store, newDiscardLogger())
+
+		_, err := svc.Trigger(context.Background(), runtimeOrgAdminPrincipal(), testRuntimeOpAppID, RuntimeOperationRestart)
+
+		require.ErrorIs(t, err, ErrNotFound)
+	})
+
+	// 子场景：RequestInitialize 不允许通过普通实例入口重跑 hidden app 初始化。
+	t.Run("重新初始化返回不存在", func(t *testing.T) {
+		store := newRuntimeOperationStub(t)
+		store.app.AiccHidden = true
+		store.app.Status = domain.AppStatusError
+		svc := NewRuntimeOperationService(store, newDiscardLogger())
+
+		_, err := svc.RequestInitialize(context.Background(), runtimeOrgAdminPrincipal(), testRuntimeOpAppID)
+
+		require.ErrorIs(t, err, ErrNotFound)
+	})
+}
+
 // TestRequestInitialize_HappyPathFromError 验证请求初始化成功路径来自错误的成功路径场景。
 // spec-A2b：container_id / runtime_node_id 已从 schema 删除，不再在此测试中设置。
 func TestRequestInitialize_HappyPathFromError(t *testing.T) {

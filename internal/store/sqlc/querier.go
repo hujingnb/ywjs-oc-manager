@@ -24,7 +24,7 @@ type Querier interface {
 	// transitionTo / RequestInitialize 强制清空进度字段。
 	ClearAppProgress(ctx context.Context, id string) error
 	CountAICCAgentsByOrg(ctx context.Context, orgID string) (int64, error)
-	// 统计企业当前未删除实例数（apps.deleted_at IS NULL），用于企业实例数量上限校验。
+	// 统计企业当前未删除普通实例数；AICC 隐藏 app 使用独立 aicc_agent_limit，不占用普通实例上限。
 	CountActiveAppsByOrg(ctx context.Context, orgID string) (int64, error)
 	// 平台总览组织计数：剔除 soft-deleted；status='active' 与 'disabled' 都算入册组织。
 	CountActiveOrganizations(ctx context.Context) (int64, error)

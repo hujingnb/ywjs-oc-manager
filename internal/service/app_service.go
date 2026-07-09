@@ -155,6 +155,9 @@ func (s *AppService) Get(ctx context.Context, principal auth.Principal, appID st
 	if err != nil {
 		return AppResult{}, fmt.Errorf("查询应用失败: %w", err)
 	}
+	if row.App.AiccHidden {
+		return AppResult{}, ErrNotFound
+	}
 	if !auth.CanViewApp(principal, row.App.OrgID, row.App.OwnerUserID) {
 		return AppResult{}, ErrForbidden
 	}
@@ -251,9 +254,15 @@ func (s *AppService) CreateHiddenAICCApp(ctx context.Context, principal auth.Pri
 	}); err != nil {
 		return "", fmt.Errorf("创建 AICC 隐藏 app 失败: %w", err)
 	}
+	rollbackCreatedApp := func(cause error) error {
+		if cleanupErr := s.store.SoftDeleteApp(ctx, input.AppID); cleanupErr != nil {
+			return errors.Join(cause, fmt.Errorf("回滚 AICC 隐藏 app 失败: %w", cleanupErr))
+		}
+		return cause
+	}
 	payload, err := json.Marshal(map[string]any{"app_id": input.AppID})
 	if err != nil {
-		return "", fmt.Errorf("序列化 AICC 初始化 job payload 失败: %w", err)
+		return "", rollbackCreatedApp(fmt.Errorf("序列化 AICC 初始化 job payload 失败: %w", err))
 	}
 	jobID := newUUID()
 	if err := s.store.CreateJob(ctx, sqlc.CreateJobParams{
@@ -264,15 +273,39 @@ func (s *AppService) CreateHiddenAICCApp(ctx context.Context, principal auth.Pri
 		MaxAttempts: 5,
 		PayloadJson: payload,
 	}); err != nil {
-		return "", fmt.Errorf("创建 AICC 隐藏 app 初始化任务失败: %w", err)
+		return "", rollbackCreatedApp(fmt.Errorf("创建 AICC 隐藏 app 初始化任务失败: %w", err))
 	}
 	if err := s.store.MarkAppAICCHidden(ctx, input.AppID); err != nil {
-		return "", fmt.Errorf("标记 AICC 隐藏 app 失败: %w", err)
+		return "", rollbackCreatedApp(fmt.Errorf("标记 AICC 隐藏 app 失败: %w", err))
 	}
 	if s.notifier != nil {
 		_ = s.notifier.Enqueue(ctx, jobID)
 	}
 	return input.AppID, nil
+}
+
+// SoftDeleteHiddenAICCApp 软删除 AICC 创建链路中需要补偿清理的隐藏 app。
+func (s *AppService) SoftDeleteHiddenAICCApp(ctx context.Context, principal auth.Principal, appID string) error {
+	if strings.TrimSpace(appID) == "" {
+		return fmt.Errorf("%w: AICC 隐藏 app ID 不能为空", ErrInvalidArgument)
+	}
+	app, err := s.store.GetAppWithVersion(ctx, appID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("查询 AICC 隐藏 app 失败: %w", err)
+	}
+	if !app.App.AiccHidden {
+		return fmt.Errorf("%w: 只能清理 AICC 隐藏 app", ErrInvalidArgument)
+	}
+	if !auth.CanManageAICCAgent(principal, app.App.OrgID) {
+		return ErrForbidden
+	}
+	if err := s.store.SoftDeleteApp(ctx, appID); err != nil {
+		return fmt.Errorf("软删除 AICC 隐藏 app 失败: %w", err)
+	}
+	return nil
 }
 
 func toAppResult(app sqlc.App) AppResult {

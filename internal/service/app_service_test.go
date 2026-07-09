@@ -103,6 +103,19 @@ func TestGetAppExposeRuntimeImageOnlyToPlatformAdmin(t *testing.T) {
 	assert.Empty(t, orgResult.RuntimeImageSha256)
 }
 
+// TestGetAppHidesAICCHiddenApp 覆盖普通应用详情隔离：AICC 隐藏 app 只能走 AICC 管理语义，
+// 不应通过 /apps/:appId 作为普通实例暴露。
+func TestGetAppHidesAICCHiddenApp(t *testing.T) {
+	svc, store := newAppServiceWithStore(t)
+	app := store.mustSeedApp(t)
+	app.AiccHidden = true
+	store.app = app
+
+	_, err := svc.Get(context.Background(), appOrgAdminPrincipal(store.organization), testAppServiceAppID)
+
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
 func newAppServiceWithStore(t *testing.T) (*AppService, *appServiceStoreStub) {
 	t.Helper()
 	store := &appServiceStoreStub{
@@ -166,6 +179,24 @@ func TestCreateHiddenAICCAppRejectsMissingVersionAllowlist(t *testing.T) {
 	})
 
 	require.ErrorIs(t, err, ErrVersionNotInAllowlist)
+}
+
+// TestCreateHiddenAICCAppRollsBackAppWhenInitializeJobFails 覆盖异常路径：隐藏 app 行已写入但初始化 job 创建失败时，
+// service 应软删除该 app，避免留下无法初始化且不可见的孤儿实例。
+func TestCreateHiddenAICCAppRollsBackAppWhenInitializeJobFails(t *testing.T) {
+	svc, store := newAppServiceWithStore(t)
+	store.organization.AssistantVersionIds = []byte(`["` + testSwitchVersionID + `"]`)
+	store.jobErr = errors.New("job insert failed")
+
+	_, err := svc.CreateHiddenAICCApp(context.Background(), appOrgAdminPrincipal(store.organization), AICCHiddenAppInput{
+		AppID:  "app-aicc-hidden-rollback",
+		OrgID:  store.organization.ID,
+		UserID: store.user.ID,
+		Name:   "官网售前",
+	})
+
+	require.Error(t, err)
+	assert.True(t, store.app.DeletedAt.Valid)
 }
 
 type appServiceStoreStub struct {

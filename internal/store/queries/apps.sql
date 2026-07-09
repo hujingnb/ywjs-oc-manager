@@ -26,7 +26,7 @@ WHERE id = ?;
 -- name: GetActiveAppByOwner :one
 SELECT *
 FROM apps
-WHERE owner_user_id = ? AND deleted_at IS NULL;
+WHERE owner_user_id = ? AND deleted_at IS NULL AND aicc_hidden = FALSE;
 
 -- name: ListAppsByOrg :many
 SELECT *
@@ -252,8 +252,8 @@ ORDER BY apps.created_at DESC, apps.id DESC
 LIMIT ? OFFSET ?;
 
 -- name: CountActiveAppsByOrg :one
--- 统计企业当前未删除实例数（apps.deleted_at IS NULL），用于企业实例数量上限校验。
-SELECT COUNT(*) FROM apps WHERE org_id = ? AND deleted_at IS NULL;
+-- 统计企业当前未删除普通实例数；AICC 隐藏 app 使用独立 aicc_agent_limit，不占用普通实例上限。
+SELECT COUNT(*) FROM apps WHERE org_id = ? AND deleted_at IS NULL AND aicc_hidden = FALSE;
 
 -- name: UpdateAppLocale :exec
 -- 更新实例语言偏好（hermes 对终端用户说话的语言）。locale 由 service 层校验合法取值后传入。

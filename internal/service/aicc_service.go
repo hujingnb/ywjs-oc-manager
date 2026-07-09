@@ -51,6 +51,12 @@ type AICCHiddenAppCreator interface {
 	CreateHiddenAICCApp(ctx context.Context, principal auth.Principal, input AICCHiddenAppInput) (string, error)
 }
 
+// AICCHiddenAppRollbacker 表示隐藏 app 创建后的补偿清理能力。
+// 生产实现使用软删除，避免 AICC 智能体写入失败后留下不可见孤儿 app。
+type AICCHiddenAppRollbacker interface {
+	SoftDeleteHiddenAICCApp(ctx context.Context, principal auth.Principal, appID string) error
+}
+
 // AICCService 负责 AICC 智能体管理与隐藏 app 绑定。
 type AICCService struct {
 	store AICCStore
@@ -90,6 +96,14 @@ func (s *AICCService) CreateAgent(ctx context.Context, principal auth.Principal,
 	}
 	agentID := newUUID()
 	appID := newUUID()
+	publicToken, err := newAICCToken()
+	if err != nil {
+		return AICCAgentResult{}, err
+	}
+	widgetToken, err := newAICCToken()
+	if err != nil {
+		return AICCAgentResult{}, err
+	}
 	createdAppID, err := s.apps.CreateHiddenAICCApp(ctx, principal, AICCHiddenAppInput{
 		AppID:  appID,
 		OrgID:  principal.OrgID,
@@ -101,14 +115,6 @@ func (s *AICCService) CreateAgent(ctx context.Context, principal auth.Principal,
 	}
 	if createdAppID != "" {
 		appID = createdAppID
-	}
-	publicToken, err := newAICCToken()
-	if err != nil {
-		return AICCAgentResult{}, err
-	}
-	widgetToken, err := newAICCToken()
-	if err != nil {
-		return AICCAgentResult{}, err
 	}
 	if err := s.store.CreateAICCAgent(ctx, sqlc.CreateAICCAgentParams{
 		ID:                 agentID,
@@ -127,6 +133,7 @@ func (s *AICCService) CreateAgent(ctx context.Context, principal auth.Principal,
 		PublicToken:        publicToken,
 		WidgetToken:        widgetToken,
 	}); err != nil {
+		s.rollbackHiddenApp(ctx, principal, appID)
 		return AICCAgentResult{}, fmt.Errorf("创建 AICC 智能体失败: %w", err)
 	}
 	row, err := s.getAgentRow(ctx, agentID)
@@ -134,6 +141,14 @@ func (s *AICCService) CreateAgent(ctx context.Context, principal auth.Principal,
 		return AICCAgentResult{}, err
 	}
 	return toAICCAgentResult(row), nil
+}
+
+func (s *AICCService) rollbackHiddenApp(ctx context.Context, principal auth.Principal, appID string) {
+	rollbacker, ok := s.apps.(AICCHiddenAppRollbacker)
+	if !ok || appID == "" {
+		return
+	}
+	_ = rollbacker.SoftDeleteHiddenAICCApp(ctx, principal, appID)
 }
 
 // ListAgents 按企业列出智能体；平台管理员必须显式传 orgID，企业管理员可省略使用自身企业。

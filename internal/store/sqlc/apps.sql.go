@@ -27,10 +27,10 @@ func (q *Queries) ClearAppProgress(ctx context.Context, id string) error {
 }
 
 const countActiveAppsByOrg = `-- name: CountActiveAppsByOrg :one
-SELECT COUNT(*) FROM apps WHERE org_id = ? AND deleted_at IS NULL
+SELECT COUNT(*) FROM apps WHERE org_id = ? AND deleted_at IS NULL AND aicc_hidden = FALSE
 `
 
-// 统计企业当前未删除实例数（apps.deleted_at IS NULL），用于企业实例数量上限校验。
+// 统计企业当前未删除普通实例数；AICC 隐藏 app 使用独立 aicc_agent_limit，不占用普通实例上限。
 func (q *Queries) CountActiveAppsByOrg(ctx context.Context, orgID string) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countActiveAppsByOrg, orgID)
 	var count int64
@@ -93,7 +93,7 @@ func (q *Queries) CreateApp(ctx context.Context, arg CreateAppParams) error {
 const getActiveAppByOwner = `-- name: GetActiveAppByOwner :one
 SELECT id, org_id, owner_user_id, name, description, status, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, runtime_token_active_key, knowledge_quota_bytes, locale, runtime_phase, web_publish_applied, applied_platform_prompt_hash, aicc_hidden, owner_active_key
 FROM apps
-WHERE owner_user_id = ? AND deleted_at IS NULL
+WHERE owner_user_id = ? AND deleted_at IS NULL AND aicc_hidden = FALSE
 `
 
 func (q *Queries) GetActiveAppByOwner(ctx context.Context, ownerUserID string) (App, error) {

@@ -100,6 +100,9 @@ func (s *RuntimeOperationService) InspectApp(ctx context.Context, principal auth
 	if err != nil {
 		return RuntimeView{}, fmt.Errorf("查询应用失败: %w", err)
 	}
+	if app.AiccHidden {
+		return RuntimeView{}, ErrNotFound
+	}
 	if !auth.CanViewApp(principal, app.OrgID, app.OwnerUserID) {
 		return RuntimeView{}, ErrForbidden
 	}
@@ -177,6 +180,9 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 	if err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("查询应用失败: %w", err)
 	}
+	if app.AiccHidden {
+		return RuntimeOperationResult{}, ErrNotFound
+	}
 	if err := s.ensurePrincipalActive(ctx, principal); err != nil {
 		return RuntimeOperationResult{}, err
 	}
@@ -223,10 +229,10 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 		})
 	}
 	if err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-		ID:        newUUID(),
-		ActorID:   null.StringFrom(principal.UserID),
-		ActorRole: principal.Role,
-		OrgID:     null.StringFrom(app.OrgID),
+		ID:         newUUID(),
+		ActorID:    null.StringFrom(principal.UserID),
+		ActorRole:  principal.Role,
+		OrgID:      null.StringFrom(app.OrgID),
 		TargetType: "app",
 		TargetID:   app.ID,
 		Action:     string(op),
@@ -265,6 +271,9 @@ func (s *RuntimeOperationService) RequestInitialize(ctx context.Context, princip
 	}
 	if err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("查询应用失败: %w", err)
+	}
+	if app.AiccHidden {
+		return RuntimeOperationResult{}, ErrNotFound
 	}
 	if err := s.ensurePrincipalActive(ctx, principal); err != nil {
 		return RuntimeOperationResult{}, err
@@ -321,10 +330,10 @@ func (s *RuntimeOperationService) RequestInitialize(ctx context.Context, princip
 		return RuntimeOperationResult{}, fmt.Errorf("创建初始化任务失败: %w", err)
 	}
 	if err := s.store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
-		ID:        newUUID(),
-		ActorID:   null.StringFrom(principal.UserID),
-		ActorRole: principal.Role,
-		OrgID:     null.StringFrom(app.OrgID),
+		ID:         newUUID(),
+		ActorID:    null.StringFrom(principal.UserID),
+		ActorRole:  principal.Role,
+		OrgID:      null.StringFrom(app.OrgID),
 		TargetType: "app",
 		TargetID:   app.ID,
 		Action:     "initialize",

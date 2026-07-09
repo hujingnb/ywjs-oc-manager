@@ -172,9 +172,11 @@ func (f *fakeAICCStore) ensureAgents() {
 
 // fakeAICCHiddenAppCreator 记录隐藏 app 创建请求，并返回预设 app ID。
 type fakeAICCHiddenAppCreator struct {
-	appID     string
-	lastInput AICCHiddenAppInput
-	err       error
+	appID       string
+	lastInput   AICCHiddenAppInput
+	rollbackID  string
+	err         error
+	rollbackErr error
 }
 
 // CreateHiddenAICCApp 模拟生产隐藏 app 创建链路。
@@ -187,6 +189,12 @@ func (f *fakeAICCHiddenAppCreator) CreateHiddenAICCApp(_ context.Context, _ auth
 		return f.appID, nil
 	}
 	return input.AppID, nil
+}
+
+// SoftDeleteHiddenAICCApp 记录回滚目标，模拟生产侧软删除隐藏 app。
+func (f *fakeAICCHiddenAppCreator) SoftDeleteHiddenAICCApp(_ context.Context, _ auth.Principal, appID string) error {
+	f.rollbackID = appID
+	return f.rollbackErr
 }
 
 func aiccOrgAdmin() auth.Principal {
@@ -383,4 +391,20 @@ func TestAICCServiceWrapsHiddenAppCreatorError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "创建 AICC 隐藏 app 失败")
+}
+
+// TestAICCServiceRollsBackHiddenAppWhenAgentCreateFails 覆盖异常路径：隐藏 app 已创建但智能体写入失败时，
+// service 应软删除隐藏 app，避免留下没有 aicc_agents 绑定的后台实例。
+func TestAICCServiceRollsBackHiddenAppWhenAgentCreateFails(t *testing.T) {
+	store := &fakeAICCStore{
+		org:       sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		createErr: errors.New("insert failed"),
+	}
+	apps := &fakeAICCHiddenAppCreator{appID: "app-hidden-rollback"}
+	svc := NewAICCService(store, apps)
+
+	_, err := svc.CreateAgent(context.Background(), aiccOrgAdmin(), AICCAgentInput{Name: "售前"})
+
+	require.Error(t, err)
+	assert.Equal(t, "app-hidden-rollback", apps.rollbackID)
 }
