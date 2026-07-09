@@ -87,7 +87,10 @@ CREATE TABLE aicc_agent_knowledge (
     CONSTRAINT fk_aicc_agent_knowledge_document_scope FOREIGN KEY (
         ragflow_document_id, ragflow_document_scope_type, org_id, app_id
     ) REFERENCES ragflow_documents(id, scope_type, org_id, app_id),
-    UNIQUE KEY uk_aicc_agent_knowledge_scope (agent_id, scope_type, scope_identity_key)
+    UNIQUE KEY uk_aicc_agent_knowledge_scope (agent_id, scope_type, scope_identity_key),
+    KEY idx_aicc_agent_knowledge_agent_scope (agent_id, agent_org_id),
+    KEY idx_aicc_agent_knowledge_industry_scope (industry_knowledge_base_id),
+    KEY idx_aicc_agent_knowledge_document_scope (ragflow_document_id, ragflow_document_scope_type, org_id, app_id)
 );
 
 CREATE TABLE aicc_sessions (
@@ -117,6 +120,8 @@ CREATE TABLE aicc_sessions (
     UNIQUE KEY uk_aicc_sessions_token (session_token),
     UNIQUE KEY uk_aicc_sessions_agent_identity (id, agent_id),
     UNIQUE KEY uk_aicc_sessions_org_identity (id, org_id),
+    KEY idx_aicc_sessions_agent_org (agent_id, org_id),
+    KEY idx_aicc_sessions_org (org_id),
     KEY idx_aicc_sessions_agent_time (agent_id, created_at DESC),
     KEY idx_aicc_sessions_retention (expires_at, id)
 );
@@ -140,6 +145,7 @@ CREATE TABLE aicc_messages (
     CONSTRAINT aicc_messages_content_type_check CHECK (content_type IN ('text','image','mixed')),
     CONSTRAINT fk_aicc_messages_session_agent FOREIGN KEY (session_id, agent_id) REFERENCES aicc_sessions(id, agent_id) ON DELETE CASCADE,
     UNIQUE KEY uk_aicc_messages_session_identity (id, session_id),
+    KEY idx_aicc_messages_session_agent (session_id, agent_id),
     KEY idx_aicc_messages_session_time (session_id, created_at, id)
 );
 
@@ -179,6 +185,8 @@ CREATE TABLE aicc_leads (
         REFERENCES aicc_sessions(id, org_id) ON DELETE SET NULL,
     UNIQUE KEY uk_aicc_leads_contact (org_id, primary_contact_hash),
     UNIQUE KEY uk_aicc_leads_identity (id, org_id),
+    KEY idx_aicc_leads_org (org_id),
+    KEY idx_aicc_leads_latest_session (latest_session_id, latest_session_org_id),
     KEY idx_aicc_leads_org_unread (org_id, unread, updated_at DESC)
 );
 
@@ -205,9 +213,10 @@ CREATE TABLE aicc_lead_values (
         REFERENCES aicc_leads(id, org_id) ON DELETE SET NULL,
     CONSTRAINT fk_aicc_lead_values_field_agent FOREIGN KEY (field_id, agent_id)
         REFERENCES aicc_lead_fields(id, agent_id),
-    KEY idx_aicc_lead_values_session (session_id, agent_id),
+    KEY idx_aicc_lead_values_session_agent (session_id, agent_id),
     KEY idx_aicc_lead_values_session_org (session_id, org_id),
-    KEY idx_aicc_lead_values_lead_org (lead_id, lead_org_id)
+    KEY idx_aicc_lead_values_lead_org (lead_id, lead_org_id),
+    KEY idx_aicc_lead_values_field_agent (field_id, agent_id)
 );
 
 CREATE TABLE aicc_feedback (
@@ -218,5 +227,6 @@ CREATE TABLE aicc_feedback (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_aicc_feedback_message_session FOREIGN KEY (message_id, session_id)
         REFERENCES aicc_messages(id, session_id) ON DELETE CASCADE,
-    UNIQUE KEY uk_aicc_feedback_message (message_id)
+    UNIQUE KEY uk_aicc_feedback_message (message_id),
+    KEY idx_aicc_feedback_message_session (message_id, session_id)
 );

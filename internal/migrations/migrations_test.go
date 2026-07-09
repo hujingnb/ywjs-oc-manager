@@ -186,16 +186,23 @@ func TestAICCMigrationGuardrails(t *testing.T) {
 	assert.Contains(t, up, "ragflow_document_scope_type VARCHAR(50) GENERATED ALWAYS AS")
 	assert.Contains(t, up, "UNIQUE KEY uk_ragflow_documents_aicc_app_doc_identity (id, scope_type, org_id, app_id)")
 	assert.Contains(t, up, "CONSTRAINT fk_aicc_agent_knowledge_document_scope FOREIGN KEY")
+	assert.Contains(t, up, "KEY idx_aicc_agent_knowledge_agent_scope (agent_id, agent_org_id)")
+	assert.Contains(t, up, "KEY idx_aicc_agent_knowledge_industry_scope (industry_knowledge_base_id)")
+	assert.Contains(t, up, "KEY idx_aicc_agent_knowledge_document_scope (ragflow_document_id, ragflow_document_scope_type, org_id, app_id)")
 	assert.Contains(t, up, "CREATE TABLE aicc_sessions")
 	assert.Contains(t, up, "UNIQUE KEY uk_aicc_sessions_token")
 	assert.Contains(t, up, "CONSTRAINT fk_aicc_sessions_agent_org FOREIGN KEY (agent_id, org_id) REFERENCES aicc_agents(id, org_id)")
+	assert.Contains(t, up, "KEY idx_aicc_sessions_agent_org (agent_id, org_id)")
+	assert.Contains(t, up, "KEY idx_aicc_sessions_org (org_id)")
 	assert.Contains(t, up, "KEY idx_aicc_sessions_retention (expires_at, id)")
 	assert.Contains(t, up, "CREATE TABLE aicc_messages")
 	assert.Contains(t, up, "CONSTRAINT fk_aicc_messages_session_agent FOREIGN KEY (session_id, agent_id) REFERENCES aicc_sessions(id, agent_id) ON DELETE CASCADE")
+	assert.Contains(t, up, "KEY idx_aicc_messages_session_agent (session_id, agent_id)")
 	assert.Contains(t, up, "CREATE TABLE aicc_leads")
 	assert.Contains(t, up, "latest_session_org_id CHAR(36) NULL")
 	assert.Contains(t, up, "CONSTRAINT fk_aicc_leads_latest_session FOREIGN KEY (latest_session_id, latest_session_org_id)")
 	assert.Contains(t, up, "UNIQUE KEY uk_aicc_leads_identity (id, org_id)")
+	assert.Contains(t, up, "KEY idx_aicc_leads_latest_session (latest_session_id, latest_session_org_id)")
 	assert.Contains(t, up, "CREATE TABLE aicc_feedback")
 	assert.Contains(t, up, "org_id CHAR(36) NOT NULL")
 	assert.Contains(t, up, "lead_org_id CHAR(36) NULL")
@@ -204,7 +211,12 @@ func TestAICCMigrationGuardrails(t *testing.T) {
 	assert.Contains(t, up, "CONSTRAINT fk_aicc_lead_values_lead_org FOREIGN KEY (lead_id, lead_org_id)")
 	assert.Contains(t, up, "CONSTRAINT aicc_lead_values_lead_org_check CHECK")
 	assert.Contains(t, up, "CONSTRAINT fk_aicc_lead_values_field_agent FOREIGN KEY (field_id, agent_id)")
+	assert.Contains(t, up, "KEY idx_aicc_lead_values_session_org (session_id, org_id)")
+	assert.Contains(t, up, "KEY idx_aicc_lead_values_session_agent (session_id, agent_id)")
+	assert.Contains(t, up, "KEY idx_aicc_lead_values_lead_org (lead_id, lead_org_id)")
+	assert.Contains(t, up, "KEY idx_aicc_lead_values_field_agent (field_id, agent_id)")
 	assert.Contains(t, up, "CONSTRAINT fk_aicc_feedback_message_session FOREIGN KEY (message_id, session_id)")
+	assert.Contains(t, up, "KEY idx_aicc_feedback_message_session (message_id, session_id)")
 
 	downBytes, err := FS.ReadFile("000028_aicc.down.sql")
 	require.NoError(t, err)
@@ -271,9 +283,11 @@ func TestAICCMigrationExecutesOnMySQL(t *testing.T) {
 	)
 	mustExecMigrationSQL(t, testDB, "INSERT INTO industry_knowledge_bases (id, name, created_by) VALUES (?, ?, ?)", "industry-1", "Industry 1", "system")
 	mustExecMigrationSQL(t, testDB, "INSERT INTO ragflow_datasets (id, scope_type, org_id, app_id, ragflow_dataset_id, name, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"dataset-a", "app", "org-a", "app-a", "remote-dataset-a", "Dataset A", "active",
 		"dataset-b", "app", "org-b", "app-b", "remote-dataset-b", "Dataset B", "active",
 	)
-	mustExecMigrationSQL(t, testDB, "INSERT INTO ragflow_documents (id, dataset_id, scope_type, org_id, app_id, ragflow_document_id, name, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+	mustExecMigrationSQL(t, testDB, "INSERT INTO ragflow_documents (id, dataset_id, scope_type, org_id, app_id, ragflow_document_id, name, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?)",
+		"doc-a", "dataset-a", "app", "org-a", "app-a", "remote-doc-a", "Doc A", "system",
 		"doc-b", "dataset-b", "app", "org-b", "app-b", "remote-doc-b", "Doc B", "system",
 	)
 
@@ -288,13 +302,57 @@ func TestAICCMigrationExecutesOnMySQL(t *testing.T) {
 		"knowledge-industry-ok", "agent-a", "org-a", "industry", "industry-1",
 	)
 
-	// app_document scope 不能借用其他组织/应用的文档；org_id=agent_org_id + 文档复合 FK 会共同兜底。
+	// 同组织/同应用的文档可被 app_document scope 正常引用。
+	mustExecMigrationSQL(t, testDB, `INSERT INTO aicc_agent_knowledge (
+		id, agent_id, agent_org_id, scope_type, org_id, app_id, ragflow_document_id
+	) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"knowledge-doc-ok", "agent-a", "org-a", "app_document", "org-a", "app-a", "doc-a",
+	)
+
+	// 目标 org/app 与 agent 保持一致时，若文档实际属于其他 org/app，必须由文档复合 FK 拒绝。
 	_, err = testDB.Exec(`INSERT INTO aicc_agent_knowledge (
 		id, agent_id, agent_org_id, scope_type, org_id, app_id, ragflow_document_id
 	) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		"knowledge-cross-doc", "agent-a", "org-a", "app_document", "org-b", "app-b", "doc-b",
+		"knowledge-cross-doc", "agent-a", "org-a", "app_document", "org-a", "app-a", "doc-b",
 	)
 	require.Error(t, err)
+
+	// 准备 lead_values 场景：会话、字段和两条不同组织的 lead。
+	mustExecMigrationSQL(t, testDB, "INSERT INTO aicc_sessions (id, agent_id, org_id, session_token, expires_at) VALUES (?, ?, ?, ?, ?)",
+		"session-a", "agent-a", "org-a", "session-token-a", time.Now().Add(24*time.Hour),
+	)
+	mustExecMigrationSQL(t, testDB, "INSERT INTO aicc_lead_fields (id, agent_id, field_key, label) VALUES (?, ?, ?, ?)",
+		"field-a", "agent-a", "contact_phone", "联系电话",
+	)
+	mustExecMigrationSQL(t, testDB, "INSERT INTO aicc_leads (id, org_id, primary_contact_hash) VALUES (?, ?, ?), (?, ?, ?)",
+		"lead-a", "org-a", "hash-a",
+		"lead-b", "org-b", "hash-b",
+	)
+
+	// 跨组织 lead 绑定必须被复合外键拒绝。
+	_, err = testDB.Exec(`INSERT INTO aicc_lead_values (
+		id, session_id, agent_id, org_id, lead_id, lead_org_id, field_id, value_text
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		"lead-value-cross-org", "session-a", "agent-a", "org-a", "lead-b", "org-b", "field-a", "13800138000",
+	)
+	require.Error(t, err)
+
+	// 同组织 lead 绑定可成功写入。
+	mustExecMigrationSQL(t, testDB, `INSERT INTO aicc_lead_values (
+		id, session_id, agent_id, org_id, lead_id, lead_org_id, field_id, value_text
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		"lead-value-ok", "session-a", "agent-a", "org-a", "lead-a", "org-a", "field-a", "13800138001",
+	)
+
+	// 删除 lead 后，复合外键应把 lead_id/lead_org_id 置空，而不是删除整条留资值。
+	mustExecMigrationSQL(t, testDB, "DELETE FROM aicc_leads WHERE id = ? AND org_id = ?", "lead-a", "org-a")
+	var leadID, leadOrgID sql.NullString
+	require.NoError(t, testDB.QueryRow(
+		"SELECT lead_id, lead_org_id FROM aicc_lead_values WHERE id = ?",
+		"lead-value-ok",
+	).Scan(&leadID, &leadOrgID))
+	assert.False(t, leadID.Valid)
+	assert.False(t, leadOrgID.Valid)
 
 	// down 迁移必须能在真实 MySQL 上成功回滚 000028，避免 parent 索引因 FK 依赖删除失败。
 	require.NoError(t, migrator.Steps(-1))
