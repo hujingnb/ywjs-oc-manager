@@ -29,10 +29,10 @@ type fakeWorkspaceObjectStore struct {
 	// data 模拟 S3 bucket，key 为完整对象 key，value 为内容
 	data         map[string][]byte
 	modTimes     map[string]time.Time // 按完整 key 记录对象最后修改时间，模拟 S3 LastModified
-	presignError error // 模拟预签名失败
-	listError    error // 模拟 ListObjects 失败
-	lastPrefix   string // 最近一次 ListObjects 的 prefix
-	lastPresign  string // 最近一次 PresignGet 的 key
+	presignError error                // 模拟预签名失败
+	listError    error                // 模拟 ListObjects 失败
+	lastPrefix   string               // 最近一次 ListObjects 的 prefix
+	lastPresign  string               // 最近一次 PresignGet 的 key
 }
 
 func newFakeWorkspaceObjectStore() *fakeWorkspaceObjectStore {
@@ -90,7 +90,7 @@ func (f *fakeWorkspaceObjectStore) ListObjects(_ context.Context, prefix string)
 }
 
 func (f *fakeWorkspaceObjectStore) MovePrefix(_ context.Context, _, _ string) error { return nil }
-func (f *fakeWorkspaceObjectStore) DeletePrefix(_ context.Context, _ string) error   { return nil }
+func (f *fakeWorkspaceObjectStore) DeletePrefix(_ context.Context, _ string) error  { return nil }
 
 // newWorkspaceStub 构造带有合法 App 记录的存储桩。
 // spec-A2b：runtime_node_id 列已从 schema 删除，不再填充。
@@ -215,9 +215,9 @@ func TestWorkspaceServiceListSearchMatchesAcrossSubdirs(t *testing.T) {
 	obj := newFakeWorkspaceObjectStore()
 	wsPrefix := "apps/" + testWorkAppID + "/workspace/"
 	// 不同层级放置文件：仅名字含 "report" 的两个应命中，note.txt 不应命中
-	obj.addObject(wsPrefix+"report.csv", []byte("a"))             // 根目录命中
+	obj.addObject(wsPrefix+"report.csv", []byte("a"))                  // 根目录命中
 	obj.addObject(wsPrefix+"logs/2026/report-final.txt", []byte("bb")) // 深层目录命中
-	obj.addObject(wsPrefix+"logs/note.txt", []byte("ccc"))        // 不命中
+	obj.addObject(wsPrefix+"logs/note.txt", []byte("ccc"))             // 不命中
 
 	svc := NewWorkspaceService(store, obj, time.Minute)
 
@@ -302,6 +302,18 @@ func TestWorkspaceServiceListAllowsPlatformAdminRead(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, listing.Entries, 1)
 	assert.Equal(t, "session.log", listing.Entries[0].Name)
+}
+
+// TestWorkspaceServiceRejectsAICCHiddenApp 覆盖普通工作目录入口隔离：AICC 隐藏 app
+// 不允许通过普通 app workspace 接口列目录。
+func TestWorkspaceServiceRejectsAICCHiddenApp(t *testing.T) {
+	store := newWorkspaceStub(t)
+	store.app.AiccHidden = true
+	svc := NewWorkspaceService(store, newFakeWorkspaceObjectStore(), time.Minute)
+
+	_, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "", "")
+
+	require.ErrorIs(t, err, ErrNotFound)
 }
 
 // TestWorkspaceServiceListRejectsForbidden 验证非应用成员无权访问工作目录，返回 ErrWorkspaceForbidden。

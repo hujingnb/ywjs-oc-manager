@@ -227,6 +227,9 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		}
 		return fmt.Errorf("查询应用失败: %w", err)
 	}
+	if app.DeletedAt.Valid {
+		return nil
+	}
 	// 已离开初始化阶段直接成功（幂等）。
 	// binding_waiting 分支再做一次「渠道已绑定」自愈：上一次切换助手版本+重启
 	// 触发的镜像重建在 transitionTo 阶段已经把行推到 binding_waiting，但若此时
@@ -485,9 +488,9 @@ func (h *AppInitializeHandler) buildAppSpec(ctx context.Context, app sqlc.App, h
 			HTTPSProxy: h.k8sCfg.Proxy.HTTPSProxy,
 			NoProxy:    h.k8sCfg.Proxy.NoProxy,
 		},
-		FeishuAppID:      feishuAppID,
-		FeishuAppSecret:  feishuSecret,
-		FeishuDomain:     feishuDomain,
+		FeishuAppID:          feishuAppID,
+		FeishuAppSecret:      feishuSecret,
+		FeishuDomain:         feishuDomain,
 		WorkWeChatBotID:      wecomBotID,
 		WorkWeChatSecret:     wecomSecret,
 		DingtalkClientID:     dingtalkClientID,

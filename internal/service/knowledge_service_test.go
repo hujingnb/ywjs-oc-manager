@@ -120,6 +120,20 @@ func TestRAGFlowKnowledgeUploadAppAllowsExactQuota(t *testing.T) {
 	require.Len(t, rf.uploadCalls, 1)
 }
 
+// TestRAGFlowKnowledgeRejectsAICCHiddenApp 覆盖普通实例知识库入口隔离：AICC 隐藏 app
+// 不允许通过普通 app 知识库接口读写，避免绕过 AICC 知识配置边界。
+func TestRAGFlowKnowledgeRejectsAICCHiddenApp(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	app := store.apps[testKnowledgeApp]
+	app.AiccHidden = true
+	store.apps[testKnowledgeApp] = app
+
+	_, err := svc.SaveAppFile(context.Background(), appOwnerPrincipal(), testKnowledgeApp, "b.md", strings.NewReader("bb"), 2)
+
+	require.ErrorIs(t, err, ErrNotFound)
+	assert.Empty(t, rf.uploadCalls)
+}
+
 // TestRAGFlowKnowledgeDeleteAppRejectsOtherOwner 验证实例知识库删除先按 manager app owner 判权，禁止路径不会调用 RAGFlow。
 func TestRAGFlowKnowledgeDeleteAppRejectsOtherOwner(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)

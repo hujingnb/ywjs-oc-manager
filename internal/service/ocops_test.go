@@ -24,14 +24,14 @@ func TestMapOcOpsCronErr(t *testing.T) {
 		in   error
 		want error
 	}{
-		{name: "nil 透传 nil", in: nil, want: nil},                                                // 无错误时返回 nil
-		{name: "BadRequest→ErrCronBadRequest", in: ocops.ErrBadRequest, want: ErrCronBadRequest},  // 400 参数非法
-		{name: "NotFound→ErrNotFound", in: ocops.ErrNotFound, want: ErrNotFound},                  // 404 资源不存在
-		{name: "Unsupported→ErrCronNotSupported", in: ocops.ErrUnsupported, want: ErrCronNotSupported}, // 409 不支持
+		{name: "nil 透传 nil", in: nil, want: nil},                                                             // 无错误时返回 nil
+		{name: "BadRequest→ErrCronBadRequest", in: ocops.ErrBadRequest, want: ErrCronBadRequest},             // 400 参数非法
+		{name: "NotFound→ErrNotFound", in: ocops.ErrNotFound, want: ErrNotFound},                             // 404 资源不存在
+		{name: "Unsupported→ErrCronNotSupported", in: ocops.ErrUnsupported, want: ErrCronNotSupported},       // 409 不支持
 		{name: "OutputInvalid→ErrCronOutputInvalid", in: ocops.ErrOutputInvalid, want: ErrCronOutputInvalid}, // 500 输出无效
-		{name: "Unauthorized 走兜底→ErrCronCLI", in: ocops.ErrUnauthorized, want: ErrCronCLI},       // 401 未单独映射，兜底
-		{name: "CLI 走兜底→ErrCronCLI", in: ocops.ErrCLI, want: ErrCronCLI},                          // 502 上游失败兜底
-		{name: "未知错误走兜底→ErrCronCLI", in: errors.New("boom"), want: ErrCronCLI},                  // 非哨兵错误兜底
+		{name: "Unauthorized 走兜底→ErrCronCLI", in: ocops.ErrUnauthorized, want: ErrCronCLI},                   // 401 未单独映射，兜底
+		{name: "CLI 走兜底→ErrCronCLI", in: ocops.ErrCLI, want: ErrCronCLI},                                     // 502 上游失败兜底
+		{name: "未知错误走兜底→ErrCronCLI", in: errors.New("boom"), want: ErrCronCLI},                               // 非哨兵错误兜底
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -54,13 +54,13 @@ func TestMapOcOpsKanbanErr(t *testing.T) {
 		in   error
 		want error
 	}{
-		{name: "nil 透传 nil", in: nil, want: nil},                                                      // 无错误时返回 nil
-		{name: "BadRequest→ErrKanbanBadRequest", in: ocops.ErrBadRequest, want: ErrKanbanBadRequest},    // 400 参数非法
-		{name: "NotFound→ErrNotFound", in: ocops.ErrNotFound, want: ErrNotFound},                        // 404 资源不存在
-		{name: "Unsupported→ErrKanbanNotSupported", in: ocops.ErrUnsupported, want: ErrKanbanNotSupported}, // 409 不支持
+		{name: "nil 透传 nil", in: nil, want: nil},                                                                 // 无错误时返回 nil
+		{name: "BadRequest→ErrKanbanBadRequest", in: ocops.ErrBadRequest, want: ErrKanbanBadRequest},             // 400 参数非法
+		{name: "NotFound→ErrNotFound", in: ocops.ErrNotFound, want: ErrNotFound},                                 // 404 资源不存在
+		{name: "Unsupported→ErrKanbanNotSupported", in: ocops.ErrUnsupported, want: ErrKanbanNotSupported},       // 409 不支持
 		{name: "OutputInvalid→ErrKanbanOutputInvalid", in: ocops.ErrOutputInvalid, want: ErrKanbanOutputInvalid}, // 500 输出无效
-		{name: "CLI 走兜底→ErrKanbanCLI", in: ocops.ErrCLI, want: ErrKanbanCLI},                            // 502 上游失败兜底
-		{name: "未知错误走兜底→ErrKanbanCLI", in: errors.New("boom"), want: ErrKanbanCLI},                    // 非哨兵错误兜底
+		{name: "CLI 走兜底→ErrKanbanCLI", in: ocops.ErrCLI, want: ErrKanbanCLI},                                     // 502 上游失败兜底
+		{name: "未知错误走兜底→ErrKanbanCLI", in: errors.New("boom"), want: ErrKanbanCLI},                               // 非哨兵错误兜底
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -96,6 +96,19 @@ func TestOcOpsResolverFromStoreNotFound(t *testing.T) {
 
 	_, err := r.Resolve(context.Background(), "app-1")
 	require.ErrorIs(t, err, ErrNotFound)
+}
+
+// TestOcOpsResolverFromStoreRejectsAICCHiddenApp 覆盖普通 oc-ops 坐标解析入口隔离：
+// AICC 隐藏 app 不应被普通会话、workspace 或 skill 等普通 app 子系统解析使用。
+func TestOcOpsResolverFromStoreRejectsAICCHiddenApp(t *testing.T) {
+	store := &fakeOcOpsAppStore{app: sqlc.App{AiccHidden: true}}
+	r := NewOcOpsResolverFromStore(store, nil, "http://app-%s-ocops.oc-apps.svc:8080")
+
+	_, resolveErr := r.Resolve(context.Background(), "app-hidden")
+	_, locateErr := r.LocateApp(context.Background(), "app-hidden")
+
+	require.ErrorIs(t, resolveErr, ErrNotFound)
+	require.ErrorIs(t, locateErr, ErrNotFound)
 }
 
 // TestOcOpsResolverFromStoreSupported 验证非 -dev 镜像解析为 Supported=true，
@@ -149,7 +162,7 @@ func TestOcOpsResolverInjectsToken(t *testing.T) {
 		ID:                     "a1",
 		OrgID:                  "o1",
 		OwnerUserID:            "u1",
-		RuntimeTokenCiphertext: null.StringFrom(ct), // 有效密文
+		RuntimeTokenCiphertext: null.StringFrom(ct),  // 有效密文
 		RuntimeImageRef:        "registry/hermes:v1", // 非 -dev，Supported=true
 	}}
 	r := NewOcOpsResolverFromStore(store, cipher, "http://app-%s-ocops.oc-apps.svc:8080")

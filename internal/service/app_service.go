@@ -278,9 +278,6 @@ func (s *AppService) CreateHiddenAICCApp(ctx context.Context, principal auth.Pri
 	if err := s.store.MarkAppAICCHidden(ctx, input.AppID); err != nil {
 		return "", rollbackCreatedApp(fmt.Errorf("标记 AICC 隐藏 app 失败: %w", err))
 	}
-	if s.notifier != nil {
-		_ = s.notifier.Enqueue(ctx, jobID)
-	}
 	return input.AppID, nil
 }
 
@@ -394,6 +391,9 @@ func (s *AppService) SwitchAppVersion(ctx context.Context, principal auth.Princi
 	if err != nil {
 		return AppResult{}, fmt.Errorf("查询应用失败: %w", err)
 	}
+	if row.App.AiccHidden {
+		return AppResult{}, ErrNotFound
+	}
 	// 权限校验：平台管理员、本组织管理员或实例 owner 成员可切换版本。
 	if !auth.CanSwitchAppVersion(principal, row.App.OrgID, row.App.OwnerUserID) {
 		return AppResult{}, ErrForbidden
@@ -444,6 +444,9 @@ func (s *AppService) UpdateAppLocale(ctx context.Context, principal auth.Princip
 	}
 	if err != nil {
 		return AppResult{}, fmt.Errorf("查询应用失败: %w", err)
+	}
+	if row.App.AiccHidden {
+		return AppResult{}, ErrNotFound
 	}
 	// 权限校验：平台管理员、本组织管理员或实例 owner 可修改语言。
 	if !auth.CanUpdateAppLocale(principal, row.App.OrgID, row.App.OwnerUserID) {
@@ -497,7 +500,7 @@ func (s *AppService) UpdateAppLocale(ctx context.Context, principal auth.Princip
 	}); err != nil {
 		return AppResult{}, fmt.Errorf("写入审计日志失败: %w", err)
 	}
-	// 即时唤醒 worker（如有 notifier 注入）。
+	// 即时唤醒 worker（如有 notifier 注入）。AICC hidden app 已在读取后被拦截，不会走到这里。
 	if s.notifier != nil {
 		_ = s.notifier.Enqueue(ctx, jobID)
 	}
@@ -546,6 +549,9 @@ func (s *AppService) AppLocaleStatus(ctx context.Context, principal auth.Princip
 	}
 	if err != nil {
 		return AppLocaleStatusResult{}, fmt.Errorf("查询应用失败: %w", err)
+	}
+	if row.App.AiccHidden {
+		return AppLocaleStatusResult{}, ErrNotFound
 	}
 	// 访问权限：与详情页一致用 CanViewApp（平台管理员 / 本组织 org_admin / 实例 owner）。
 	if !auth.CanViewApp(principal, row.App.OrgID, row.App.OwnerUserID) {

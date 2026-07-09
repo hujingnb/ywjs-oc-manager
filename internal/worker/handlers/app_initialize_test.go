@@ -398,6 +398,21 @@ func TestAppInitializeRejectsInvalidPayload(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestAppInitializeSkipsDeletedApp 验证 AICC 创建失败回滚后的软删 app 即便仍有 pending 初始化任务，
+// worker 也会直接跳过，避免为不可见孤儿 app 创建 new-api token 或 runtime 资源。
+func TestAppInitializeSkipsDeletedApp(t *testing.T) {
+	store := newAppInitStub(t)
+	store.app.DeletedAt = null.TimeFrom(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
+	client := &fakeNewAPI{}
+	handler := NewAppInitializeHandler(store, client, AppInitializeConfig{Cipher: testCipher(t), ResolveRuntimeImage: testResolveRuntimeImage})
+
+	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, client.calls)
+	assert.False(t, store.statusSet)
+	assert.False(t, store.failedSet)
+}
 
 // TestEnsureAPIKeyKeepsNewAPITokenModelsUnrestricted 验证 new-api token 创建不限制模型。
 func TestEnsureAPIKeyKeepsNewAPITokenModelsUnrestricted(t *testing.T) {
@@ -721,7 +736,6 @@ func testResolveRuntimeImage(imageID string) (string, bool) {
 func mustUUIDForTest(_ *testing.T, value string) string {
 	return value
 }
-
 
 // fakeAuditRecorder 实现 audit.AuditRecorder，用于断言审计事件被写入。
 type fakeAuditRecorder struct {
@@ -1121,4 +1135,3 @@ func TestAppInitialize_IdempotentBindingWaitingPromotesWhenChannelBound(t *testi
 	assert.Equal(t, domain.AppStatusRunning, store.statusCalls[0].Status)
 	assert.Equal(t, domain.AppStatusRunning, store.app.Status)
 }
-

@@ -148,6 +148,8 @@ func TestCreateHiddenAICCAppCreatesHiddenAppAndInitializeJob(t *testing.T) {
 	svc, store := newAppServiceWithStore(t)
 	store.organization.AssistantVersionIds = []byte(`["` + testSwitchVersionID + `"]`)
 	store.user.Locale = null.StringFrom("zh")
+	notifier := &fakeNotifier{}
+	svc.SetJobNotifier(notifier)
 
 	appID, err := svc.CreateHiddenAICCApp(context.Background(), appOrgAdminPrincipal(store.organization), AICCHiddenAppInput{
 		AppID:  "app-aicc-hidden-1",
@@ -165,6 +167,7 @@ func TestCreateHiddenAICCAppCreatesHiddenAppAndInitializeJob(t *testing.T) {
 	require.Len(t, store.jobs, 1)
 	assert.Equal(t, domain.JobTypeAppInitialize, store.jobs[0].Type)
 	assert.JSONEq(t, `{"app_id":"app-aicc-hidden-1"}`, string(store.jobs[0].PayloadJson))
+	assert.Empty(t, notifier.lastJobID, "AICC agent 写入前不应即时唤醒 worker")
 }
 
 // TestCreateHiddenAICCAppRejectsMissingVersionAllowlist 覆盖异常路径：企业未配置助手版本时拒绝创建隐藏 app，避免初始化必然失败。
@@ -576,6 +579,49 @@ func TestAppLocaleStatusForbidden(t *testing.T) {
 		UserID: testAdminUID, // 与 owner（testMemUID）不同
 	}, testAppServiceAppID)
 	require.ErrorIs(t, err, ErrForbidden)
+}
+
+// TestAppManagementRejectsAICCHiddenApp 覆盖普通应用管理入口隔离：AICC 隐藏 app 不允许通过
+// 切换版本、修改语言或语言状态查询入口访问。
+func TestAppManagementRejectsAICCHiddenApp(t *testing.T) {
+	// 子场景：隐藏 app 不能通过普通实例版本切换入口修改助手版本。
+	t.Run("切换版本返回不存在", func(t *testing.T) {
+		svc, store := newAppServiceWithStore(t)
+		app := store.mustSeedApp(t)
+		app.AiccHidden = true
+		store.app = app
+		store.organization = mustOrgWithAllowlist(t, testSwitchVersionID)
+
+		_, err := svc.SwitchAppVersion(context.Background(), appOrgAdminPrincipal(store.organization), testAppServiceAppID, testSwitchVersionID)
+
+		require.ErrorIs(t, err, ErrNotFound)
+	})
+
+	// 子场景：隐藏 app 不能通过普通实例语言入口触发重启。
+	t.Run("修改语言返回不存在", func(t *testing.T) {
+		svc, store := newAppServiceWithStore(t)
+		app := store.mustSeedApp(t)
+		app.AiccHidden = true
+		store.app = app
+
+		_, err := svc.UpdateAppLocale(context.Background(), appOrgAdminPrincipal(store.organization), testAppServiceAppID, "zh")
+
+		require.ErrorIs(t, err, ErrNotFound)
+		assert.Empty(t, store.jobs)
+	})
+
+	// 子场景：隐藏 app 不暴露普通实例语言状态。
+	t.Run("语言状态返回不存在", func(t *testing.T) {
+		svc, store := newAppServiceWithStore(t)
+		app := store.mustSeedApp(t)
+		app.AiccHidden = true
+		store.app = app
+		svc.SetOcOps(&fakeConfigOps{cfg: ocops.OcConfig{DisplayLanguage: "zh"}}, readyResolver())
+
+		_, err := svc.AppLocaleStatus(context.Background(), appOrgAdminPrincipal(store.organization), testAppServiceAppID)
+
+		require.ErrorIs(t, err, ErrNotFound)
+	})
 }
 
 // mustOrgWithAllowlist 构造一个包含给定版本 id allowlist 的 Organization sqlc 记录。

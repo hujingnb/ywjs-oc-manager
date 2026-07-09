@@ -14,6 +14,8 @@ func TestAppQueriesExcludeAICCHiddenFromNormalInstanceScope(t *testing.T) {
 	assert.Contains(t, normalizedSQL(getActiveAppByOwner), "aicc_hidden = false")
 	// CountActiveAppsByOrg 用于 max_instance_count，AICC 已有独立上限，不应占用普通实例名额。
 	assert.Contains(t, normalizedSQL(countActiveAppsByOrg), "aicc_hidden = false")
+	// ListAppsByOrgWithVersion 是普通实例列表实际使用查询，应排除 AICC 隐藏 app。
+	assert.Contains(t, normalizedSQL(listAppsByOrgWithVersion), "aicc_hidden = false")
 }
 
 func normalizedSQL(query string) string {

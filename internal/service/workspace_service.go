@@ -307,6 +307,9 @@ func (s *WorkspaceService) loadAuthorizedApp(ctx context.Context, principal auth
 	if err != nil {
 		return sqlc.App{}, fmt.Errorf("查询应用失败: %w", err)
 	}
+	if app.AiccHidden {
+		return sqlc.App{}, ErrNotFound
+	}
 	// app.OrgID / app.OwnerUserID 已是 string，直接传入权限校验。
 	if !auth.CanViewApp(principal, app.OrgID, app.OwnerUserID) {
 		return sqlc.App{}, ErrWorkspaceForbidden

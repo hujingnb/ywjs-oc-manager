@@ -132,12 +132,9 @@ func NewOcOpsResolverFromStore(store ocOpsAppStore, cipher *auth.Cipher, baseURL
 // app 不存在（sql.ErrNoRows）映射为 ErrNotFound；其它查询错误包装返回。
 // Token 由 cipher 解密 app.runtime_token_ciphertext 填入；cipher 为 nil 或密文为空时留空。
 func (r *OcOpsResolverFromStore) Resolve(ctx context.Context, appID string) (OcOpsAppLocation, error) {
-	app, err := r.store.GetApp(ctx, appID)
+	app, err := r.getVisibleApp(ctx, appID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return OcOpsAppLocation{}, ErrNotFound
-		}
-		return OcOpsAppLocation{}, fmt.Errorf("查询 app 失败: %w", err)
+		return OcOpsAppLocation{}, err
 	}
 	// 解密 per-app control token：仅当密文字段有效且 cipher 已注入时才解密；
 	// 任一条件不满足时 Token 留空（兼容旧数据或 cipher 未配置场景）。
@@ -165,12 +162,9 @@ func (r *OcOpsResolverFromStore) Resolve(ctx context.Context, appID string) (OcO
 // 复用 Resolve 内的 GetApp 逻辑，多取一个 VersionID 字段供 AppSkillService 删除保护使用。
 // app 不存在映射为 ErrNotFound；token 解密失败透传错误。
 func (r *OcOpsResolverFromStore) LocateApp(ctx context.Context, appID string) (AppSkillLocation, error) {
-	app, err := r.store.GetApp(ctx, appID)
+	app, err := r.getVisibleApp(ctx, appID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return AppSkillLocation{}, ErrNotFound
-		}
-		return AppSkillLocation{}, fmt.Errorf("查询 app 失败: %w", err)
+		return AppSkillLocation{}, err
 	}
 	// 解密 per-app control token（与 Resolve 同逻辑）
 	token := ""
@@ -197,6 +191,20 @@ func (r *OcOpsResolverFromStore) LocateApp(ctx context.Context, appID string) (A
 		// dev stub 镜像（-dev 后缀）不含真实 hermes，标记为不支持
 		Supported: !strings.HasSuffix(app.RuntimeImageRef, "-dev"),
 	}, nil
+}
+
+func (r *OcOpsResolverFromStore) getVisibleApp(ctx context.Context, appID string) (sqlc.App, error) {
+	app, err := r.store.GetApp(ctx, appID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return sqlc.App{}, ErrNotFound
+		}
+		return sqlc.App{}, fmt.Errorf("查询 app 失败: %w", err)
+	}
+	if app.AiccHidden {
+		return sqlc.App{}, ErrNotFound
+	}
+	return app, nil
 }
 
 // mapOcOpsCronErr 把 ocops 哨兵错误翻译成 cron service 既有哨兵错误，保留语义不变。

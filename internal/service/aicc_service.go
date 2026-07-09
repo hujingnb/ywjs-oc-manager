@@ -133,8 +133,11 @@ func (s *AICCService) CreateAgent(ctx context.Context, principal auth.Principal,
 		PublicToken:        publicToken,
 		WidgetToken:        widgetToken,
 	}); err != nil {
-		s.rollbackHiddenApp(ctx, principal, appID)
-		return AICCAgentResult{}, fmt.Errorf("创建 AICC 智能体失败: %w", err)
+		createErr := fmt.Errorf("创建 AICC 智能体失败: %w", err)
+		if rollbackErr := s.rollbackHiddenApp(ctx, principal, appID); rollbackErr != nil {
+			return AICCAgentResult{}, errors.Join(createErr, rollbackErr)
+		}
+		return AICCAgentResult{}, createErr
 	}
 	row, err := s.getAgentRow(ctx, agentID)
 	if err != nil {
@@ -143,12 +146,15 @@ func (s *AICCService) CreateAgent(ctx context.Context, principal auth.Principal,
 	return toAICCAgentResult(row), nil
 }
 
-func (s *AICCService) rollbackHiddenApp(ctx context.Context, principal auth.Principal, appID string) {
+func (s *AICCService) rollbackHiddenApp(ctx context.Context, principal auth.Principal, appID string) error {
 	rollbacker, ok := s.apps.(AICCHiddenAppRollbacker)
 	if !ok || appID == "" {
-		return
+		return nil
 	}
-	_ = rollbacker.SoftDeleteHiddenAICCApp(ctx, principal, appID)
+	if err := rollbacker.SoftDeleteHiddenAICCApp(ctx, principal, appID); err != nil {
+		return fmt.Errorf("回滚 AICC 隐藏 app 失败: %w", err)
+	}
+	return nil
 }
 
 // ListAgents 按企业列出智能体；平台管理员必须显式传 orgID，企业管理员可省略使用自身企业。

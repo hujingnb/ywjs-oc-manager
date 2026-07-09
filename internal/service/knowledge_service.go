@@ -1254,6 +1254,9 @@ func (s *KnowledgeService) getApp(ctx context.Context, appID string) (sqlc.App, 
 	if err != nil {
 		return sqlc.App{}, fmt.Errorf("查询应用失败: %w", err)
 	}
+	if app.AiccHidden {
+		return sqlc.App{}, ErrNotFound
+	}
 	return app, nil
 }
 
