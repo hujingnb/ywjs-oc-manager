@@ -329,9 +329,6 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 
 // UploadImage 校验并保存公开访客图片，返回发送消息时可引用的 image_file_id。
 func (s *AICCPublicService) UploadImage(ctx context.Context, input AICCPublicImageInput) (AICCPublicImageResult, error) {
-	if s.blob == nil {
-		return AICCPublicImageResult{}, ErrAICCImageUnavailable
-	}
 	session, err := s.store.GetAICCSessionByToken(ctx, strings.TrimSpace(input.SessionToken))
 	if err != nil {
 		return AICCPublicImageResult{}, ErrAICCInvalidSession
@@ -343,9 +340,15 @@ func (s *AICCPublicService) UploadImage(ctx context.Context, input AICCPublicIma
 	if err != nil {
 		return AICCPublicImageResult{}, err
 	}
+	if s.blob == nil {
+		return AICCPublicImageResult{}, ErrAICCImageUnavailable
+	}
 	filename := filepath.Base(input.Filename)
 	if filename == "." || filename == ".." || filename == "/" || strings.TrimSpace(filename) == "" {
 		return AICCPublicImageResult{}, fmt.Errorf("%w: 图片文件名非法", ErrInvalidArgument)
+	}
+	if len(filename) > 255 {
+		return AICCPublicImageResult{}, fmt.Errorf("%w: 图片文件名过长", ErrInvalidArgument)
 	}
 	ext := strings.ToLower(filepath.Ext(filename))
 	if !aiccAllowedImageExts[ext] {
@@ -365,15 +368,19 @@ func (s *AICCPublicService) UploadImage(ctx context.Context, input AICCPublicIma
 	if actualSize == 0 {
 		return AICCPublicImageResult{}, fmt.Errorf("%w: 图片内容不能为空", ErrInvalidArgument)
 	}
-	if detected := http.DetectContentType(data); !strings.HasPrefix(detected, "image/") {
-		return AICCPublicImageResult{}, fmt.Errorf("%w: 图片内容类型不支持", ErrInvalidArgument)
-	}
+	detected := http.DetectContentType(data)
 	mimeType := mime.TypeByExtension(ext)
 	if !strings.HasPrefix(mimeType, "image/") {
 		return AICCPublicImageResult{}, fmt.Errorf("%w: 图片类型不支持", ErrInvalidArgument)
 	}
+	if detected != mimeType {
+		return AICCPublicImageResult{}, fmt.Errorf("%w: 图片内容类型与扩展名不一致", ErrInvalidArgument)
+	}
 	imageID := newUUID()
 	key := storage.AICCImageKey(agent.AppID, session.ID, imageID, filename)
+	if len(key) > 1024 {
+		return AICCPublicImageResult{}, fmt.Errorf("%w: 图片对象路径过长", ErrInvalidArgument)
+	}
 	if err := s.blob.PutObject(ctx, key, bytes.NewReader(data), actualSize); err != nil {
 		return AICCPublicImageResult{}, fmt.Errorf("上传 AICC 图片失败: %w", err)
 	}

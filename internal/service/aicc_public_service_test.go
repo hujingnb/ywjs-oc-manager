@@ -179,6 +179,55 @@ func TestAICCPublicUploadImageRejectsUnsupportedType(t *testing.T) {
 	assert.Empty(t, blob.key)
 }
 
+// TestAICCPublicUploadImageChecksSessionBeforeBlob 覆盖错误优先级：无效 session 不应被 S3 未启用掩盖。
+func TestAICCPublicUploadImageChecksSessionBeforeBlob(t *testing.T) {
+	store := &fakeAICCPublicStore{}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	_, err := svc.UploadImage(context.Background(), AICCPublicImageInput{SessionToken: "bad-token", Filename: "a.png", Body: strings.NewReader("x"), Size: 1})
+
+	require.ErrorIs(t, err, ErrAICCInvalidSession)
+}
+
+// TestAICCPublicUploadImageRejectsTooLongFilenameBeforePut 覆盖 DB 长度边界：文件名过长时不能先上传孤儿对象。
+func TestAICCPublicUploadImageRejectsTooLongFilenameBeforePut(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+	}
+	blob := &fakeAICCImageBlob{}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.SetImageBlob(blob)
+	svc.now = func() time.Time { return aiccPublicTestNow }
+	filename := strings.Repeat("a", 256) + ".png"
+
+	_, err := svc.UploadImage(context.Background(), AICCPublicImageInput{SessionToken: "tok", Filename: filename, Body: strings.NewReader("x"), Size: 1})
+
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	assert.Empty(t, blob.key)
+}
+
+// TestAICCPublicUploadImageRejectsMismatchedMime 覆盖内容嗅探边界：扩展名与实际图片 MIME 不一致时拒绝。
+func TestAICCPublicUploadImageRejectsMismatchedMime(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+	}
+	blob := &fakeAICCImageBlob{}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.SetImageBlob(blob)
+	svc.now = func() time.Time { return aiccPublicTestNow }
+	gifBytes := "GIF89a\x01\x00\x01\x00\x00\x00\x00"
+
+	_, err := svc.UploadImage(context.Background(), AICCPublicImageInput{SessionToken: "tok", Filename: "photo.jpg", Body: strings.NewReader(gifBytes), Size: int64(len(gifBytes))})
+
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	assert.Empty(t, blob.key)
+}
+
 // TestAICCPublicChatStopsWhenOrgDisabled 覆盖平台关闭企业 AICC 后，已有访客会话也不能继续发送消息。
 func TestAICCPublicChatStopsWhenOrgDisabled(t *testing.T) {
 	store := &fakeAICCPublicStore{
