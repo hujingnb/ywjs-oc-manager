@@ -19,6 +19,8 @@ type publicAICCServiceStub struct {
 	configErr      error
 	sessionResult  service.AICCPublicSessionResult
 	sessionErr     error
+	imageResult    service.AICCPublicImageResult
+	imageErr       error
 	messageResult  service.AICCPublicMessageResult
 	messageErr     error
 	leadResult     service.AICCPublicLeadValuesResult
@@ -29,6 +31,7 @@ type publicAICCServiceStub struct {
 
 	lastPublicToken   string
 	lastSessionToken  string
+	lastImageInput    service.AICCPublicImageInput
 	lastMessageInput  service.AICCPublicMessageInput
 	lastLeadInput     service.AICCPublicLeadValuesInput
 	lastFeedbackInput service.AICCPublicFeedbackInput
@@ -47,6 +50,11 @@ func (s *publicAICCServiceStub) CreateSession(_ context.Context, publicToken str
 func (s *publicAICCServiceStub) Consent(_ context.Context, sessionToken string) error {
 	s.lastSessionToken = sessionToken
 	return s.consentErr
+}
+
+func (s *publicAICCServiceStub) UploadImage(_ context.Context, input service.AICCPublicImageInput) (service.AICCPublicImageResult, error) {
+	s.lastImageInput = input
+	return s.imageResult, s.imageErr
 }
 
 func (s *publicAICCServiceStub) SendMessage(_ context.Context, input service.AICCPublicMessageInput) (service.AICCPublicMessageResult, error) {
@@ -86,6 +94,22 @@ func TestPublicAICCHandlerSendMessage(t *testing.T) {
 	assert.Contains(t, recorder.Body.String(), "msg-1")
 	assert.Equal(t, "sess-1", svc.lastMessageInput.SessionToken)
 	assert.Equal(t, "你好", svc.lastMessageInput.Text)
+}
+
+// TestPublicAICCHandlerUploadImage 覆盖公开图片上传入口：session token 来自路径，文件名来自 query。
+func TestPublicAICCHandlerUploadImage(t *testing.T) {
+	svc := &publicAICCServiceStub{imageResult: service.AICCPublicImageResult{ImageFileID: "image-1", Mime: "image/png", Size: 12}}
+	router := newPublicAICCTestRouter(t, svc)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/sessions/sess-1/images?filename=a.png", bytes.NewBufferString("image-bytes"))
+	request.Header.Set("Content-Type", "application/octet-stream")
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "image-1")
+	assert.Equal(t, "sess-1", svc.lastImageInput.SessionToken)
+	assert.Equal(t, "a.png", svc.lastImageInput.Filename)
 }
 
 // TestPublicAICCHandlerSubmitLeadValues 覆盖公开留资入口：session token 来自路径，字段值来自请求体。

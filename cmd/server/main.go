@@ -357,6 +357,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			UsePathStyle:    cfg.Storage.S3.UsePathStyle,
 		}
 		objStore := storage.NewS3ObjectStore(s3cfg)
+		aiccPublicService.SetImageBlob(objStore)
 		// s3Skills 供 BootstrapService 生成 skill 预签名读 URL；
 		// 助手版本 skill 已改为从平台库选（快照引用库路径），不再需要独立 tar 写入副本。
 		s3Skills := service.NewS3SkillBlobStore(objStore, cfg.Storage.S3.PresignTTL.Duration)

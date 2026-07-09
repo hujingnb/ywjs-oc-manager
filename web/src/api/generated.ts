@@ -12362,11 +12362,14 @@ export interface paths {
         put?: never;
         /**
          * 上传 AICC 公开图片
-         * @description 图片消息能力后续接入，当前返回 501
+         * @description 上传访客图片并返回发送消息时引用的 image_file_id
          */
         post: {
             parameters: {
-                query?: never;
+                query: {
+                    /** @description 原始文件名 */
+                    filename: string;
+                };
                 header?: never;
                 path: {
                     /** @description 会话 token */
@@ -12374,10 +12377,70 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody?: {
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
             responses: {
-                /** @description Not Implemented */
-                501: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.AICCPublicImageResult"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Request Entity Too Large */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -14905,6 +14968,11 @@ export interface components {
         };
         "service.AICCPublicFeedbackResult": {
             resolution_status?: string;
+        };
+        "service.AICCPublicImageResult": {
+            image_file_id?: string;
+            mime?: string;
+            size?: number;
         };
         "service.AICCPublicLeadValuesResult": {
             lead_status?: string;

@@ -162,6 +162,23 @@ CREATE TABLE aicc_messages (
     KEY idx_aicc_messages_session_time (session_id, created_at, id)
 );
 
+CREATE TABLE aicc_images (
+    id CHAR(36) PRIMARY KEY,
+    session_id CHAR(36) NOT NULL,
+    agent_id CHAR(36) NOT NULL,
+    org_id CHAR(36) NOT NULL,
+    object_key VARCHAR(1024) NOT NULL,
+    mime VARCHAR(100) NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    filename VARCHAR(255) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_aicc_images_session_org FOREIGN KEY (session_id, org_id)
+        REFERENCES aicc_sessions(id, org_id) ON DELETE CASCADE,
+    CONSTRAINT fk_aicc_images_session_agent FOREIGN KEY (session_id, agent_id)
+        REFERENCES aicc_sessions(id, agent_id) ON DELETE CASCADE,
+    KEY idx_aicc_images_session (session_id, id)
+);
+
 CREATE TABLE aicc_lead_fields (
     id CHAR(36) PRIMARY KEY,
     agent_id CHAR(36) NOT NULL,

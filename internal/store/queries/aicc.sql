@@ -67,6 +67,16 @@ INSERT INTO aicc_messages (
     is_fallback, is_refusal, error_summary
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
+-- name: CreateAICCImage :exec
+INSERT INTO aicc_images (
+    id, session_id, agent_id, org_id, object_key, mime, size_bytes, filename
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: GetAICCImageBySession :one
+SELECT *
+FROM aicc_images
+WHERE id = ? AND session_id = ?;
+
 -- name: ListAICCMessagesBySession :many
 SELECT *
 FROM aicc_messages

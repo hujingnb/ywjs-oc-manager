@@ -54,6 +54,18 @@ type AiccFeedback struct {
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
+type AiccImage struct {
+	ID        string    `db:"id" json:"id"`
+	SessionID string    `db:"session_id" json:"session_id"`
+	AgentID   string    `db:"agent_id" json:"agent_id"`
+	OrgID     string    `db:"org_id" json:"org_id"`
+	ObjectKey string    `db:"object_key" json:"object_key"`
+	Mime      string    `db:"mime" json:"mime"`
+	SizeBytes int64     `db:"size_bytes" json:"size_bytes"`
+	Filename  string    `db:"filename" json:"filename"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+}
+
 type AiccLead struct {
 	ID                 string      `db:"id" json:"id"`
 	OrgID              string      `db:"org_id" json:"org_id"`

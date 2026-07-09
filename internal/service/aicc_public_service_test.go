@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"database/sql"
+	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -106,6 +108,75 @@ func TestAICCPublicChatStoresVisitorAndAssistantMessages(t *testing.T) {
 	assert.Equal(t, 2, len(store.createdMessages))
 	assert.Equal(t, "app-1", chat.appID)
 	assert.Equal(t, "报价多少", chat.text)
+}
+
+// TestAICCPublicChatStoresImageMessage 覆盖图片消息路径：已上传图片可作为访客消息镜像保存。
+func TestAICCPublicChatStoresImageMessage(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+		image:   sqlc.AiccImage{ID: "image-1", SessionID: "session-1", ObjectKey: "apps/app-1/aicc/session-1/image-1/a.png", Mime: "image/png", SizeBytes: 12},
+	}
+	chat := &fakeAICCHermesChat{reply: "已收到图片。"}
+	svc := NewAICCPublicService(store, chat)
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	result, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", ImageFileID: "image-1"})
+
+	require.NoError(t, err)
+	assert.Equal(t, "已收到图片。", result.Text)
+	require.Len(t, store.createdMessages, 2)
+	assert.Equal(t, domain.AICCMessageContentTypeImage, store.createdMessages[0].ContentType)
+	assert.Equal(t, "apps/app-1/aicc/session-1/image-1/a.png", store.createdMessages[0].ImageObjectKey.String)
+	assert.Equal(t, "[访客发送了一张图片]", chat.text)
+}
+
+// TestAICCPublicUploadImageStoresObject 覆盖图片上传正常路径：校验后写对象存储并落图片记录。
+func TestAICCPublicUploadImageStoresObject(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+	}
+	blob := &fakeAICCImageBlob{}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.SetImageBlob(blob)
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	pngBytes := "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+	result, err := svc.UploadImage(context.Background(), AICCPublicImageInput{
+		SessionToken: "tok",
+		Filename:     "../photo.png",
+		Body:         strings.NewReader(pngBytes),
+		Size:         int64(len(pngBytes)),
+	})
+
+	require.NoError(t, err)
+	assert.NotEmpty(t, result.ImageFileID)
+	assert.Equal(t, "image/png", result.Mime)
+	assert.Equal(t, int64(len(pngBytes)), result.Size)
+	assert.Contains(t, blob.key, "/aicc/session-1/")
+	assert.Equal(t, "photo.png", store.image.Filename)
+	assert.Equal(t, blob.key, store.image.ObjectKey)
+}
+
+// TestAICCPublicUploadImageRejectsUnsupportedType 覆盖图片上传类型边界：非图片扩展名不落对象存储。
+func TestAICCPublicUploadImageRejectsUnsupportedType(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+	}
+	blob := &fakeAICCImageBlob{}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.SetImageBlob(blob)
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	_, err := svc.UploadImage(context.Background(), AICCPublicImageInput{SessionToken: "tok", Filename: "a.exe", Body: strings.NewReader("x"), Size: 1})
+
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	assert.Empty(t, blob.key)
 }
 
 // TestAICCPublicChatStopsWhenOrgDisabled 覆盖平台关闭企业 AICC 后，已有访客会话也不能继续发送消息。
@@ -267,6 +338,7 @@ type fakeAICCPublicStore struct {
 	agent              sqlc.AiccAgent
 	session            sqlc.AiccSession
 	message            sqlc.AiccMessage
+	image              sqlc.AiccImage
 	leadFields         []sqlc.AiccLeadField
 	requiredLeadFields []sqlc.AiccLeadField
 	createdSession     sqlc.CreateAICCSessionParams
@@ -331,6 +403,27 @@ func (f *fakeAICCPublicStore) MarkAICCSessionConsented(_ context.Context, sessio
 func (f *fakeAICCPublicStore) CreateAICCMessage(_ context.Context, arg sqlc.CreateAICCMessageParams) error {
 	f.createdMessages = append(f.createdMessages, arg)
 	return nil
+}
+
+func (f *fakeAICCPublicStore) CreateAICCImage(_ context.Context, arg sqlc.CreateAICCImageParams) error {
+	f.image = sqlc.AiccImage{
+		ID:        arg.ID,
+		SessionID: arg.SessionID,
+		AgentID:   arg.AgentID,
+		OrgID:     arg.OrgID,
+		ObjectKey: arg.ObjectKey,
+		Mime:      arg.Mime,
+		SizeBytes: arg.SizeBytes,
+		Filename:  arg.Filename,
+	}
+	return nil
+}
+
+func (f *fakeAICCPublicStore) GetAICCImageBySession(_ context.Context, arg sqlc.GetAICCImageBySessionParams) (sqlc.AiccImage, error) {
+	if f.image.ID != arg.ID || f.image.SessionID != arg.SessionID {
+		return sqlc.AiccImage{}, sql.ErrNoRows
+	}
+	return f.image, nil
 }
 
 func (f *fakeAICCPublicStore) ListAICCLeadFieldsByAgent(_ context.Context, agentID string) ([]sqlc.AiccLeadField, error) {
@@ -403,4 +496,15 @@ func (f *fakeAICCHermesChat) ChatAICC(_ context.Context, appID, _ string, text s
 	f.appID = appID
 	f.text = text
 	return f.reply, nil
+}
+
+type fakeAICCImageBlob struct {
+	key  string
+	size int64
+}
+
+func (f *fakeAICCImageBlob) PutObject(_ context.Context, key string, _ io.Reader, size int64) error {
+	f.key = key
+	f.size = size
+	return nil
 }

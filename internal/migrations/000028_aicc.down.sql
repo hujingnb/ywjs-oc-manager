@@ -2,6 +2,7 @@ DROP TABLE IF EXISTS aicc_feedback;
 DROP TABLE IF EXISTS aicc_lead_values;
 DROP TABLE IF EXISTS aicc_leads;
 DROP TABLE IF EXISTS aicc_lead_fields;
+DROP TABLE IF EXISTS aicc_images;
 DROP TABLE IF EXISTS aicc_messages;
 DROP TABLE IF EXISTS aicc_sessions;
 DROP TABLE IF EXISTS aicc_agent_knowledge;

@@ -72,6 +72,37 @@ func (q *Queries) CreateAICCAgent(ctx context.Context, arg CreateAICCAgentParams
 	return err
 }
 
+const createAICCImage = `-- name: CreateAICCImage :exec
+INSERT INTO aicc_images (
+    id, session_id, agent_id, org_id, object_key, mime, size_bytes, filename
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type CreateAICCImageParams struct {
+	ID        string `db:"id" json:"id"`
+	SessionID string `db:"session_id" json:"session_id"`
+	AgentID   string `db:"agent_id" json:"agent_id"`
+	OrgID     string `db:"org_id" json:"org_id"`
+	ObjectKey string `db:"object_key" json:"object_key"`
+	Mime      string `db:"mime" json:"mime"`
+	SizeBytes int64  `db:"size_bytes" json:"size_bytes"`
+	Filename  string `db:"filename" json:"filename"`
+}
+
+func (q *Queries) CreateAICCImage(ctx context.Context, arg CreateAICCImageParams) error {
+	_, err := q.db.ExecContext(ctx, createAICCImage,
+		arg.ID,
+		arg.SessionID,
+		arg.AgentID,
+		arg.OrgID,
+		arg.ObjectKey,
+		arg.Mime,
+		arg.SizeBytes,
+		arg.Filename,
+	)
+	return err
+}
+
 const createAICCMessage = `-- name: CreateAICCMessage :exec
 INSERT INTO aicc_messages (
     id, session_id, agent_id, direction, content_type, text_content,
@@ -258,6 +289,34 @@ func (q *Queries) GetAICCAssistantMessageForFeedback(ctx context.Context, arg Ge
 		&i.IsFallback,
 		&i.IsRefusal,
 		&i.ErrorSummary,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getAICCImageBySession = `-- name: GetAICCImageBySession :one
+SELECT id, session_id, agent_id, org_id, object_key, mime, size_bytes, filename, created_at
+FROM aicc_images
+WHERE id = ? AND session_id = ?
+`
+
+type GetAICCImageBySessionParams struct {
+	ID        string `db:"id" json:"id"`
+	SessionID string `db:"session_id" json:"session_id"`
+}
+
+func (q *Queries) GetAICCImageBySession(ctx context.Context, arg GetAICCImageBySessionParams) (AiccImage, error) {
+	row := q.db.QueryRowContext(ctx, getAICCImageBySession, arg.ID, arg.SessionID)
+	var i AiccImage
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.AgentID,
+		&i.OrgID,
+		&i.ObjectKey,
+		&i.Mime,
+		&i.SizeBytes,
+		&i.Filename,
 		&i.CreatedAt,
 	)
 	return i, err

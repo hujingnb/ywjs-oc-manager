@@ -1,12 +1,17 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"mime"
+	"net/http"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -14,8 +19,15 @@ import (
 	"github.com/guregu/null/v5"
 
 	"oc-manager/internal/domain"
+	"oc-manager/internal/integrations/storage"
 	"oc-manager/internal/store/sqlc"
 )
+
+const aiccImageMaxBytes int64 = 10 * 1024 * 1024
+
+var aiccAllowedImageExts = map[string]bool{
+	".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true,
+}
 
 // AICCPublicStore 是访客公开 API 依赖的数据访问接口。
 type AICCPublicStore interface {
@@ -33,6 +45,10 @@ type AICCPublicStore interface {
 	MarkAICCSessionConsented(ctx context.Context, sessionToken string) (int64, error)
 	// CreateAICCMessage 写入访客消息或助手回复镜像。
 	CreateAICCMessage(ctx context.Context, arg sqlc.CreateAICCMessageParams) error
+	// CreateAICCImage 写入公开会话图片对象记录。
+	CreateAICCImage(ctx context.Context, arg sqlc.CreateAICCImageParams) error
+	// GetAICCImageBySession 读取当前会话内已上传图片。
+	GetAICCImageBySession(ctx context.Context, arg sqlc.GetAICCImageBySessionParams) (sqlc.AiccImage, error)
 	// ListAICCLeadFieldsByAgent 读取智能体留资字段配置，用于访客提交值时校验 field_key。
 	ListAICCLeadFieldsByAgent(ctx context.Context, agentID string) ([]sqlc.AiccLeadField, error)
 	// UpsertAICCLeadValue 写入或覆盖会话内某个留资字段值。
@@ -49,9 +65,14 @@ type AICCPublicStore interface {
 	UpdateAICCSessionResolutionStatus(ctx context.Context, arg sqlc.UpdateAICCSessionResolutionStatusParams) error
 }
 
-// AICCPublicTxRunner 为公开留资提交提供事务边界，避免多字段写入与 session 状态半成功。
+// AICCPublicTxRunner 为公开组合写操作提供事务边界，避免多字段或多表写入半成功。
 type AICCPublicTxRunner interface {
 	WithAICCPublicTx(ctx context.Context, fn func(AICCPublicStore) error) error
+}
+
+// AICCPublicImageBlob 抽象 AICC 公开图片对象存储。
+type AICCPublicImageBlob interface {
+	PutObject(ctx context.Context, key string, r io.Reader, size int64) error
 }
 
 // AICCHermesChat 抽象转发隐藏 app/hermes 的聊天能力。
@@ -99,6 +120,21 @@ type AICCPublicMessageResult struct {
 	Text      string `json:"text"`
 }
 
+// AICCPublicImageInput 是访客上传图片的入参。
+type AICCPublicImageInput struct {
+	SessionToken string
+	Filename     string
+	Body         io.Reader
+	Size         int64
+}
+
+// AICCPublicImageResult 是公开图片上传结果，image_file_id 可在发送消息时引用。
+type AICCPublicImageResult struct {
+	ImageFileID string `json:"image_file_id"`
+	Mime        string `json:"mime"`
+	Size        int64  `json:"size"`
+}
+
 // AICCPublicLeadValuesInput 是访客提交留资字段的入参。
 type AICCPublicLeadValuesInput struct {
 	SessionToken string
@@ -127,6 +163,7 @@ type AICCPublicFeedbackResult struct {
 type AICCPublicService struct {
 	store AICCPublicStore
 	tx    AICCPublicTxRunner
+	blob  AICCPublicImageBlob
 	chat  AICCHermesChat
 	now   func() time.Time
 }
@@ -138,6 +175,9 @@ func NewAICCPublicService(store AICCPublicStore, chat AICCHermesChat) *AICCPubli
 
 // SetTxRunner 注入公开 AICC 写操作事务 runner。
 func (s *AICCPublicService) SetTxRunner(tx AICCPublicTxRunner) { s.tx = tx }
+
+// SetImageBlob 注入公开 AICC 图片对象存储；未启用 S3 时图片上传返回不可用。
+func (s *AICCPublicService) SetImageBlob(blob AICCPublicImageBlob) { s.blob = blob }
 
 // PublicConfig 返回访客端可展示的公开智能体配置。
 func (s *AICCPublicService) PublicConfig(ctx context.Context, publicToken string) (AICCPublicConfigResult, error) {
@@ -231,24 +271,45 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 		return AICCPublicMessageResult{}, ErrAICCLeadRequired
 	}
 	text := strings.TrimSpace(input.Text)
-	if strings.TrimSpace(input.ImageFileID) != "" {
-		return AICCPublicMessageResult{}, fmt.Errorf("%w: 当前仅支持文字消息", ErrInvalidArgument)
+	imageID := strings.TrimSpace(input.ImageFileID)
+	var image sqlc.AiccImage
+	if imageID != "" {
+		image, err = s.store.GetAICCImageBySession(ctx, sqlc.GetAICCImageBySessionParams{ID: imageID, SessionID: session.ID})
+		if errors.Is(err, sql.ErrNoRows) {
+			return AICCPublicMessageResult{}, fmt.Errorf("%w: 图片不存在", ErrInvalidArgument)
+		}
+		if err != nil {
+			return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 图片失败: %w", err)
+		}
 	}
-	if text == "" {
+	if text == "" && imageID == "" {
 		return AICCPublicMessageResult{}, fmt.Errorf("%w: 消息内容不能为空", ErrInvalidArgument)
+	}
+	contentType := domain.AICCMessageContentTypeText
+	if imageID != "" && text == "" {
+		contentType = domain.AICCMessageContentTypeImage
+	} else if imageID != "" {
+		contentType = domain.AICCMessageContentTypeMixed
 	}
 	visitorMessageID := newUUID()
 	if err := s.store.CreateAICCMessage(ctx, sqlc.CreateAICCMessageParams{
-		ID:          visitorMessageID,
-		SessionID:   session.ID,
-		AgentID:     session.AgentID,
-		Direction:   domain.AICCMessageDirectionVisitor,
-		ContentType: domain.AICCMessageContentTypeText,
-		TextContent: nullStr(text),
+		ID:             visitorMessageID,
+		SessionID:      session.ID,
+		AgentID:        session.AgentID,
+		Direction:      domain.AICCMessageDirectionVisitor,
+		ContentType:    contentType,
+		TextContent:    nullStr(text),
+		ImageObjectKey: nullStr(image.ObjectKey),
+		ImageMime:      nullStr(image.Mime),
+		ImageSizeBytes: null.IntFromPtr(int64PtrIfValid(image.SizeBytes, imageID != "")),
 	}); err != nil {
 		return AICCPublicMessageResult{}, fmt.Errorf("保存 AICC 访客消息失败: %w", err)
 	}
-	reply, err := s.chat.ChatAICC(ctx, agent.AppID, session.ID, text)
+	runtimeText := text
+	if runtimeText == "" && imageID != "" {
+		runtimeText = "[访客发送了一张图片]"
+	}
+	reply, err := s.chat.ChatAICC(ctx, agent.AppID, session.ID, runtimeText)
 	if err != nil {
 		return AICCPublicMessageResult{}, fmt.Errorf("转发 AICC 消息失败: %w", err)
 	}
@@ -264,6 +325,71 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 		return AICCPublicMessageResult{}, fmt.Errorf("保存 AICC 助手回复失败: %w", err)
 	}
 	return AICCPublicMessageResult{MessageID: replyID, Text: reply}, nil
+}
+
+// UploadImage 校验并保存公开访客图片，返回发送消息时可引用的 image_file_id。
+func (s *AICCPublicService) UploadImage(ctx context.Context, input AICCPublicImageInput) (AICCPublicImageResult, error) {
+	if s.blob == nil {
+		return AICCPublicImageResult{}, ErrAICCImageUnavailable
+	}
+	session, err := s.store.GetAICCSessionByToken(ctx, strings.TrimSpace(input.SessionToken))
+	if err != nil {
+		return AICCPublicImageResult{}, ErrAICCInvalidSession
+	}
+	if !session.ExpiresAt.After(s.now()) {
+		return AICCPublicImageResult{}, ErrAICCInvalidSession
+	}
+	agent, err := s.activeAgentBySession(ctx, session)
+	if err != nil {
+		return AICCPublicImageResult{}, err
+	}
+	filename := filepath.Base(input.Filename)
+	if filename == "." || filename == ".." || filename == "/" || strings.TrimSpace(filename) == "" {
+		return AICCPublicImageResult{}, fmt.Errorf("%w: 图片文件名非法", ErrInvalidArgument)
+	}
+	ext := strings.ToLower(filepath.Ext(filename))
+	if !aiccAllowedImageExts[ext] {
+		return AICCPublicImageResult{}, fmt.Errorf("%w: 图片类型不支持", ErrInvalidArgument)
+	}
+	if input.Size >= 0 && input.Size > aiccImageMaxBytes {
+		return AICCPublicImageResult{}, ErrConversationFileTooLarge
+	}
+	data, err := io.ReadAll(io.LimitReader(input.Body, aiccImageMaxBytes+1))
+	if err != nil {
+		return AICCPublicImageResult{}, fmt.Errorf("读取 AICC 图片失败: %w", err)
+	}
+	if int64(len(data)) > aiccImageMaxBytes {
+		return AICCPublicImageResult{}, ErrConversationFileTooLarge
+	}
+	actualSize := int64(len(data))
+	if actualSize == 0 {
+		return AICCPublicImageResult{}, fmt.Errorf("%w: 图片内容不能为空", ErrInvalidArgument)
+	}
+	if detected := http.DetectContentType(data); !strings.HasPrefix(detected, "image/") {
+		return AICCPublicImageResult{}, fmt.Errorf("%w: 图片内容类型不支持", ErrInvalidArgument)
+	}
+	mimeType := mime.TypeByExtension(ext)
+	if !strings.HasPrefix(mimeType, "image/") {
+		return AICCPublicImageResult{}, fmt.Errorf("%w: 图片类型不支持", ErrInvalidArgument)
+	}
+	imageID := newUUID()
+	key := storage.AICCImageKey(agent.AppID, session.ID, imageID, filename)
+	if err := s.blob.PutObject(ctx, key, bytes.NewReader(data), actualSize); err != nil {
+		return AICCPublicImageResult{}, fmt.Errorf("上传 AICC 图片失败: %w", err)
+	}
+	if err := s.store.CreateAICCImage(ctx, sqlc.CreateAICCImageParams{
+		ID:        imageID,
+		SessionID: session.ID,
+		AgentID:   session.AgentID,
+		OrgID:     session.OrgID,
+		ObjectKey: key,
+		Mime:      mimeType,
+		SizeBytes: actualSize,
+		Filename:  filename,
+	}); err != nil {
+		return AICCPublicImageResult{}, fmt.Errorf("保存 AICC 图片记录失败: %w", err)
+	}
+	return AICCPublicImageResult{ImageFileID: imageID, Mime: mimeType, Size: actualSize}, nil
 }
 
 // SubmitLeadValues 写入访客留资字段，并在必填字段齐全后同步会话 lead_status。
@@ -484,6 +610,13 @@ func aiccLeadFieldKeys(fields []sqlc.AiccLeadField) []string {
 		keys = append(keys, field.FieldKey)
 	}
 	return keys
+}
+
+func int64PtrIfValid(v int64, valid bool) *int64 {
+	if !valid {
+		return nil
+	}
+	return &v
 }
 
 func normalizeAICCChannel(channel string) string {

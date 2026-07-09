@@ -52,6 +52,7 @@ type Querier interface {
 	// 统计行业知识库文件总数，过滤条件必须与 ListRAGFlowIndustryDocuments 保持一致。
 	CountRAGFlowIndustryDocuments(ctx context.Context, arg CountRAGFlowIndustryDocumentsParams) (int64, error)
 	CreateAICCAgent(ctx context.Context, arg CreateAICCAgentParams) error
+	CreateAICCImage(ctx context.Context, arg CreateAICCImageParams) error
 	CreateAICCMessage(ctx context.Context, arg CreateAICCMessageParams) error
 	CreateAICCSession(ctx context.Context, arg CreateAICCSessionParams) error
 	// k8s 模型下 app 对应 Deployment，pod 落点由调度器决定，不再写 runtime_node_id。
@@ -100,6 +101,7 @@ type Querier interface {
 	GetAICCAgent(ctx context.Context, id string) (AiccAgent, error)
 	GetAICCAgentByPublicToken(ctx context.Context, publicToken string) (AiccAgent, error)
 	GetAICCAssistantMessageForFeedback(ctx context.Context, arg GetAICCAssistantMessageForFeedbackParams) (AiccMessage, error)
+	GetAICCImageBySession(ctx context.Context, arg GetAICCImageBySessionParams) (AiccImage, error)
 	GetAICCSessionByToken(ctx context.Context, sessionToken string) (AiccSession, error)
 	GetActiveAppByOwner(ctx context.Context, ownerUserID string) (App, error)
 	GetApp(ctx context.Context, id string) (App, error)

@@ -12,6 +12,12 @@ func TestConversationFileKey(t *testing.T) {
 	assert.Equal(t, "apps/app1/conversations/weixin:u1/f9/报告.pdf", got)
 }
 
+// TestAICCImageKey 校验 AICC 公开图片对象键：位于 hidden app 前缀下的 aicc 会话目录。
+func TestAICCImageKey(t *testing.T) {
+	got := AICCImageKey("app1", "session1", "img1", "photo.png")
+	assert.Equal(t, "apps/app1/aicc/session1/img1/photo.png", got)
+}
+
 // TestKeyConventions 验证各类 S3 key/prefix 拼接符合 spec-B §4 约定。
 func TestKeyConventions(t *testing.T) {
 	// app 根前缀必须以 "/" 结尾，供 STS prefix 通配与 MovePrefix 使用

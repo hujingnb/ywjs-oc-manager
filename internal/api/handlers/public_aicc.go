@@ -21,6 +21,7 @@ type publicAICCService interface {
 	PublicConfig(ctx context.Context, publicToken string) (service.AICCPublicConfigResult, error)
 	CreateSession(ctx context.Context, publicToken string, input service.AICCPublicSessionInput) (service.AICCPublicSessionResult, error)
 	Consent(ctx context.Context, sessionToken string) error
+	UploadImage(ctx context.Context, input service.AICCPublicImageInput) (service.AICCPublicImageResult, error)
 	SendMessage(ctx context.Context, input service.AICCPublicMessageInput) (service.AICCPublicMessageResult, error)
 	SubmitLeadValues(ctx context.Context, input service.AICCPublicLeadValuesInput) (service.AICCPublicLeadValuesResult, error)
 	SubmitFeedback(ctx context.Context, input service.AICCPublicFeedbackInput) (service.AICCPublicFeedbackResult, error)
@@ -147,17 +148,40 @@ func (h *PublicAICCHandler) SendMessage(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": result})
 }
 
-// UploadImage 暂保留路由契约，图片对象存储将在后续小任务接入。
+// UploadImage 上传访客图片。
 //
 // @Summary      上传 AICC 公开图片
-// @Description  图片消息能力后续接入，当前返回 501
+// @Description  上传访客图片并返回发送消息时引用的 image_file_id
 // @Tags         public-aicc
+// @Accept       application/octet-stream
 // @Produce      json
 // @Param        sessionToken  path      string  true  "会话 token"
-// @Failure      501           {object}  ErrorResponse
+// @Param        filename      query     string  true  "原始文件名"
+// @Success      200           {object}  map[string]service.AICCPublicImageResult
+// @Failure      400           {object}  ErrorResponse
+// @Failure      401           {object}  ErrorResponse
+// @Failure      404           {object}  ErrorResponse
+// @Failure      413           {object}  ErrorResponse
+// @Failure      503           {object}  ErrorResponse
+// @Failure      500           {object}  ErrorResponse
 // @Router       /public/aicc/sessions/{sessionToken}/images [post]
 func (h *PublicAICCHandler) UploadImage(c *gin.Context) {
-	apierror.JSON(c, http.StatusNotImplemented, "AICC_IMAGE_NOT_IMPLEMENTED", apierror.MsgBadRequestGeneric)
+	filename := c.Query("filename")
+	if filename == "" {
+		apierror.JSON(c, http.StatusBadRequest, "BAD_REQUEST", apierror.MsgBadRequestGeneric)
+		return
+	}
+	result, err := h.service.UploadImage(c.Request.Context(), service.AICCPublicImageInput{
+		SessionToken: c.Param("sessionToken"),
+		Filename:     filename,
+		Body:         c.Request.Body,
+		Size:         c.Request.ContentLength,
+	})
+	if err != nil {
+		writePublicAICCError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"image": result})
 }
 
 // SubmitLeadValues 提交留资字段。
@@ -237,6 +261,8 @@ func writePublicAICCError(c *gin.Context, err error) {
 		c.JSON(http.StatusUnauthorized, apierror.New("AICC_INVALID_SESSION", "会话已失效"))
 	case errors.Is(err, service.ErrAICCInvalidMessage):
 		c.JSON(http.StatusNotFound, apierror.New("AICC_INVALID_MESSAGE", "消息不可反馈"))
+	case errors.Is(err, service.ErrAICCImageUnavailable):
+		c.JSON(http.StatusServiceUnavailable, apierror.New("AICC_IMAGE_UNAVAILABLE", "图片上传不可用"))
 	case errors.Is(err, service.ErrInvalidArgument):
 		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", validationServiceMessage(err, service.ErrInvalidArgument)))
 	default:

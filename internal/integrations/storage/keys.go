@@ -69,3 +69,10 @@ func LibrarySkillKey(source, sourceRef, version, ext string) string {
 func ConversationFileKey(appID, sessionID, fileID, filename string) string {
 	return path.Join("apps", appID, "conversations", sessionID, fileID, filename)
 }
+
+// AICCImageKey 返回 AICC 公开访客图片对象键
+// "apps/<appID>/aicc/<sessionID>/<imageID>/<filename>"。
+// 位于 hidden app 的 AppPrefix 下，随 app 数据归档；调用方保证各段为合法路径段。
+func AICCImageKey(appID, sessionID, imageID, filename string) string {
+	return path.Join("apps", appID, "aicc", sessionID, imageID, filename)
+}
