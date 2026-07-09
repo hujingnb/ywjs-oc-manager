@@ -117,15 +117,22 @@ type ocOpsAppStore interface {
 // （spec-A 落地；cipher 为 nil 或密文为空时 Token 留空）。
 // Supported 由镜像 ref 是否 -dev 判定（沿用旧 Stub 语义）。
 type OcOpsResolverFromStore struct {
-	store      ocOpsAppStore // 复用最小 GetApp 接口
-	cipher     *auth.Cipher  // 解密 per-app control token；nil 时 Token 留空
-	baseURLTpl string        // 如 "http://app-%s-ocops.oc-apps.svc:8080"
+	store           ocOpsAppStore // 复用最小 GetApp 接口
+	cipher          *auth.Cipher  // 解密 per-app control token；nil 时 Token 留空
+	baseURLTpl      string        // 如 "http://app-%s-ocops.oc-apps.svc:8080"
+	allowAICCHidden bool          // 仅 AICC 公开运行时使用，普通 app 子系统必须保持 false。
 }
 
 // NewOcOpsResolverFromStore 构造从 store 解析坐标的 resolver。
 // cipher 用于解密 app.runtime_token_ciphertext 注入 Endpoint.Token；baseURLTpl 必须含一个 %s（appID 替换）。
 func NewOcOpsResolverFromStore(store ocOpsAppStore, cipher *auth.Cipher, baseURLTpl string) *OcOpsResolverFromStore {
 	return &OcOpsResolverFromStore{store: store, cipher: cipher, baseURLTpl: baseURLTpl}
+}
+
+// NewAICCOcOpsResolverFromStore 构造 AICC 专用 resolver，允许解析 AICC hidden app。
+// 只能用于 AICC public runtime → hidden app/hermes 转发，普通 app 管理入口不得使用。
+func NewAICCOcOpsResolverFromStore(store ocOpsAppStore, cipher *auth.Cipher, baseURLTpl string) *OcOpsResolverFromStore {
+	return &OcOpsResolverFromStore{store: store, cipher: cipher, baseURLTpl: baseURLTpl, allowAICCHidden: true}
 }
 
 // Resolve 查询 app 并组装 oc-ops 调用坐标。
@@ -201,7 +208,7 @@ func (r *OcOpsResolverFromStore) getVisibleApp(ctx context.Context, appID string
 		}
 		return sqlc.App{}, fmt.Errorf("查询 app 失败: %w", err)
 	}
-	if app.AiccHidden {
+	if app.AiccHidden && !r.allowAICCHidden {
 		return sqlc.App{}, ErrNotFound
 	}
 	return app, nil

@@ -46,6 +46,8 @@ type Dependencies struct {
 	AppService *service.AppService
 	// AICCService 提供 AICC 智能体管理路由；nil 时不注册。
 	AICCService *service.AICCService
+	// AICCPublicService 提供匿名访客 AICC 公开路由；nil 时不注册。
+	AICCPublicService *service.AICCPublicService
 	// RechargeService 提供组织充值、充值记录和余额查询路由。
 	RechargeService *service.RechargeService
 	// AssistantVersionService 提供助手版本目录管理路由。
@@ -175,6 +177,9 @@ func NewRouter(deps ...Dependencies) http.Handler {
 		defaultLocale = "en"
 	}
 	handlers.RegisterPublicConfigRoutes(router, handlers.NewConfigHandler(defaultLocale, service.SupportedLocales, dep.WebPublishDevMode))
+	if dep.AICCPublicService != nil {
+		handlers.RegisterPublicAICCRoutes(router, handlers.NewPublicAICCHandler(dep.AICCPublicService))
+	}
 
 	// ── user：RequireUserAuth 注入 principal，所有业务路由挂载在此组 ──
 	user := router.Group("")

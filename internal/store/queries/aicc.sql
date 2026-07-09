@@ -73,6 +73,14 @@ FROM aicc_messages
 WHERE session_id = ?
 ORDER BY created_at ASC, id ASC;
 
+-- name: ListRequiredAICCLeadFieldsMissing :many
+SELECT f.*
+FROM aicc_lead_fields f
+JOIN aicc_sessions s ON s.agent_id = f.agent_id
+LEFT JOIN aicc_lead_values v ON v.session_id = s.id AND v.field_id = f.id
+WHERE s.id = ? AND f.required = TRUE AND v.id IS NULL
+ORDER BY f.sort_order ASC, f.id ASC;
+
 -- name: ListExpiredAICCSessions :many
 SELECT *
 FROM aicc_sessions

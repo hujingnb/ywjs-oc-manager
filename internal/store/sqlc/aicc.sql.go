@@ -412,6 +412,49 @@ func (q *Queries) ListExpiredAICCSessions(ctx context.Context, limit int32) ([]A
 	return items, nil
 }
 
+const listRequiredAICCLeadFieldsMissing = `-- name: ListRequiredAICCLeadFieldsMissing :many
+SELECT f.id, f.agent_id, f.field_key, f.label, f.field_type, f.required, f.prompt_text, f.sort_order, f.created_at, f.updated_at
+FROM aicc_lead_fields f
+JOIN aicc_sessions s ON s.agent_id = f.agent_id
+LEFT JOIN aicc_lead_values v ON v.session_id = s.id AND v.field_id = f.id
+WHERE s.id = ? AND f.required = TRUE AND v.id IS NULL
+ORDER BY f.sort_order ASC, f.id ASC
+`
+
+func (q *Queries) ListRequiredAICCLeadFieldsMissing(ctx context.Context, id string) ([]AiccLeadField, error) {
+	rows, err := q.db.QueryContext(ctx, listRequiredAICCLeadFieldsMissing, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AiccLeadField{}
+	for rows.Next() {
+		var i AiccLeadField
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.FieldKey,
+			&i.Label,
+			&i.FieldType,
+			&i.Required,
+			&i.PromptText,
+			&i.SortOrder,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markAICCSessionConsented = `-- name: MarkAICCSessionConsented :exec
 UPDATE aicc_sessions
 SET privacy_consented_at = now(), updated_at = now()

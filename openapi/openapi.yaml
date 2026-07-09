@@ -124,6 +124,18 @@ components:
       required:
       - name
       type: object
+    handlers.CreateAICCSessionRequest:
+      properties:
+        channel:
+          description: Channel 是公开入口渠道：web_link / web_widget。
+          type: string
+        referrer:
+          description: Referrer 是浏览器 referrer。
+          type: string
+        source_url:
+          description: SourceURL 是访客进入会话时所在页面 URL。
+          type: string
+      type: object
     handlers.CreateAssistantVersionRequest:
       properties:
         description:
@@ -550,6 +562,15 @@ components:
           type: string
       required:
       - name
+      type: object
+    handlers.PublicAICCMessageRequest:
+      properties:
+        image_file_id:
+          description: ImageFileID 是已上传图片文件 ID，图片能力后续扩展时使用。
+          type: string
+        text:
+          description: Text 是访客文本消息。
+          type: string
       type: object
     handlers.PublicConfigResponse:
       properties:
@@ -1371,6 +1392,37 @@ components:
           type: string
         widget_token:
           description: WidgetToken 是嵌入组件 token；仅管理面返回。
+          type: string
+      type: object
+    service.AICCPublicConfigResult:
+      properties:
+        greeting:
+          type: string
+        name:
+          type: string
+        privacy_mode:
+          type: string
+        privacy_text:
+          type: string
+        retention_days:
+          type: integer
+      type: object
+    service.AICCPublicMessageResult:
+      properties:
+        message_id:
+          type: string
+        text:
+          type: string
+      type: object
+    service.AICCPublicSessionResult:
+      properties:
+        privacy_mode:
+          type: string
+        privacy_notice_shown:
+          type: boolean
+        privacy_text:
+          type: string
+        session_token:
           type: string
       type: object
     service.AppResult:
@@ -10606,6 +10658,176 @@ paths:
       summary: 各企业用量分布
       tags:
       - usage
+  /public/aicc/agents/{publicToken}/config:
+    get:
+      description: 访客端通过公开 token 加载智能体展示配置
+      parameters:
+      - description: 公开 token
+        in: path
+        name: publicToken
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AICCPublicConfigResult'
+                type: object
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      summary: AICC 公开配置
+      tags:
+      - public-aicc
+  /public/aicc/agents/{publicToken}/sessions:
+    post:
+      description: 访客端通过公开 token 创建会话并获得 session token
+      parameters:
+      - description: 公开 token
+        in: path
+        name: publicToken
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.CreateAICCSessionRequest'
+                description: 创建会话请求
+                summary: body
+        description: 创建会话请求
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AICCPublicSessionResult'
+                type: object
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      summary: 创建 AICC 公开会话
+      tags:
+      - public-aicc
+  /public/aicc/sessions/{sessionToken}/consent:
+    post:
+      description: 访客通过 session token 记录隐私同意时间
+      parameters:
+      - description: 会话 token
+        in: path
+        name: sessionToken
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      summary: 同意 AICC 隐私说明
+      tags:
+      - public-aicc
+  /public/aicc/sessions/{sessionToken}/messages:
+    post:
+      description: 访客通过 session token 发送消息，manager 转发隐藏 app runtime
+      parameters:
+      - description: 会话 token
+        in: path
+        name: sessionToken
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.PublicAICCMessageRequest'
+                description: 访客消息
+                summary: body
+        description: 访客消息
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AICCPublicMessageResult'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      summary: 发送 AICC 公开消息
+      tags:
+      - public-aicc
   /published-sites/{siteId}/disable:
     post:
       description: 将站点状态置为 disabled，并删除整站对象存储前缀；需 CanManageOrg 权限

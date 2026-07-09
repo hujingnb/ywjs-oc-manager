@@ -21,6 +21,18 @@ var ErrInvalidArgument = errors.New("请求参数不合法")
 // ErrQuotaExceeded 表示租户级数量或容量配额已用尽，handler 层映射为 409 Conflict。
 var ErrQuotaExceeded = errors.New("已达到配额上限")
 
+// ErrAICCConsentRequired 表示 AICC 公开会话要求访客先同意隐私说明。
+var ErrAICCConsentRequired = errors.New("aicc consent required")
+
+// ErrAICCLeadRequired 表示 AICC 公开会话存在未完成的必填留资字段。
+var ErrAICCLeadRequired = errors.New("aicc lead required")
+
+// ErrAICCOffline 表示公开访问的 AICC 智能体不存在、未启用或已下线。
+var ErrAICCOffline = errors.New("aicc offline")
+
+// ErrAICCInvalidSession 表示访客 session token 不存在或不可用。
+var ErrAICCInvalidSession = errors.New("aicc invalid session")
+
 // ErrInvalidResourceRange 表示资源趋势查询的时间范围或聚合粒度非法，handler 层应映射为 400。
 var ErrInvalidResourceRange = errors.New("资源查询范围不合法")
 

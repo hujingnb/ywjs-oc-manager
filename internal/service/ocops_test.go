@@ -111,6 +111,25 @@ func TestOcOpsResolverFromStoreRejectsAICCHiddenApp(t *testing.T) {
 	require.ErrorIs(t, locateErr, ErrNotFound)
 }
 
+// TestAICCOcOpsResolverFromStoreAllowsHiddenApp 覆盖 AICC 专用转发入口：
+// 公开客服运行时需要解析 hidden app 坐标，但该能力不得复用到普通 app 入口。
+func TestAICCOcOpsResolverFromStoreAllowsHiddenApp(t *testing.T) {
+	store := &fakeOcOpsAppStore{app: sqlc.App{
+		ID:              "app-hidden",
+		OrgID:           "org-1",
+		OwnerUserID:     "admin-1",
+		RuntimeImageRef: "registry/hermes:v1",
+		AiccHidden:      true,
+	}}
+	r := NewAICCOcOpsResolverFromStore(store, nil, "http://app-%s-ocops.oc-apps.svc:8080")
+
+	loc, err := r.Resolve(context.Background(), "app-hidden")
+
+	require.NoError(t, err)
+	assert.Equal(t, "org-1", loc.OrgID)
+	assert.Equal(t, "http://app-app-hidden-ocops.oc-apps.svc:8080", loc.Endpoint.BaseURL)
+}
+
 // TestOcOpsResolverFromStoreSupported 验证非 -dev 镜像解析为 Supported=true，
 // 且 BaseURL 按模板以 appID 拼装、归属信息正确透传。
 func TestOcOpsResolverFromStoreSupported(t *testing.T) {

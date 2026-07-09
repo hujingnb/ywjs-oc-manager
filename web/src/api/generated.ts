@@ -12155,6 +12155,287 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/public/aicc/agents/{publicToken}/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * AICC 公开配置
+         * @description 访客端通过公开 token 加载智能体展示配置
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 公开 token */
+                    publicToken: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.AICCPublicConfigResult"];
+                        };
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/public/aicc/agents/{publicToken}/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 创建 AICC 公开会话
+         * @description 访客端通过公开 token 创建会话并获得 session token
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 公开 token */
+                    publicToken: string;
+                };
+                cookie?: never;
+            };
+            /** @description 创建会话请求 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.CreateAICCSessionRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.AICCPublicSessionResult"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/public/aicc/sessions/{sessionToken}/consent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 同意 AICC 隐私说明
+         * @description 访客通过 session token 记录隐私同意时间
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 会话 token */
+                    sessionToken: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/public/aicc/sessions/{sessionToken}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 发送 AICC 公开消息
+         * @description 访客通过 session token 发送消息，manager 转发隐藏 app runtime
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 会话 token */
+                    sessionToken: string;
+                };
+                cookie?: never;
+            };
+            /** @description 访客消息 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.PublicAICCMessageRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.AICCPublicMessageResult"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/published-sites/{siteId}/disable": {
         parameters: {
             query?: never;
@@ -13632,6 +13913,14 @@ export interface components {
             /** @description Scenario 是智能体适用业务场景说明。 */
             scenario?: string;
         };
+        "handlers.CreateAICCSessionRequest": {
+            /** @description Channel 是公开入口渠道：web_link / web_widget。 */
+            channel?: string;
+            /** @description Referrer 是浏览器 referrer。 */
+            referrer?: string;
+            /** @description SourceURL 是访客进入会话时所在页面 URL。 */
+            source_url?: string;
+        };
         "handlers.CreateAssistantVersionRequest": {
             description?: string;
             image_id: string;
@@ -13873,6 +14162,12 @@ export interface components {
             name: string;
             /** @description Remark 是平台管理员维护的内部备注，可置空。 */
             remark?: string;
+        };
+        "handlers.PublicAICCMessageRequest": {
+            /** @description ImageFileID 是已上传图片文件 ID，图片能力后续扩展时使用。 */
+            image_file_id?: string;
+            /** @description Text 是访客文本消息。 */
+            text?: string;
         };
         "handlers.PublicConfigResponse": {
             /** @description DefaultLocale 是平台默认界面语言（en/zh），登录页 localStorage 为空时采用。 */
@@ -14385,6 +14680,23 @@ export interface components {
             updated_at?: string;
             /** @description WidgetToken 是嵌入组件 token；仅管理面返回。 */
             widget_token?: string;
+        };
+        "service.AICCPublicConfigResult": {
+            greeting?: string;
+            name?: string;
+            privacy_mode?: string;
+            privacy_text?: string;
+            retention_days?: number;
+        };
+        "service.AICCPublicMessageResult": {
+            message_id?: string;
+            text?: string;
+        };
+        "service.AICCPublicSessionResult": {
+            privacy_mode?: string;
+            privacy_notice_shown?: boolean;
+            privacy_text?: string;
+            session_token?: string;
         };
         "service.AppResult": {
             api_key_status?: string;

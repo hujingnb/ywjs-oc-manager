@@ -147,6 +147,36 @@ type UpdateAICCAgentRequest struct {
 	RetentionDays int32 `json:"retention_days"`
 }
 
+// CreateAICCSessionRequest 是访客创建公开会话的请求体。
+type CreateAICCSessionRequest struct {
+	// Channel 是公开入口渠道：web_link / web_widget。
+	Channel string `json:"channel"`
+	// SourceURL 是访客进入会话时所在页面 URL。
+	SourceURL string `json:"source_url"`
+	// Referrer 是浏览器 referrer。
+	Referrer string `json:"referrer"`
+}
+
+// PublicAICCMessageRequest 是访客发送消息的请求体。
+type PublicAICCMessageRequest struct {
+	// Text 是访客文本消息。
+	Text string `json:"text"`
+	// ImageFileID 是已上传图片文件 ID，图片能力后续扩展时使用。
+	ImageFileID string `json:"image_file_id"`
+}
+
+// SubmitAICCLeadValuesRequest 是访客提交留资字段的请求体。
+type SubmitAICCLeadValuesRequest struct {
+	// Values 是 field_key 到访客填写值的映射。
+	Values map[string]string `json:"values" binding:"required"`
+}
+
+// SubmitAICCFeedbackRequest 是访客反馈单条回答是否有帮助的请求体。
+type SubmitAICCFeedbackRequest struct {
+	// Helpful 表示该回答是否有帮助。
+	Helpful bool `json:"helpful"`
+}
+
 // ===== 成员 members =====
 
 // CreateMemberRequest 创建企业成员的请求体。
