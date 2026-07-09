@@ -174,7 +174,7 @@ type SubmitAICCLeadValuesRequest struct {
 // SubmitAICCFeedbackRequest 是访客反馈单条回答是否有帮助的请求体。
 type SubmitAICCFeedbackRequest struct {
 	// Helpful 表示该回答是否有帮助。
-	Helpful bool `json:"helpful"`
+	Helpful *bool `json:"helpful" binding:"required"`
 }
 
 // ===== 成员 members =====

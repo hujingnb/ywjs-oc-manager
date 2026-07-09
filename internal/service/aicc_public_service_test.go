@@ -37,6 +37,7 @@ func TestAICCPublicChatRequiresLeadFields(t *testing.T) {
 		org:                sqlc.Organization{ID: "org-1", AiccEnabled: true},
 		agent:              sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		session:            sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+		leadFields:         []sqlc.AiccLeadField{{ID: "field-phone", AgentID: "agent-1", Required: true, FieldKey: "phone", Label: "手机号"}},
 		requiredLeadFields: []sqlc.AiccLeadField{{ID: "field-phone", Required: true, FieldKey: "phone", Label: "手机号"}},
 	}
 	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
@@ -45,6 +46,46 @@ func TestAICCPublicChatRequiresLeadFields(t *testing.T) {
 	_, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "报价多少"})
 
 	require.ErrorIs(t, err, ErrAICCLeadRequired)
+}
+
+// TestAICCPublicSubmitLeadValuesCompletesRequiredFields 覆盖留资提交闭环：必填字段写入后 session 标记完成。
+func TestAICCPublicSubmitLeadValuesCompletesRequiredFields(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:        sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:      sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		session:    sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+		leadFields: []sqlc.AiccLeadField{{ID: "field-phone", AgentID: "agent-1", Required: true, FieldKey: "phone", Label: "手机号"}},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	result, err := svc.SubmitLeadValues(context.Background(), AICCPublicLeadValuesInput{
+		SessionToken: "tok",
+		Values:       map[string]string{"phone": " 13800000000 "},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, domain.AICCLeadStatusComplete, result.LeadStatus)
+	require.Len(t, store.leadValues, 1)
+	assert.Equal(t, "13800000000", store.leadValues[0].ValueText)
+	assert.Equal(t, domain.AICCLeadStatusComplete, store.session.LeadStatus)
+}
+
+// TestAICCPublicSubmitLeadValuesRejectsUnknownField 覆盖留资字段配置边界：未配置的 field_key 不能写入。
+func TestAICCPublicSubmitLeadValuesRejectsUnknownField(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:        sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:      sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		session:    sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+		leadFields: []sqlc.AiccLeadField{{ID: "field-phone", AgentID: "agent-1", Required: true, FieldKey: "phone", Label: "手机号"}},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	_, err := svc.SubmitLeadValues(context.Background(), AICCPublicLeadValuesInput{SessionToken: "tok", Values: map[string]string{"wechat": "abc"}})
+
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	assert.Empty(t, store.leadValues)
 }
 
 // TestAICCPublicChatStoresVisitorAndAssistantMessages 覆盖正常路径：访客消息转发 hermes 后保存问答镜像。
@@ -140,7 +181,7 @@ func TestAICCPublicCreateSessionCreatesExpiringSession(t *testing.T) {
 	assert.Equal(t, time.Date(2026, 8, 8, 10, 0, 0, 0, time.UTC), store.createdSession.ExpiresAt)
 }
 
-// TestAICCPublicConsentRejectsInvalidSession 覆盖隐私同意接口：无效或已过期 token 不能伪造成功响应。
+// TestAICCPublicConsentRejectsInvalidSession 覆盖隐私同意接口：无效 token 不能伪造成功响应。
 func TestAICCPublicConsentRejectsInvalidSession(t *testing.T) {
 	store := &fakeAICCPublicStore{
 		session: sqlc.AiccSession{ID: "session-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
@@ -172,13 +213,49 @@ func TestAICCPublicConfigStopsWhenOrgDisabled(t *testing.T) {
 	require.ErrorIs(t, err, ErrAICCOffline)
 }
 
+// TestAICCPublicSubmitFeedbackUpdatesResolution 覆盖反馈正常路径：助手回复可写入反馈并同步会话解决状态。
+func TestAICCPublicSubmitFeedbackUpdatesResolution(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive},
+		message: sqlc.AiccMessage{ID: "msg-1", SessionID: "session-1", AgentID: "agent-1", Direction: domain.AICCMessageDirectionAssistant},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+
+	result, err := svc.SubmitFeedback(context.Background(), AICCPublicFeedbackInput{MessageID: "msg-1", Helpful: false})
+
+	require.NoError(t, err)
+	assert.Equal(t, domain.AICCResolutionUnresolved, result.ResolutionStatus)
+	assert.False(t, store.feedback.Helpful)
+	assert.Equal(t, domain.AICCResolutionUnresolved, store.resolutionStatus)
+}
+
+// TestAICCPublicSubmitFeedbackRejectsVisitorMessage 覆盖反馈边界：访客消息或不存在消息不能被反馈。
+func TestAICCPublicSubmitFeedbackRejectsVisitorMessage(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive},
+		message: sqlc.AiccMessage{ID: "msg-1", SessionID: "session-1", AgentID: "agent-1", Direction: domain.AICCMessageDirectionVisitor},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+
+	_, err := svc.SubmitFeedback(context.Background(), AICCPublicFeedbackInput{MessageID: "msg-1", Helpful: true})
+
+	require.ErrorIs(t, err, ErrAICCInvalidMessage)
+}
+
 type fakeAICCPublicStore struct {
 	org                sqlc.Organization
 	agent              sqlc.AiccAgent
 	session            sqlc.AiccSession
+	message            sqlc.AiccMessage
+	leadFields         []sqlc.AiccLeadField
 	requiredLeadFields []sqlc.AiccLeadField
 	createdSession     sqlc.CreateAICCSessionParams
 	createdMessages    []sqlc.CreateAICCMessageParams
+	leadValues         []sqlc.UpsertAICCLeadValueParams
+	feedback           sqlc.UpsertAICCFeedbackParams
+	resolutionStatus   string
 }
 
 func (f *fakeAICCPublicStore) GetOrganization(_ context.Context, id string) (sqlc.Organization, error) {
@@ -238,8 +315,64 @@ func (f *fakeAICCPublicStore) CreateAICCMessage(_ context.Context, arg sqlc.Crea
 	return nil
 }
 
+func (f *fakeAICCPublicStore) ListAICCLeadFieldsByAgent(_ context.Context, agentID string) ([]sqlc.AiccLeadField, error) {
+	var fields []sqlc.AiccLeadField
+	for _, field := range f.leadFields {
+		if field.AgentID == agentID {
+			fields = append(fields, field)
+		}
+	}
+	return fields, nil
+}
+
+func (f *fakeAICCPublicStore) UpsertAICCLeadValue(_ context.Context, arg sqlc.UpsertAICCLeadValueParams) error {
+	for i, existing := range f.leadValues {
+		if existing.SessionID == arg.SessionID && existing.FieldID == arg.FieldID {
+			f.leadValues[i] = arg
+			return nil
+		}
+	}
+	f.leadValues = append(f.leadValues, arg)
+	return nil
+}
+
 func (f *fakeAICCPublicStore) ListRequiredAICCLeadFieldsMissing(_ context.Context, _ string) ([]sqlc.AiccLeadField, error) {
-	return f.requiredLeadFields, nil
+	if len(f.requiredLeadFields) > 0 {
+		return f.requiredLeadFields, nil
+	}
+	written := make(map[string]bool, len(f.leadValues))
+	for _, value := range f.leadValues {
+		written[value.FieldID] = true
+	}
+	var missing []sqlc.AiccLeadField
+	for _, field := range f.leadFields {
+		if field.Required && !written[field.ID] {
+			missing = append(missing, field)
+		}
+	}
+	return missing, nil
+}
+
+func (f *fakeAICCPublicStore) UpdateAICCSessionLeadStatus(_ context.Context, arg sqlc.UpdateAICCSessionLeadStatusParams) error {
+	f.session.LeadStatus = arg.LeadStatus
+	return nil
+}
+
+func (f *fakeAICCPublicStore) GetAICCAssistantMessageForFeedback(_ context.Context, id string) (sqlc.AiccMessage, error) {
+	if f.message.ID != id || f.message.Direction != domain.AICCMessageDirectionAssistant {
+		return sqlc.AiccMessage{}, sql.ErrNoRows
+	}
+	return f.message, nil
+}
+
+func (f *fakeAICCPublicStore) UpsertAICCFeedback(_ context.Context, arg sqlc.UpsertAICCFeedbackParams) error {
+	f.feedback = arg
+	return nil
+}
+
+func (f *fakeAICCPublicStore) UpdateAICCSessionResolutionStatus(_ context.Context, arg sqlc.UpdateAICCSessionResolutionStatusParams) error {
+	f.resolutionStatus = arg.ResolutionStatus
+	return nil
 }
 
 type fakeAICCHermesChat struct {

@@ -253,6 +253,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// 二者在此处才装配完成（appService 早于此构造），故用 setter 补注入。
 	appService.SetOcOps(ocopsClient, ocopsResolver)
 	aiccPublicService := service.NewAICCPublicService(dbStore.Queries, service.NewAICCPublicHermesChat(ocopsClient, aiccOcOpsResolver))
+	aiccPublicService.SetTxRunner(store.NewAICCPublicRunner(dbStore))
 
 	channelRegistry := channel.NewRegistry()
 	channelService := service.NewChannelService(dbStore.Queries, channelRegistry, redisQueue)

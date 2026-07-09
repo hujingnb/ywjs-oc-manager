@@ -22,6 +22,8 @@ type publicAICCService interface {
 	CreateSession(ctx context.Context, publicToken string, input service.AICCPublicSessionInput) (service.AICCPublicSessionResult, error)
 	Consent(ctx context.Context, sessionToken string) error
 	SendMessage(ctx context.Context, input service.AICCPublicMessageInput) (service.AICCPublicMessageResult, error)
+	SubmitLeadValues(ctx context.Context, input service.AICCPublicLeadValuesInput) (service.AICCPublicLeadValuesResult, error)
+	SubmitFeedback(ctx context.Context, input service.AICCPublicFeedbackInput) (service.AICCPublicFeedbackResult, error)
 }
 
 // NewPublicAICCHandler 创建公开 AICC handler。
@@ -158,34 +160,67 @@ func (h *PublicAICCHandler) UploadImage(c *gin.Context) {
 	apierror.JSON(c, http.StatusNotImplemented, "AICC_IMAGE_NOT_IMPLEMENTED", apierror.MsgBadRequestGeneric)
 }
 
-// SubmitLeadValues 暂保留路由契约，留资提交将在后续小任务接入。
+// SubmitLeadValues 提交留资字段。
 //
 // @Summary      提交 AICC 留资字段
-// @Description  留资写入能力后续接入，当前返回 501
+// @Description  访客提交当前会话的留资字段，字段 key 必须来自智能体配置
 // @Tags         public-aicc
 // @Accept       json
 // @Produce      json
 // @Param        sessionToken  path      string                       true  "会话 token"
 // @Param        body          body      SubmitAICCLeadValuesRequest  true  "留资字段"
-// @Failure      501           {object}  ErrorResponse
+// @Success      200           {object}  map[string]service.AICCPublicLeadValuesResult
+// @Failure      400           {object}  ErrorResponse
+// @Failure      401           {object}  ErrorResponse
+// @Failure      404           {object}  ErrorResponse
+// @Failure      500           {object}  ErrorResponse
 // @Router       /public/aicc/sessions/{sessionToken}/lead-values [post]
 func (h *PublicAICCHandler) SubmitLeadValues(c *gin.Context) {
-	apierror.JSON(c, http.StatusNotImplemented, "AICC_LEAD_VALUES_NOT_IMPLEMENTED", apierror.MsgBadRequestGeneric)
+	var req SubmitAICCLeadValuesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeBindError(c, err)
+		return
+	}
+	result, err := h.service.SubmitLeadValues(c.Request.Context(), service.AICCPublicLeadValuesInput{
+		SessionToken: c.Param("sessionToken"),
+		Values:       req.Values,
+	})
+	if err != nil {
+		writePublicAICCError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"lead": result})
 }
 
-// Feedback 暂保留路由契约，反馈写入将在后续小任务接入。
+// Feedback 提交单条助手回复反馈。
 //
 // @Summary      提交 AICC 回复反馈
-// @Description  反馈写入能力后续接入，当前返回 501
+// @Description  访客反馈助手回复是否有帮助，并同步会话解决状态
 // @Tags         public-aicc
 // @Accept       json
 // @Produce      json
 // @Param        messageId  path      string                     true  "消息 ID"
 // @Param        body       body      SubmitAICCFeedbackRequest  true  "反馈内容"
-// @Failure      501        {object}  ErrorResponse
+// @Success      200        {object}  map[string]service.AICCPublicFeedbackResult
+// @Failure      400        {object}  ErrorResponse
+// @Failure      404        {object}  ErrorResponse
+// @Failure      500        {object}  ErrorResponse
 // @Router       /public/aicc/messages/{messageId}/feedback [post]
 func (h *PublicAICCHandler) Feedback(c *gin.Context) {
-	apierror.JSON(c, http.StatusNotImplemented, "AICC_FEEDBACK_NOT_IMPLEMENTED", apierror.MsgBadRequestGeneric)
+	var req SubmitAICCFeedbackRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeBindError(c, err)
+		return
+	}
+	result, err := h.service.SubmitFeedback(c.Request.Context(), service.AICCPublicFeedbackInput{
+		MessageID: c.Param("messageId"),
+		Helpful:   *req.Helpful,
+	})
+	if err != nil {
+		writePublicAICCError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"feedback": result})
 }
 
 func writePublicAICCError(c *gin.Context, err error) {
@@ -198,6 +233,8 @@ func writePublicAICCError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, apierror.New("AICC_OFFLINE", "客服已下线"))
 	case errors.Is(err, service.ErrAICCInvalidSession):
 		c.JSON(http.StatusUnauthorized, apierror.New("AICC_INVALID_SESSION", "会话已失效"))
+	case errors.Is(err, service.ErrAICCInvalidMessage):
+		c.JSON(http.StatusNotFound, apierror.New("AICC_INVALID_MESSAGE", "消息不可反馈"))
 	case errors.Is(err, service.ErrInvalidArgument):
 		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", validationServiceMessage(err, service.ErrInvalidArgument)))
 	default:

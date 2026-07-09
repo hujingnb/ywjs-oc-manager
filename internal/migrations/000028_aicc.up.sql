@@ -226,6 +226,7 @@ CREATE TABLE aicc_lead_values (
         REFERENCES aicc_leads(id, org_id) ON DELETE SET NULL,
     CONSTRAINT fk_aicc_lead_values_field_agent FOREIGN KEY (field_id, agent_id)
         REFERENCES aicc_lead_fields(id, agent_id),
+    UNIQUE KEY uk_aicc_lead_values_session_field (session_id, field_id),
     KEY idx_aicc_lead_values_session_agent (session_id, agent_id),
     KEY idx_aicc_lead_values_session_org (session_id, org_id),
     KEY idx_aicc_lead_values_lead_org (lead_id, lead_org_id),

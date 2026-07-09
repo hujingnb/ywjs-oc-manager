@@ -218,6 +218,7 @@ func TestAICCMigrationGuardrails(t *testing.T) {
 	assert.Contains(t, up, "CONSTRAINT fk_aicc_lead_values_lead_org FOREIGN KEY (lead_id, lead_org_id)")
 	assert.Contains(t, up, "CONSTRAINT aicc_lead_values_lead_org_check CHECK")
 	assert.Contains(t, up, "CONSTRAINT fk_aicc_lead_values_field_agent FOREIGN KEY (field_id, agent_id)")
+	assert.Contains(t, up, "UNIQUE KEY uk_aicc_lead_values_session_field (session_id, field_id)")
 	assert.Contains(t, up, "KEY idx_aicc_lead_values_session_org (session_id, org_id)")
 	assert.Contains(t, up, "KEY idx_aicc_lead_values_session_agent (session_id, agent_id)")
 	assert.Contains(t, up, "KEY idx_aicc_lead_values_lead_org (lead_id, lead_org_id)")

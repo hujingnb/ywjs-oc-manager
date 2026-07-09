@@ -229,6 +229,35 @@ func (q *Queries) GetAICCAgentByPublicToken(ctx context.Context, publicToken str
 	return i, err
 }
 
+const getAICCAssistantMessageForFeedback = `-- name: GetAICCAssistantMessageForFeedback :one
+SELECT m.id, m.session_id, m.agent_id, m.direction, m.content_type, m.text_content, m.image_object_key, m.image_mime, m.image_size_bytes, m.hermes_message_id, m.is_fallback, m.is_refusal, m.error_summary, m.created_at
+FROM aicc_messages m
+JOIN aicc_sessions s ON s.id = m.session_id
+WHERE m.id = ? AND m.direction = 'assistant' AND s.expires_at > now()
+`
+
+func (q *Queries) GetAICCAssistantMessageForFeedback(ctx context.Context, id string) (AiccMessage, error) {
+	row := q.db.QueryRowContext(ctx, getAICCAssistantMessageForFeedback, id)
+	var i AiccMessage
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.AgentID,
+		&i.Direction,
+		&i.ContentType,
+		&i.TextContent,
+		&i.ImageObjectKey,
+		&i.ImageMime,
+		&i.ImageSizeBytes,
+		&i.HermesMessageID,
+		&i.IsFallback,
+		&i.IsRefusal,
+		&i.ErrorSummary,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getAICCSessionByToken = `-- name: GetAICCSessionByToken :one
 SELECT id, agent_id, org_id, session_token, channel, source_url, referrer, region, ip_hash, user_agent_hash, privacy_notice_shown, privacy_consented_at, resolution_status, lead_status, last_active_at, expires_at, created_at, updated_at
 FROM aicc_sessions
@@ -303,6 +332,47 @@ func (q *Queries) ListAICCAgentsByOrg(ctx context.Context, arg ListAICCAgentsByO
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAICCLeadFieldsByAgent = `-- name: ListAICCLeadFieldsByAgent :many
+SELECT id, agent_id, field_key, label, field_type, required, prompt_text, sort_order, created_at, updated_at
+FROM aicc_lead_fields
+WHERE agent_id = ?
+ORDER BY sort_order ASC, id ASC
+`
+
+func (q *Queries) ListAICCLeadFieldsByAgent(ctx context.Context, agentID string) ([]AiccLeadField, error) {
+	rows, err := q.db.QueryContext(ctx, listAICCLeadFieldsByAgent, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AiccLeadField{}
+	for rows.Next() {
+		var i AiccLeadField
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.FieldKey,
+			&i.Label,
+			&i.FieldType,
+			&i.Required,
+			&i.PromptText,
+			&i.SortOrder,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -529,6 +599,94 @@ func (q *Queries) UpdateAICCAgentProfile(ctx context.Context, arg UpdateAICCAgen
 		arg.ThemeJson,
 		arg.AllowedDomainsJson,
 		arg.ID,
+	)
+	return err
+}
+
+const updateAICCSessionLeadStatus = `-- name: UpdateAICCSessionLeadStatus :exec
+UPDATE aicc_sessions
+SET lead_status = ?, updated_at = now()
+WHERE id = ?
+`
+
+type UpdateAICCSessionLeadStatusParams struct {
+	LeadStatus string `db:"lead_status" json:"lead_status"`
+	ID         string `db:"id" json:"id"`
+}
+
+func (q *Queries) UpdateAICCSessionLeadStatus(ctx context.Context, arg UpdateAICCSessionLeadStatusParams) error {
+	_, err := q.db.ExecContext(ctx, updateAICCSessionLeadStatus, arg.LeadStatus, arg.ID)
+	return err
+}
+
+const updateAICCSessionResolutionStatus = `-- name: UpdateAICCSessionResolutionStatus :exec
+UPDATE aicc_sessions
+SET resolution_status = ?, updated_at = now()
+WHERE id = ?
+`
+
+type UpdateAICCSessionResolutionStatusParams struct {
+	ResolutionStatus string `db:"resolution_status" json:"resolution_status"`
+	ID               string `db:"id" json:"id"`
+}
+
+func (q *Queries) UpdateAICCSessionResolutionStatus(ctx context.Context, arg UpdateAICCSessionResolutionStatusParams) error {
+	_, err := q.db.ExecContext(ctx, updateAICCSessionResolutionStatus, arg.ResolutionStatus, arg.ID)
+	return err
+}
+
+const upsertAICCFeedback = `-- name: UpsertAICCFeedback :exec
+INSERT INTO aicc_feedback (id, session_id, message_id, helpful)
+VALUES (?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+    helpful = VALUES(helpful)
+`
+
+type UpsertAICCFeedbackParams struct {
+	ID        string `db:"id" json:"id"`
+	SessionID string `db:"session_id" json:"session_id"`
+	MessageID string `db:"message_id" json:"message_id"`
+	Helpful   bool   `db:"helpful" json:"helpful"`
+}
+
+func (q *Queries) UpsertAICCFeedback(ctx context.Context, arg UpsertAICCFeedbackParams) error {
+	_, err := q.db.ExecContext(ctx, upsertAICCFeedback,
+		arg.ID,
+		arg.SessionID,
+		arg.MessageID,
+		arg.Helpful,
+	)
+	return err
+}
+
+const upsertAICCLeadValue = `-- name: UpsertAICCLeadValue :exec
+INSERT INTO aicc_lead_values (
+    id, session_id, agent_id, org_id, field_id, value_text, value_hash
+) VALUES (?, ?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+    value_text = VALUES(value_text),
+    value_hash = VALUES(value_hash)
+`
+
+type UpsertAICCLeadValueParams struct {
+	ID        string      `db:"id" json:"id"`
+	SessionID string      `db:"session_id" json:"session_id"`
+	AgentID   string      `db:"agent_id" json:"agent_id"`
+	OrgID     string      `db:"org_id" json:"org_id"`
+	FieldID   string      `db:"field_id" json:"field_id"`
+	ValueText string      `db:"value_text" json:"value_text"`
+	ValueHash null.String `db:"value_hash" json:"value_hash"`
+}
+
+func (q *Queries) UpsertAICCLeadValue(ctx context.Context, arg UpsertAICCLeadValueParams) error {
+	_, err := q.db.ExecContext(ctx, upsertAICCLeadValue,
+		arg.ID,
+		arg.SessionID,
+		arg.AgentID,
+		arg.OrgID,
+		arg.FieldID,
+		arg.ValueText,
+		arg.ValueHash,
 	)
 	return err
 }

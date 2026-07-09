@@ -2,9 +2,12 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -30,8 +33,25 @@ type AICCPublicStore interface {
 	MarkAICCSessionConsented(ctx context.Context, sessionToken string) (int64, error)
 	// CreateAICCMessage 写入访客消息或助手回复镜像。
 	CreateAICCMessage(ctx context.Context, arg sqlc.CreateAICCMessageParams) error
+	// ListAICCLeadFieldsByAgent 读取智能体留资字段配置，用于访客提交值时校验 field_key。
+	ListAICCLeadFieldsByAgent(ctx context.Context, agentID string) ([]sqlc.AiccLeadField, error)
+	// UpsertAICCLeadValue 写入或覆盖会话内某个留资字段值。
+	UpsertAICCLeadValue(ctx context.Context, arg sqlc.UpsertAICCLeadValueParams) error
 	// ListRequiredAICCLeadFieldsMissing 查询当前会话尚未提交的必填留资字段。
 	ListRequiredAICCLeadFieldsMissing(ctx context.Context, sessionID string) ([]sqlc.AiccLeadField, error)
+	// UpdateAICCSessionLeadStatus 同步会话留资完成状态。
+	UpdateAICCSessionLeadStatus(ctx context.Context, arg sqlc.UpdateAICCSessionLeadStatusParams) error
+	// GetAICCAssistantMessageForFeedback 查询可反馈的未过期助手消息。
+	GetAICCAssistantMessageForFeedback(ctx context.Context, id string) (sqlc.AiccMessage, error)
+	// UpsertAICCFeedback 写入或覆盖单条助手消息反馈。
+	UpsertAICCFeedback(ctx context.Context, arg sqlc.UpsertAICCFeedbackParams) error
+	// UpdateAICCSessionResolutionStatus 根据反馈同步会话解决状态。
+	UpdateAICCSessionResolutionStatus(ctx context.Context, arg sqlc.UpdateAICCSessionResolutionStatusParams) error
+}
+
+// AICCPublicTxRunner 为公开留资提交提供事务边界，避免多字段写入与 session 状态半成功。
+type AICCPublicTxRunner interface {
+	WithAICCPublicTx(ctx context.Context, fn func(AICCPublicStore) error) error
 }
 
 // AICCHermesChat 抽象转发隐藏 app/hermes 的聊天能力。
@@ -79,9 +99,33 @@ type AICCPublicMessageResult struct {
 	Text      string `json:"text"`
 }
 
+// AICCPublicLeadValuesInput 是访客提交留资字段的入参。
+type AICCPublicLeadValuesInput struct {
+	SessionToken string
+	Values       map[string]string
+}
+
+// AICCPublicLeadValuesResult 描述留资提交后的会话留资状态。
+type AICCPublicLeadValuesResult struct {
+	LeadStatus          string   `json:"lead_status"`
+	MissingRequiredKeys []string `json:"missing_required_keys,omitempty"`
+}
+
+// AICCPublicFeedbackInput 是访客提交助手回复反馈的入参。
+type AICCPublicFeedbackInput struct {
+	MessageID string
+	Helpful   bool
+}
+
+// AICCPublicFeedbackResult 描述反馈提交后的会话解决状态。
+type AICCPublicFeedbackResult struct {
+	ResolutionStatus string `json:"resolution_status"`
+}
+
 // AICCPublicService 负责匿名访客侧 AICC 会话状态机。
 type AICCPublicService struct {
 	store AICCPublicStore
+	tx    AICCPublicTxRunner
 	chat  AICCHermesChat
 	now   func() time.Time
 }
@@ -90,6 +134,9 @@ type AICCPublicService struct {
 func NewAICCPublicService(store AICCPublicStore, chat AICCHermesChat) *AICCPublicService {
 	return &AICCPublicService{store: store, chat: chat, now: time.Now}
 }
+
+// SetTxRunner 注入公开 AICC 写操作事务 runner。
+func (s *AICCPublicService) SetTxRunner(tx AICCPublicTxRunner) { s.tx = tx }
 
 // PublicConfig 返回访客端可展示的公开智能体配置。
 func (s *AICCPublicService) PublicConfig(ctx context.Context, publicToken string) (AICCPublicConfigResult, error) {
@@ -168,14 +215,8 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 	if !session.ExpiresAt.After(s.now()) {
 		return AICCPublicMessageResult{}, ErrAICCInvalidSession
 	}
-	agent, err := s.store.GetAICCAgent(ctx, session.AgentID)
+	agent, err := s.activeAgentBySession(ctx, session)
 	if err != nil {
-		return AICCPublicMessageResult{}, ErrAICCOffline
-	}
-	if agent.Status != domain.AICCAgentStatusActive {
-		return AICCPublicMessageResult{}, ErrAICCOffline
-	}
-	if err := s.ensureAICCOrgEnabled(ctx, agent.OrgID); err != nil {
 		return AICCPublicMessageResult{}, err
 	}
 	if agent.PrivacyMode == domain.AICCPrivacyModeConsentRequired && !session.PrivacyConsentedAt.Valid {
@@ -224,6 +265,128 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 	return AICCPublicMessageResult{MessageID: replyID, Text: reply}, nil
 }
 
+// SubmitLeadValues 写入访客留资字段，并在必填字段齐全后同步会话 lead_status。
+func (s *AICCPublicService) SubmitLeadValues(ctx context.Context, input AICCPublicLeadValuesInput) (AICCPublicLeadValuesResult, error) {
+	if s.tx != nil {
+		var result AICCPublicLeadValuesResult
+		err := s.tx.WithAICCPublicTx(ctx, func(store AICCPublicStore) error {
+			next := *s
+			next.store = store
+			var runErr error
+			result, runErr = next.submitLeadValues(ctx, input)
+			return runErr
+		})
+		return result, err
+	}
+	return s.submitLeadValues(ctx, input)
+}
+
+func (s *AICCPublicService) submitLeadValues(ctx context.Context, input AICCPublicLeadValuesInput) (AICCPublicLeadValuesResult, error) {
+	session, err := s.store.GetAICCSessionByToken(ctx, strings.TrimSpace(input.SessionToken))
+	if err != nil {
+		return AICCPublicLeadValuesResult{}, ErrAICCInvalidSession
+	}
+	if !session.ExpiresAt.After(s.now()) {
+		return AICCPublicLeadValuesResult{}, ErrAICCInvalidSession
+	}
+	if _, err := s.activeAgentBySession(ctx, session); err != nil {
+		return AICCPublicLeadValuesResult{}, err
+	}
+	fields, err := s.store.ListAICCLeadFieldsByAgent(ctx, session.AgentID)
+	if err != nil {
+		return AICCPublicLeadValuesResult{}, fmt.Errorf("查询 AICC 留资字段失败: %w", err)
+	}
+	if len(input.Values) == 0 {
+		return AICCPublicLeadValuesResult{}, fmt.Errorf("%w: 留资字段不能为空", ErrInvalidArgument)
+	}
+	fieldsByKey := make(map[string]sqlc.AiccLeadField, len(fields))
+	for _, field := range fields {
+		fieldsByKey[field.FieldKey] = field
+	}
+	keys := make([]string, 0, len(input.Values))
+	for key := range input.Values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, rawKey := range keys {
+		key := strings.TrimSpace(rawKey)
+		if key == "" {
+			return AICCPublicLeadValuesResult{}, fmt.Errorf("%w: 留资字段 key 不能为空", ErrInvalidArgument)
+		}
+		field, ok := fieldsByKey[key]
+		if !ok {
+			return AICCPublicLeadValuesResult{}, fmt.Errorf("%w: 未配置的留资字段", ErrInvalidArgument)
+		}
+		value := strings.TrimSpace(input.Values[rawKey])
+		if value == "" {
+			return AICCPublicLeadValuesResult{}, fmt.Errorf("%w: 留资字段值不能为空", ErrInvalidArgument)
+		}
+		if err := s.store.UpsertAICCLeadValue(ctx, sqlc.UpsertAICCLeadValueParams{
+			ID:        newUUID(),
+			SessionID: session.ID,
+			AgentID:   session.AgentID,
+			OrgID:     session.OrgID,
+			FieldID:   field.ID,
+			ValueText: value,
+			ValueHash: nullStr(hashAICCLeadValue(value)),
+		}); err != nil {
+			return AICCPublicLeadValuesResult{}, fmt.Errorf("保存 AICC 留资字段失败: %w", err)
+		}
+	}
+	missing, err := s.store.ListRequiredAICCLeadFieldsMissing(ctx, session.ID)
+	if err != nil {
+		return AICCPublicLeadValuesResult{}, fmt.Errorf("查询 AICC 必填留资字段失败: %w", err)
+	}
+	status := domain.AICCLeadStatusPending
+	if len(missing) == 0 {
+		status = domain.AICCLeadStatusComplete
+	}
+	if err := s.store.UpdateAICCSessionLeadStatus(ctx, sqlc.UpdateAICCSessionLeadStatusParams{
+		ID:         session.ID,
+		LeadStatus: status,
+	}); err != nil {
+		return AICCPublicLeadValuesResult{}, fmt.Errorf("更新 AICC 留资状态失败: %w", err)
+	}
+	return AICCPublicLeadValuesResult{LeadStatus: status, MissingRequiredKeys: aiccLeadFieldKeys(missing)}, nil
+}
+
+// SubmitFeedback 写入助手回复反馈，并同步会话解决状态。
+func (s *AICCPublicService) SubmitFeedback(ctx context.Context, input AICCPublicFeedbackInput) (AICCPublicFeedbackResult, error) {
+	messageID := strings.TrimSpace(input.MessageID)
+	if messageID == "" {
+		return AICCPublicFeedbackResult{}, ErrAICCInvalidMessage
+	}
+	message, err := s.store.GetAICCAssistantMessageForFeedback(ctx, messageID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return AICCPublicFeedbackResult{}, ErrAICCInvalidMessage
+	}
+	if err != nil {
+		return AICCPublicFeedbackResult{}, fmt.Errorf("查询 AICC 反馈消息失败: %w", err)
+	}
+	if _, err := s.activeAgentByMessage(ctx, message); err != nil {
+		return AICCPublicFeedbackResult{}, err
+	}
+	if err := s.store.UpsertAICCFeedback(ctx, sqlc.UpsertAICCFeedbackParams{
+		ID:        newUUID(),
+		SessionID: message.SessionID,
+		MessageID: message.ID,
+		Helpful:   input.Helpful,
+	}); err != nil {
+		return AICCPublicFeedbackResult{}, fmt.Errorf("保存 AICC 回复反馈失败: %w", err)
+	}
+	status := domain.AICCResolutionUnresolved
+	if input.Helpful {
+		status = domain.AICCResolutionResolved
+	}
+	if err := s.store.UpdateAICCSessionResolutionStatus(ctx, sqlc.UpdateAICCSessionResolutionStatusParams{
+		ID:               message.SessionID,
+		ResolutionStatus: status,
+	}); err != nil {
+		return AICCPublicFeedbackResult{}, fmt.Errorf("更新 AICC 会话解决状态失败: %w", err)
+	}
+	return AICCPublicFeedbackResult{ResolutionStatus: status}, nil
+}
+
 func (s *AICCPublicService) activeAgentByPublicToken(ctx context.Context, publicToken string) (sqlc.AiccAgent, error) {
 	token := strings.TrimSpace(publicToken)
 	if token == "" {
@@ -235,6 +398,34 @@ func (s *AICCPublicService) activeAgentByPublicToken(ctx context.Context, public
 	}
 	if err != nil {
 		return sqlc.AiccAgent{}, fmt.Errorf("查询 AICC 公开智能体失败: %w", err)
+	}
+	if agent.Status != domain.AICCAgentStatusActive {
+		return sqlc.AiccAgent{}, ErrAICCOffline
+	}
+	if err := s.ensureAICCOrgEnabled(ctx, agent.OrgID); err != nil {
+		return sqlc.AiccAgent{}, err
+	}
+	return agent, nil
+}
+
+func (s *AICCPublicService) activeAgentBySession(ctx context.Context, session sqlc.AiccSession) (sqlc.AiccAgent, error) {
+	agent, err := s.store.GetAICCAgent(ctx, session.AgentID)
+	if err != nil {
+		return sqlc.AiccAgent{}, ErrAICCOffline
+	}
+	if agent.Status != domain.AICCAgentStatusActive {
+		return sqlc.AiccAgent{}, ErrAICCOffline
+	}
+	if err := s.ensureAICCOrgEnabled(ctx, agent.OrgID); err != nil {
+		return sqlc.AiccAgent{}, err
+	}
+	return agent, nil
+}
+
+func (s *AICCPublicService) activeAgentByMessage(ctx context.Context, message sqlc.AiccMessage) (sqlc.AiccAgent, error) {
+	agent, err := s.store.GetAICCAgent(ctx, message.AgentID)
+	if err != nil {
+		return sqlc.AiccAgent{}, ErrAICCInvalidMessage
 	}
 	if agent.Status != domain.AICCAgentStatusActive {
 		return sqlc.AiccAgent{}, ErrAICCOffline
@@ -257,6 +448,22 @@ func (s *AICCPublicService) ensureAICCOrgEnabled(ctx context.Context, orgID stri
 		return ErrAICCOffline
 	}
 	return nil
+}
+
+func hashAICCLeadValue(value string) string {
+	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(value))))
+	return hex.EncodeToString(sum[:])
+}
+
+func aiccLeadFieldKeys(fields []sqlc.AiccLeadField) []string {
+	if len(fields) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(fields))
+	for _, field := range fields {
+		keys = append(keys, field.FieldKey)
+	}
+	return keys
 }
 
 func normalizeAICCChannel(channel string) string {

@@ -12304,7 +12304,7 @@ export interface paths {
         put?: never;
         /**
          * 提交 AICC 回复反馈
-         * @description 反馈写入能力后续接入，当前返回 501
+         * @description 访客反馈助手回复是否有帮助，并同步会话解决状态
          */
         post: {
             parameters: {
@@ -12323,8 +12323,37 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Not Implemented */
-                501: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.AICCPublicFeedbackResult"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -12451,7 +12480,7 @@ export interface paths {
         put?: never;
         /**
          * 提交 AICC 留资字段
-         * @description 留资写入能力后续接入，当前返回 501
+         * @description 访客提交当前会话的留资字段，字段 key 必须来自智能体配置
          */
         post: {
             parameters: {
@@ -12470,8 +12499,46 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Not Implemented */
-                501: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.AICCPublicLeadValuesResult"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -14351,7 +14418,7 @@ export interface components {
         };
         "handlers.SubmitAICCFeedbackRequest": {
             /** @description Helpful 表示该回答是否有帮助。 */
-            helpful?: boolean;
+            helpful: boolean;
         };
         "handlers.SubmitAICCLeadValuesRequest": {
             /** @description Values 是 field_key 到访客填写值的映射。 */
@@ -14833,6 +14900,13 @@ export interface components {
             privacy_mode?: string;
             privacy_text?: string;
             retention_days?: number;
+        };
+        "service.AICCPublicFeedbackResult": {
+            resolution_status?: string;
+        };
+        "service.AICCPublicLeadValuesResult": {
+            lead_status?: string;
+            missing_required_keys?: string[];
         };
         "service.AICCPublicMessageResult": {
             message_id?: string;

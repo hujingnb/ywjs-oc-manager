@@ -73,6 +73,20 @@ FROM aicc_messages
 WHERE session_id = ?
 ORDER BY created_at ASC, id ASC;
 
+-- name: ListAICCLeadFieldsByAgent :many
+SELECT *
+FROM aicc_lead_fields
+WHERE agent_id = ?
+ORDER BY sort_order ASC, id ASC;
+
+-- name: UpsertAICCLeadValue :exec
+INSERT INTO aicc_lead_values (
+    id, session_id, agent_id, org_id, field_id, value_text, value_hash
+) VALUES (?, ?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+    value_text = VALUES(value_text),
+    value_hash = VALUES(value_hash);
+
 -- name: ListRequiredAICCLeadFieldsMissing :many
 SELECT f.*
 FROM aicc_lead_fields f
@@ -80,6 +94,28 @@ JOIN aicc_sessions s ON s.agent_id = f.agent_id
 LEFT JOIN aicc_lead_values v ON v.session_id = s.id AND v.field_id = f.id
 WHERE s.id = ? AND f.required = TRUE AND v.id IS NULL
 ORDER BY f.sort_order ASC, f.id ASC;
+
+-- name: UpdateAICCSessionLeadStatus :exec
+UPDATE aicc_sessions
+SET lead_status = ?, updated_at = now()
+WHERE id = ?;
+
+-- name: GetAICCAssistantMessageForFeedback :one
+SELECT m.*
+FROM aicc_messages m
+JOIN aicc_sessions s ON s.id = m.session_id
+WHERE m.id = ? AND m.direction = 'assistant' AND s.expires_at > now();
+
+-- name: UpsertAICCFeedback :exec
+INSERT INTO aicc_feedback (id, session_id, message_id, helpful)
+VALUES (?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+    helpful = VALUES(helpful);
+
+-- name: UpdateAICCSessionResolutionStatus :exec
+UPDATE aicc_sessions
+SET resolution_status = ?, updated_at = now()
+WHERE id = ?;
 
 -- name: ListExpiredAICCSessions :many
 SELECT *

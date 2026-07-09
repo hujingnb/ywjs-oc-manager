@@ -99,6 +99,7 @@ type Querier interface {
 	DeleteRAGFlowDocumentMapping(ctx context.Context, id string) error
 	GetAICCAgent(ctx context.Context, id string) (AiccAgent, error)
 	GetAICCAgentByPublicToken(ctx context.Context, publicToken string) (AiccAgent, error)
+	GetAICCAssistantMessageForFeedback(ctx context.Context, id string) (AiccMessage, error)
 	GetAICCSessionByToken(ctx context.Context, sessionToken string) (AiccSession, error)
 	GetActiveAppByOwner(ctx context.Context, ownerUserID string) (App, error)
 	GetApp(ctx context.Context, id string) (App, error)
@@ -165,6 +166,7 @@ type Querier interface {
 	// 正常生命周期不可见此查询；普通"删除"必须走 SoftDeleteOrganization。
 	HardDeleteOrganization(ctx context.Context, id string) error
 	ListAICCAgentsByOrg(ctx context.Context, arg ListAICCAgentsByOrgParams) ([]AiccAgent, error)
+	ListAICCLeadFieldsByAgent(ctx context.Context, agentID string) ([]AiccLeadField, error)
 	ListAICCMessagesBySession(ctx context.Context, sessionID string) ([]AiccMessage, error)
 	ListActiveSites(ctx context.Context) ([]ListActiveSitesRow, error)
 	// 全量返回活跃组织（deleted_at IS NULL），不分页；
@@ -360,6 +362,8 @@ type Querier interface {
 	TouchApp(ctx context.Context, id string) error
 	TouchSkillTicket(ctx context.Context, id string) error
 	UpdateAICCAgentProfile(ctx context.Context, arg UpdateAICCAgentProfileParams) error
+	UpdateAICCSessionLeadStatus(ctx context.Context, arg UpdateAICCSessionLeadStatusParams) error
+	UpdateAICCSessionResolutionStatus(ctx context.Context, arg UpdateAICCSessionResolutionStatusParams) error
 	// 更新实例语言偏好（hermes 对终端用户说话的语言）。locale 由 service 层校验合法取值后传入。
 	UpdateAppLocale(ctx context.Context, arg UpdateAppLocaleParams) error
 	// phasePullRuntimeImage 成功后写入镜像引用与 sha256。
@@ -381,6 +385,8 @@ type Querier interface {
 	UpdateUserLocale(ctx context.Context, arg UpdateUserLocaleParams) error
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) error
+	UpsertAICCFeedback(ctx context.Context, arg UpsertAICCFeedbackParams) error
+	UpsertAICCLeadValue(ctx context.Context, arg UpsertAICCLeadValueParams) error
 	// 飞书无预建绑定行，BeginAuth 时 create-on-demand（已存在则忽略）。
 	// app_active_key 是 VIRTUAL 生成列（非 deleted 行 = app_id），不能显式赋值，
 	// ON DUPLICATE KEY 命中唯一约束 (app_active_key, channel_type) 时做 no-op。

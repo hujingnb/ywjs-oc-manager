@@ -33,6 +33,9 @@ var ErrAICCOffline = errors.New("aicc offline")
 // ErrAICCInvalidSession 表示访客 session token 不存在或不可用。
 var ErrAICCInvalidSession = errors.New("aicc invalid session")
 
+// ErrAICCInvalidMessage 表示访客反馈引用的消息不存在、不可用或不是助手回复。
+var ErrAICCInvalidMessage = errors.New("aicc invalid message")
+
 // ErrInvalidResourceRange 表示资源趋势查询的时间范围或聚合粒度非法，handler 层应映射为 400。
 var ErrInvalidResourceRange = errors.New("资源查询范围不合法")
 

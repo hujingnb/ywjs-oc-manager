@@ -655,6 +655,8 @@ components:
         helpful:
           description: Helpful 表示该回答是否有帮助。
           type: boolean
+      required:
+      - helpful
       type: object
     handlers.SubmitAICCLeadValuesRequest:
       properties:
@@ -1422,6 +1424,21 @@ components:
           type: string
         retention_days:
           type: integer
+      type: object
+    service.AICCPublicFeedbackResult:
+      properties:
+        resolution_status:
+          type: string
+      type: object
+    service.AICCPublicLeadValuesResult:
+      properties:
+        lead_status:
+          type: string
+        missing_required_keys:
+          items:
+            type: string
+          type: array
+          uniqueItems: false
       type: object
     service.AICCPublicMessageResult:
       properties:
@@ -10761,7 +10778,7 @@ paths:
       - public-aicc
   /public/aicc/messages/{messageId}/feedback:
     post:
-      description: 反馈写入能力后续接入，当前返回 501
+      description: 访客反馈助手回复是否有帮助，并同步会话解决状态
       parameters:
       - description: 消息 ID
         in: path
@@ -10781,12 +10798,32 @@ paths:
         description: 反馈内容
         required: true
       responses:
-        "501":
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AICCPublicFeedbackResult'
+                type: object
+          description: OK
+        "400":
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Not Implemented
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
       summary: 提交 AICC 回复反馈
       tags:
       - public-aicc
@@ -10840,7 +10877,7 @@ paths:
       - public-aicc
   /public/aicc/sessions/{sessionToken}/lead-values:
     post:
-      description: 留资写入能力后续接入，当前返回 501
+      description: 访客提交当前会话的留资字段，字段 key 必须来自智能体配置
       parameters:
       - description: 会话 token
         in: path
@@ -10860,12 +10897,38 @@ paths:
         description: 留资字段
         required: true
       responses:
-        "501":
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AICCPublicLeadValuesResult'
+                type: object
+          description: OK
+        "400":
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Not Implemented
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
       summary: 提交 AICC 留资字段
       tags:
       - public-aicc

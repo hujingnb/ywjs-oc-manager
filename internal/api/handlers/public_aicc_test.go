@@ -15,17 +15,23 @@ import (
 )
 
 type publicAICCServiceStub struct {
-	configResult  service.AICCPublicConfigResult
-	configErr     error
-	sessionResult service.AICCPublicSessionResult
-	sessionErr    error
-	messageResult service.AICCPublicMessageResult
-	messageErr    error
-	consentErr    error
+	configResult   service.AICCPublicConfigResult
+	configErr      error
+	sessionResult  service.AICCPublicSessionResult
+	sessionErr     error
+	messageResult  service.AICCPublicMessageResult
+	messageErr     error
+	leadResult     service.AICCPublicLeadValuesResult
+	leadErr        error
+	feedbackResult service.AICCPublicFeedbackResult
+	feedbackErr    error
+	consentErr     error
 
-	lastPublicToken string
-	lastSessionToken string
-	lastMessageInput service.AICCPublicMessageInput
+	lastPublicToken   string
+	lastSessionToken  string
+	lastMessageInput  service.AICCPublicMessageInput
+	lastLeadInput     service.AICCPublicLeadValuesInput
+	lastFeedbackInput service.AICCPublicFeedbackInput
 }
 
 func (s *publicAICCServiceStub) PublicConfig(_ context.Context, publicToken string) (service.AICCPublicConfigResult, error) {
@@ -46,6 +52,16 @@ func (s *publicAICCServiceStub) Consent(_ context.Context, sessionToken string) 
 func (s *publicAICCServiceStub) SendMessage(_ context.Context, input service.AICCPublicMessageInput) (service.AICCPublicMessageResult, error) {
 	s.lastMessageInput = input
 	return s.messageResult, s.messageErr
+}
+
+func (s *publicAICCServiceStub) SubmitLeadValues(_ context.Context, input service.AICCPublicLeadValuesInput) (service.AICCPublicLeadValuesResult, error) {
+	s.lastLeadInput = input
+	return s.leadResult, s.leadErr
+}
+
+func (s *publicAICCServiceStub) SubmitFeedback(_ context.Context, input service.AICCPublicFeedbackInput) (service.AICCPublicFeedbackResult, error) {
+	s.lastFeedbackInput = input
+	return s.feedbackResult, s.feedbackErr
 }
 
 func newPublicAICCTestRouter(t *testing.T, svc publicAICCService) *gin.Engine {
@@ -72,6 +88,50 @@ func TestPublicAICCHandlerSendMessage(t *testing.T) {
 	assert.Equal(t, "你好", svc.lastMessageInput.Text)
 }
 
+// TestPublicAICCHandlerSubmitLeadValues 覆盖公开留资入口：session token 来自路径，字段值来自请求体。
+func TestPublicAICCHandlerSubmitLeadValues(t *testing.T) {
+	svc := &publicAICCServiceStub{leadResult: service.AICCPublicLeadValuesResult{LeadStatus: "complete"}}
+	router := newPublicAICCTestRouter(t, svc)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/sessions/sess-1/lead-values", bytes.NewBufferString(`{"values":{"phone":"13800000000"}}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "complete")
+	assert.Equal(t, "sess-1", svc.lastLeadInput.SessionToken)
+	assert.Equal(t, "13800000000", svc.lastLeadInput.Values["phone"])
+}
+
+// TestPublicAICCHandlerSubmitFeedback 覆盖公开反馈入口：message id 来自路径，helpful 来自请求体。
+func TestPublicAICCHandlerSubmitFeedback(t *testing.T) {
+	svc := &publicAICCServiceStub{feedbackResult: service.AICCPublicFeedbackResult{ResolutionStatus: "resolved"}}
+	router := newPublicAICCTestRouter(t, svc)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/messages/msg-1/feedback", bytes.NewBufferString(`{"helpful":true}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "resolved")
+	assert.Equal(t, "msg-1", svc.lastFeedbackInput.MessageID)
+	assert.True(t, svc.lastFeedbackInput.Helpful)
+}
+
+// TestPublicAICCHandlerSubmitFeedbackRequiresHelpful 覆盖反馈入口：缺少 helpful 时不能默认为没帮助。
+func TestPublicAICCHandlerSubmitFeedbackRequiresHelpful(t *testing.T) {
+	router := newPublicAICCTestRouter(t, &publicAICCServiceStub{})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/messages/msg-1/feedback", bytes.NewBufferString(`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+}
+
 // TestPublicAICCHandlerMapsConversationGates 覆盖公开访客消息入口的隐私同意和留资阻断错误映射。
 func TestPublicAICCHandlerMapsConversationGates(t *testing.T) {
 	cases := []struct {
@@ -80,7 +140,7 @@ func TestPublicAICCHandlerMapsConversationGates(t *testing.T) {
 		code string
 	}{
 		{name: "未同意隐私说明返回稳定 code", err: service.ErrAICCConsentRequired, code: "AICC_CONSENT_REQUIRED"}, // 场景：consent_required 模式未同意。
-		{name: "缺少必填留资返回稳定 code", err: service.ErrAICCLeadRequired, code: "AICC_LEAD_REQUIRED"},       // 场景：必填字段未完成。
+		{name: "缺少必填留资返回稳定 code", err: service.ErrAICCLeadRequired, code: "AICC_LEAD_REQUIRED"},        // 场景：必填字段未完成。
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -95,6 +155,19 @@ func TestPublicAICCHandlerMapsConversationGates(t *testing.T) {
 			assert.Contains(t, recorder.Body.String(), tc.code)
 		})
 	}
+}
+
+// TestPublicAICCHandlerMapsInvalidMessage 覆盖反馈入口：不可反馈消息返回稳定 code。
+func TestPublicAICCHandlerMapsInvalidMessage(t *testing.T) {
+	router := newPublicAICCTestRouter(t, &publicAICCServiceStub{feedbackErr: service.ErrAICCInvalidMessage})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/messages/msg-1/feedback", bytes.NewBufferString(`{"helpful":false}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusNotFound, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "AICC_INVALID_MESSAGE")
 }
 
 // TestPublicAICCHandlerCreateSession 覆盖公开创建会话入口：公开 token 来自路径，返回 session token。
