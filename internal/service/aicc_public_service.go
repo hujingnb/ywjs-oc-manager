@@ -353,6 +353,7 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 	if runtimeText == "" && imageID != "" {
 		runtimeText = "[访客发送了一张图片]"
 	}
+	runtimeText = buildAICCRuntimePrompt(agent, runtimeText)
 	reply, err := s.chat.ChatAICC(ctx, agent.AppID, session.ID, runtimeText)
 	if err != nil {
 		return AICCPublicMessageResult{}, fmt.Errorf("转发 AICC 消息失败: %w", err)
@@ -369,6 +370,22 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 		return AICCPublicMessageResult{}, fmt.Errorf("保存 AICC 助手回复失败: %w", err)
 	}
 	return AICCPublicMessageResult{MessageID: replyID, Text: reply}, nil
+}
+
+func buildAICCRuntimePrompt(agent sqlc.AiccAgent, visitorText string) string {
+	lines := []string{
+		"你是 AICC（AI Contact Center）在线客服智能体，只能以企业客服身份回答访客问题。",
+		"必须优先使用当前智能体已配置的知识库和企业提供的信息；缺少依据时不要编造。",
+		"问题超出业务场景、回答边界或需要人工审批时，应明确说明暂时无法确认，并建议访客联系人工客服。",
+	}
+	if scenario := strings.TrimSpace(strOrEmpty(agent.Scenario)); scenario != "" {
+		lines = append(lines, "业务场景："+scenario)
+	}
+	if boundary := strings.TrimSpace(strOrEmpty(agent.AnswerBoundary)); boundary != "" {
+		lines = append(lines, "回答边界："+boundary)
+	}
+	lines = append(lines, "访客问题：", strings.TrimSpace(visitorText))
+	return strings.Join(lines, "\n")
 }
 
 // UploadImage 校验并保存公开访客图片，返回发送消息时可引用的 image_file_id。

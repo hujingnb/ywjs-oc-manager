@@ -101,7 +101,7 @@ func TestAICCPublicSubmitLeadValuesRejectsUnknownField(t *testing.T) {
 func TestAICCPublicChatStoresVisitorAndAssistantMessages(t *testing.T) {
 	store := &fakeAICCPublicStore{
 		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
-		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice, Scenario: null.StringFrom("官网售前咨询"), AnswerBoundary: null.StringFrom("不承诺最终成交价格")},
 		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 	}
 	chat := &fakeAICCHermesChat{reply: "您好，这是报价说明。"}
@@ -113,8 +113,12 @@ func TestAICCPublicChatStoresVisitorAndAssistantMessages(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "您好，这是报价说明。", result.Text)
 	assert.Equal(t, 2, len(store.createdMessages))
+	assert.Equal(t, "报价多少", store.createdMessages[0].TextContent.String)
 	assert.Equal(t, "app-1", chat.appID)
-	assert.Equal(t, "报价多少", chat.text)
+	assert.Contains(t, chat.text, "AICC（AI Contact Center）在线客服智能体")
+	assert.Contains(t, chat.text, "官网售前咨询")
+	assert.Contains(t, chat.text, "不承诺最终成交价格")
+	assert.Contains(t, chat.text, "访客问题：\n报价多少")
 }
 
 // TestAICCPublicChatStoresImageMessage 覆盖图片消息路径：已上传图片可作为访客消息镜像保存。
@@ -136,7 +140,7 @@ func TestAICCPublicChatStoresImageMessage(t *testing.T) {
 	require.Len(t, store.createdMessages, 2)
 	assert.Equal(t, domain.AICCMessageContentTypeImage, store.createdMessages[0].ContentType)
 	assert.Equal(t, "apps/app-1/aicc/session-1/image-1/a.png", store.createdMessages[0].ImageObjectKey.String)
-	assert.Equal(t, "[访客发送了一张图片]", chat.text)
+	assert.Contains(t, chat.text, "访客问题：\n[访客发送了一张图片]")
 }
 
 // TestAICCPublicUploadImageStoresObject 覆盖图片上传正常路径：校验后写对象存储并落图片记录。
