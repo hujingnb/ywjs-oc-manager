@@ -14,6 +14,25 @@
           <p>{{ card.subtitle }}</p>
         </RouterLink>
       </div>
+
+      <section v-if="subsystemCards.length" class="subsystem-section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">{{ t('dashboard.subsystems.eyebrow') }}</p>
+            <h3>{{ t('dashboard.subsystems.title') }}</h3>
+          </div>
+        </div>
+        <div class="subsystem-grid">
+          <RouterLink v-for="card in subsystemCards" :key="card.path" class="subsystem-card" :to="card.path">
+            <span class="subsystem-mark">AI</span>
+            <span>
+              <strong>{{ card.title }}</strong>
+              <small>{{ card.subtitle }}</small>
+            </span>
+            <em>{{ card.action }}</em>
+          </RouterLink>
+        </div>
+      </section>
     </section>
   </main>
 </template>
@@ -24,6 +43,7 @@ import { RouterLink, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
 import { useAuthStore } from '@/stores/auth'
+import { useOrganizationQuery } from '@/api/hooks/useOrganizations'
 import { useMemberApp } from '@/composables/useMemberApp'
 
 // RoleAwareHome 根据当前角色展示首屏快捷入口，避免不同角色看到无权限入口。
@@ -38,6 +58,11 @@ const memberHomePath = computed(() =>
   memberHasApp.value && memberAppId.value ? `/apps/${memberAppId.value}/overview` : '/apps/empty',
 )
 
+// ownOrgId 仅在企业管理员概览页查询当前企业，平台管理员和成员仍走原有自动分流。
+const ownOrgId = computed(() => auth.user?.role === 'org_admin' ? auth.user.org_id ?? undefined : undefined)
+const { data: ownOrganization } = useOrganizationQuery(ownOrgId)
+const aiccEnabledForOrg = computed(() => Boolean(ownOrganization.value?.aicc_enabled))
+
 // 首页只承担按角色分流的职责；成员实例查询未完成前不跳转，避免误落到空状态。
 watch(
   () => ({
@@ -48,8 +73,6 @@ watch(
   ({ role, memberLoading, memberPath }) => {
     if (role === 'platform_admin') {
       void router.replace('/console')
-    } else if (role === 'org_admin') {
-      void router.replace('/org-console')
     } else if (role === 'org_member' && !memberLoading) {
       void router.replace(memberPath)
     }
@@ -78,6 +101,9 @@ const greeting = computed(() =>
 
 // QuickCard 描述一个首页快捷入口，path 必须对应路由表中的后台路径。
 interface QuickCard { path: string; title: string; subtitle: string }
+
+// SubsystemCard 描述企业已开通的独立子系统入口，避免未开通能力在概览页曝光。
+interface SubsystemCard { path: string; title: string; subtitle: string; action: string }
 
 // cards 按角色返回可访问的核心工作流入口；权限兜底仍由路由和接口控制。
 // 使用 computed 确保语言切换时文案响应式刷新。
@@ -108,6 +134,17 @@ const cards = computed<QuickCard[]>(() => {
     ]
   }
   return []
+})
+
+// subsystemCards 只面向企业管理员开放；企业能力开关由组织详情实时决定。
+const subsystemCards = computed<SubsystemCard[]>(() => {
+  if (auth.user?.role !== 'org_admin' || !aiccEnabledForOrg.value) return []
+  return [{
+    path: '/aicc-console',
+    title: t('dashboard.subsystems.aicc.title'),
+    subtitle: t('dashboard.subsystems.aicc.subtitle'),
+    action: t('dashboard.subsystems.aicc.action'),
+  }]
 })
 </script>
 
@@ -145,5 +182,77 @@ const cards = computed<QuickCard[]>(() => {
   margin: 0;
   color: var(--color-text-secondary);
   font-size: 13px;
+}
+
+.subsystem-section {
+  margin-top: 28px;
+}
+
+.section-heading h3 {
+  margin: 2px 0 0;
+  font-size: 18px;
+}
+
+.subsystem-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.subsystem-card {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  text-decoration: none;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+
+.subsystem-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--color-brand);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+.subsystem-mark {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--color-brand-soft);
+  color: var(--color-brand);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.subsystem-card strong,
+.subsystem-card small {
+  display: block;
+}
+
+.subsystem-card strong {
+  font-size: 15px;
+}
+
+.subsystem-card small {
+  margin-top: 4px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.subsystem-card em {
+  color: var(--color-brand);
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 600;
+  white-space: nowrap;
 }
 </style>

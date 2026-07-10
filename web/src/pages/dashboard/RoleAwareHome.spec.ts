@@ -18,6 +18,19 @@ const memberAppState = vi.hoisted(() => {
     isLoading: ref(false),
   }
 })
+const organizationState = vi.hoisted(() => {
+  const { ref } = require('vue') as typeof import('vue')
+
+  return {
+    data: ref({
+      id: 'org-1',
+      name: '测试企业',
+      status: 'enabled',
+      code: 'test-org',
+      aicc_enabled: true,
+    }),
+  }
+})
 
 vi.mock('vue-router', () => ({
   RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' },
@@ -30,6 +43,10 @@ vi.mock('@/stores/auth', () => ({
 
 vi.mock('@/composables/useMemberApp', () => ({
   useMemberApp: () => memberAppState,
+}))
+
+vi.mock('@/api/hooks/useOrganizations', () => ({
+  useOrganizationQuery: () => organizationState,
 }))
 
 const mountedWrappers: { unmount: () => void }[] = []
@@ -50,6 +67,13 @@ describe('RoleAwareHome', () => {
     memberAppState.appId.value = 'app-1'
     memberAppState.hasApp.value = true
     memberAppState.isLoading.value = false
+    organizationState.data.value = {
+      id: 'org-1',
+      name: '测试企业',
+      status: 'enabled',
+      code: 'test-org',
+      aicc_enabled: true,
+    }
   })
 
   afterEach(() => {
@@ -98,5 +122,42 @@ describe('RoleAwareHome', () => {
 
     expect(wrapper.text()).toContain('企业知识库')
     expect(wrapper.text()).not.toContain('知识库上传共享文件')
+  })
+
+  // 覆盖企业管理员默认落点：org_admin 不再被首页自动替换到 /org-console，而是在概览页看到子系统入口。
+  it('keeps org_admin on enterprise overview and shows enabled AICC subsystem card', async () => {
+    authState.user = { id: 'owner-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' }
+    organizationState.data.value = {
+      id: 'org-1',
+      name: '测试企业',
+      status: 'enabled',
+      code: 'test-org',
+      aicc_enabled: true,
+    }
+
+    const wrapper = mountHome()
+    await nextTick()
+
+    expect(routerReplace).not.toHaveBeenCalledWith('/org-console')
+    expect(wrapper.text()).toContain('子系统入口')
+    expect(wrapper.text()).toContain('AICC 客服')
+    expect(wrapper.find('a[href="/aicc-console"]').exists()).toBe(true)
+  })
+
+  // 覆盖未开通企业边界：未开通 AICC 时概览页不能暴露客服子系统入口。
+  it('hides AICC subsystem card for org_admin when AICC is disabled', () => {
+    authState.user = { id: 'owner-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' }
+    organizationState.data.value = {
+      id: 'org-1',
+      name: '测试企业',
+      status: 'enabled',
+      code: 'test-org',
+      aicc_enabled: false,
+    }
+
+    const wrapper = mountHome()
+
+    expect(wrapper.text()).not.toContain('AICC 客服')
+    expect(wrapper.find('a[href="/aicc-console"]').exists()).toBe(false)
   })
 })

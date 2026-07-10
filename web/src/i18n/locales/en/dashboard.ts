@@ -43,4 +43,14 @@ export default {
       subtitle: 'Reference materials',
     },
   },
+  // subsystems 展示企业已开通的独立子系统入口。
+  subsystems: {
+    eyebrow: 'Subsystems',
+    title: 'Subsystem Entry',
+    aicc: {
+      title: 'AICC Service',
+      subtitle: 'Open the dedicated service workspace for reception, sessions, leads, and deployment',
+      action: 'Open workspace',
+    },
+  },
 } as const

@@ -44,4 +44,14 @@ export default {
       subtitle: '可读资料',
     },
   },
+  // subsystems 展示企业已开通的独立子系统入口。
+  subsystems: {
+    eyebrow: '子系统',
+    title: '子系统入口',
+    aicc: {
+      title: 'AICC 客服',
+      subtitle: '进入独立客服工作台，管理接待、会话、线索和投放配置',
+      action: '进入工作台',
+    },
+  },
 } as const
