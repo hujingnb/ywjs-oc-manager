@@ -13566,6 +13566,15 @@ export interface paths {
                         "application/json": components["schemas"]["handlers.ErrorResponse"];
                     };
                 };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
                 /** @description Conflict */
                 409: {
                     headers: {
@@ -15177,6 +15186,8 @@ export interface components {
             channel?: string;
             /** @description Referrer 是浏览器 referrer。 */
             referrer?: string;
+            /** @description SessionToken 是访客刷新页面时带回的短期会话 token，用于续接未过期会话。 */
+            session_token?: string;
             /** @description SourceURL 是访客进入会话时所在页面 URL。 */
             source_url?: string;
         };
@@ -16126,6 +16137,7 @@ export interface components {
             privacy_mode?: string;
             privacy_notice_shown?: boolean;
             privacy_text?: string;
+            restored?: boolean;
             session_token?: string;
         };
         "service.AICCSessionDetailResult": {

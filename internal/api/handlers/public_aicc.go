@@ -88,12 +88,13 @@ func (h *PublicAICCHandler) CreateSession(c *gin.Context) {
 		return
 	}
 	result, err := h.service.CreateSession(c.Request.Context(), c.Param("publicToken"), service.AICCPublicSessionInput{
-		Channel:   req.Channel,
-		SourceURL: req.SourceURL,
-		Referrer:  req.Referrer,
-		Origin:    c.GetHeader("Origin"),
-		RemoteIP:  c.ClientIP(),
-		UserAgent: c.GetHeader("User-Agent"),
+		Channel:      req.Channel,
+		SourceURL:    req.SourceURL,
+		Referrer:     req.Referrer,
+		SessionToken: req.SessionToken,
+		Origin:       c.GetHeader("Origin"),
+		RemoteIP:     c.ClientIP(),
+		UserAgent:    c.GetHeader("User-Agent"),
 	})
 	if err != nil {
 		writePublicAICCError(c, err)
@@ -133,6 +134,7 @@ func (h *PublicAICCHandler) Consent(c *gin.Context) {
 // @Success      200           {object}  map[string]service.AICCPublicMessageResult
 // @Failure      400           {object}  ErrorResponse
 // @Failure      401           {object}  ErrorResponse
+// @Failure      403           {object}  ErrorResponse
 // @Failure      409           {object}  ErrorResponse
 // @Failure      429           {object}  ErrorResponse
 // @Failure      500           {object}  ErrorResponse
@@ -273,6 +275,12 @@ func writePublicAICCError(c *gin.Context, err error) {
 		apierror.JSON(c, http.StatusServiceUnavailable, "AICC_IMAGE_UNAVAILABLE", apierror.MsgAICCImageUnavailable)
 	case errors.Is(err, service.ErrAICCDomainForbidden):
 		apierror.JSON(c, http.StatusForbidden, "AICC_DOMAIN_FORBIDDEN", apierror.MsgAICCDomainForbidden)
+	case errors.Is(err, service.ErrAICCSensitiveWord):
+		apierror.JSON(c, http.StatusBadRequest, "AICC_SENSITIVE_WORD", "消息包含暂不支持发送的内容")
+	case errors.Is(err, service.ErrAICCMessageLimitExceeded):
+		apierror.JSON(c, http.StatusTooManyRequests, "AICC_MESSAGE_LIMIT_EXCEEDED", "本次会话消息数量已达上限")
+	case errors.Is(err, service.ErrAICCVisitorBlocked):
+		apierror.JSON(c, http.StatusForbidden, "AICC_VISITOR_BLOCKED", "当前访客暂不能继续咨询")
 	case errors.Is(err, service.ErrRateLimited):
 		apierror.JSON(c, http.StatusTooManyRequests, "RATE_LIMITED", apierror.MsgAICCRateLimited)
 	case errors.Is(err, service.ErrConversationFileTooLarge):

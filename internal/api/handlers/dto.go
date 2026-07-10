@@ -205,6 +205,8 @@ type CreateAICCSessionRequest struct {
 	SourceURL string `json:"source_url"`
 	// Referrer 是浏览器 referrer。
 	Referrer string `json:"referrer"`
+	// SessionToken 是访客刷新页面时带回的短期会话 token，用于续接未过期会话。
+	SessionToken string `json:"session_token,omitempty"`
 }
 
 // PublicAICCMessageRequest 是访客发送消息的请求体。

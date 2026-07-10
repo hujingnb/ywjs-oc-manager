@@ -45,6 +45,15 @@ var ErrAICCImageUnavailable = errors.New("aicc image unavailable")
 // ErrAICCDomainForbidden 表示网页挂件来源域名不在智能体允许列表内。
 var ErrAICCDomainForbidden = errors.New("aicc domain forbidden")
 
+// ErrAICCSensitiveWord 表示访客消息命中了智能体运营侧配置的敏感词拦截。
+var ErrAICCSensitiveWord = errors.New("aicc sensitive word")
+
+// ErrAICCMessageLimitExceeded 表示当前公开会话已达到运营侧配置的访客消息上限。
+var ErrAICCMessageLimitExceeded = errors.New("aicc message limit exceeded")
+
+// ErrAICCVisitorBlocked 表示当前访客命中了智能体有效封禁名单。
+var ErrAICCVisitorBlocked = errors.New("aicc visitor blocked")
+
 // ErrInvalidResourceRange 表示资源趋势查询的时间范围或聚合粒度非法，handler 层应映射为 400。
 var ErrInvalidResourceRange = errors.New("资源查询范围不合法")
 

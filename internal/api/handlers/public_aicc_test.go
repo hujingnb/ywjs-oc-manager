@@ -180,12 +180,16 @@ func TestPublicAICCHandlerSubmitFeedbackRequiresHelpful(t *testing.T) {
 // TestPublicAICCHandlerMapsConversationGates 覆盖公开访客消息入口的隐私同意和留资阻断错误映射。
 func TestPublicAICCHandlerMapsConversationGates(t *testing.T) {
 	cases := []struct {
-		name string // 子场景说明
-		err  error
-		code string
+		name   string // 子场景说明
+		err    error
+		status int
+		code   string
 	}{
-		{name: "未同意隐私说明返回稳定 code", err: service.ErrAICCConsentRequired, code: "AICC_CONSENT_REQUIRED"}, // 场景：consent_required 模式未同意。
-		{name: "缺少必填留资返回稳定 code", err: service.ErrAICCLeadRequired, code: "AICC_LEAD_REQUIRED"},        // 场景：必填字段未完成。
+		{name: "未同意隐私说明返回稳定 code", err: service.ErrAICCConsentRequired, status: http.StatusConflict, code: "AICC_CONSENT_REQUIRED"},                  // 场景：consent_required 模式未同意。
+		{name: "缺少必填留资返回稳定 code", err: service.ErrAICCLeadRequired, status: http.StatusConflict, code: "AICC_LEAD_REQUIRED"},                         // 场景：必填字段未完成。
+		{name: "敏感词拦截返回稳定 code", err: service.ErrAICCSensitiveWord, status: http.StatusBadRequest, code: "AICC_SENSITIVE_WORD"},                      // 场景：访客消息命中敏感词配置。
+		{name: "消息上限拦截返回稳定 code", err: service.ErrAICCMessageLimitExceeded, status: http.StatusTooManyRequests, code: "AICC_MESSAGE_LIMIT_EXCEEDED"}, // 场景：当前会话访客消息数已达上限。
+		{name: "封禁访客拦截返回稳定 code", err: service.ErrAICCVisitorBlocked, status: http.StatusForbidden, code: "AICC_VISITOR_BLOCKED"},                    // 场景：当前访客命中有效封禁名单。
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -196,7 +200,7 @@ func TestPublicAICCHandlerMapsConversationGates(t *testing.T) {
 			request.Header.Set("Content-Type", "application/json")
 			router.ServeHTTP(recorder, request)
 
-			require.Equal(t, http.StatusConflict, recorder.Code)
+			require.Equal(t, tc.status, recorder.Code)
 			assert.Contains(t, recorder.Body.String(), tc.code)
 		})
 	}
@@ -241,6 +245,22 @@ func TestPublicAICCHandlerCreateSession(t *testing.T) {
 	require.Equal(t, http.StatusCreated, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), "sess-token")
 	assert.Equal(t, "pub", svc.lastPublicToken)
+}
+
+// TestPublicAICCHandlerCreateSessionPassesSessionToken 覆盖刷新续接：
+// 公开创建会话接口必须把访客端保存的 token 透传给 service。
+func TestPublicAICCHandlerCreateSessionPassesSessionToken(t *testing.T) {
+	svc := &publicAICCServiceStub{sessionResult: service.AICCPublicSessionResult{SessionToken: "tok", Restored: true}}
+	router := newPublicAICCTestRouter(t, svc)
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/agents/pub/sessions", bytes.NewBufferString(`{"channel":"web_link","session_token":"tok"}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	assert.Equal(t, http.StatusCreated, recorder.Code)
+	assert.Equal(t, "tok", svc.lastSessionInput.SessionToken)
+	assert.Contains(t, recorder.Body.String(), `"restored":true`)
 }
 
 // TestPublicAICCHandlerCreateSessionPassesRequestMetadata 覆盖公开会话安全元数据：

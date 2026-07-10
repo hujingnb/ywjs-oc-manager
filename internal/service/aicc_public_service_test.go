@@ -143,6 +143,66 @@ func TestAICCPublicChatStoresImageMessage(t *testing.T) {
 	assert.Contains(t, chat.text, "访客问题：\n[访客发送了一张图片]")
 }
 
+// TestAICCPublicSendMessageRejectsSensitiveWord 覆盖敏感词拦截：
+// 命中配置后不能调用 Hermes，避免违规内容继续消耗模型费用。
+func TestAICCPublicSendMessageRejectsSensitiveWord(t *testing.T) {
+	chat := &fakeAICCHermesChat{}
+	store := &fakeAICCPublicStore{
+		org:      sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:    sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		session:  sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour), PrivacyNoticeShown: true},
+		settings: sqlc.AiccAgentSetting{AgentID: "agent-1", MessageLimitPerSession: 100, SensitiveWordsJson: []byte(`["违禁词"]`), BlockedVisitorEnabled: true, SessionResumeTtlMinutes: 30},
+	}
+	svc := NewAICCPublicService(store, chat)
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	_, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "包含违禁词"})
+
+	require.ErrorIs(t, err, ErrAICCSensitiveWord)
+	assert.Empty(t, chat.text)
+}
+
+// TestAICCPublicSendMessageRejectsMessageLimit 覆盖单会话消息数上限：
+// 达到上限后拒绝继续发送，且不调用 Hermes。
+func TestAICCPublicSendMessageRejectsMessageLimit(t *testing.T) {
+	chat := &fakeAICCHermesChat{}
+	store := &fakeAICCPublicStore{
+		org:                 sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:               sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		session:             sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour), PrivacyNoticeShown: true},
+		settings:            sqlc.AiccAgentSetting{AgentID: "agent-1", MessageLimitPerSession: 1, BlockedVisitorEnabled: true, SessionResumeTtlMinutes: 30},
+		visitorMessageCount: 1,
+	}
+	svc := NewAICCPublicService(store, chat)
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	_, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "还能问吗"})
+
+	require.ErrorIs(t, err, ErrAICCMessageLimitExceeded)
+	assert.Empty(t, chat.text)
+}
+
+// TestAICCPublicSendMessageRejectsBlockedVisitor 覆盖访客封禁：
+// 命中当前会话的访客 hash 后拒绝继续发送，且不调用 Hermes。
+func TestAICCPublicSendMessageRejectsBlockedVisitor(t *testing.T) {
+	chat := &fakeAICCHermesChat{}
+	visitorHash := hashAICCVisitorMarker("203.0.113.9")
+	store := &fakeAICCPublicStore{
+		org:            sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:          sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		session:        sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour), PrivacyNoticeShown: true, IpHash: null.StringFrom(visitorHash)},
+		settings:       sqlc.AiccAgentSetting{AgentID: "agent-1", MessageLimitPerSession: 100, BlockedVisitorEnabled: true, SessionResumeTtlMinutes: 30},
+		blockedVisitor: sqlc.AiccBlockedVisitor{ID: "blocked-1", AgentID: "agent-1", OrgID: "org-1", VisitorHash: visitorHash, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+	}
+	svc := NewAICCPublicService(store, chat)
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	_, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "还能问吗"})
+
+	require.ErrorIs(t, err, ErrAICCVisitorBlocked)
+	assert.Empty(t, chat.text)
+}
+
 // TestAICCPublicUploadImageStoresObject 覆盖图片上传正常路径：校验后写对象存储并落图片记录。
 func TestAICCPublicUploadImageStoresObject(t *testing.T) {
 	store := &fakeAICCPublicStore{
@@ -310,6 +370,25 @@ func TestAICCPublicCreateSessionCreatesExpiringSession(t *testing.T) {
 	assert.Equal(t, "org-1", store.createdSession.OrgID)
 	assert.True(t, store.createdSession.PrivacyNoticeShown)
 	assert.Equal(t, time.Date(2026, 8, 8, 10, 0, 0, 0, time.UTC), store.createdSession.ExpiresAt)
+}
+
+// TestAICCPublicCreateSessionRestoresExistingSession 覆盖刷新续接：
+// 访客传入仍有效的 session token 时，服务端必须返回原会话，不创建新会话。
+func TestAICCPublicCreateSessionRestoresExistingSession(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", PublicToken: "pub", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour), PrivacyNoticeShown: true},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	result, err := svc.CreateSession(context.Background(), "pub", AICCPublicSessionInput{SessionToken: "tok"})
+
+	require.NoError(t, err)
+	assert.Equal(t, "tok", result.SessionToken)
+	assert.True(t, result.Restored)
+	assert.Equal(t, 0, store.createdSessionCount)
 }
 
 // TestAICCPublicCreateWidgetSessionRejectsDisallowedOrigin 覆盖挂件域名白名单：
@@ -525,21 +604,25 @@ func TestAICCPublicSubmitFeedbackRejectsWrongSession(t *testing.T) {
 }
 
 type fakeAICCPublicStore struct {
-	org                sqlc.Organization
-	agent              sqlc.AiccAgent
-	session            sqlc.AiccSession
-	message            sqlc.AiccMessage
-	image              sqlc.AiccImage
-	leadFields         []sqlc.AiccLeadField
-	requiredLeadFields []sqlc.AiccLeadField
-	createdSession     sqlc.CreateAICCSessionParams
-	createdMessages    []sqlc.CreateAICCMessageParams
-	leads              []sqlc.AiccLead
-	leadValues         []sqlc.UpsertAICCLeadValueParams
-	attachedLeadID     string
-	attachedLeadOrgID  string
-	feedback           sqlc.UpsertAICCFeedbackParams
-	resolutionStatus   string
+	org                 sqlc.Organization
+	agent               sqlc.AiccAgent
+	session             sqlc.AiccSession
+	message             sqlc.AiccMessage
+	image               sqlc.AiccImage
+	settings            sqlc.AiccAgentSetting
+	blockedVisitor      sqlc.AiccBlockedVisitor
+	leadFields          []sqlc.AiccLeadField
+	requiredLeadFields  []sqlc.AiccLeadField
+	createdSession      sqlc.CreateAICCSessionParams
+	createdSessionCount int
+	createdMessages     []sqlc.CreateAICCMessageParams
+	visitorMessageCount int64
+	leads               []sqlc.AiccLead
+	leadValues          []sqlc.UpsertAICCLeadValueParams
+	attachedLeadID      string
+	attachedLeadOrgID   string
+	feedback            sqlc.UpsertAICCFeedbackParams
+	resolutionStatus    string
 }
 
 func (f *fakeAICCPublicStore) GetOrganization(_ context.Context, id string) (sqlc.Organization, error) {
@@ -578,6 +661,7 @@ func (f *fakeAICCPublicStore) GetAICCSessionByToken(_ context.Context, token str
 }
 
 func (f *fakeAICCPublicStore) CreateAICCSession(_ context.Context, arg sqlc.CreateAICCSessionParams) error {
+	f.createdSessionCount++
 	f.createdSession = arg
 	f.session = sqlc.AiccSession{
 		ID:                 arg.ID,
@@ -591,6 +675,27 @@ func (f *fakeAICCPublicStore) CreateAICCSession(_ context.Context, arg sqlc.Crea
 		ExpiresAt:          arg.ExpiresAt,
 	}
 	return nil
+}
+
+func (f *fakeAICCPublicStore) GetAICCAgentSettings(_ context.Context, agentID string) (sqlc.AiccAgentSetting, error) {
+	if f.settings.AgentID != agentID {
+		return sqlc.AiccAgentSetting{}, sql.ErrNoRows
+	}
+	return f.settings, nil
+}
+
+func (f *fakeAICCPublicStore) CountAICCVisitorMessagesBySession(_ context.Context, sessionID string) (int64, error) {
+	if f.session.ID != sessionID {
+		return 0, sql.ErrNoRows
+	}
+	return f.visitorMessageCount, nil
+}
+
+func (f *fakeAICCPublicStore) GetActiveAICCBlockedVisitor(_ context.Context, arg sqlc.GetActiveAICCBlockedVisitorParams) (sqlc.AiccBlockedVisitor, error) {
+	if f.blockedVisitor.AgentID != arg.AgentID || f.blockedVisitor.VisitorHash != arg.VisitorHash {
+		return sqlc.AiccBlockedVisitor{}, sql.ErrNoRows
+	}
+	return f.blockedVisitor, nil
 }
 
 func (f *fakeAICCPublicStore) MarkAICCSessionConsented(_ context.Context, sessionToken string) (int64, error) {

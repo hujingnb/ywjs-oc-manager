@@ -52,6 +52,12 @@ type AICCPublicStore interface {
 	GetAICCAgentByWidgetToken(ctx context.Context, widgetToken string) (sqlc.AiccAgent, error)
 	// GetAICCSessionByToken 通过访客 session token 定位单个公开会话。
 	GetAICCSessionByToken(ctx context.Context, token string) (sqlc.AiccSession, error)
+	// GetAICCAgentSettings 读取智能体运营配置；历史智能体可能没有配置行。
+	GetAICCAgentSettings(ctx context.Context, agentID string) (sqlc.AiccAgentSetting, error)
+	// CountAICCVisitorMessagesBySession 统计当前会话已写入的访客消息数量，用于发送前拦截。
+	CountAICCVisitorMessagesBySession(ctx context.Context, sessionID string) (int64, error)
+	// GetActiveAICCBlockedVisitor 按匿名访客 hash 查询有效封禁记录，避免公开端继续消耗模型。
+	GetActiveAICCBlockedVisitor(ctx context.Context, arg sqlc.GetActiveAICCBlockedVisitorParams) (sqlc.AiccBlockedVisitor, error)
 	// CreateAICCSession 创建公开访客会话。
 	CreateAICCSession(ctx context.Context, arg sqlc.CreateAICCSessionParams) error
 	// MarkAICCSessionConsented 记录访客已同意隐私说明。
@@ -113,6 +119,8 @@ type AICCPublicSessionInput struct {
 	RemoteIP string
 	// UserAgent 是访客浏览器 UA，仅做 hash 后保存。
 	UserAgent string
+	// SessionToken 是访客端刷新页面时带回的短期会话 token，用于恢复未过期会话。
+	SessionToken string
 }
 
 // AICCPublicSessionResult 是公开会话创建响应。
@@ -121,6 +129,7 @@ type AICCPublicSessionResult struct {
 	PrivacyMode        string `json:"privacy_mode"`
 	PrivacyText        string `json:"privacy_text,omitempty"`
 	PrivacyNoticeShown bool   `json:"privacy_notice_shown"`
+	Restored           bool   `json:"restored"`
 }
 
 // AICCPublicConfigResult 是公开访客端可读取的智能体展示配置。
@@ -185,6 +194,14 @@ type AICCPublicFeedbackResult struct {
 	ResolutionStatus string `json:"resolution_status"`
 }
 
+// aiccPublicSettings 是公开发送链路只需要读取的运营配置子集。
+type aiccPublicSettings struct {
+	MessageLimitPerSession  int32
+	SensitiveWords          []string
+	BlockedVisitorEnabled   bool
+	SessionResumeTTLMinutes int32
+}
+
 // AICCPublicService 负责匿名访客侧 AICC 会话状态机。
 type AICCPublicService struct {
 	store AICCPublicStore
@@ -239,6 +256,21 @@ func (s *AICCPublicService) CreateSession(ctx context.Context, publicToken strin
 	if err := ensureAICCWidgetOriginAllowed(agent, channel, input); err != nil {
 		return AICCPublicSessionResult{}, err
 	}
+	if sessionToken := strings.TrimSpace(input.SessionToken); sessionToken != "" {
+		session, err := s.store.GetAICCSessionByToken(ctx, sessionToken)
+		if err == nil && session.AgentID == agent.ID && session.ExpiresAt.After(s.now()) {
+			return AICCPublicSessionResult{
+				SessionToken:       session.SessionToken,
+				PrivacyMode:        agent.PrivacyMode,
+				PrivacyText:        strOrEmpty(agent.PrivacyText),
+				PrivacyNoticeShown: session.PrivacyNoticeShown,
+				Restored:           true,
+			}, nil
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return AICCPublicSessionResult{}, fmt.Errorf("恢复 AICC 会话失败: %w", err)
+		}
+	}
 	if err := s.ensureRateAllowed(ctx, "create_session:"+agent.ID+":"+hashAICCVisitorMarker(input.RemoteIP), aiccCreateSessionRateLimit, time.Minute); err != nil {
 		return AICCPublicSessionResult{}, err
 	}
@@ -260,6 +292,7 @@ func (s *AICCPublicService) CreateSession(ctx context.Context, publicToken strin
 		Channel:            channel,
 		SourceUrl:          null.StringFrom(strings.TrimSpace(input.SourceURL)),
 		Referrer:           null.StringFrom(strings.TrimSpace(input.Referrer)),
+		Region:             nullStr(resolveAICCRegion(input.RemoteIP)),
 		IpHash:             nullStr(hashAICCVisitorMarker(input.RemoteIP)),
 		UserAgentHash:      nullStr(hashAICCVisitorMarker(input.UserAgent)),
 		PrivacyNoticeShown: privacyNoticeShown,
@@ -315,6 +348,21 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 	}
 	if len(missing) > 0 {
 		return AICCPublicMessageResult{}, ErrAICCLeadRequired
+	}
+	settings, err := s.loadPublicSettings(ctx, session.AgentID)
+	if err != nil {
+		return AICCPublicMessageResult{}, err
+	}
+	if settings.BlockedVisitorEnabled {
+		if err := s.ensureVisitorNotBlocked(ctx, session); err != nil {
+			return AICCPublicMessageResult{}, err
+		}
+	}
+	if err := s.ensureMessageLimit(ctx, session.ID, settings.MessageLimitPerSession); err != nil {
+		return AICCPublicMessageResult{}, err
+	}
+	if containsAICCSensitiveWord(input.Text, settings.SensitiveWords) {
+		return AICCPublicMessageResult{}, ErrAICCSensitiveWord
 	}
 	text := strings.TrimSpace(input.Text)
 	imageID := strings.TrimSpace(input.ImageFileID)
@@ -388,6 +436,105 @@ func buildAICCRuntimePrompt(agent sqlc.AiccAgent, visitorText string) string {
 	}
 	lines = append(lines, "访客问题：", strings.TrimSpace(visitorText))
 	return strings.Join(lines, "\n")
+}
+
+// loadPublicSettings 读取公开发送链路需要的运营配置；历史无配置行时使用管理端同款默认值。
+func (s *AICCPublicService) loadPublicSettings(ctx context.Context, agentID string) (aiccPublicSettings, error) {
+	settings := defaultAICCPublicSettings()
+	row, err := s.store.GetAICCAgentSettings(ctx, agentID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return settings, nil
+	}
+	if err != nil {
+		return aiccPublicSettings{}, fmt.Errorf("读取 AICC 运营配置失败: %w", err)
+	}
+	settings, err = publicSettingsFromSQLC(row)
+	if err != nil {
+		return aiccPublicSettings{}, err
+	}
+	return settings, nil
+}
+
+// defaultAICCPublicSettings 与管理端默认配置保持一致，兼容没有 settings 行的历史智能体。
+func defaultAICCPublicSettings() aiccPublicSettings {
+	return aiccPublicSettings{
+		MessageLimitPerSession:  aiccDefaultMessageLimitPerSession,
+		SensitiveWords:          []string{},
+		BlockedVisitorEnabled:   true,
+		SessionResumeTTLMinutes: aiccDefaultSessionResumeTTLMin,
+	}
+}
+
+// publicSettingsFromSQLC 将数据库配置行转换为公开发送链路配置，损坏 JSON 直接暴露为服务错误。
+func publicSettingsFromSQLC(row sqlc.AiccAgentSetting) (aiccPublicSettings, error) {
+	words := []string{}
+	if len(bytes.TrimSpace(row.SensitiveWordsJson)) > 0 {
+		if err := json.Unmarshal(row.SensitiveWordsJson, &words); err != nil {
+			return aiccPublicSettings{}, fmt.Errorf("解析 AICC 敏感词配置失败: %w", err)
+		}
+		if words == nil {
+			words = []string{}
+		}
+	}
+	return aiccPublicSettings{
+		MessageLimitPerSession:  row.MessageLimitPerSession,
+		SensitiveWords:          normalizeAICCSensitiveWords(words),
+		BlockedVisitorEnabled:   row.BlockedVisitorEnabled,
+		SessionResumeTTLMinutes: row.SessionResumeTtlMinutes,
+	}, nil
+}
+
+// ensureMessageLimit 在写入新访客消息前检查单会话消息上限，避免超额请求继续进入 Hermes。
+func (s *AICCPublicService) ensureMessageLimit(ctx context.Context, sessionID string, limit int32) error {
+	count, err := s.store.CountAICCVisitorMessagesBySession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("统计 AICC 会话消息数失败: %w", err)
+	}
+	if count >= int64(limit) {
+		return ErrAICCMessageLimitExceeded
+	}
+	return nil
+}
+
+// ensureVisitorNotBlocked 仅使用会话中已保存的匿名 hash 查询封禁名单，避免公开端处理原始 IP/UA。
+func (s *AICCPublicService) ensureVisitorNotBlocked(ctx context.Context, session sqlc.AiccSession) error {
+	for _, visitorHash := range []string{session.IpHash.String, session.UserAgentHash.String} {
+		if strings.TrimSpace(visitorHash) == "" {
+			continue
+		}
+		_, err := s.store.GetActiveAICCBlockedVisitor(ctx, sqlc.GetActiveAICCBlockedVisitorParams{
+			AgentID:     session.AgentID,
+			VisitorHash: visitorHash,
+		})
+		if err == nil {
+			return ErrAICCVisitorBlocked
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("查询 AICC 访客封禁失败: %w", err)
+		}
+	}
+	return nil
+}
+
+// containsAICCSensitiveWord 使用简单子串匹配，公开端只做轻量拦截，不引入正则或外部依赖。
+func containsAICCSensitiveWord(text string, words []string) bool {
+	trimmedText := strings.TrimSpace(text)
+	if trimmedText == "" {
+		return false
+	}
+	for _, raw := range words {
+		word := strings.TrimSpace(raw)
+		if word != "" && strings.Contains(trimmedText, word) {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveAICCRegion 预留地域解析钩子；当前不引入外部 IP 库，所有地址均返回空地域。
+func resolveAICCRegion(remoteIP string) string {
+	_ = strings.TrimSpace(remoteIP)
+	return ""
 }
 
 // UploadImage 校验并保存公开访客图片，返回发送消息时可引用的 image_file_id。
