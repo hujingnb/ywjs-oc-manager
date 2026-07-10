@@ -18,6 +18,8 @@
           <n-select v-model:value="resolutionFilter" clearable :options="resolutionOptions" placeholder="解决状态" />
           <n-select v-model:value="leadFilter" clearable :options="leadOptions" placeholder="留资状态" />
           <n-select v-model:value="channelFilter" clearable :options="channelOptions" placeholder="渠道" />
+          <n-input v-model:value="regionFilter" clearable placeholder="地域" />
+          <n-date-picker v-model:value="dateRange" type="datetimerange" clearable start-placeholder="开始时间" end-placeholder="结束时间" />
           <n-input v-model:value="keywordFilter" clearable placeholder="来源关键词" />
         </div>
         <n-spin :show="sessionsQuery.isLoading.value">
@@ -40,11 +42,12 @@
             >
               <span>
                 <strong>{{ formatShortId(session.id) }}</strong>
-                <small>{{ session.channel || 'web_link' }}</small>
+                <small>{{ session.channel || 'web_link' }} · {{ session.region || '未知地域' }}</small>
               </span>
               <n-tag size="small" :type="session.resolution_status === 'resolved' ? 'success' : 'warning'" :bordered="false">
                 {{ session.resolution_status === 'resolved' ? '已解决' : '跟进中' }}
               </n-tag>
+              <small class="meta-text">{{ session.message_count ?? 0 }} 条消息</small>
               <small class="time-text">{{ formatDate(session.last_active_at || session.created_at) }}</small>
             </button>
           </template>
@@ -68,6 +71,24 @@
             <span>选择左侧会话后查看访客与助手对话。</span>
           </div>
           <div v-else class="message-stack">
+            <div v-if="selectedSession" class="session-summary">
+              <span>
+                <strong>地域</strong>
+                <small>{{ selectedSession.region || '未知地域' }}</small>
+              </span>
+              <span>
+                <strong>消息数</strong>
+                <small>{{ selectedSession.message_count ?? 0 }}</small>
+              </span>
+              <span>
+                <strong>渠道</strong>
+                <small>{{ selectedSession.channel || 'web_link' }}</small>
+              </span>
+              <span>
+                <strong>来源</strong>
+                <small>{{ selectedSession.source_url || '-' }}</small>
+              </span>
+            </div>
             <div v-if="leadValues.length" class="lead-summary">
               <span v-for="value in leadValues" :key="value.field_key">
                 <strong>{{ value.label }}</strong>
@@ -94,7 +115,8 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { NAlert, NInput, NSelect, NSpin, NTag, type SelectOption } from 'naive-ui'
+import { useRoute, useRouter } from 'vue-router'
+import { NAlert, NDatePicker, NInput, NSelect, NSpin, NTag, type SelectOption } from 'naive-ui'
 import { MessageSquareText } from 'lucide-vue-next'
 
 import { useAICCSessionsQuery, useAICCSessionQuery } from '@/api/hooks/useAICC'
@@ -104,22 +126,31 @@ const props = defineProps<{
   agentId?: string
 }>()
 
+const route = useRoute()
+const router = useRouter()
 const selectedSessionId = ref<string | undefined>()
 const resolutionFilter = ref<string | null>(null)
 const leadFilter = ref<string | null>(null)
 const channelFilter = ref<string | null>(null)
+const regionFilter = ref('')
+const dateRange = ref<[number, number] | null>(null)
 const keywordFilter = ref('')
+const isApplyingRouteQuery = ref(false)
 const currentAgentId = computed(() => props.agentId)
 const sessionFilters = computed<AICCSessionFilters>(() => ({
   resolution_status: resolutionFilter.value || undefined,
   lead_status: leadFilter.value || undefined,
   channel: channelFilter.value || undefined,
+  region: regionFilter.value.trim() || undefined,
+  start_at: dateRange.value ? new Date(dateRange.value[0]).toISOString() : undefined,
+  end_at: dateRange.value ? new Date(dateRange.value[1]).toISOString() : undefined,
   keyword: keywordFilter.value.trim() || undefined,
 }))
 const sessionsQuery = useAICCSessionsQuery(currentAgentId, sessionFilters)
 const detailQuery = useAICCSessionQuery(selectedSessionId)
 
 const sessions = computed(() => sessionsQuery.data.value ?? [])
+const selectedSession = computed(() => detailQuery.data.value?.session)
 const messages = computed(() => detailQuery.data.value?.messages ?? [])
 const leadValues = computed(() => detailQuery.data.value?.lead_values ?? [])
 
@@ -140,6 +171,39 @@ const channelOptions: SelectOption[] = [
   { label: '网页挂件', value: 'web_widget' },
   { label: '语音客服', value: 'voice' },
 ]
+
+watch(
+  () => route.query,
+  (query) => {
+    isApplyingRouteQuery.value = true
+    resolutionFilter.value = stringQuery(query.resolution_status)
+    leadFilter.value = stringQuery(query.lead_status)
+    channelFilter.value = stringQuery(query.channel)
+    regionFilter.value = stringQuery(query.region) ?? ''
+    keywordFilter.value = stringQuery(query.keyword) ?? ''
+    const start = parseQueryDate(query.start_at)
+    const end = parseQueryDate(query.end_at)
+    dateRange.value = start !== null && end !== null ? [start, end] : null
+    isApplyingRouteQuery.value = false
+  },
+  { immediate: true },
+)
+
+watch(sessionFilters, (filters) => {
+  if (isApplyingRouteQuery.value) return
+  const nextQuery = {
+    ...route.query,
+    resolution_status: filters.resolution_status,
+    lead_status: filters.lead_status,
+    channel: filters.channel,
+    region: filters.region,
+    start_at: filters.start_at,
+    end_at: filters.end_at,
+    keyword: filters.keyword,
+  }
+  if (isSameQuery(route.query, nextQuery)) return
+  void router.replace({ query: nextQuery })
+}, { deep: true })
 
 watch(sessions, (items) => {
   if (!items.some(item => item.id === selectedSessionId.value)) {
@@ -165,6 +229,33 @@ function roleLabel(role?: string) {
   if (role === 'assistant') return '助手'
   if (role === 'system') return '系统'
   return '访客'
+}
+
+function stringQuery(value: unknown): string | null {
+  if (Array.isArray(value)) return typeof value[0] === 'string' ? value[0] : null
+  return typeof value === 'string' && value ? value : null
+}
+
+function parseQueryDate(value: unknown): number | null {
+  const text = stringQuery(value)
+  if (!text) return null
+  const time = new Date(text).getTime()
+  return Number.isFinite(time) ? time : null
+}
+
+function isSameQuery(current: Record<string, unknown>, next: Record<string, unknown>): boolean {
+  const keys = new Set([...Object.keys(current), ...Object.keys(next)])
+  for (const key of keys) {
+    const left = normalizeQueryValue(current[key])
+    const right = normalizeQueryValue(next[key])
+    if (left !== right) return false
+  }
+  return true
+}
+
+function normalizeQueryValue(value: unknown): string {
+  if (Array.isArray(value)) return value.join(',')
+  return value === undefined || value === null ? '' : String(value)
 }
 </script>
 
@@ -193,11 +284,12 @@ function roleLabel(role?: string) {
 
 .session-filters {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
-.session-filters :deep(.n-input) {
+.session-filters :deep(.n-date-picker),
+.session-filters :deep(.n-input:last-child) {
   grid-column: 1 / -1;
 }
 
@@ -250,6 +342,10 @@ function roleLabel(role?: string) {
   grid-column: 1 / -1;
 }
 
+.meta-text {
+  justify-self: end;
+}
+
 .empty-state {
   display: grid;
   place-items: center;
@@ -272,6 +368,7 @@ function roleLabel(role?: string) {
   gap: 10px;
 }
 
+.session-summary,
 .lead-summary {
   display: flex;
   flex-wrap: wrap;
@@ -282,17 +379,20 @@ function roleLabel(role?: string) {
   background: var(--color-surface);
 }
 
+.session-summary span,
 .lead-summary span {
   display: grid;
   min-width: 120px;
   gap: 2px;
 }
 
+.session-summary strong,
 .lead-summary strong {
   font-size: 12px;
   color: var(--color-text-secondary);
 }
 
+.session-summary small,
 .lead-summary small {
   color: var(--color-text-primary);
   overflow-wrap: anywhere;

@@ -7,7 +7,10 @@ import { apiDownload, apiRequest, getCsrfToken } from '@/api/client'
 import type {
   AICCAgent,
   AICCAgentPayload,
+  AICCAgentSettings,
+  AICCAgentSettingsPayload,
   AICCAnalytics,
+  AICCAnalyticsFilters,
   AICCLead,
   AICCLeadField,
   AICCLeadFieldPayload,
@@ -27,12 +30,14 @@ import type {
 const AICC_AGENTS_KEY = ['aicc', 'agents'] as const
 const aiccAgentsKey = (orgId?: string) => [...AICC_AGENTS_KEY, orgId ?? 'current'] as const
 const aiccAgentKey = (agentId?: string) => ['aicc', 'agent', agentId] as const
+const aiccSettingsKey = (agentId?: string) => ['aicc', 'settings', agentId] as const
 const aiccLeadFieldsKey = (agentId?: string) => ['aicc', 'lead-fields', agentId] as const
 const aiccKnowledgeKey = (agentId?: string) => ['aicc', 'knowledge', agentId] as const
 const aiccSessionsKey = (agentId?: string, filters?: AICCSessionFilters) => ['aicc', 'sessions', agentId, filters ?? {}] as const
 const aiccSessionKey = (sessionId?: string) => ['aicc', 'session', sessionId] as const
 const AICC_LEADS_KEY = ['aicc', 'leads'] as const
 const AICC_ANALYTICS_KEY = ['aicc', 'analytics'] as const
+const aiccAnalyticsKey = (filters?: AICCAnalyticsFilters) => [...AICC_ANALYTICS_KEY, filters ?? {}] as const
 
 // useAICCAgentsQuery 查询 AICC 智能体列表；orgId 为空时后端按当前企业管理员所属企业处理。
 export function useAICCAgentsQuery(orgId?: Ref<string | undefined>, enabled?: () => boolean) {
@@ -127,6 +132,36 @@ export function useDeleteAICCAgent() {
   })
 }
 
+// useAICCSettingsQuery 查询选中智能体的运营安全配置；旧智能体无 settings 行时由后端返回默认值。
+export function useAICCSettingsQuery(agentId: Ref<string | undefined>) {
+  return useQuery<AICCAgentSettings | null>({
+    queryKey: computed(() => aiccSettingsKey(agentId.value)),
+    enabled: () => Boolean(agentId.value),
+    queryFn: async () => {
+      if (!agentId.value) return null
+      const response = await apiRequest<{ settings: AICCAgentSettings }>(`/api/v1/aicc/agents/${agentId.value}/settings`)
+      return response.settings
+    },
+  })
+}
+
+// useUpdateAICCSettings 保存智能体运营安全配置，成功后刷新当前智能体 settings 缓存。
+export function useUpdateAICCSettings() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ agentId, payload }: { agentId: string; payload: AICCAgentSettingsPayload }) => {
+      const response = await apiRequest<{ settings: AICCAgentSettings }>(`/api/v1/aicc/agents/${agentId}/settings`, {
+        method: 'PUT',
+        body: payload,
+      })
+      return response.settings
+    },
+    onSuccess: (_settings, vars) => {
+      void client.invalidateQueries({ queryKey: aiccSettingsKey(vars.agentId) })
+    },
+  })
+}
+
 // useAICCLeadFieldsQuery 查询选中智能体的公开页留资字段配置。
 export function useAICCLeadFieldsQuery(agentId: Ref<string | undefined>) {
   return useQuery<AICCLeadField[]>({
@@ -200,6 +235,9 @@ export function useAICCSessionsQuery(agentId: Ref<string | undefined>, filters?:
           resolution_status: filters?.value?.resolution_status || undefined,
           lead_status: filters?.value?.lead_status || undefined,
           channel: filters?.value?.channel || undefined,
+          region: filters?.value?.region?.trim() || undefined,
+          start_at: filters?.value?.start_at || undefined,
+          end_at: filters?.value?.end_at || undefined,
           keyword: filters?.value?.keyword?.trim() || undefined,
         },
       })
@@ -248,12 +286,20 @@ export function useMarkAICCLeadRead() {
   })
 }
 
-// useAICCAnalyticsQuery 查询 AICC 运营看板的轻量统计。
-export function useAICCAnalyticsQuery() {
+// useAICCAnalyticsQuery 查询 AICC 运营看板统计；筛选条件进入 query key，避免不同时间窗口复用旧缓存。
+export function useAICCAnalyticsQuery(filters?: Ref<AICCAnalyticsFilters | undefined>) {
   return useQuery<AICCAnalytics>({
-    queryKey: AICC_ANALYTICS_KEY,
+    queryKey: computed(() => aiccAnalyticsKey(filters?.value)),
     queryFn: async () => {
-      const response = await apiRequest<{ analytics: AICCAnalytics }>('/api/v1/aicc/analytics')
+      const currentFilters = filters?.value
+      const response = await apiRequest<{ analytics: AICCAnalytics }>('/api/v1/aicc/analytics', {
+        query: {
+          start_at: currentFilters?.start_at,
+          end_at: currentFilters?.end_at,
+          bucket: currentFilters?.bucket,
+          agent_id: currentFilters?.agent_id,
+        },
+      })
       return response.analytics
     },
   })
@@ -275,16 +321,42 @@ export async function fetchAICCPublicConfig(publicToken: string, channel: AICCPu
 
 // createAICCPublicSession 为公开访客创建短期会话 token。
 export async function createAICCPublicSession(publicToken: string, channel: AICCPublicChannel = 'web_link'): Promise<AICCPublicSession> {
+  const storageKey = `aicc:session:${publicToken}:${channel}`
+  const storedSessionToken = readAICCPublicSessionToken(storageKey)
   const response = await apiRequest<{ session: AICCPublicSession }>(`/api/v1/public/aicc/agents/${publicToken}/sessions`, {
     method: 'POST',
     withAuth: false,
     body: {
       channel,
+      session_token: storedSessionToken || undefined,
       referrer: typeof document === 'undefined' ? '' : document.referrer,
       source_url: typeof window === 'undefined' ? '' : window.location.href,
     },
   })
+  if (response.session.session_token) {
+    writeAICCPublicSessionToken(storageKey, response.session.session_token)
+  }
   return response.session
+}
+
+// readAICCPublicSessionToken 容忍隐私模式禁用 localStorage，公开页仍可退化为新建会话。
+function readAICCPublicSessionToken(key: string): string {
+  if (typeof localStorage === 'undefined') return ''
+  try {
+    return localStorage.getItem(key) || ''
+  } catch {
+    return ''
+  }
+}
+
+// writeAICCPublicSessionToken 持久化服务端返回的最新 token，用于刷新页面后的同渠道续接。
+function writeAICCPublicSessionToken(key: string, token: string): void {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(key, token)
+  } catch {
+    // localStorage 不可用时忽略，公开客服仍保持当前内存会话。
+  }
 }
 
 // consentAICCPublicSession 记录访客已同意隐私说明；仅 consent_required 模式需要调用。

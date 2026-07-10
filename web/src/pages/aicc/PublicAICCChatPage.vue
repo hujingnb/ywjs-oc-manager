@@ -6,7 +6,7 @@
           <MessageCircle :size="22" />
         </div>
         <div>
-          <p>AI Contact Center</p>
+          <p>AI Integrated Customer Care</p>
           <h1>{{ config?.name || '在线客服' }}</h1>
         </div>
         <n-tag :type="sessionToken ? 'success' : 'default'" :bordered="false">
@@ -124,7 +124,7 @@ import type { AICCLeadField, AICCPublicConfig } from '@/domain/aicc'
 import { normalizeAICCPublicChannel } from '@/domain/aicc'
 
 // PublicAICCChatPage 是访客公开客服页，不依赖后台登录态。
-// 会话 token 只保存在页面内存，刷新页面会重新创建会话，避免把访客凭证持久化到本地存储。
+// 会话 token 由 API hook 按 publicToken + channel 写入 localStorage，用于刷新后的短期续接。
 interface ChatMessage {
   id: string
   role: 'visitor' | 'assistant'
@@ -188,7 +188,7 @@ async function boot() {
       text: config.value.greeting || '您好，我是在线客服，请问有什么可以帮您？',
     }]
   } catch (err) {
-    errorMessage.value = err instanceof Error ? err.message : '客服入口暂时不可用'
+    errorMessage.value = friendlyAICCError(err)
   }
 }
 
@@ -217,7 +217,7 @@ async function submitLeadForm() {
       errorMessage.value = '请补全必填联系信息'
     }
   } catch (err) {
-    errorMessage.value = err instanceof Error ? err.message : '联系信息提交失败'
+    errorMessage.value = friendlyAICCError(err)
   } finally {
     leadBusy.value = false
   }
@@ -231,7 +231,7 @@ async function acceptConsent() {
     await consentAICCPublicSession(sessionToken.value)
     hasConsent.value = true
   } catch (err) {
-    errorMessage.value = err instanceof Error ? err.message : '隐私确认失败'
+    errorMessage.value = friendlyAICCError(err)
   } finally {
     consentBusy.value = false
   }
@@ -277,7 +277,15 @@ function publicMessageErrorText(err: unknown): string {
   if (isApiErrorCode(err, 'AICC_LEAD_REQUIRED')) {
     return '请先提交联系信息后继续咨询。'
   }
-  return err instanceof Error ? err.message : '消息发送失败'
+  return friendlyAICCError(err)
+}
+
+function friendlyAICCError(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error || '')
+  if (text.includes('AICC_SENSITIVE_WORD')) return '这条消息包含暂不支持发送的内容，请调整后再试。'
+  if (text.includes('AICC_MESSAGE_LIMIT_EXCEEDED')) return '本次会话消息数量已达上限，请稍后重新打开客服。'
+  if (text.includes('AICC_VISITOR_BLOCKED')) return '当前访客暂不能继续咨询。'
+  return text || '消息发送失败，请稍后重试。'
 }
 
 function isApiErrorCode(err: unknown, code: string): boolean {
@@ -293,7 +301,7 @@ async function sendFeedback(message: ChatMessage, helpful: boolean) {
     await submitAICCPublicFeedback(sessionToken.value, message.messageId, helpful)
     message.feedbackSent = true
   } catch (err) {
-    errorMessage.value = err instanceof Error ? err.message : '反馈提交失败'
+    errorMessage.value = friendlyAICCError(err)
   }
 }
 

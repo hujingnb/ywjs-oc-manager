@@ -2,7 +2,7 @@
   <main class="aicc-page">
     <section class="aicc-hero">
       <div>
-        <p class="eyebrow">AI Contact Center</p>
+        <p class="eyebrow">AI Integrated Customer Care</p>
         <h2>AICC 接待台</h2>
         <p>统一维护在线客服智能体、公开链接和访客隐私口径。</p>
       </div>
@@ -158,6 +158,78 @@
               </n-space>
             </n-form>
 
+            <div class="operations-panel">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">投放与安全策略</p>
+                  <strong>公开入口和会话续接</strong>
+                </div>
+                <n-tag v-if="settingsQuery.data.value?.blocked_visitor_count !== undefined" size="small" :bordered="false">
+                  封禁访客 {{ settingsQuery.data.value?.blocked_visitor_count }}
+                </n-tag>
+              </div>
+              <div v-if="!selectedAgent" class="state-text">保存智能体后可配置公开入口和运营安全策略。</div>
+              <template v-else>
+                <div class="delivery-grid">
+                  <div class="public-link-box">
+                    <span>公开链接</span>
+                    <n-input :value="publicLink || '保存智能体后生成'" readonly :input-props="{ readonly: true }" />
+                    <n-space>
+                      <n-button size="small" :disabled="!publicLink" @click="copyText(publicLink)">
+                        <template #icon><Copy :size="14" /></template>
+                        复制
+                      </n-button>
+                      <n-button size="small" :disabled="!publicLink" @click="openPublicLink">
+                        <template #icon><ExternalLink :size="14" /></template>
+                        预览
+                      </n-button>
+                    </n-space>
+                  </div>
+                  <div class="qr-box">
+                    <div v-if="qrDataUrl" class="qr-preview">
+                      <img :src="qrDataUrl" alt="AICC 公开链接二维码" />
+                    </div>
+                    <div v-else class="qr-placeholder">
+                      <QrCode :size="30" />
+                      <span>保存后生成二维码</span>
+                    </div>
+                    <n-button size="small" :disabled="!qrDataUrl" @click="downloadQRCode">
+                      <template #icon><Download :size="14" /></template>
+                      下载 PNG
+                    </n-button>
+                  </div>
+                </div>
+
+                <n-form class="settings-form" :model="settingsForm" label-placement="top">
+                  <div class="settings-grid">
+                    <n-form-item label="单会话消息上限">
+                      <n-input-number v-model:value="settingsForm.message_limit_per_session" :min="1" :max="1000" style="width: 100%" />
+                    </n-form-item>
+                    <n-form-item label="会话续接有效期（分钟）">
+                      <n-input-number v-model:value="settingsForm.session_resume_ttl_minutes" :min="1" :max="1440" style="width: 100%" />
+                    </n-form-item>
+                    <n-form-item label="启用访客封禁">
+                      <n-switch v-model:value="settingsForm.blocked_visitor_enabled" />
+                    </n-form-item>
+                    <n-form-item class="field-full" label="敏感词（一行一个）">
+                      <n-input
+                        v-model:value="settingsForm.sensitive_words_text"
+                        type="textarea"
+                        :autosize="{ minRows: 3, maxRows: 6 }"
+                        placeholder="命中后公开页会阻止发送并提示访客调整内容"
+                      />
+                    </n-form-item>
+                  </div>
+                </n-form>
+                <n-space justify="end">
+                  <n-button :loading="settingsBusy" @click="saveSettings">
+                    <template #icon><Save :size="16" /></template>
+                    保存运营配置
+                  </n-button>
+                </n-space>
+              </template>
+            </div>
+
             <div class="knowledge-panel">
               <div class="section-heading">
                 <div>
@@ -238,22 +310,6 @@
               </n-space>
             </div>
 
-            <div class="publish-panel">
-              <div>
-                <p class="eyebrow">公开链接</p>
-                <strong>{{ publicLink || '保存智能体后生成' }}</strong>
-              </div>
-              <n-space>
-                <n-button :disabled="!publicLink" @click="copyText(publicLink)">
-                  <template #icon><Copy :size="16" /></template>
-                  复制链接
-                </n-button>
-                <n-button :disabled="!publicLink" @click="openPublicLink">
-                  <template #icon><ExternalLink :size="16" /></template>
-                  预览
-                </n-button>
-              </n-space>
-            </div>
             <div class="snippet-panel">
               <span>嵌入占位</span>
               <code>{{ widgetSnippet }}</code>
@@ -269,7 +325,7 @@
             <AICCLeadsPage />
           </n-tab-pane>
           <n-tab-pane name="analytics" tab="统计">
-            <AICCAnalyticsPage :agent-count="agents.length" :active-agent-count="activeAgentCount" />
+            <AICCAnalyticsPage :agent-id="selectedAgentId" :agent-count="agents.length" :active-agent-count="activeAgentCount" />
           </n-tab-pane>
         </n-tabs>
       </section>
@@ -290,12 +346,13 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
+import QRCode from 'qrcode'
 import {
   NAlert, NButton, NCheckbox, NForm, NFormItem, NInput, NInputNumber, NSelect, NSpace, NTag,
-  NTabPane, NTabs, type SelectOption,
+  NSwitch, NTabPane, NTabs, type SelectOption,
 } from 'naive-ui'
 import {
-  Copy, ExternalLink, MessageSquareText, PauseCircle, PlayCircle, Plus, Save, Trash2,
+  Copy, Download, ExternalLink, MessageSquareText, PauseCircle, PlayCircle, Plus, QrCode, Save, Trash2,
 } from 'lucide-vue-next'
 
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
@@ -306,19 +363,31 @@ import {
   useAICCAgentsQuery,
   useAICCKnowledgeQuery,
   useAICCLeadFieldsQuery,
+  useAICCSettingsQuery,
   useCreateAICCAgent,
   useDeleteAICCAgent,
   useReplaceAICCKnowledge,
   useReplaceAICCLeadFields,
   useSetAICCAgentStatus,
   useUpdateAICCAgent,
+  useUpdateAICCSettings,
 } from '@/api/hooks/useAICC'
 import { useIndustryKnowledgeBasesQuery } from '@/api/hooks/useIndustryKnowledge'
 import { useAppKnowledgeQuery } from '@/api/hooks/useKnowledge'
-import type { AICCAgent, AICCAgentPayload, AICCAgentStatus, AICCLeadField, AICCLeadFieldPayload, AICCKnowledgePayload, AICCPrivacyMode } from '@/domain/aicc'
+import type {
+  AICCAgent,
+  AICCAgentPayload,
+  AICCAgentSettings,
+  AICCAgentSettingsPayload,
+  AICCAgentStatus,
+  AICCLeadField,
+  AICCLeadFieldPayload,
+  AICCKnowledgePayload,
+  AICCPrivacyMode,
+} from '@/domain/aicc'
 import { isAICCAgentRunning } from '@/domain/aicc'
 
-// AICCManagerPage 是企业管理员维护 AI Contact Center 在线客服智能体和运营数据的入口。
+// AICCManagerPage 是企业管理员维护 AI Integrated Customer Care 在线客服智能体和运营数据的入口。
 interface AgentForm extends AICCAgentPayload {
   id?: string
   privacy_mode: AICCPrivacyMode
@@ -332,16 +401,26 @@ interface LeadFieldRow extends AICCLeadFieldPayload {
 
 interface KnowledgeForm extends AICCKnowledgePayload {}
 
+interface SettingsForm {
+  message_limit_per_session: number
+  sensitive_words_text: string
+  blocked_visitor_enabled: boolean
+  blocked_visitor_threshold_json?: Record<string, unknown>
+  session_resume_ttl_minutes: number
+}
+
 const selectedAgentId = ref<string | undefined>()
 const deleteModalOpen = ref(false)
 const feedback = ref('')
 const feedbackDanger = ref(false)
 
 const agentsQuery = useAICCAgentsQuery()
+const settingsQuery = useAICCSettingsQuery(selectedAgentId)
 const leadFieldsQuery = useAICCLeadFieldsQuery(selectedAgentId)
 const knowledgeQuery = useAICCKnowledgeQuery(selectedAgentId)
 const createMutation = useCreateAICCAgent()
 const updateMutation = useUpdateAICCAgent()
+const settingsMutation = useUpdateAICCSettings()
 const leadFieldMutation = useReplaceAICCLeadFields()
 const knowledgeMutation = useReplaceAICCKnowledge()
 const statusMutation = useSetAICCAgentStatus()
@@ -357,12 +436,15 @@ const activeAgentCount = computed(() => agents.value.filter(agent => isAICCAgent
 const submitBusy = computed(() => createMutation.isPending.value || updateMutation.isPending.value)
 const statusBusy = computed(() => statusMutation.isPending.value)
 const deleteBusy = computed(() => deleteMutation.isPending.value)
+const settingsBusy = computed(() => settingsMutation.isPending.value || settingsQuery.isFetching.value)
 const leadFieldBusy = computed(() => leadFieldMutation.isPending.value || leadFieldsQuery.isFetching.value)
 const knowledgeBusy = computed(() => knowledgeMutation.isPending.value || knowledgeQuery.isFetching.value)
 
 const form = reactive<AgentForm>(emptyForm())
+const settingsForm = reactive<SettingsForm>(emptySettingsForm())
 const leadFieldRows = ref<LeadFieldRow[]>([])
 const knowledgeForm = reactive<KnowledgeForm>(emptyKnowledgeForm())
+const qrDataUrl = ref('')
 
 const industryKnowledgeOptions = computed<SelectOption[]>(() =>
   (industryBasesQuery.data.value?.items ?? []).map(item => ({
@@ -416,6 +498,26 @@ watch(selectedAgent, (agent) => {
 }, { immediate: true })
 
 watch(
+  () => settingsQuery.data.value,
+  (settings) => {
+    Object.assign(settingsForm, settings ? toSettingsForm(settings) : emptySettingsForm())
+  },
+  { immediate: true },
+)
+
+watch(publicLink, async (value) => {
+  if (!value) {
+    qrDataUrl.value = ''
+    return
+  }
+  try {
+    qrDataUrl.value = await QRCode.toDataURL(value, { width: 192, margin: 1 })
+  } catch {
+    qrDataUrl.value = ''
+  }
+}, { immediate: true })
+
+watch(
   () => leadFieldsQuery.data.value,
   (fields) => {
     leadFieldRows.value = (fields ?? []).map(toLeadFieldRow)
@@ -459,6 +561,26 @@ function emptyKnowledgeForm(): KnowledgeForm {
   }
 }
 
+function emptySettingsForm(): SettingsForm {
+  return {
+    message_limit_per_session: 100,
+    sensitive_words_text: '',
+    blocked_visitor_enabled: true,
+    blocked_visitor_threshold_json: undefined,
+    session_resume_ttl_minutes: 30,
+  }
+}
+
+function toSettingsForm(settings: AICCAgentSettings): SettingsForm {
+  return {
+    message_limit_per_session: settings.message_limit_per_session,
+    sensitive_words_text: settings.sensitive_words.join('\n'),
+    blocked_visitor_enabled: settings.blocked_visitor_enabled,
+    blocked_visitor_threshold_json: settings.blocked_visitor_threshold_json,
+    session_resume_ttl_minutes: settings.session_resume_ttl_minutes,
+  }
+}
+
 function fillForm(agent: AICCAgent) {
   form.id = agent.id
   form.name = agent.name
@@ -485,6 +607,13 @@ function payloadFromForm(): AICCAgentPayload {
 }
 
 function parseAllowedDomains(value: string): string[] {
+  return value
+    .split(/[\n,]/)
+    .map(item => item.trim())
+    .filter(Boolean)
+}
+
+function parseSensitiveWords(value: string): string[] {
   return value
     .split(/[\n,]/)
     .map(item => item.trim())
@@ -584,6 +713,24 @@ async function saveKnowledge() {
   }
 }
 
+async function saveSettings() {
+  if (!selectedAgent.value) return
+  const payload: AICCAgentSettingsPayload = {
+    message_limit_per_session: settingsForm.message_limit_per_session,
+    sensitive_words: parseSensitiveWords(settingsForm.sensitive_words_text),
+    blocked_visitor_enabled: settingsForm.blocked_visitor_enabled,
+    blocked_visitor_threshold_json: settingsForm.blocked_visitor_threshold_json,
+    session_resume_ttl_minutes: settingsForm.session_resume_ttl_minutes,
+  }
+  try {
+    const settings = await settingsMutation.mutateAsync({ agentId: selectedAgent.value.id, payload })
+    Object.assign(settingsForm, toSettingsForm(settings))
+    setFeedback('运营配置已保存')
+  } catch (err) {
+    setFeedback(err instanceof Error ? err.message : '运营配置保存失败', true)
+  }
+}
+
 function statusMeta(status?: AICCAgentStatus): { label: string; type: 'success' | 'warning' | 'default' | 'error' } {
   if (status === 'active') return { label: '接待中', type: 'success' }
   if (status === 'paused') return { label: '已暂停', type: 'warning' }
@@ -646,6 +793,14 @@ async function copyText(text: string) {
 function openPublicLink() {
   if (!publicLink.value) return
   window.open(publicLink.value, '_blank', 'noopener,noreferrer')
+}
+
+function downloadQRCode() {
+  if (!qrDataUrl.value || !selectedAgent.value) return
+  const anchor = document.createElement('a')
+  anchor.href = qrDataUrl.value
+  anchor.download = `${selectedAgent.value.name || 'aicc'}-qrcode.png`
+  anchor.click()
 }
 
 function openDedicatedKnowledge() {
@@ -714,7 +869,6 @@ function openDedicatedKnowledge() {
 .agent-topline,
 .editor-toolbar,
 .section-heading,
-.publish-panel,
 .snippet-panel {
   display: flex;
   align-items: center;
@@ -811,6 +965,7 @@ function openDedicatedKnowledge() {
   grid-column: 1 / -1;
 }
 
+.operations-panel,
 .knowledge-panel,
 .lead-field-panel {
   display: grid;
@@ -820,6 +975,65 @@ function openDedicatedKnowledge() {
   border: 1px solid var(--color-divider);
   border-radius: 8px;
   background: var(--color-surface-muted);
+}
+
+.delivery-grid,
+.settings-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.delivery-grid {
+  grid-template-columns: minmax(0, 1fr) 210px;
+  align-items: stretch;
+}
+
+.public-link-box,
+.qr-box {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
+.public-link-box span {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.qr-box {
+  justify-items: center;
+}
+
+.qr-preview,
+.qr-placeholder {
+  display: grid;
+  width: 154px;
+  height: 154px;
+  place-items: center;
+  border: 1px solid var(--color-divider);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.qr-preview img {
+  display: block;
+  width: 142px;
+  height: 142px;
+}
+
+.qr-placeholder {
+  gap: 6px;
+  color: var(--color-text-secondary);
+  text-align: center;
+  font-size: 12px;
+}
+
+.settings-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .section-heading strong {
@@ -844,7 +1058,6 @@ function openDedicatedKnowledge() {
   align-items: center;
 }
 
-.publish-panel,
 .snippet-panel {
   min-width: 0;
   padding: 12px 14px;
@@ -853,7 +1066,6 @@ function openDedicatedKnowledge() {
   background: var(--color-surface-muted);
 }
 
-.publish-panel strong,
 .snippet-panel code {
   word-break: break-all;
 }
@@ -869,7 +1081,7 @@ function openDedicatedKnowledge() {
   .aicc-hero,
   .editor-toolbar,
   .section-heading,
-  .publish-panel {
+  .snippet-panel {
     align-items: stretch;
     flex-direction: column;
   }
@@ -880,6 +1092,8 @@ function openDedicatedKnowledge() {
 
   .status-grid,
   .agent-fields,
+  .delivery-grid,
+  .settings-grid,
   .lead-field-row {
     grid-template-columns: 1fr;
   }

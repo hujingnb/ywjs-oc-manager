@@ -86,6 +86,38 @@ export interface AICCLeadField {
 // AICCLeadFieldPayload 是管理端保存留资字段时提交的载荷。
 export type AICCLeadFieldPayload = Omit<AICCLeadField, 'id'>
 
+// AICCAgentSettings 是单个智能体的运营安全配置回显。
+export interface AICCAgentSettings {
+  // 智能体主键。
+  agent_id: string
+  // 单个公开会话允许访客发送的最大消息数。
+  message_limit_per_session: number
+  // 公开端发送前拦截的敏感词列表。
+  sensitive_words: string[]
+  // 是否启用异常访客封禁检查。
+  blocked_visitor_enabled: boolean
+  // 异常访客自动封禁阈值配置；当前后端按 JSON 对象透传。
+  blocked_visitor_threshold_json?: Record<string, unknown>
+  // 公开页刷新后允许续接原会话的分钟数。
+  session_resume_ttl_minutes: number
+  // 当前有效封禁访客数量，仅用于运营面板展示。
+  blocked_visitor_count?: number
+}
+
+// AICCAgentSettingsPayload 是保存运营安全配置时提交的载荷。
+export interface AICCAgentSettingsPayload {
+  // 单个公开会话允许访客发送的最大消息数。
+  message_limit_per_session: number
+  // 公开端发送前拦截的敏感词列表。
+  sensitive_words: string[]
+  // 是否启用异常访客封禁检查。
+  blocked_visitor_enabled: boolean
+  // 异常访客自动封禁阈值配置；未配置时由后端保留默认规则。
+  blocked_visitor_threshold_json?: Record<string, unknown>
+  // 公开页刷新后允许续接原会话的分钟数。
+  session_resume_ttl_minutes: number
+}
+
 // AICCKnowledge 是智能体可检索知识范围配置。
 export interface AICCKnowledge {
   // 智能体主键。
@@ -121,8 +153,10 @@ export interface AICCPublicConfig {
 
 // AICCPublicSession 是公开访客会话的临时凭证和隐私状态。
 export interface AICCPublicSession {
-  // 会话短期 token；只保存在当前浏览器页面内。
+  // 会话短期 token；公开页按 publicToken + channel 持久化，用于刷新后续接。
   session_token?: string
+  // 是否由服务端根据提交的旧 token 恢复既有会话。
+  restored?: boolean
   // 隐私提示模式。
   privacy_mode?: AICCPrivacyMode
   // 隐私说明文本。
@@ -165,8 +199,12 @@ export interface AICCSession {
   agent_id: string
   // 当前会话接待渠道。
   channel?: string
+  // 公开端解析出的访客地域。
+  region?: string
   // 访客来源页面。
   source_url?: string
+  // 会话消息数量，用于运营快速判断沟通深度。
+  message_count?: number
   // 当前会话解决状态。
   resolution_status?: string
   // 当前会话留资状态。
@@ -187,6 +225,12 @@ export interface AICCSessionFilters {
   lead_status?: string
   // 入口渠道。
   channel?: string
+  // 访客地域。
+  region?: string
+  // 创建时间下界，RFC3339 字符串。
+  start_at?: string
+  // 创建时间上界，RFC3339 字符串。
+  end_at?: string
   // 来源关键词。
   keyword?: string
 }
@@ -265,18 +309,48 @@ export interface AICCLead {
 export interface AICCAnalytics {
   // 今日新增会话数。
   today_sessions: number
+  // 当前筛选窗口内的会话总数。
+  total_sessions?: number
   // 未读线索数。
   unread_leads: number
   // 已解决会话数。
   resolved_sessions?: number
   // 未解决会话数。
   unresolved_sessions?: number
+  // 尚未判定解决状态的会话数。
+  unknown_sessions?: number
+  // 未解决会话在已判定会话中的占比。
+  unresolved_rate?: number
   // 已完成留资的会话数。
   completed_lead_sessions?: number
+  // 按日或周聚合的会话趋势。
+  session_trend?: AICCTrendBucket[]
+  // 访客地域分布。
+  regions?: AICCTopItem[]
   // 访客热门问题。
   top_questions?: AICCTopItem[]
   // 访客来源页面分布。
   top_sources?: AICCTopItem[]
+}
+
+// AICCAnalyticsFilters 是统计页筛选条件。
+export interface AICCAnalyticsFilters {
+  // 统计开始时间，RFC3339 字符串。
+  start_at?: string
+  // 统计结束时间，RFC3339 字符串。
+  end_at?: string
+  // 趋势聚合粒度。
+  bucket?: 'day' | 'week'
+  // 限定单个智能体。
+  agent_id?: string
+}
+
+// AICCTrendBucket 是统计趋势中的单个时间桶。
+export interface AICCTrendBucket {
+  // 后端返回的日期或周标签。
+  bucket: string
+  // 该时间桶内的会话数量。
+  count: number
 }
 
 // AICCTopItem 是统计页中带次数的排行项。
