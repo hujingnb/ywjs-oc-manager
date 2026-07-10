@@ -1,17 +1,43 @@
 import { mount } from '@vue/test-utils'
-import { defineComponent, h } from 'vue'
+import { defineComponent, h, nextTick } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { i18n } from '@/i18n'
 import AICCConsoleLayout from './AICCConsoleLayout.vue'
 
 const routerPush = vi.hoisted(() => vi.fn())
+const routerReplace = vi.hoisted(() => vi.fn())
 const routeState = vi.hoisted(() => ({ path: '/aicc-console' }))
+const authState = vi.hoisted(() => ({
+  user: { id: 'owner-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' },
+}))
+const organizationState = vi.hoisted(() => {
+  const { ref } = require('vue') as typeof import('vue')
+
+  return {
+    data: ref({
+      id: 'org-1',
+      name: '测试企业',
+      status: 'enabled',
+      code: 'test-org',
+      aicc_enabled: true,
+    }),
+    isLoading: ref(false),
+  }
+})
 
 vi.mock('vue-router', () => ({
   RouterView: { template: '<main data-test="router-view">AICC 子页面</main>' },
   useRoute: () => routeState,
-  useRouter: () => ({ push: routerPush }),
+  useRouter: () => ({ push: routerPush, replace: routerReplace }),
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => authState,
+}))
+
+vi.mock('@/api/hooks/useOrganizations', () => ({
+  useOrganizationQuery: () => organizationState,
 }))
 
 // LocaleSwitcherStub：独立工作台只验证语言切换器插槽位置，不挂载真实本地化存储逻辑。
@@ -74,6 +100,16 @@ describe('AICCConsoleLayout', () => {
   beforeEach(() => {
     routeState.path = '/aicc-console'
     routerPush.mockClear()
+    routerReplace.mockClear()
+    authState.user = { id: 'owner-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' }
+    organizationState.data.value = {
+      id: 'org-1',
+      name: '测试企业',
+      status: 'enabled',
+      code: 'test-org',
+      aicc_enabled: true,
+    }
+    organizationState.isLoading.value = false
   })
 
   // 覆盖独立客服工作台骨架：顶部栏、内部导航和子路由出口必须同时存在，避免回落到主后台菜单。
@@ -123,5 +159,21 @@ describe('AICCConsoleLayout', () => {
       await navItem!.trigger('click')
       expect(routerPush).toHaveBeenCalledWith(path)
     }
+  })
+
+  // 覆盖未开通企业直接访问兜底：即使用户手动输入 /aicc-console，也会回到概览页。
+  it('redirects disabled organizations back to overview', async () => {
+    organizationState.data.value = {
+      id: 'org-1',
+      name: '测试企业',
+      status: 'enabled',
+      code: 'test-org',
+      aicc_enabled: false,
+    }
+
+    mountLayout()
+    await nextTick()
+
+    expect(routerReplace).toHaveBeenCalledWith('/')
   })
 })

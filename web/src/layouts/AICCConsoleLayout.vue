@@ -48,7 +48,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h } from 'vue'
+import { computed, h, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
@@ -58,6 +58,8 @@ import {
 import { ArrowLeft, BarChart3, BookOpen, LayoutDashboard, MessageSquare, Settings, Users } from 'lucide-vue-next'
 
 import LocaleSwitcher from '@/components/LocaleSwitcher.vue'
+import { useOrganizationQuery } from '@/api/hooks/useOrganizations'
+import { useAuthStore } from '@/stores/auth'
 
 interface ConsoleNavItem {
   path: string
@@ -68,6 +70,20 @@ interface ConsoleNavItem {
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
+const auth = useAuthStore()
+const ownOrgId = computed(() => auth.user?.role === 'org_admin' ? auth.user.org_id ?? undefined : undefined)
+const { data: ownOrganization, isLoading: orgLoading } = useOrganizationQuery(ownOrgId)
+
+// AICC 子系统入口由企业开通状态控制；直接访问 /aicc-console 时也必须兜底拦截未开通企业。
+watch(
+  () => ({ loading: orgLoading.value, enabled: ownOrganization.value?.aicc_enabled }),
+  ({ loading, enabled }) => {
+    if (!loading && enabled === false) {
+      void router.replace('/')
+    }
+  },
+  { immediate: true },
+)
 
 // navItems 是 AICC 工作台的信息架构入口；暂未拆页的分区先保留导航目标，路由在后续任务扩展。
 const navItems: ConsoleNavItem[] = [
