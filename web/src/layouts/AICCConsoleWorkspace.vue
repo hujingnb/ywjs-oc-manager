@@ -1,33 +1,15 @@
 <template>
   <section class="aicc-console-workspace" :aria-label="t('aicc.console.navLabel')">
-    <header class="aicc-agent-context" data-test="workspace-agent-bar">
-      <div class="aicc-agent-identity">
-        <span>{{ t('aicc.console.currentAgent') }}</span>
-        <strong>{{ selectedAgent?.name || t('aicc.console.noAgentSelected') }}</strong>
+    <header class="aicc-workspace-topbar" data-test="workspace-topbar">
+      <div class="aicc-brand" data-test="workspace-brand">
+        <div class="aicc-brand-mark">AI</div>
+        <div>
+          <p>{{ t('aicc.console.eyebrow') }}</p>
+          <h1>{{ t('aicc.console.title') }}</h1>
+        </div>
       </div>
 
-      <div class="aicc-agent-meta" aria-live="polite">
-        <span v-if="agentsLoading">{{ t('aicc.console.agentLoading') }}</span>
-        <span v-else-if="agentsError">{{ t('aicc.console.agentLoadFailed') }}</span>
-        <template v-else>
-          <span>
-            {{ t('aicc.manager.status.runtime') }}
-            <n-tag size="small" :type="selectedAgentStatusType">{{ selectedAgentStatusText }}</n-tag>
-          </span>
-          <span>
-            {{ t('aicc.manager.status.publicEntry') }}
-            <n-tag size="small" :type="selectedAgent?.public_token ? 'success' : 'default'">
-              {{ selectedAgentPublicEntryText }}
-            </n-tag>
-          </span>
-          <span>
-            {{ t('aicc.manager.status.retention') }}
-            <strong>{{ selectedAgentRetentionText }}</strong>
-          </span>
-        </template>
-      </div>
-
-      <div class="aicc-agent-actions">
+      <section class="aicc-agent-context" data-test="workspace-agent-bar" :aria-label="t('aicc.console.currentAgent')">
         <n-select
           v-model:value="selectedAgentIdModel"
           class="aicc-agent-select"
@@ -37,9 +19,43 @@
           :loading="agentsLoading"
           :placeholder="t('aicc.console.switchAgent')"
         />
+
+        <div class="aicc-agent-summary">
+          <p>{{ t('aicc.console.currentAgent') }}</p>
+          <strong>{{ selectedAgent?.name || t('aicc.console.noAgentSelected') }}</strong>
+          <div class="aicc-agent-meta" aria-live="polite">
+            <span v-if="agentsLoading">{{ t('aicc.console.agentLoading') }}</span>
+            <span v-else-if="agentsError">{{ t('aicc.console.agentLoadFailed') }}</span>
+            <template v-else>
+              <span>
+                {{ t('aicc.manager.status.runtime') }}
+                <n-tag size="small" :type="selectedAgentStatusType">{{ selectedAgentStatusText }}</n-tag>
+              </span>
+              <span>
+                {{ t('aicc.manager.status.publicEntry') }}
+                <n-tag size="small" :type="selectedAgent?.public_token ? 'success' : 'default'">
+                  {{ selectedAgentPublicEntryText }}
+                </n-tag>
+              </span>
+              <span>
+                {{ t('aicc.manager.status.retention') }}
+                <strong>{{ selectedAgentRetentionText }}</strong>
+              </span>
+            </template>
+          </div>
+        </div>
+
         <n-button size="small" type="primary" secondary @click="startCreateAgent">
           <template #icon><Plus :size="15" /></template>
           {{ t('aicc.console.createAgent') }}
+        </n-button>
+      </section>
+
+      <div class="aicc-header-actions">
+        <LocaleSwitcher :persist="true" />
+        <n-button secondary @click="returnToOverview">
+          <template #icon><ArrowLeft :size="16" /></template>
+          {{ t('aicc.console.returnToOverview') }}
         </n-button>
       </div>
     </header>
@@ -73,8 +89,9 @@ import { computed, provide, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { NButton, NSelect, NTag, type SelectOption } from 'naive-ui'
-import { BarChart3, BookOpen, LayoutDashboard, MessageSquare, Plus, Settings, Users } from 'lucide-vue-next'
+import { ArrowLeft, BarChart3, BookOpen, LayoutDashboard, MessageSquare, Plus, Settings, Users } from 'lucide-vue-next'
 
+import LocaleSwitcher from '@/components/LocaleSwitcher.vue'
 import { useAICCAgentsQuery } from '@/api/hooks/useAICC'
 import type { AICCAgent } from '@/domain/aicc'
 import { AICCConsoleContextKey } from '@/pages/aicc/aiccConsoleContext'
@@ -195,6 +212,10 @@ function startCreateAgent() {
 function navigateTo(path: string) {
   void router.push(path)
 }
+
+function returnToOverview() {
+  void router.push('/')
+}
 </script>
 
 <style scoped>
@@ -205,6 +226,57 @@ function navigateTo(path: string) {
   flex: 1;
   flex-direction: column;
   gap: 12px;
+}
+
+.aicc-workspace-topbar {
+  display: grid;
+  grid-template-columns: minmax(220px, auto) minmax(520px, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  min-height: 72px;
+  padding: 12px 22px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
+.aicc-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.aicc-brand-mark {
+  display: grid;
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--color-brand);
+  color: var(--color-on-brand);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.aicc-brand p,
+.aicc-agent-summary p {
+  margin: 0 0 2px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.aicc-brand h1 {
+  margin: 0;
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-size: 19px;
+  font-weight: 750;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .aicc-workspace-shell {
@@ -253,35 +325,29 @@ function navigateTo(path: string) {
 
 .aicc-agent-context {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) minmax(220px, 2fr) minmax(220px, auto);
-  gap: 16px;
+  grid-template-columns: minmax(260px, 380px) minmax(280px, 1fr) auto;
+  gap: 12px;
   align-items: center;
-  min-height: 58px;
+  min-width: 0;
+  min-height: 56px;
   padding: 10px 14px;
   border: 1px solid var(--color-border);
   border-radius: 8px;
-  background: var(--color-surface);
+  background: var(--color-surface-muted);
 }
 
-.aicc-agent-identity,
+.aicc-agent-summary,
 .aicc-agent-meta {
   min-width: 0;
 }
 
-.aicc-agent-identity span {
-  display: block;
-  margin-bottom: 2px;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  line-height: 1.2;
-}
-
-.aicc-agent-identity strong {
-  display: block;
+.aicc-agent-summary strong {
+  display: inline-block;
+  max-width: 100%;
   overflow: hidden;
   color: var(--color-text-primary);
-  font-size: 15px;
-  line-height: 1.4;
+  font-size: 13px;
+  line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -289,9 +355,9 @@ function navigateTo(path: string) {
 .aicc-agent-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 14px;
+  gap: 6px 10px;
   color: var(--color-text-secondary);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .aicc-agent-meta span {
@@ -300,12 +366,13 @@ function navigateTo(path: string) {
   gap: 6px;
 }
 
-.aicc-agent-actions {
+.aicc-header-actions {
   display: flex;
   min-width: 0;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .aicc-agent-select {
@@ -328,11 +395,15 @@ function navigateTo(path: string) {
 }
 
 @media (max-width: 1100px) {
+  .aicc-workspace-topbar {
+    grid-template-columns: 1fr;
+  }
+
   .aicc-agent-context {
     grid-template-columns: 1fr;
   }
 
-  .aicc-agent-actions {
+  .aicc-header-actions {
     justify-content: flex-start;
   }
 

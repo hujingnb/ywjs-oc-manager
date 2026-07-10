@@ -82,6 +82,13 @@ const TagStub = defineComponent({
   },
 })
 
+const LocaleSwitcherStub = defineComponent({
+  props: ['persist'],
+  setup() {
+    return () => h('div', { 'data-test': 'locale-switcher' })
+  },
+})
+
 // makeAgent：构造最小智能体夹具，字段保持与后端 snake_case 契约一致。
 function makeAgent(overrides: Partial<AICCAgent> = {}): AICCAgent {
   return {
@@ -107,9 +114,11 @@ function mountWorkspace() {
         NButton: ButtonStub,
         NSelect: SelectStub,
         NTag: TagStub,
+        LocaleSwitcher: LocaleSwitcherStub,
         'n-button': ButtonStub,
         'n-select': SelectStub,
         'n-tag': TagStub,
+        'locale-switcher': LocaleSwitcherStub,
       },
     },
   })
@@ -142,6 +151,9 @@ describe('AICCConsoleWorkspace', () => {
   it('renders the module menu in the left rail and pushes all console routes', async () => {
     const wrapper = mountWorkspace()
 
+    expect(wrapper.find('[data-test="workspace-topbar"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="workspace-brand"]').text()).toContain('AI Contact Center')
+    expect(wrapper.find('[data-test="locale-switcher"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="workspace-module-menu"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="workspace-agent-bar"]').exists()).toBe(true)
     expect(navItems(wrapper).map(item => item.text())).toEqual(['接待台', '会话', '线索', '知识库', '分析', '设置'])
@@ -167,6 +179,15 @@ describe('AICCConsoleWorkspace', () => {
       '/aicc-console/analytics',
       '/aicc-console/settings',
     ])
+  })
+
+  // 覆盖 demo 版顶栏：返回概览入口与智能体选择处于同一工作台顶栏内。
+  it('returns to enterprise overview from the unified topbar', async () => {
+    const wrapper = mountWorkspace()
+
+    await wrapper.findAll('button').find(button => button.text().includes('返回概览'))!.trigger('click')
+
+    expect(routerPush).toHaveBeenCalledWith('/')
   })
 
   // 覆盖当前智能体上下文条：默认选中首个智能体，并展示名称、运行状态、公开入口和保留天数。
