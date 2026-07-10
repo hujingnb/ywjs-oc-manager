@@ -18,8 +18,8 @@
           <strong>{{ t('aicc.manager.agents') }}</strong>
           <n-tag size="small" :bordered="false">{{ agents.length }}</n-tag>
         </div>
-        <div v-if="agentsQuery.isLoading.value" class="state-text">{{ t('aicc.manager.loading') }}</div>
-        <p v-else-if="agentsQuery.error.value" class="state-text danger">{{ agentsQuery.error.value.message }}</p>
+        <div v-if="agentsLoading" class="state-text">{{ t('aicc.manager.loading') }}</div>
+        <p v-else-if="agentsError" class="state-text danger">{{ agentsError.message }}</p>
         <template v-else>
           <button
             v-for="agent in agents"
@@ -38,7 +38,7 @@
             <small>{{ agent.scenario || t('aicc.manager.noScenario') }}</small>
           </button>
         </template>
-        <div v-if="!agentsQuery.isLoading.value && agents.length === 0" class="empty-block">
+        <div v-if="!agentsLoading && agents.length === 0" class="empty-block">
           <MessageSquareText :size="28" />
           <strong>{{ t('aicc.manager.emptyAgentsTitle') }}</strong>
           <span>{{ t('aicc.manager.emptyAgentsDesc') }}</span>
@@ -358,10 +358,10 @@ import {
 
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import AICCAnalyticsPage from '@/pages/aicc/AICCAnalyticsPage.vue'
+import { useRequiredAICCConsoleContext } from '@/pages/aicc/aiccConsoleContext'
 import AICCLeadsPage from '@/pages/aicc/AICCLeadsPage.vue'
 import AICCSessionsPage from '@/pages/aicc/AICCSessionsPage.vue'
 import {
-  useAICCAgentsQuery,
   useAICCKnowledgeQuery,
   useAICCKnowledgeOptionsQuery,
   useAICCLeadFieldsQuery,
@@ -418,7 +418,12 @@ interface SettingsForm {
   session_resume_ttl_minutes: number
 }
 
-const selectedAgentId = ref<string | undefined>()
+const consoleContext = useRequiredAICCConsoleContext()
+const selectedAgentId = consoleContext.selectedAgentId
+const agents = consoleContext.agents
+const selectedAgent = consoleContext.selectedAgent
+const agentsLoading = consoleContext.agentsLoading
+const agentsError = consoleContext.agentsError
 const deleteModalOpen = ref(false)
 const feedback = ref('')
 const feedbackDanger = ref(false)
@@ -426,7 +431,6 @@ const activeSection = ref<ManagerTab>(sectionToTab(props.initialSection))
 const knowledgePanelEl = ref<HTMLElement>()
 const { t } = useI18n()
 
-const agentsQuery = useAICCAgentsQuery()
 const settingsQuery = useAICCSettingsQuery(selectedAgentId)
 const leadFieldsQuery = useAICCLeadFieldsQuery(selectedAgentId)
 const knowledgeQuery = useAICCKnowledgeQuery(selectedAgentId)
@@ -439,8 +443,6 @@ const knowledgeMutation = useReplaceAICCKnowledge()
 const statusMutation = useSetAICCAgentStatus()
 const deleteMutation = useDeleteAICCAgent()
 
-const agents = computed(() => agentsQuery.data.value ?? [])
-const selectedAgent = computed(() => agents.value.find(agent => agent.id === selectedAgentId.value))
 const selectedKnowledgeAppId = computed(() => knowledgeQuery.data.value?.app_id || selectedAgent.value?.app_id)
 const isSelectedRunning = computed(() => selectedAgent.value ? isAICCAgentRunning(selectedAgent.value) : false)
 const activeAgentCount = computed(() => agents.value.filter(agent => isAICCAgentRunning(agent)).length)
@@ -493,16 +495,6 @@ const widgetSnippet = computed(() => {
   const base = typeof window === 'undefined' ? '' : window.location.origin
   return `<script src="${base}/aicc-widget.js" data-aicc-widget-token="${token}"></` + 'script>'
 })
-
-watch(
-  agents,
-  (items) => {
-    if (!selectedAgentId.value && items.length > 0) {
-      selectedAgentId.value = items[0].id
-    }
-  },
-  { immediate: true },
-)
 
 watch(selectedAgent, (agent) => {
   if (agent) fillForm(agent)
@@ -661,11 +653,11 @@ function setFeedback(message: string, danger = false) {
 }
 
 function selectAgent(agentId?: string) {
-  selectedAgentId.value = agentId
+  consoleContext.selectAgent(agentId)
 }
 
 function startCreate() {
-  selectedAgentId.value = undefined
+  consoleContext.startCreateAgent()
   delete form.id
   Object.assign(form, emptyForm())
   feedback.value = ''
@@ -783,7 +775,7 @@ async function submitForm() {
     const agent = form.id
       ? await updateMutation.mutateAsync({ agentId: form.id, payload })
       : await createMutation.mutateAsync(payload)
-    selectedAgentId.value = agent.id
+    consoleContext.selectAgent(agent.id)
     fillForm(agent)
     setFeedback(t('aicc.manager.feedback.configSaved'))
   } catch (err) {
