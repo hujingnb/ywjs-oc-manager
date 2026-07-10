@@ -4,6 +4,7 @@ export default {
     title: 'AICC 工作台',
     returnToOverview: '返回概览',
     navLabel: 'AICC 工作台内容',
+    checkingAccess: '正在检查客服开通状态',
     nav: {
       reception: '接待台',
       sessions: '会话',

@@ -5,6 +5,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { i18n } from '@/i18n'
 import AICCConsoleLayout from './AICCConsoleLayout.vue'
 
+interface OrganizationFixture {
+  id: string
+  name: string
+  status: string
+  code: string
+  aicc_enabled: boolean
+}
+
 const routerPush = vi.hoisted(() => vi.fn())
 const routerReplace = vi.hoisted(() => vi.fn())
 const routeState = vi.hoisted(() => ({ path: '/aicc-console' }))
@@ -15,7 +23,7 @@ const organizationState = vi.hoisted(() => {
   const { ref } = require('vue') as typeof import('vue')
 
   return {
-    data: ref({
+    data: ref<OrganizationFixture | undefined>({
       id: 'org-1',
       name: '测试企业',
       status: 'enabled',
@@ -175,5 +183,16 @@ describe('AICCConsoleLayout', () => {
     await nextTick()
 
     expect(routerReplace).toHaveBeenCalledWith('/')
+  })
+
+  // 覆盖开通状态加载期间的访问保护：企业状态未知时不能提前挂载子页面，避免子页面抢先请求 AICC API。
+  it('does not render routed console content while organization enablement is loading', () => {
+    organizationState.data.value = undefined
+    organizationState.isLoading.value = true
+
+    const wrapper = mountLayout()
+
+    expect(wrapper.find('[data-test="router-view"]').exists()).toBe(false)
+    expect(routerReplace).not.toHaveBeenCalled()
   })
 })

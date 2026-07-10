@@ -4,6 +4,7 @@ export default {
     title: 'AICC Console',
     returnToOverview: 'Back to overview',
     navLabel: 'AICC console content',
+    checkingAccess: 'Checking customer-care access',
     nav: {
       reception: 'Reception',
       sessions: 'Sessions',
