@@ -180,7 +180,7 @@ test('公开访客提交留资后企业管理员可查看线索和导出 CSV', a
 
   await page.goto('/aicc')
   await page.getByText('线索', { exact: true }).click()
-  await expect(page.getByText(phone)).toBeVisible()
+  await expect(page.getByText(phone, { exact: true })).toBeVisible()
   await expect(page.getByText('未读')).toBeVisible()
 
   await page.getByText('统计', { exact: true }).click()
