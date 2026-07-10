@@ -31,6 +31,7 @@ type Querier interface {
 	CountAICCSessionsByResolution(ctx context.Context, arg CountAICCSessionsByResolutionParams) (int64, error)
 	CountAICCTodaySessions(ctx context.Context, orgID string) (int64, error)
 	CountAICCUnreadLeads(ctx context.Context, orgID string) (int64, error)
+	CountAICCVisitorMessagesBySession(ctx context.Context, sessionID string) (int64, error)
 	// 统计企业当前未删除普通实例数；AICC 隐藏 app 使用独立 aicc_agent_limit，不占用普通实例上限。
 	CountActiveAppsByOrg(ctx context.Context, orgID string) (int64, error)
 	// 平台总览组织计数：剔除 soft-deleted；status='active' 与 'disabled' 都算入册组织。
@@ -98,6 +99,7 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) error
 	DeactivateAICCLeadFieldsByAgent(ctx context.Context, agentID string) error
 	DeleteAICCAgentKnowledgeByAgent(ctx context.Context, agentID string) error
+	DeleteAICCBlockedVisitor(ctx context.Context, arg DeleteAICCBlockedVisitorParams) (int64, error)
 	DeleteAICCSession(ctx context.Context, id string) error
 	DeleteAppSkillByAppAndName(ctx context.Context, arg DeleteAppSkillByAppAndNameParams) error
 	DeleteCustomSkillTargetsByName(ctx context.Context, customSkillName string) error
@@ -112,11 +114,13 @@ type Querier interface {
 	GetAICCAgentByAppID(ctx context.Context, appID string) (AiccAgent, error)
 	GetAICCAgentByPublicToken(ctx context.Context, publicToken string) (AiccAgent, error)
 	GetAICCAgentByWidgetToken(ctx context.Context, widgetToken string) (AiccAgent, error)
+	GetAICCAgentSettings(ctx context.Context, agentID string) (AiccAgentSetting, error)
 	GetAICCAssistantMessageForFeedback(ctx context.Context, arg GetAICCAssistantMessageForFeedbackParams) (AiccMessage, error)
 	GetAICCImageBySession(ctx context.Context, arg GetAICCImageBySessionParams) (AiccImage, error)
 	GetAICCLeadByContact(ctx context.Context, arg GetAICCLeadByContactParams) (AiccLead, error)
 	GetAICCSession(ctx context.Context, id string) (AiccSession, error)
 	GetAICCSessionByToken(ctx context.Context, sessionToken string) (AiccSession, error)
+	GetActiveAICCBlockedVisitor(ctx context.Context, arg GetActiveAICCBlockedVisitorParams) (AiccBlockedVisitor, error)
 	GetActiveAppByOwner(ctx context.Context, ownerUserID string) (App, error)
 	GetApp(ctx context.Context, id string) (App, error)
 	// 按 control token（per-app 三用：bootstrap / oc-kb / oc-ops）的 hash 反查当前 app；
@@ -183,6 +187,7 @@ type Querier interface {
 	HardDeleteOrganization(ctx context.Context, id string) error
 	ListAICCAgentKnowledge(ctx context.Context, agentID string) ([]AiccAgentKnowledge, error)
 	ListAICCAgentsByOrg(ctx context.Context, arg ListAICCAgentsByOrgParams) ([]AiccAgent, error)
+	ListAICCBlockedVisitorsByAgent(ctx context.Context, arg ListAICCBlockedVisitorsByAgentParams) ([]AiccBlockedVisitor, error)
 	ListAICCImageObjectKeysBySession(ctx context.Context, sessionID string) ([]string, error)
 	ListAICCLeadFieldsByAgent(ctx context.Context, agentID string) ([]AiccLeadField, error)
 	ListAICCLeadValuesByLead(ctx context.Context, arg ListAICCLeadValuesByLeadParams) ([]ListAICCLeadValuesByLeadRow, error)
@@ -411,6 +416,8 @@ type Querier interface {
 	UpdateUserLocale(ctx context.Context, arg UpdateUserLocaleParams) error
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) error
+	UpsertAICCAgentSettings(ctx context.Context, arg UpsertAICCAgentSettingsParams) error
+	UpsertAICCBlockedVisitor(ctx context.Context, arg UpsertAICCBlockedVisitorParams) error
 	UpsertAICCFeedback(ctx context.Context, arg UpsertAICCFeedbackParams) error
 	UpsertAICCLead(ctx context.Context, arg UpsertAICCLeadParams) error
 	UpsertAICCLeadField(ctx context.Context, arg UpsertAICCLeadFieldParams) error

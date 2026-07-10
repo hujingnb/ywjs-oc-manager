@@ -88,6 +88,9 @@ WHERE agent_id = ?
   AND (sqlc.narg(resolution_status) IS NULL OR resolution_status = sqlc.narg(resolution_status))
   AND (sqlc.narg(lead_status) IS NULL OR lead_status = sqlc.narg(lead_status))
   AND (sqlc.narg(channel) IS NULL OR channel = sqlc.narg(channel))
+  AND (sqlc.narg(region) IS NULL OR region = sqlc.narg(region))
+  AND (sqlc.narg(start_at) IS NULL OR created_at >= sqlc.narg(start_at))
+  AND (sqlc.narg(end_at) IS NULL OR created_at < sqlc.narg(end_at))
   AND (
       sqlc.narg(keyword) IS NULL
       OR source_url LIKE CONCAT('%', sqlc.narg(keyword), '%')
@@ -336,3 +339,55 @@ WHERE l.org_id = ?
 -- name: DeleteAICCSession :exec
 DELETE FROM aicc_sessions
 WHERE id = ?;
+
+-- name: GetAICCAgentSettings :one
+SELECT *
+FROM aicc_agent_settings
+WHERE agent_id = ?;
+
+-- name: UpsertAICCAgentSettings :exec
+INSERT INTO aicc_agent_settings (
+    agent_id, message_limit_per_session, sensitive_words_json,
+    blocked_visitor_enabled, blocked_visitor_threshold_json,
+    session_resume_ttl_minutes, analytics_config_json
+) VALUES (?, ?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+    message_limit_per_session = VALUES(message_limit_per_session),
+    sensitive_words_json = VALUES(sensitive_words_json),
+    blocked_visitor_enabled = VALUES(blocked_visitor_enabled),
+    blocked_visitor_threshold_json = VALUES(blocked_visitor_threshold_json),
+    session_resume_ttl_minutes = VALUES(session_resume_ttl_minutes),
+    analytics_config_json = VALUES(analytics_config_json),
+    updated_at = now();
+
+-- name: ListAICCBlockedVisitorsByAgent :many
+SELECT *
+FROM aicc_blocked_visitors
+WHERE agent_id = ?
+ORDER BY created_at DESC, id DESC
+LIMIT ? OFFSET ?;
+
+-- name: GetActiveAICCBlockedVisitor :one
+SELECT *
+FROM aicc_blocked_visitors
+WHERE agent_id = ? AND visitor_hash = ? AND expires_at > now()
+ORDER BY expires_at DESC, id DESC
+LIMIT 1;
+
+-- name: UpsertAICCBlockedVisitor :exec
+INSERT INTO aicc_blocked_visitors (
+    id, agent_id, org_id, visitor_hash, reason, expires_at
+) VALUES (?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+    reason = VALUES(reason),
+    expires_at = VALUES(expires_at),
+    updated_at = now();
+
+-- name: DeleteAICCBlockedVisitor :execrows
+DELETE FROM aicc_blocked_visitors
+WHERE id = ? AND agent_id = ?;
+
+-- name: CountAICCVisitorMessagesBySession :one
+SELECT COUNT(*)
+FROM aicc_messages
+WHERE session_id = ? AND direction = 'visitor';

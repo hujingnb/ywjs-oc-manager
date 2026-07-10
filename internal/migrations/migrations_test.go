@@ -251,6 +251,26 @@ func TestAICCMigrationGuardrails(t *testing.T) {
 	assert.Greater(t, dropDocumentIndex, dropKnowledgeIndex)
 }
 
+// TestAICCSettingsMigrationContainsOperationalTables 覆盖 AICC 运营配置表：
+// 新增表必须按 agent 维度保存安全与续接策略，并用访客哈希记录封禁，避免保存明文 IP。
+func TestAICCSettingsMigrationContainsOperationalTables(t *testing.T) {
+	upBytes, err := FS.ReadFile("000030_aicc_settings.up.sql")
+	require.NoError(t, err)
+	up := string(upBytes)
+
+	assert.Contains(t, up, "CREATE TABLE aicc_agent_settings")
+	assert.Contains(t, up, "agent_id CHAR(36) NOT NULL")
+	assert.Contains(t, up, "message_limit_per_session INT NOT NULL DEFAULT 100")
+	assert.Contains(t, up, "sensitive_words_json JSON NULL")
+	assert.Contains(t, up, "session_resume_ttl_minutes INT NOT NULL DEFAULT 30")
+	assert.Contains(t, up, "UNIQUE KEY uk_aicc_agent_settings_agent (agent_id)")
+	assert.Contains(t, up, "CREATE TABLE aicc_blocked_visitors")
+	assert.Contains(t, up, "visitor_hash VARCHAR(128) NOT NULL")
+	assert.Contains(t, up, "expires_at DATETIME NOT NULL")
+	assert.Contains(t, up, "KEY idx_aicc_blocked_visitors_lookup (agent_id, visitor_hash, expires_at)")
+	assert.NotContains(t, up, "remote_ip")
+}
+
 // TestAICCMigrationExecutesOnMySQL 验证 AICC 迁移在真实 MySQL 8 上能建立约束、拒绝跨作用域脏数据并成功回滚。
 func TestAICCMigrationExecutesOnMySQL(t *testing.T) {
 	baseURL := os.Getenv("AICC_MIGRATION_TEST_DSN")

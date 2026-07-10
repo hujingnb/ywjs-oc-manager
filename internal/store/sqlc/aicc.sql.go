@@ -148,6 +148,19 @@ func (q *Queries) CountAICCUnreadLeads(ctx context.Context, orgID string) (int64
 	return count, err
 }
 
+const countAICCVisitorMessagesBySession = `-- name: CountAICCVisitorMessagesBySession :one
+SELECT COUNT(*)
+FROM aicc_messages
+WHERE session_id = ? AND direction = 'visitor'
+`
+
+func (q *Queries) CountAICCVisitorMessagesBySession(ctx context.Context, sessionID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countAICCVisitorMessagesBySession, sessionID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createAICCAgent = `-- name: CreateAICCAgent :exec
 INSERT INTO aicc_agents (
     id, org_id, app_id, name, status, scenario, greeting, answer_boundary,
@@ -330,6 +343,24 @@ func (q *Queries) DeleteAICCAgentKnowledgeByAgent(ctx context.Context, agentID s
 	return err
 }
 
+const deleteAICCBlockedVisitor = `-- name: DeleteAICCBlockedVisitor :execrows
+DELETE FROM aicc_blocked_visitors
+WHERE id = ? AND agent_id = ?
+`
+
+type DeleteAICCBlockedVisitorParams struct {
+	ID      string `db:"id" json:"id"`
+	AgentID string `db:"agent_id" json:"agent_id"`
+}
+
+func (q *Queries) DeleteAICCBlockedVisitor(ctx context.Context, arg DeleteAICCBlockedVisitorParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteAICCBlockedVisitor, arg.ID, arg.AgentID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteAICCSession = `-- name: DeleteAICCSession :exec
 DELETE FROM aicc_sessions
 WHERE id = ?
@@ -481,6 +512,29 @@ func (q *Queries) GetAICCAgentByWidgetToken(ctx context.Context, widgetToken str
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const getAICCAgentSettings = `-- name: GetAICCAgentSettings :one
+SELECT agent_id, message_limit_per_session, sensitive_words_json, blocked_visitor_enabled, blocked_visitor_threshold_json, session_resume_ttl_minutes, analytics_config_json, created_at, updated_at
+FROM aicc_agent_settings
+WHERE agent_id = ?
+`
+
+func (q *Queries) GetAICCAgentSettings(ctx context.Context, agentID string) (AiccAgentSetting, error) {
+	row := q.db.QueryRowContext(ctx, getAICCAgentSettings, agentID)
+	var i AiccAgentSetting
+	err := row.Scan(
+		&i.AgentID,
+		&i.MessageLimitPerSession,
+		&i.SensitiveWordsJson,
+		&i.BlockedVisitorEnabled,
+		&i.BlockedVisitorThresholdJson,
+		&i.SessionResumeTtlMinutes,
+		&i.AnalyticsConfigJson,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -639,6 +693,35 @@ func (q *Queries) GetAICCSessionByToken(ctx context.Context, sessionToken string
 	return i, err
 }
 
+const getActiveAICCBlockedVisitor = `-- name: GetActiveAICCBlockedVisitor :one
+SELECT id, agent_id, org_id, visitor_hash, reason, expires_at, created_at, updated_at
+FROM aicc_blocked_visitors
+WHERE agent_id = ? AND visitor_hash = ? AND expires_at > now()
+ORDER BY expires_at DESC, id DESC
+LIMIT 1
+`
+
+type GetActiveAICCBlockedVisitorParams struct {
+	AgentID     string `db:"agent_id" json:"agent_id"`
+	VisitorHash string `db:"visitor_hash" json:"visitor_hash"`
+}
+
+func (q *Queries) GetActiveAICCBlockedVisitor(ctx context.Context, arg GetActiveAICCBlockedVisitorParams) (AiccBlockedVisitor, error) {
+	row := q.db.QueryRowContext(ctx, getActiveAICCBlockedVisitor, arg.AgentID, arg.VisitorHash)
+	var i AiccBlockedVisitor
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.OrgID,
+		&i.VisitorHash,
+		&i.Reason,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listAICCAgentKnowledge = `-- name: ListAICCAgentKnowledge :many
 SELECT id, agent_id, agent_org_id, scope_type, org_id, app_id, industry_knowledge_base_id, ragflow_document_id, ragflow_document_scope_type, scope_identity_key, created_at
 FROM aicc_agent_knowledge
@@ -723,6 +806,52 @@ func (q *Queries) ListAICCAgentsByOrg(ctx context.Context, arg ListAICCAgentsByO
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAICCBlockedVisitorsByAgent = `-- name: ListAICCBlockedVisitorsByAgent :many
+SELECT id, agent_id, org_id, visitor_hash, reason, expires_at, created_at, updated_at
+FROM aicc_blocked_visitors
+WHERE agent_id = ?
+ORDER BY created_at DESC, id DESC
+LIMIT ? OFFSET ?
+`
+
+type ListAICCBlockedVisitorsByAgentParams struct {
+	AgentID string `db:"agent_id" json:"agent_id"`
+	Limit   int32  `db:"limit" json:"limit"`
+	Offset  int32  `db:"offset" json:"offset"`
+}
+
+func (q *Queries) ListAICCBlockedVisitorsByAgent(ctx context.Context, arg ListAICCBlockedVisitorsByAgentParams) ([]AiccBlockedVisitor, error) {
+	rows, err := q.db.QueryContext(ctx, listAICCBlockedVisitorsByAgent, arg.AgentID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AiccBlockedVisitor{}
+	for rows.Next() {
+		var i AiccBlockedVisitor
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.OrgID,
+			&i.VisitorHash,
+			&i.Reason,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1031,6 +1160,9 @@ WHERE agent_id = ?
   AND (? IS NULL OR resolution_status = ?)
   AND (? IS NULL OR lead_status = ?)
   AND (? IS NULL OR channel = ?)
+  AND (? IS NULL OR region = ?)
+  AND (? IS NULL OR created_at >= ?)
+  AND (? IS NULL OR created_at < ?)
   AND (
       ? IS NULL
       OR source_url LIKE CONCAT('%', ?, '%')
@@ -1045,6 +1177,9 @@ type ListAICCSessionsByAgentParams struct {
 	ResolutionStatus null.String `db:"resolution_status" json:"resolution_status"`
 	LeadStatus       null.String `db:"lead_status" json:"lead_status"`
 	Channel          null.String `db:"channel" json:"channel"`
+	Region           null.String `db:"region" json:"region"`
+	StartAt          null.Time   `db:"start_at" json:"start_at"`
+	EndAt            null.Time   `db:"end_at" json:"end_at"`
 	Keyword          interface{} `db:"keyword" json:"keyword"`
 	Limit            int32       `db:"limit" json:"limit"`
 	Offset           int32       `db:"offset" json:"offset"`
@@ -1059,6 +1194,12 @@ func (q *Queries) ListAICCSessionsByAgent(ctx context.Context, arg ListAICCSessi
 		arg.LeadStatus,
 		arg.Channel,
 		arg.Channel,
+		arg.Region,
+		arg.Region,
+		arg.StartAt,
+		arg.StartAt,
+		arg.EndAt,
+		arg.EndAt,
 		arg.Keyword,
 		arg.Keyword,
 		arg.Keyword,
@@ -1463,6 +1604,76 @@ type UpdateAICCSessionResolutionStatusParams struct {
 
 func (q *Queries) UpdateAICCSessionResolutionStatus(ctx context.Context, arg UpdateAICCSessionResolutionStatusParams) error {
 	_, err := q.db.ExecContext(ctx, updateAICCSessionResolutionStatus, arg.ResolutionStatus, arg.ID)
+	return err
+}
+
+const upsertAICCAgentSettings = `-- name: UpsertAICCAgentSettings :exec
+INSERT INTO aicc_agent_settings (
+    agent_id, message_limit_per_session, sensitive_words_json,
+    blocked_visitor_enabled, blocked_visitor_threshold_json,
+    session_resume_ttl_minutes, analytics_config_json
+) VALUES (?, ?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+    message_limit_per_session = VALUES(message_limit_per_session),
+    sensitive_words_json = VALUES(sensitive_words_json),
+    blocked_visitor_enabled = VALUES(blocked_visitor_enabled),
+    blocked_visitor_threshold_json = VALUES(blocked_visitor_threshold_json),
+    session_resume_ttl_minutes = VALUES(session_resume_ttl_minutes),
+    analytics_config_json = VALUES(analytics_config_json),
+    updated_at = now()
+`
+
+type UpsertAICCAgentSettingsParams struct {
+	AgentID                     string `db:"agent_id" json:"agent_id"`
+	MessageLimitPerSession      int32  `db:"message_limit_per_session" json:"message_limit_per_session"`
+	SensitiveWordsJson          []byte `db:"sensitive_words_json" json:"sensitive_words_json"`
+	BlockedVisitorEnabled       bool   `db:"blocked_visitor_enabled" json:"blocked_visitor_enabled"`
+	BlockedVisitorThresholdJson []byte `db:"blocked_visitor_threshold_json" json:"blocked_visitor_threshold_json"`
+	SessionResumeTtlMinutes     int32  `db:"session_resume_ttl_minutes" json:"session_resume_ttl_minutes"`
+	AnalyticsConfigJson         []byte `db:"analytics_config_json" json:"analytics_config_json"`
+}
+
+func (q *Queries) UpsertAICCAgentSettings(ctx context.Context, arg UpsertAICCAgentSettingsParams) error {
+	_, err := q.db.ExecContext(ctx, upsertAICCAgentSettings,
+		arg.AgentID,
+		arg.MessageLimitPerSession,
+		arg.SensitiveWordsJson,
+		arg.BlockedVisitorEnabled,
+		arg.BlockedVisitorThresholdJson,
+		arg.SessionResumeTtlMinutes,
+		arg.AnalyticsConfigJson,
+	)
+	return err
+}
+
+const upsertAICCBlockedVisitor = `-- name: UpsertAICCBlockedVisitor :exec
+INSERT INTO aicc_blocked_visitors (
+    id, agent_id, org_id, visitor_hash, reason, expires_at
+) VALUES (?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+    reason = VALUES(reason),
+    expires_at = VALUES(expires_at),
+    updated_at = now()
+`
+
+type UpsertAICCBlockedVisitorParams struct {
+	ID          string    `db:"id" json:"id"`
+	AgentID     string    `db:"agent_id" json:"agent_id"`
+	OrgID       string    `db:"org_id" json:"org_id"`
+	VisitorHash string    `db:"visitor_hash" json:"visitor_hash"`
+	Reason      string    `db:"reason" json:"reason"`
+	ExpiresAt   time.Time `db:"expires_at" json:"expires_at"`
+}
+
+func (q *Queries) UpsertAICCBlockedVisitor(ctx context.Context, arg UpsertAICCBlockedVisitorParams) error {
+	_, err := q.db.ExecContext(ctx, upsertAICCBlockedVisitor,
+		arg.ID,
+		arg.AgentID,
+		arg.OrgID,
+		arg.VisitorHash,
+		arg.Reason,
+		arg.ExpiresAt,
+	)
 	return err
 }
 

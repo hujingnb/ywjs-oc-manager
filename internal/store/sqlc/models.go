@@ -46,6 +46,29 @@ type AiccAgentKnowledge struct {
 	CreatedAt                time.Time   `db:"created_at" json:"created_at"`
 }
 
+type AiccAgentSetting struct {
+	AgentID                     string    `db:"agent_id" json:"agent_id"`
+	MessageLimitPerSession      int32     `db:"message_limit_per_session" json:"message_limit_per_session"`
+	SensitiveWordsJson          []byte    `db:"sensitive_words_json" json:"sensitive_words_json"`
+	BlockedVisitorEnabled       bool      `db:"blocked_visitor_enabled" json:"blocked_visitor_enabled"`
+	BlockedVisitorThresholdJson []byte    `db:"blocked_visitor_threshold_json" json:"blocked_visitor_threshold_json"`
+	SessionResumeTtlMinutes     int32     `db:"session_resume_ttl_minutes" json:"session_resume_ttl_minutes"`
+	AnalyticsConfigJson         []byte    `db:"analytics_config_json" json:"analytics_config_json"`
+	CreatedAt                   time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt                   time.Time `db:"updated_at" json:"updated_at"`
+}
+
+type AiccBlockedVisitor struct {
+	ID          string    `db:"id" json:"id"`
+	AgentID     string    `db:"agent_id" json:"agent_id"`
+	OrgID       string    `db:"org_id" json:"org_id"`
+	VisitorHash string    `db:"visitor_hash" json:"visitor_hash"`
+	Reason      string    `db:"reason" json:"reason"`
+	ExpiresAt   time.Time `db:"expires_at" json:"expires_at"`
+	CreatedAt   time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt   time.Time `db:"updated_at" json:"updated_at"`
+}
+
 type AiccFeedback struct {
 	ID        string    `db:"id" json:"id"`
 	SessionID string    `db:"session_id" json:"session_id"`
