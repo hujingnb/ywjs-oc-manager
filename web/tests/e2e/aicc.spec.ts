@@ -11,6 +11,13 @@ type AICCAgentResponse = {
   }
 }
 
+type AICCPublicSessionResponse = {
+  session: {
+    session_token: string
+    restored?: boolean
+  }
+}
+
 // forceZh 在页面初始化前固定中文界面，避免平台默认语言差异影响可见文案定位。
 async function forceZh(page: Page): Promise<void> {
   await page.addInitScript(() => {
@@ -85,7 +92,7 @@ async function createAICCAgentAsOrgAdmin(page: Page): Promise<AICCAgentResponse[
   const created = await createdResponse.json() as AICCAgentResponse
 
   await expect(page.getByRole('button', { name: new RegExp(agentName) })).toBeVisible()
-  await expect(page.getByText(/\/aicc\/[A-Za-z0-9_-]+/)).toBeVisible()
+  await expect(page.locator('.public-link-box').locator('input')).toHaveValue(/\/aicc\/[A-Za-z0-9_-]+/)
   return created.agent
 }
 
@@ -127,6 +134,112 @@ async function startAICCAgent(page: Page): Promise<void> {
   await page.getByRole('button', { name: '启动接待' }).click()
   expect((await started).ok()).toBeTruthy()
   await expect(page.getByText('已启动接待')).toBeVisible()
+}
+
+// configureOperationsSettings 通过管理页保存新增运营策略，覆盖安全配置表单到后端 settings 接口的接线。
+async function configureOperationsSettings(page: Page): Promise<void> {
+  await page
+    .locator('.n-form-item')
+    .filter({ hasText: '单会话消息上限' })
+    .locator('input')
+    .fill('2')
+  await page
+    .locator('.n-form-item')
+    .filter({ hasText: '会话续接有效期' })
+    .locator('input')
+    .fill('45')
+  await page
+    .locator('.n-form-item')
+    .filter({ hasText: '敏感词' })
+    .locator('textarea')
+    .fill('禁用词')
+
+  const saved = page.waitForResponse(response =>
+    response.url().includes('/settings')
+    && response.request().method() === 'PUT',
+  )
+  await page.getByRole('button', { name: '保存运营配置' }).click()
+  const response = await saved
+  expect(response.ok()).toBeTruthy()
+  expect(response.request().postDataJSON()).toMatchObject({
+    message_limit_per_session: 2,
+    sensitive_words: ['禁用词'],
+    blocked_visitor_enabled: true,
+    session_resume_ttl_minutes: 45,
+  })
+  await expect(page.getByText('运营配置已保存')).toBeVisible()
+}
+
+// verifyPublicSessionRestore 覆盖公开页把服务端 session_token 写入本地存储，并在刷新时提交旧 token 续接会话。
+async function verifyPublicSessionRestore(page: Page, agent: AICCAgentResponse['agent']): Promise<string> {
+  const firstSession = page.waitForResponse(response =>
+    response.url().includes(`/api/v1/public/aicc/agents/${agent.public_token}/sessions`)
+    && response.request().method() === 'POST',
+  )
+  await page.goto(`/aicc/${agent.public_token}`)
+  await expect(page.getByRole('heading', { name: agent.name })).toBeVisible()
+  const firstPayload = await (await firstSession).json() as AICCPublicSessionResponse
+  const sessionToken = firstPayload.session.session_token
+  expect(sessionToken).toBeTruthy()
+  await expect.poll(async () => page.evaluate(
+    key => window.localStorage.getItem(key),
+    `aicc:session:${agent.public_token}:web_link`,
+  )).toBe(sessionToken)
+
+  const restoredSession = page.waitForResponse(response =>
+    response.url().includes(`/api/v1/public/aicc/agents/${agent.public_token}/sessions`)
+    && response.request().method() === 'POST'
+    && response.request().postDataJSON()?.session_token === sessionToken,
+  )
+  await page.reload()
+  const restoredPayload = await (await restoredSession).json() as AICCPublicSessionResponse
+  expect(restoredPayload.session.restored).toBeTruthy()
+  return sessionToken
+}
+
+// verifySessionFilters 覆盖新增会话筛选条件进入 URL query 与后端 sessions 查询参数。
+async function verifySessionFilters(page: Page): Promise<void> {
+  await page.getByText('会话', { exact: true }).click()
+  await expect(page.getByText('最近会话')).toBeVisible()
+  const filtered = page.waitForResponse(response => {
+    if (!response.url().includes('/sessions') || response.request().method() !== 'GET') return false
+    const url = new URL(response.url())
+    return url.searchParams.get('channel') === 'web_link'
+      && url.searchParams.get('region') === '未知地域'
+  })
+  await page.locator('.session-filters .n-select').nth(2).click()
+  await page.locator('.n-base-select-option').filter({ hasText: '公开链接' }).click()
+  await page.getByPlaceholder('地域').fill('未知地域')
+  expect((await filtered).ok()).toBeTruthy()
+  await expect(page).toHaveURL(/channel=web_link/)
+  await expect(page).toHaveURL(/region=/)
+}
+
+// verifyAnalyticsFilters 覆盖统计时间窗口、bucket 与当前智能体筛选进入 analytics 查询参数。
+async function verifyAnalyticsFilters(page: Page, agentId: string): Promise<void> {
+  await page.getByText('统计', { exact: true }).click()
+  await expect(page.getByText('会话趋势')).toBeVisible()
+  const weekly = page.waitForResponse(response => {
+    if (!response.url().includes('/api/v1/aicc/analytics') || response.request().method() !== 'GET') return false
+    const url = new URL(response.url())
+    return url.searchParams.get('bucket') === 'week'
+      && url.searchParams.get('agent_id') === agentId
+      && Boolean(url.searchParams.get('start_at'))
+      && Boolean(url.searchParams.get('end_at'))
+  })
+  await page.getByText('周', { exact: true }).click()
+  expect((await weekly).ok()).toBeTruthy()
+
+  const monthly = page.waitForResponse(response => {
+    if (!response.url().includes('/api/v1/aicc/analytics') || response.request().method() !== 'GET') return false
+    const url = new URL(response.url())
+    return url.searchParams.get('bucket') === 'week'
+      && url.searchParams.get('agent_id') === agentId
+      && Boolean(url.searchParams.get('start_at'))
+      && Boolean(url.searchParams.get('end_at'))
+  })
+  await page.getByRole('button', { name: '近 30 天' }).click()
+  expect((await monthly).ok()).toBeTruthy()
 }
 
 // AICC 主流程覆盖：平台开通企业 AICC 后，企业管理员可以创建客服智能体并取得公开链接。
@@ -191,4 +304,23 @@ test('公开访客提交留资后企业管理员可查看线索和导出 CSV', a
   await page.getByRole('button', { name: '导出 CSV' }).click()
   const download = await downloadPromise
   expect(download.suggestedFilename()).toMatch(/aicc-leads\.csv/)
+})
+
+// AICC 运营补齐覆盖：企业管理员保存运营配置后，公开页可续接会话，后台会话和统计筛选使用新增参数。
+test('企业管理员可配置运营策略并验证公开会话续接和筛选统计', async ({ page }) => {
+  await enableAICCForFixtureOrg(page)
+  await clearLoginState(page)
+  const agent = await createAICCAgentAsOrgAdmin(page)
+  await configureOperationsSettings(page)
+  await startAICCAgent(page)
+
+  const publicPage = await page.context().newPage()
+  await forceZh(publicPage)
+  await verifyPublicSessionRestore(publicPage, agent)
+  await publicPage.close()
+
+  await page.goto('/aicc')
+  await page.getByRole('button', { name: new RegExp(agent.name) }).click()
+  await verifySessionFilters(page)
+  await verifyAnalyticsFilters(page, agent.id)
 })
