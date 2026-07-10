@@ -20,52 +20,53 @@ import (
 
 // fakeAICCStore 是 AICC service 单测使用的最小 store，记录创建入参与返回组织配置。
 type fakeAICCStore struct {
-	org               sqlc.Organization
-	count             int64
-	agents            map[string]sqlc.AiccAgent
-	settings          map[string]sqlc.AiccAgentSetting
-	knowledge         map[string][]sqlc.AiccAgentKnowledge
-	sessions          map[string]sqlc.AiccSession
-	messages          map[string][]sqlc.AiccMessage
-	leads             map[string]sqlc.AiccLead
-	leadValues        map[string][]sqlc.ListAICCLeadValuesByLeadRow
-	sessionValues     map[string][]sqlc.ListAICCLeadValuesBySessionRow
-	leadFields        map[string][]sqlc.AiccLeadField
-	todayCount        int64
-	unreadCount       int64
-	blockedCount      int64
-	resolved          int64
-	unresolved        int64
-	completeLead      int64
-	analyticsSummary  AICCAnalyticsSummary
-	analyticsTrend    []AICCTrendBucket
-	analyticsRegions  []AICCTopItemResult
-	topQuestions      []sqlc.ListAICCTopVisitorQuestionsByOrgRow
-	topSources        []sqlc.ListAICCTopSourceURLsByOrgRow
-	audits            []sqlc.CreateAuditLogParams
-	createArg         sqlc.CreateAICCAgentParams
-	upsertSettings    *sqlc.UpsertAICCAgentSettingsParams
-	addKnowledge      []sqlc.AddAICCAgentKnowledgeParams
-	updateArg         sqlc.UpdateAICCAgentProfileParams
-	statusArg         sqlc.SetAICCAgentStatusParams
-	sessionArg        sqlc.ListAICCSessionsByAgentParams
-	analyticsArg      AICCAnalyticsOptions
-	countBlockedArg   string
-	readLeadArg       sqlc.MarkAICCLeadReadParams
-	createField       sqlc.UpsertAICCLeadFieldParams
-	deletedID         string
-	createErr         error
-	getErr            error
-	getSettingsErr    error
-	upsertSettingsErr error
-	blockedCountErr   error
-	listErr           error
-	updateErr         error
-	statusErr         error
-	deleteErr         error
-	sessionsErr       error
-	leadsErr          error
-	organization      error
+	org                 sqlc.Organization
+	count               int64
+	agents              map[string]sqlc.AiccAgent
+	settings            map[string]sqlc.AiccAgentSetting
+	knowledge           map[string][]sqlc.AiccAgentKnowledge
+	sessions            map[string]sqlc.AiccSession
+	messages            map[string][]sqlc.AiccMessage
+	leads               map[string]sqlc.AiccLead
+	leadValues          map[string][]sqlc.ListAICCLeadValuesByLeadRow
+	sessionValues       map[string][]sqlc.ListAICCLeadValuesBySessionRow
+	leadFields          map[string][]sqlc.AiccLeadField
+	todayCount          int64
+	unreadCount         int64
+	blockedCount        int64
+	resolved            int64
+	unresolved          int64
+	completeLead        int64
+	analyticsSummary    AICCAnalyticsSummary
+	analyticsTrend      []AICCTrendBucket
+	analyticsRegions    []AICCTopItemResult
+	analyticsRegionRows []sqlc.ListAICCRegionsInRangeRow
+	topQuestions        []sqlc.ListAICCTopVisitorQuestionsByOrgRow
+	topSources          []sqlc.ListAICCTopSourceURLsByOrgRow
+	audits              []sqlc.CreateAuditLogParams
+	createArg           sqlc.CreateAICCAgentParams
+	upsertSettings      *sqlc.UpsertAICCAgentSettingsParams
+	addKnowledge        []sqlc.AddAICCAgentKnowledgeParams
+	updateArg           sqlc.UpdateAICCAgentProfileParams
+	statusArg           sqlc.SetAICCAgentStatusParams
+	sessionArg          sqlc.ListAICCSessionsByAgentParams
+	analyticsArg        AICCAnalyticsOptions
+	countBlockedArg     string
+	readLeadArg         sqlc.MarkAICCLeadReadParams
+	createField         sqlc.UpsertAICCLeadFieldParams
+	deletedID           string
+	createErr           error
+	getErr              error
+	getSettingsErr      error
+	upsertSettingsErr   error
+	blockedCountErr     error
+	listErr             error
+	updateErr           error
+	statusErr           error
+	deleteErr           error
+	sessionsErr         error
+	leadsErr            error
+	organization        error
 }
 
 // GetOrganization 返回测试预置的企业开通配置。
@@ -526,6 +527,9 @@ func (f *fakeAICCStore) ListAICCSessionTrendByWeek(_ context.Context, arg sqlc.L
 
 // ListAICCRegionsInRange 返回时间范围内地域分布。
 func (f *fakeAICCStore) ListAICCRegionsInRange(_ context.Context, arg sqlc.ListAICCRegionsInRangeParams) ([]sqlc.ListAICCRegionsInRangeRow, error) {
+	if f.analyticsRegionRows != nil {
+		return append([]sqlc.ListAICCRegionsInRangeRow(nil), f.analyticsRegionRows...), nil
+	}
 	rows := make([]sqlc.ListAICCRegionsInRangeRow, 0, len(f.analyticsRegions))
 	for _, item := range f.analyticsRegions {
 		rows = append(rows, sqlc.ListAICCRegionsInRangeRow{Label: item.Label, Count: item.Count})
@@ -1122,6 +1126,7 @@ func TestAICCServiceGetSessionReturnsMessages(t *testing.T) {
 	require.Len(t, result.Messages, 2)
 	assert.Equal(t, "msg-1", result.Messages[0].ID)
 	assert.Equal(t, "你好", result.Messages[0].Text)
+	assert.Equal(t, int64(2), result.Session.MessageCount)
 	require.Len(t, result.LeadValues, 1)
 	assert.Equal(t, "phone", result.LeadValues[0].FieldKey)
 	assert.Equal(t, "13800138000", result.LeadValues[0].Value)
@@ -1242,6 +1247,23 @@ func TestAICCAnalyticsWithRangeAndBucket(t *testing.T) {
 	assert.Equal(t, []AICCTrendBucket{{Bucket: "2026-07-01", Count: 3}}, result.SessionTrend)
 	require.Len(t, result.Regions, 1)
 	assert.Equal(t, "上海", result.Regions[0].Label)
+}
+
+// TestAICCAnalyticsRegionLabelBytes 覆盖 MySQL 文本表达式扫描边界：
+// sqlc 将地域 label 生成为 interface{} 时，service 必须把 []byte 转成 UTF-8 文本。
+func TestAICCAnalyticsRegionLabelBytes(t *testing.T) {
+	store := seededAICCStore()
+	store.analyticsRegionRows = []sqlc.ListAICCRegionsInRangeRow{
+		{Label: []byte("上海"), Count: 2}, // 场景：MySQL driver 将 CAST/COALESCE 文本表达式扫描为 []byte。
+	}
+	svc := NewAICCService(store, nil)
+
+	result, err := svc.Analytics(context.Background(), aiccOrgAdmin(), AICCAnalyticsOptions{})
+
+	require.NoError(t, err)
+	require.Len(t, result.Regions, 1)
+	assert.Equal(t, "上海", result.Regions[0].Label)
+	assert.Equal(t, int64(2), result.Regions[0].Count)
 }
 
 // TestAICCAnalyticsRejectsInvalidBucket 覆盖统计粒度校验：

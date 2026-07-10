@@ -597,6 +597,7 @@ func (s *AICCService) GetSession(ctx context.Context, principal auth.Principal, 
 		LeadValues: toAICCLeadValueResults(leadValues),
 		Messages:   make([]AICCMessageResult, 0, len(messages)),
 	}
+	result.Session.MessageCount = int64(len(messages))
 	for _, row := range messages {
 		result.Messages = append(result.Messages, toAICCMessageResult(row))
 	}
@@ -1390,7 +1391,20 @@ func toAICCWeeklyTrend(rows []sqlc.ListAICCSessionTrendByWeekRow) []AICCTrendBuc
 func toAICCRegionResults(rows []sqlc.ListAICCRegionsInRangeRow) []AICCTopItemResult {
 	results := make([]AICCTopItemResult, 0, len(rows))
 	for _, row := range rows {
-		results = append(results, AICCTopItemResult{Label: fmt.Sprint(row.Label), Count: row.Count})
+		results = append(results, AICCTopItemResult{Label: aiccRegionLabel(row.Label), Count: row.Count})
 	}
 	return results
+}
+
+func aiccRegionLabel(value any) string {
+	switch label := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return label
+	case []byte:
+		return string(label)
+	default:
+		return fmt.Sprint(label)
+	}
 }
