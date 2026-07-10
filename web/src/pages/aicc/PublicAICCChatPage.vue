@@ -175,8 +175,9 @@ onBeforeUnmount(() => {
 async function boot() {
   errorMessage.value = ''
   try {
-    config.value = await fetchAICCPublicConfig(publicToken.value)
-    const session = await createAICCPublicSession(publicToken.value, normalizeAICCPublicChannel(route.query.aicc_channel))
+    const channel = normalizeAICCPublicChannel(route.query.aicc_channel)
+    config.value = await fetchAICCPublicConfig(publicToken.value, channel)
+    const session = await createAICCPublicSession(publicToken.value, channel)
     sessionToken.value = session.session_token ?? ''
     hasConsent.value = config.value.privacy_mode !== 'consent_required'
     leadValues.value = Object.fromEntries((config.value.lead_fields ?? []).map(field => [field.field_key, '']))

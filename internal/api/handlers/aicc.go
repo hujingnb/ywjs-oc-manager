@@ -173,6 +173,7 @@ func (h *AICCHandler) UpdateAgent(c *gin.Context) {
 		PrivacyMode:    req.PrivacyMode,
 		PrivacyText:    req.PrivacyText,
 		RetentionDays:  req.RetentionDays,
+		AllowedDomains: req.AllowedDomains,
 	})
 	if err != nil {
 		writeServiceError(c, err)
@@ -571,5 +572,6 @@ func toAICCAgentInput(req CreateAICCAgentRequest) service.AICCAgentInput {
 		PrivacyMode:    req.PrivacyMode,
 		PrivacyText:    req.PrivacyText,
 		RetentionDays:  req.RetentionDays,
+		AllowedDomains: req.AllowedDomains,
 	}
 }

@@ -515,6 +515,11 @@ func TestAICCServiceCreateAgentCreatesHiddenApp(t *testing.T) {
 		Greeting:      "您好，请问想了解什么？",
 		PrivacyMode:   domain.AICCPrivacyModeNotice,
 		RetentionDays: 180,
+		AllowedDomains: []string{
+			" https://WWW.Example.com/path ",
+			"*.Example.org",
+			"www.example.com",
+		},
 	})
 
 	require.NoError(t, err)
@@ -525,6 +530,8 @@ func TestAICCServiceCreateAgentCreatesHiddenApp(t *testing.T) {
 	assert.Equal(t, "官网售前", result.Name)
 	assert.NotEmpty(t, result.PublicToken)
 	assert.NotEmpty(t, result.WidgetToken)
+	assert.Equal(t, []string{"www.example.com", "*.example.org"}, result.AllowedDomains)
+	assert.JSONEq(t, `["www.example.com","*.example.org"]`, string(store.createArg.AllowedDomainsJson))
 	require.Len(t, store.audits, 1)
 	assert.Equal(t, "aicc_agent", store.audits[0].TargetType)
 	assert.Equal(t, "create", store.audits[0].Action)
@@ -544,6 +551,7 @@ func TestAICCServiceCreateAgentValidation(t *testing.T) {
 		{name: "空名称返回参数错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1", AiccEnabled: true}, input: AICCAgentInput{Name: "   "}, wantErr: ErrInvalidArgument},                                                              // 场景：名称 trim 后为空。
 		{name: "保留期小于下限返回参数错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1", AiccEnabled: true}, input: AICCAgentInput{Name: "售前", RetentionDays: -1}, wantErr: ErrInvalidArgument},                                        // 场景：保留期不能小于 1 天。
 		{name: "保留期超过上限返回参数错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1", AiccEnabled: true}, input: AICCAgentInput{Name: "售前", RetentionDays: 3651}, wantErr: ErrInvalidArgument},                                      // 场景：保留期不能超过迁移约束上限。
+		{name: "挂件域名不合法返回参数错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1", AiccEnabled: true}, input: AICCAgentInput{Name: "售前", AllowedDomains: []string{"https://"}}, wantErr: ErrInvalidArgument},                     // 场景：域名白名单必须能解析出主机名。
 		{name: "未开通企业返回无权限", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1", AiccEnabled: false}, input: AICCAgentInput{Name: "售前"}, wantErr: ErrForbidden},                                                                   // 场景：平台未给企业开通 AICC。
 		{name: "达到企业上限返回配额错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1", AiccEnabled: true, AiccAgentLimit: null.IntFrom(1)}, count: 1, input: AICCAgentInput{Name: "售前"}, wantErr: ErrQuotaExceeded},                   // 场景：当前数量已达到 aicc_agent_limit。
 		{name: "跨组织管理员返回无权限", principal: auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: "org-2", UserID: "admin-2"}, org: sqlc.Organization{ID: "org-1", AiccEnabled: true}, input: AICCAgentInput{Name: "售前"}, wantErr: ErrForbidden}, // 场景：企业管理员只能管理本企业。

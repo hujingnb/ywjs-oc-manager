@@ -27,6 +27,8 @@ type AICCAgentInput struct {
 	PrivacyText string
 	// RetentionDays 是会话与留资数据保留天数；0 表示使用默认值。
 	RetentionDays int32
+	// AllowedDomains 是允许加载网页挂件的域名列表；为空表示不限制，支持 *.example.com。
+	AllowedDomains []string
 	// ThemeJSON 保留前端主题配置原始 JSON，由后续投放配置使用。
 	ThemeJSON []byte
 	// AllowedDomainsJSON 保留允许嵌入的域名列表原始 JSON，由 public widget 校验使用。
@@ -61,6 +63,8 @@ type AICCAgentResult struct {
 	PublicToken string `json:"public_token,omitempty"`
 	// WidgetToken 是嵌入组件 token；仅管理面返回。
 	WidgetToken string `json:"widget_token,omitempty"`
+	// AllowedDomains 是允许加载网页挂件的域名列表；为空表示不限制，支持 *.example.com。
+	AllowedDomains []string `json:"allowed_domains"`
 	// CreatedAt 是创建时间。
 	CreatedAt time.Time `json:"created_at"`
 	// UpdatedAt 是最近更新时间。

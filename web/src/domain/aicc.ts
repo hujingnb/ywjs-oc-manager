@@ -37,6 +37,8 @@ export interface AICCAgent {
   public_token?: string
   // 嵌入组件 token。
   widget_token?: string
+  // 允许加载网页挂件的域名列表；为空表示不限制。
+  allowed_domains?: string[]
   // 创建时间。
   created_at?: string
   // 更新时间。
@@ -59,6 +61,8 @@ export interface AICCAgentPayload {
   privacy_text?: string
   // 数据保留天数；0 或缺省由后端使用默认值。
   retention_days?: number
+  // 允许加载网页挂件的域名列表；为空表示不限制。
+  allowed_domains?: string[]
 }
 
 // AICCLeadField 是公开页留资字段配置，管理端编辑和访客端渲染共用。

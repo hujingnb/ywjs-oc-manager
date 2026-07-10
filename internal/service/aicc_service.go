@@ -844,6 +844,26 @@ func normalizeAICCAgentInput(input AICCAgentInput) (AICCAgentInput, error) {
 		return AICCAgentInput{}, fmt.Errorf("%w: AICC 数据保留天数必须在 1 到 3650 之间", ErrInvalidArgument)
 	}
 	input.PrivacyMode = normalizeAICCPrivacyMode(input.PrivacyMode)
+	if input.AllowedDomains != nil {
+		normalized := make([]string, 0, len(input.AllowedDomains))
+		seen := map[string]bool{}
+		for _, value := range input.AllowedDomains {
+			host := normalizeAICCDomainPattern(value)
+			if host == "" {
+				return AICCAgentInput{}, fmt.Errorf("%w: AICC 挂件允许域名不合法", ErrInvalidArgument)
+			}
+			if !seen[host] {
+				seen[host] = true
+				normalized = append(normalized, host)
+			}
+		}
+		raw, err := json.Marshal(normalized)
+		if err != nil {
+			return AICCAgentInput{}, fmt.Errorf("序列化 AICC 挂件允许域名失败: %w", err)
+		}
+		input.AllowedDomains = normalized
+		input.AllowedDomainsJSON = raw
+	}
 	return input, nil
 }
 
@@ -874,6 +894,7 @@ func newAICCToken() (string, error) {
 }
 
 func toAICCAgentResult(row sqlc.AiccAgent) AICCAgentResult {
+	allowedDomains, _ := parseAICCAllowedDomains(row.AllowedDomainsJson)
 	return AICCAgentResult{
 		ID:             row.ID,
 		OrgID:          row.OrgID,
@@ -888,6 +909,7 @@ func toAICCAgentResult(row sqlc.AiccAgent) AICCAgentResult {
 		RetentionDays:  row.RetentionDays,
 		PublicToken:    row.PublicToken,
 		WidgetToken:    row.WidgetToken,
+		AllowedDomains: allowedDomains,
 		CreatedAt:      row.CreatedAt,
 		UpdatedAt:      row.UpdatedAt,
 	}

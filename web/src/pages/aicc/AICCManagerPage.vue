@@ -138,6 +138,16 @@
                     />
                   </n-form-item>
                 </div>
+                <div class="field-full">
+                  <n-form-item label="挂件允许域名">
+                    <n-input
+                      v-model:value="form.allowed_domains_text"
+                      type="textarea"
+                      :autosize="{ minRows: 2, maxRows: 4 }"
+                      placeholder="每行一个域名，例如：www.example.com 或 *.example.com；留空表示不限制"
+                    />
+                  </n-form-item>
+                </div>
               </div>
               <n-space justify="end">
                 <n-button attr-type="button" @click="resetForm">重置</n-button>
@@ -313,6 +323,7 @@ interface AgentForm extends AICCAgentPayload {
   id?: string
   privacy_mode: AICCPrivacyMode
   retention_days: number
+  allowed_domains_text: string
 }
 
 interface LeadFieldRow extends AICCLeadFieldPayload {
@@ -436,6 +447,7 @@ function emptyForm(): AgentForm {
     privacy_mode: 'notice',
     privacy_text: '我们会使用本次对话内容来回答您的问题，并按企业数据保留策略保存。',
     retention_days: 180,
+    allowed_domains_text: '',
   }
 }
 
@@ -456,6 +468,7 @@ function fillForm(agent: AICCAgent) {
   form.privacy_mode = agent.privacy_mode
   form.privacy_text = agent.privacy_text ?? ''
   form.retention_days = agent.retention_days || 180
+  form.allowed_domains_text = (agent.allowed_domains ?? []).join('\n')
 }
 
 function payloadFromForm(): AICCAgentPayload {
@@ -467,7 +480,15 @@ function payloadFromForm(): AICCAgentPayload {
     privacy_mode: form.privacy_mode,
     privacy_text: form.privacy_text?.trim() || undefined,
     retention_days: form.retention_days,
+    allowed_domains: parseAllowedDomains(form.allowed_domains_text),
   }
+}
+
+function parseAllowedDomains(value: string): string[] {
+  return value
+    .split(/[\n,]/)
+    .map(item => item.trim())
+    .filter(Boolean)
 }
 
 function setFeedback(message: string, danger = false) {

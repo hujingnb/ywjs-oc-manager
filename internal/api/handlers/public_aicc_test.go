@@ -30,6 +30,7 @@ type publicAICCServiceStub struct {
 	consentErr     error
 
 	lastPublicToken   string
+	lastConfigChannel string
 	lastSessionToken  string
 	lastSessionInput  service.AICCPublicSessionInput
 	lastImageInput    service.AICCPublicImageInput
@@ -38,8 +39,9 @@ type publicAICCServiceStub struct {
 	lastFeedbackInput service.AICCPublicFeedbackInput
 }
 
-func (s *publicAICCServiceStub) PublicConfig(_ context.Context, publicToken string) (service.AICCPublicConfigResult, error) {
+func (s *publicAICCServiceStub) PublicConfig(_ context.Context, publicToken, channel string) (service.AICCPublicConfigResult, error) {
 	s.lastPublicToken = publicToken
+	s.lastConfigChannel = channel
 	return s.configResult, s.configErr
 }
 
@@ -80,6 +82,22 @@ func newPublicAICCTestRouter(t *testing.T, svc publicAICCService) *gin.Engine {
 	router := gin.New()
 	RegisterPublicAICCRoutes(router, NewPublicAICCHandler(svc))
 	return router
+}
+
+// TestPublicAICCHandlerConfigPassesChannel 覆盖公开配置入口：网页挂件 iframe 通过 query
+// 传入渠道，handler 必须透传给 service 才能按 widget_token 查找智能体。
+func TestPublicAICCHandlerConfigPassesChannel(t *testing.T) {
+	svc := &publicAICCServiceStub{configResult: service.AICCPublicConfigResult{Name: "售前接待"}}
+	router := newPublicAICCTestRouter(t, svc)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/public/aicc/agents/widget-token/config?channel=web_widget", nil)
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "售前接待")
+	assert.Equal(t, "widget-token", svc.lastPublicToken)
+	assert.Equal(t, "web_widget", svc.lastConfigChannel)
 }
 
 // TestPublicAICCHandlerSendMessage 覆盖公开访客消息入口：session token 来自路径，消息文本来自请求体。

@@ -218,7 +218,7 @@ func TestAICCHandlerCreateAgent(t *testing.T) {
 	router := newAICCTestRouter(t, svc)
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/aicc/agents", bytes.NewBufferString(`{"name":"官网售前","greeting":"你好","privacy_mode":"notice","retention_days":180}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/aicc/agents", bytes.NewBufferString(`{"name":"官网售前","greeting":"你好","privacy_mode":"notice","retention_days":180,"allowed_domains":["www.example.com","*.example.org"]}`))
 	request.Header.Set("Content-Type", "application/json")
 	request = withPrincipal(request, auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: "org-1", UserID: "admin-1"})
 	router.ServeHTTP(recorder, request)
@@ -228,6 +228,7 @@ func TestAICCHandlerCreateAgent(t *testing.T) {
 	assert.Equal(t, domain.UserRoleOrgAdmin, svc.lastPrincipal.Role)
 	assert.Equal(t, "官网售前", svc.lastInput.Name)
 	assert.Equal(t, int32(180), svc.lastInput.RetentionDays)
+	assert.Equal(t, []string{"www.example.com", "*.example.org"}, svc.lastInput.AllowedDomains)
 }
 
 // TestAICCHandlerCreateAgentBadBody 覆盖异常路径：非法 JSON 或缺少名称时返回 400。
@@ -300,9 +301,10 @@ func TestAICCHandlerBasicRoutes(t *testing.T) {
 			assert.Equal(t, "agent-1", svc.lastAgentID)
 			assert.Contains(t, body, "agent-1")
 		}}, // 场景：读取单个智能体。
-		{name: "更新路由透传资料", method: http.MethodPatch, path: "/api/v1/aicc/agents/agent-1", body: `{"name":"官网售后","retention_days":90}`, wantStatus: http.StatusOK, assertion: func(t *testing.T, svc *aiccServiceStub, _ string) {
+		{name: "更新路由透传资料", method: http.MethodPatch, path: "/api/v1/aicc/agents/agent-1", body: `{"name":"官网售后","retention_days":90,"allowed_domains":["support.example.com"]}`, wantStatus: http.StatusOK, assertion: func(t *testing.T, svc *aiccServiceStub, _ string) {
 			assert.Equal(t, "agent-1", svc.lastAgentID)
 			assert.Equal(t, "官网售后", svc.lastInput.Name)
+			assert.Equal(t, []string{"support.example.com"}, svc.lastInput.AllowedDomains)
 		}}, // 场景：企业管理员更新智能体资料。
 		{name: "启动路由写 start 动作", method: http.MethodPost, path: "/api/v1/aicc/agents/agent-1/start", wantStatus: http.StatusOK, assertion: func(t *testing.T, svc *aiccServiceStub, _ string) {
 			assert.Equal(t, "agent-1", svc.lastAgentID)

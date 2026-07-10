@@ -265,8 +265,11 @@ export function downloadAICCLeadsCSV() {
 }
 
 // fetchAICCPublicConfig 读取访客公开配置；该接口不带 Authorization，避免公开链接受登录态影响。
-export async function fetchAICCPublicConfig(publicToken: string): Promise<AICCPublicConfig> {
-  const response = await apiRequest<{ config: AICCPublicConfig }>(`/api/v1/public/aicc/agents/${publicToken}/config`, { withAuth: false })
+export async function fetchAICCPublicConfig(publicToken: string, channel: AICCPublicChannel = 'web_link'): Promise<AICCPublicConfig> {
+  const response = await apiRequest<{ config: AICCPublicConfig }>(`/api/v1/public/aicc/agents/${publicToken}/config`, {
+    withAuth: false,
+    query: { channel },
+  })
   return response.config
 }
 

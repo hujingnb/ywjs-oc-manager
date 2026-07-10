@@ -323,12 +323,13 @@ func TestAICCPublicCreateWidgetSessionRejectsDisallowedOrigin(t *testing.T) {
 			Status:             domain.AICCAgentStatusActive,
 			PrivacyMode:        domain.AICCPrivacyModeNotice,
 			PublicToken:        "pub",
+			WidgetToken:        "widget",
 			AllowedDomainsJson: []byte(`["www.example.com"]`),
 		},
 	}
 	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
 
-	_, err := svc.CreateSession(context.Background(), "pub", AICCPublicSessionInput{
+	_, err := svc.CreateSession(context.Background(), "widget", AICCPublicSessionInput{
 		Channel: domain.AICCChannelWebWidget,
 		Origin:  "https://evil.example.net",
 	})
@@ -348,13 +349,14 @@ func TestAICCPublicCreateWidgetSessionStoresRequestHashes(t *testing.T) {
 			Status:             domain.AICCAgentStatusActive,
 			PrivacyMode:        domain.AICCPrivacyModeNotice,
 			PublicToken:        "pub",
+			WidgetToken:        "widget",
 			AllowedDomainsJson: []byte(`["*.example.com"]`),
 		},
 	}
 	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
 	svc.now = func() time.Time { return aiccPublicTestNow }
 
-	_, err := svc.CreateSession(context.Background(), "pub", AICCPublicSessionInput{
+	_, err := svc.CreateSession(context.Background(), "widget", AICCPublicSessionInput{
 		Channel:   domain.AICCChannelWebWidget,
 		Origin:    "https://shop.example.com",
 		RemoteIP:  "203.0.113.9",
@@ -420,13 +422,13 @@ func TestAICCPublicConfigStopsWhenOrgDisabled(t *testing.T) {
 	}
 	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
 
-	_, err := svc.PublicConfig(context.Background(), "pub")
+	_, err := svc.PublicConfig(context.Background(), "pub", domain.AICCChannelWebLink)
 
 	require.ErrorIs(t, err, ErrAICCOffline)
 }
 
 // TestAICCPublicConfigAcceptsWidgetToken 覆盖网页挂件入口：管理页嵌入代码使用 widget_token，
-// 公开配置读取必须把它视为公开访问 token，否则 iframe 挂件会一直显示下线。
+// 仅当渠道明确为 web_widget 时才允许加载配置，否则挂件 token 不能伪装成公开链接。
 func TestAICCPublicConfigAcceptsWidgetToken(t *testing.T) {
 	store := &fakeAICCPublicStore{
 		org: sqlc.Organization{ID: "org-1", AiccEnabled: true},
@@ -442,10 +444,35 @@ func TestAICCPublicConfigAcceptsWidgetToken(t *testing.T) {
 	}
 	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
 
-	result, err := svc.PublicConfig(context.Background(), "widget-token")
+	_, err := svc.PublicConfig(context.Background(), "widget-token", domain.AICCChannelWebLink)
+	require.ErrorIs(t, err, ErrAICCOffline)
+
+	result, err := svc.PublicConfig(context.Background(), "widget-token", domain.AICCChannelWebWidget)
 
 	require.NoError(t, err)
 	assert.Equal(t, "售前接待", result.Name)
+}
+
+// TestAICCPublicCreateSessionRejectsWidgetTokenAsWebLink 覆盖公开会话入口隔离：
+// 挂件 token 不能走 web_link 渠道创建会话，避免绕开挂件域名白名单。
+func TestAICCPublicCreateSessionRejectsWidgetTokenAsWebLink(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org: sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent: sqlc.AiccAgent{
+			ID:          "agent-1",
+			OrgID:       "org-1",
+			Status:      domain.AICCAgentStatusActive,
+			PrivacyMode: domain.AICCPrivacyModeNotice,
+			PublicToken: "public-token",
+			WidgetToken: "widget-token",
+		},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+
+	_, err := svc.CreateSession(context.Background(), "widget-token", AICCPublicSessionInput{Channel: domain.AICCChannelWebLink})
+
+	require.ErrorIs(t, err, ErrAICCOffline)
+	assert.Empty(t, store.createdSession.ID)
 }
 
 // TestAICCPublicSubmitFeedbackUpdatesResolution 覆盖反馈正常路径：助手回复可写入反馈并同步会话解决状态。
@@ -529,8 +556,15 @@ func (f *fakeAICCPublicStore) GetAICCAgent(_ context.Context, id string) (sqlc.A
 	return f.agent, nil
 }
 
-func (f *fakeAICCPublicStore) GetAICCAgentByPublicToken(_ context.Context, arg sqlc.GetAICCAgentByPublicTokenParams) (sqlc.AiccAgent, error) {
-	if f.agent.PublicToken != arg.PublicToken && f.agent.WidgetToken != arg.WidgetToken {
+func (f *fakeAICCPublicStore) GetAICCAgentByPublicToken(_ context.Context, publicToken string) (sqlc.AiccAgent, error) {
+	if f.agent.PublicToken != publicToken {
+		return sqlc.AiccAgent{}, sql.ErrNoRows
+	}
+	return f.agent, nil
+}
+
+func (f *fakeAICCPublicStore) GetAICCAgentByWidgetToken(_ context.Context, widgetToken string) (sqlc.AiccAgent, error) {
+	if f.agent.WidgetToken != widgetToken {
 		return sqlc.AiccAgent{}, sql.ErrNoRows
 	}
 	return f.agent, nil

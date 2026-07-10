@@ -46,8 +46,10 @@ type AICCPublicStore interface {
 	GetOrganization(ctx context.Context, id string) (sqlc.Organization, error)
 	// GetAICCAgent 通过会话内 agent_id 读取未删除智能体，用于消息发送前校验状态。
 	GetAICCAgent(ctx context.Context, id string) (sqlc.AiccAgent, error)
-	// GetAICCAgentByPublicToken 通过公开链接 token 或网页挂件 token 定位 active 智能体。
-	GetAICCAgentByPublicToken(ctx context.Context, arg sqlc.GetAICCAgentByPublicTokenParams) (sqlc.AiccAgent, error)
+	// GetAICCAgentByPublicToken 只通过公开链接 token 定位 active 智能体，避免挂件 token 旁路域名校验。
+	GetAICCAgentByPublicToken(ctx context.Context, publicToken string) (sqlc.AiccAgent, error)
+	// GetAICCAgentByWidgetToken 只通过网页挂件 token 定位 active 智能体，创建挂件会话时必须继续校验 Origin。
+	GetAICCAgentByWidgetToken(ctx context.Context, widgetToken string) (sqlc.AiccAgent, error)
 	// GetAICCSessionByToken 通过访客 session token 定位单个公开会话。
 	GetAICCSessionByToken(ctx context.Context, token string) (sqlc.AiccSession, error)
 	// CreateAICCSession 创建公开访客会话。
@@ -208,8 +210,8 @@ func (s *AICCPublicService) SetImageBlob(blob AICCPublicImageBlob) { s.blob = bl
 func (s *AICCPublicService) SetRateLimiter(limiter AICCRateLimiter) { s.limit = limiter }
 
 // PublicConfig 返回访客端可展示的公开智能体配置。
-func (s *AICCPublicService) PublicConfig(ctx context.Context, publicToken string) (AICCPublicConfigResult, error) {
-	agent, err := s.activeAgentByPublicToken(ctx, publicToken)
+func (s *AICCPublicService) PublicConfig(ctx context.Context, publicToken, channel string) (AICCPublicConfigResult, error) {
+	agent, err := s.activeAgentByToken(ctx, publicToken, normalizeAICCChannel(channel))
 	if err != nil {
 		return AICCPublicConfigResult{}, err
 	}
@@ -229,11 +231,11 @@ func (s *AICCPublicService) PublicConfig(ctx context.Context, publicToken string
 
 // CreateSession 创建公开访客会话，session token 只授权访问单个会话。
 func (s *AICCPublicService) CreateSession(ctx context.Context, publicToken string, input AICCPublicSessionInput) (AICCPublicSessionResult, error) {
-	agent, err := s.activeAgentByPublicToken(ctx, publicToken)
+	channel := normalizeAICCChannel(input.Channel)
+	agent, err := s.activeAgentByToken(ctx, publicToken, channel)
 	if err != nil {
 		return AICCPublicSessionResult{}, err
 	}
-	channel := normalizeAICCChannel(input.Channel)
 	if err := ensureAICCWidgetOriginAllowed(agent, channel, input); err != nil {
 		return AICCPublicSessionResult{}, err
 	}
@@ -637,15 +639,20 @@ func (s *AICCPublicService) submitFeedback(ctx context.Context, input AICCPublic
 	return AICCPublicFeedbackResult{ResolutionStatus: status}, nil
 }
 
-func (s *AICCPublicService) activeAgentByPublicToken(ctx context.Context, publicToken string) (sqlc.AiccAgent, error) {
+func (s *AICCPublicService) activeAgentByToken(ctx context.Context, publicToken, channel string) (sqlc.AiccAgent, error) {
 	token := strings.TrimSpace(publicToken)
 	if token == "" {
 		return sqlc.AiccAgent{}, ErrAICCOffline
 	}
-	agent, err := s.store.GetAICCAgentByPublicToken(ctx, sqlc.GetAICCAgentByPublicTokenParams{
-		PublicToken: token,
-		WidgetToken: token,
-	})
+	var (
+		agent sqlc.AiccAgent
+		err   error
+	)
+	if channel == domain.AICCChannelWebWidget {
+		agent, err = s.store.GetAICCAgentByWidgetToken(ctx, token)
+	} else {
+		agent, err = s.store.GetAICCAgentByPublicToken(ctx, token)
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return sqlc.AiccAgent{}, ErrAICCOffline
 	}

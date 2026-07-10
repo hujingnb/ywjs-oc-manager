@@ -127,6 +127,8 @@ type CreateAICCAgentRequest struct {
 	PrivacyText string `json:"privacy_text"`
 	// RetentionDays 是数据保留天数；0 表示使用后端默认值。
 	RetentionDays int32 `json:"retention_days"`
+	// AllowedDomains 是允许加载网页挂件的域名列表；为空表示不限制。
+	AllowedDomains []string `json:"allowed_domains"`
 }
 
 // UpdateAICCAgentRequest 是企业管理员更新 AICC 智能体资料的请求体。
@@ -145,6 +147,8 @@ type UpdateAICCAgentRequest struct {
 	PrivacyText string `json:"privacy_text"`
 	// RetentionDays 是数据保留天数；0 表示使用后端默认值。
 	RetentionDays int32 `json:"retention_days"`
+	// AllowedDomains 是允许加载网页挂件的域名列表；为空表示不限制。
+	AllowedDomains []string `json:"allowed_domains"`
 }
 
 // AICCLeadFieldRequest 是企业管理员维护公开页留资字段的单条配置。

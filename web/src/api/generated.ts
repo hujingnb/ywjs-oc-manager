@@ -12946,7 +12946,10 @@ export interface paths {
          */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description 入口渠道：web_link / web_widget */
+                    channel?: string;
+                };
                 header?: never;
                 path: {
                     /** @description 公开 token */
@@ -14994,6 +14997,8 @@ export interface components {
             message: unknown;
         };
         "handlers.CreateAICCAgentRequest": {
+            /** @description AllowedDomains 是允许加载网页挂件的域名列表；为空表示不限制。 */
+            allowed_domains?: string[];
             /** @description AnswerBoundary 是智能体回答边界说明。 */
             answer_boundary?: string;
             /** @description Greeting 是访客进入会话时看到的欢迎语。 */
@@ -15340,6 +15345,8 @@ export interface components {
             version_id: string;
         };
         "handlers.UpdateAICCAgentRequest": {
+            /** @description AllowedDomains 是允许加载网页挂件的域名列表；为空表示不限制。 */
+            allowed_domains?: string[];
             /** @description AnswerBoundary 是智能体回答边界说明。 */
             answer_boundary?: string;
             /** @description Greeting 是访客进入会话时看到的欢迎语。 */
@@ -15768,6 +15775,8 @@ export interface components {
             worker_pid?: number;
         };
         "service.AICCAgentResult": {
+            /** @description AllowedDomains 是允许加载网页挂件的域名列表；为空表示不限制，支持 *.example.com。 */
+            allowed_domains?: string[];
             /** @description AnswerBoundary 是回答边界说明。 */
             answer_boundary?: string;
             /** @description AppID 是该智能体绑定的隐藏 app。 */

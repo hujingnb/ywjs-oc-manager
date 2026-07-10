@@ -392,16 +392,43 @@ func (q *Queries) GetAICCAgent(ctx context.Context, id string) (AiccAgent, error
 const getAICCAgentByPublicToken = `-- name: GetAICCAgentByPublicToken :one
 SELECT id, org_id, app_id, name, status, scenario, greeting, answer_boundary, privacy_mode, privacy_text, retention_days, theme_json, allowed_domains_json, public_token, widget_token, created_at, updated_at, deleted_at
 FROM aicc_agents
-WHERE (public_token = ? OR widget_token = ?) AND status = 'active' AND deleted_at IS NULL
+WHERE public_token = ? AND status = 'active' AND deleted_at IS NULL
 `
 
-type GetAICCAgentByPublicTokenParams struct {
-	PublicToken string `db:"public_token" json:"public_token"`
-	WidgetToken string `db:"widget_token" json:"widget_token"`
+func (q *Queries) GetAICCAgentByPublicToken(ctx context.Context, publicToken string) (AiccAgent, error) {
+	row := q.db.QueryRowContext(ctx, getAICCAgentByPublicToken, publicToken)
+	var i AiccAgent
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.AppID,
+		&i.Name,
+		&i.Status,
+		&i.Scenario,
+		&i.Greeting,
+		&i.AnswerBoundary,
+		&i.PrivacyMode,
+		&i.PrivacyText,
+		&i.RetentionDays,
+		&i.ThemeJson,
+		&i.AllowedDomainsJson,
+		&i.PublicToken,
+		&i.WidgetToken,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
 }
 
-func (q *Queries) GetAICCAgentByPublicToken(ctx context.Context, arg GetAICCAgentByPublicTokenParams) (AiccAgent, error) {
-	row := q.db.QueryRowContext(ctx, getAICCAgentByPublicToken, arg.PublicToken, arg.WidgetToken)
+const getAICCAgentByWidgetToken = `-- name: GetAICCAgentByWidgetToken :one
+SELECT id, org_id, app_id, name, status, scenario, greeting, answer_boundary, privacy_mode, privacy_text, retention_days, theme_json, allowed_domains_json, public_token, widget_token, created_at, updated_at, deleted_at
+FROM aicc_agents
+WHERE widget_token = ? AND status = 'active' AND deleted_at IS NULL
+`
+
+func (q *Queries) GetAICCAgentByWidgetToken(ctx context.Context, widgetToken string) (AiccAgent, error) {
+	row := q.db.QueryRowContext(ctx, getAICCAgentByWidgetToken, widgetToken)
 	var i AiccAgent
 	err := row.Scan(
 		&i.ID,

@@ -18,7 +18,7 @@ type PublicAICCHandler struct {
 
 // publicAICCService 是公开 AICC handler 依赖的最小 service 接口。
 type publicAICCService interface {
-	PublicConfig(ctx context.Context, publicToken string) (service.AICCPublicConfigResult, error)
+	PublicConfig(ctx context.Context, publicToken, channel string) (service.AICCPublicConfigResult, error)
 	CreateSession(ctx context.Context, publicToken string, input service.AICCPublicSessionInput) (service.AICCPublicSessionResult, error)
 	Consent(ctx context.Context, sessionToken string) error
 	UploadImage(ctx context.Context, input service.AICCPublicImageInput) (service.AICCPublicImageResult, error)
@@ -50,13 +50,14 @@ func RegisterPublicAICCRoutes(router gin.IRouter, handler *PublicAICCHandler) {
 // @Description  访客端通过公开 token 加载智能体展示配置
 // @Tags         public-aicc
 // @Produce      json
-// @Param        publicToken  path      string  true  "公开 token"
+// @Param        publicToken  path      string  true   "公开 token"
+// @Param        channel      query     string  false  "入口渠道：web_link / web_widget"
 // @Success      200          {object}  map[string]service.AICCPublicConfigResult
 // @Failure      404          {object}  ErrorResponse
 // @Failure      500          {object}  ErrorResponse
 // @Router       /public/aicc/agents/{publicToken}/config [get]
 func (h *PublicAICCHandler) Config(c *gin.Context) {
-	result, err := h.service.PublicConfig(c.Request.Context(), c.Param("publicToken"))
+	result, err := h.service.PublicConfig(c.Request.Context(), c.Param("publicToken"), c.Query("channel"))
 	if err != nil {
 		writePublicAICCError(c, err)
 		return

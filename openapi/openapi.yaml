@@ -125,6 +125,12 @@ components:
       type: object
     handlers.CreateAICCAgentRequest:
       properties:
+        allowed_domains:
+          description: AllowedDomains 是允许加载网页挂件的域名列表；为空表示不限制。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
         answer_boundary:
           description: AnswerBoundary 是智能体回答边界说明。
           type: string
@@ -739,6 +745,12 @@ components:
       type: object
     handlers.UpdateAICCAgentRequest:
       properties:
+        allowed_domains:
+          description: AllowedDomains 是允许加载网页挂件的域名列表；为空表示不限制。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
         answer_boundary:
           description: AnswerBoundary 是智能体回答边界说明。
           type: string
@@ -1420,6 +1432,12 @@ components:
       type: object
     service.AICCAgentResult:
       properties:
+        allowed_domains:
+          description: AllowedDomains 是允许加载网页挂件的域名列表；为空表示不限制，支持 *.example.com。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
         answer_boundary:
           description: AnswerBoundary 是回答边界说明。
           type: string
@@ -11491,6 +11509,11 @@ paths:
         in: path
         name: publicToken
         required: true
+        schema:
+          type: string
+      - description: 入口渠道：web_link / web_widget
+        in: query
+        name: channel
         schema:
           type: string
       responses:
