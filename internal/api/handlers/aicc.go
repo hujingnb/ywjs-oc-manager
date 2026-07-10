@@ -33,6 +33,8 @@ type aiccService interface {
 	MarkLeadRead(ctx context.Context, principal auth.Principal, leadID string) error
 	ListLeadFields(ctx context.Context, principal auth.Principal, agentID string) ([]service.AICCLeadFieldResult, error)
 	ReplaceLeadFields(ctx context.Context, principal auth.Principal, agentID string, fields []service.AICCLeadFieldInput) ([]service.AICCLeadFieldResult, error)
+	GetAgentKnowledge(ctx context.Context, principal auth.Principal, agentID string) (service.AICCKnowledgeResult, error)
+	ReplaceAgentKnowledge(ctx context.Context, principal auth.Principal, agentID string, input service.AICCKnowledgeInput) (service.AICCKnowledgeResult, error)
 	Analytics(ctx context.Context, principal auth.Principal, orgID string) (service.AICCAnalyticsResult, error)
 }
 
@@ -53,6 +55,8 @@ func RegisterAICCRoutes(router gin.IRouter, handler *AICCHandler) {
 	group.POST("/agents/:agentId/stop", handler.StopAgent)
 	group.GET("/agents/:agentId/lead-fields", handler.ListLeadFields)
 	group.PUT("/agents/:agentId/lead-fields", handler.ReplaceLeadFields)
+	group.GET("/agents/:agentId/knowledge", handler.GetAgentKnowledge)
+	group.PUT("/agents/:agentId/knowledge", handler.ReplaceAgentKnowledge)
 	group.GET("/agents/:agentId/sessions", handler.ListSessions)
 	group.GET("/sessions/:sessionId", handler.GetSession)
 	group.GET("/leads", handler.ListLeads)
@@ -234,6 +238,64 @@ func (h *AICCHandler) DeleteAgent(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// GetAgentKnowledge 读取 AICC 智能体知识范围。
+//
+// @Summary      AICC 智能体知识范围
+// @Description  读取企业知识库、行业知识库和专属文档的挂载配置
+// @Tags         aicc
+// @Produce      json
+// @Security     BearerAuth
+// @Param        agentId  path      string  true  "智能体 ID"
+// @Success      200      {object}  map[string]service.AICCKnowledgeResult
+// @Failure      401      {object}  ErrorResponse
+// @Failure      403      {object}  ErrorResponse
+// @Failure      404      {object}  ErrorResponse
+// @Failure      500      {object}  ErrorResponse
+// @Router       /aicc/agents/{agentId}/knowledge [get]
+func (h *AICCHandler) GetAgentKnowledge(c *gin.Context) {
+	result, err := h.service.GetAgentKnowledge(c.Request.Context(), principalFromCtx(c), c.Param("agentId"))
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"knowledge": result})
+}
+
+// ReplaceAgentKnowledge 整组保存 AICC 智能体知识范围。
+//
+// @Summary      保存 AICC 智能体知识范围
+// @Description  企业管理员整组替换企业知识库、行业知识库和专属文档挂载配置
+// @Tags         aicc
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        agentId  path      string                       true  "智能体 ID"
+// @Param        body     body      ReplaceAICCKnowledgeRequest  true  "知识范围配置"
+// @Success      200      {object}  map[string]service.AICCKnowledgeResult
+// @Failure      400      {object}  ErrorResponse
+// @Failure      401      {object}  ErrorResponse
+// @Failure      403      {object}  ErrorResponse
+// @Failure      404      {object}  ErrorResponse
+// @Failure      500      {object}  ErrorResponse
+// @Router       /aicc/agents/{agentId}/knowledge [put]
+func (h *AICCHandler) ReplaceAgentKnowledge(c *gin.Context) {
+	var req ReplaceAICCKnowledgeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeBindError(c, err)
+		return
+	}
+	result, err := h.service.ReplaceAgentKnowledge(c.Request.Context(), principalFromCtx(c), c.Param("agentId"), service.AICCKnowledgeInput{
+		UseOrgKnowledge:          req.UseOrgKnowledge,
+		IndustryKnowledgeBaseIDs: req.IndustryKnowledgeBaseIDs,
+		AppDocumentIDs:           req.AppDocumentIDs,
+	})
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"knowledge": result})
 }
 
 // ListSessions 列出 AICC 会话。

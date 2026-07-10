@@ -179,6 +179,30 @@ type AICCLeadFieldResult struct {
 	SortOrder int32 `json:"sort_order"`
 }
 
+// AICCKnowledgeInput 是企业管理员保存智能体知识范围的完整快照。
+type AICCKnowledgeInput struct {
+	// UseOrgKnowledge 表示是否允许智能体检索本企业共享知识库。
+	UseOrgKnowledge bool `json:"use_org_knowledge"`
+	// IndustryKnowledgeBaseIDs 是额外挂载的平台行业知识库 ID 列表。
+	IndustryKnowledgeBaseIDs []string `json:"industry_knowledge_base_ids"`
+	// AppDocumentIDs 是该智能体隐藏 app 专属知识库中允许检索的文档 ID 列表。
+	AppDocumentIDs []string `json:"app_document_ids"`
+}
+
+// AICCKnowledgeResult 是管理端回显的智能体知识范围配置。
+type AICCKnowledgeResult struct {
+	// AgentID 是智能体主键。
+	AgentID string `json:"agent_id"`
+	// AppID 是绑定隐藏 app ID，前端用它跳转到专属文档库维护入口。
+	AppID string `json:"app_id"`
+	// UseOrgKnowledge 表示是否允许检索本企业共享知识库。
+	UseOrgKnowledge bool `json:"use_org_knowledge"`
+	// IndustryKnowledgeBaseIDs 是已挂载的平台行业知识库 ID 列表。
+	IndustryKnowledgeBaseIDs []string `json:"industry_knowledge_base_ids"`
+	// AppDocumentIDs 是已挂载的专属文档 ID 列表。
+	AppDocumentIDs []string `json:"app_document_ids"`
+}
+
 // AICCAnalyticsResult 是管理端 AICC 运营统计卡片视图。
 type AICCAnalyticsResult struct {
 	// TodaySessions 是当前企业今日会话数。

@@ -22,6 +22,22 @@ WHERE org_id = ? AND deleted_at IS NULL
 ORDER BY created_at DESC, id DESC
 LIMIT ? OFFSET ?;
 
+-- name: ListAICCAgentKnowledge :many
+SELECT *
+FROM aicc_agent_knowledge
+WHERE agent_id = ?
+ORDER BY scope_type ASC, scope_identity_key ASC;
+
+-- name: DeleteAICCAgentKnowledgeByAgent :exec
+DELETE FROM aicc_agent_knowledge
+WHERE agent_id = ?;
+
+-- name: AddAICCAgentKnowledge :exec
+INSERT INTO aicc_agent_knowledge (
+    id, agent_id, agent_org_id, scope_type, org_id, app_id,
+    industry_knowledge_base_id, ragflow_document_id
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
 -- name: CountAICCAgentsByOrg :one
 SELECT COUNT(*)
 FROM aicc_agents

@@ -82,6 +82,23 @@ export interface AICCLeadField {
 // AICCLeadFieldPayload 是管理端保存留资字段时提交的载荷。
 export type AICCLeadFieldPayload = Omit<AICCLeadField, 'id'>
 
+// AICCKnowledge 是智能体可检索知识范围配置。
+export interface AICCKnowledge {
+  // 智能体主键。
+  agent_id: string
+  // 绑定隐藏 app ID，用于跳转专属知识库。
+  app_id: string
+  // 是否检索企业共享知识库。
+  use_org_knowledge: boolean
+  // 平台行业知识库 ID 列表。
+  industry_knowledge_base_ids: string[]
+  // 隐藏 app 专属文档 ID 列表。
+  app_document_ids: string[]
+}
+
+// AICCKnowledgePayload 是保存知识范围时提交的完整快照。
+export type AICCKnowledgePayload = Pick<AICCKnowledge, 'use_org_knowledge' | 'industry_knowledge_base_ids' | 'app_document_ids'>
+
 // AICCPublicConfig 是访客打开公开链接后可读取的非敏感展示配置。
 export interface AICCPublicConfig {
   // 智能体公开展示名。

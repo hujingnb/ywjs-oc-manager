@@ -35,6 +35,7 @@ type aiccServiceStub struct {
 	sessionResult   service.AICCSessionDetailResult
 	leadsResult     []service.AICCLeadResult
 	fieldsResult    []service.AICCLeadFieldResult
+	knowledgeResult service.AICCKnowledgeResult
 	analyticsResult service.AICCAnalyticsResult
 	markLeadErr     error
 
@@ -46,6 +47,7 @@ type aiccServiceStub struct {
 	lastLeadID    string
 	lastAction    string
 	lastFields    []service.AICCLeadFieldInput
+	lastKnowledge service.AICCKnowledgeInput
 }
 
 // CreateAgent 记录创建请求并返回预设结果。
@@ -152,6 +154,30 @@ func (s *aiccServiceStub) ReplaceLeadFields(_ context.Context, principal auth.Pr
 		})
 	}
 	return results, nil
+}
+
+// GetAgentKnowledge 记录智能体 ID 并返回预设知识范围。
+func (s *aiccServiceStub) GetAgentKnowledge(_ context.Context, principal auth.Principal, agentID string) (service.AICCKnowledgeResult, error) {
+	s.lastPrincipal = principal
+	s.lastAgentID = agentID
+	return s.knowledgeResult, nil
+}
+
+// ReplaceAgentKnowledge 记录知识范围入参并返回预设配置。
+func (s *aiccServiceStub) ReplaceAgentKnowledge(_ context.Context, principal auth.Principal, agentID string, input service.AICCKnowledgeInput) (service.AICCKnowledgeResult, error) {
+	s.lastPrincipal = principal
+	s.lastAgentID = agentID
+	s.lastKnowledge = input
+	if s.knowledgeResult.AgentID != "" {
+		return s.knowledgeResult, nil
+	}
+	return service.AICCKnowledgeResult{
+		AgentID:                  agentID,
+		AppID:                    "app-hidden-1",
+		UseOrgKnowledge:          input.UseOrgKnowledge,
+		IndustryKnowledgeBaseIDs: input.IndustryKnowledgeBaseIDs,
+		AppDocumentIDs:           input.AppDocumentIDs,
+	}, nil
 }
 
 // Analytics 记录企业 ID 并返回预设统计。
@@ -287,6 +313,17 @@ func TestAICCHandlerBasicRoutes(t *testing.T) {
 		{name: "删除路由返回 204", method: http.MethodDelete, path: "/api/v1/aicc/agents/agent-1", wantStatus: http.StatusNoContent, assertion: func(t *testing.T, svc *aiccServiceStub, _ string) {
 			assert.Equal(t, "agent-1", svc.lastAgentID)
 		}}, // 场景：企业管理员软删除智能体。
+		{name: "读取知识范围路由返回 knowledge", method: http.MethodGet, path: "/api/v1/aicc/agents/agent-1/knowledge", wantStatus: http.StatusOK, assertion: func(t *testing.T, svc *aiccServiceStub, body string) {
+			assert.Equal(t, "agent-1", svc.lastAgentID)
+			assert.Contains(t, body, "knowledge")
+		}}, // 场景：企业管理员回显智能体可检索的知识范围。
+		{name: "保存知识范围路由绑定配置", method: http.MethodPut, path: "/api/v1/aicc/agents/agent-1/knowledge", body: `{"use_org_knowledge":true,"industry_knowledge_base_ids":["industry-1"],"app_document_ids":["doc-1"]}`, wantStatus: http.StatusOK, assertion: func(t *testing.T, svc *aiccServiceStub, body string) {
+			assert.Equal(t, "agent-1", svc.lastAgentID)
+			assert.True(t, svc.lastKnowledge.UseOrgKnowledge)
+			assert.Equal(t, []string{"industry-1"}, svc.lastKnowledge.IndustryKnowledgeBaseIDs)
+			assert.Equal(t, []string{"doc-1"}, svc.lastKnowledge.AppDocumentIDs)
+			assert.Contains(t, body, "knowledge")
+		}}, // 场景：企业管理员整组保存企业、行业和专属文档范围。
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -295,6 +332,13 @@ func TestAICCHandlerBasicRoutes(t *testing.T) {
 				getResult:    testAICCAgentResult(),
 				updateResult: testAICCAgentResult(),
 				statusResult: testAICCAgentResult(),
+				knowledgeResult: service.AICCKnowledgeResult{
+					AgentID:                  "agent-1",
+					AppID:                    "app-hidden-1",
+					UseOrgKnowledge:          true,
+					IndustryKnowledgeBaseIDs: []string{"industry-1"},
+					AppDocumentIDs:           []string{"doc-1"},
+				},
 			}
 			router := newAICCTestRouter(t, svc)
 

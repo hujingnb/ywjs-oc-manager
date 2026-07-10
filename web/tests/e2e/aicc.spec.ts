@@ -104,6 +104,20 @@ async function configurePhoneLeadField(page: Page): Promise<void> {
   await expect(page.getByText('留资字段已保存')).toBeVisible()
 }
 
+// configureKnowledgeScope 通过管理页保存知识库范围，覆盖企业知识库检索配置的真实路由接线。
+async function configureKnowledgeScope(page: Page): Promise<void> {
+  await expect(page.getByText('知识库范围')).toBeVisible()
+  const orgKnowledgeCheckbox = page.getByText('使用企业共享知识库')
+  await orgKnowledgeCheckbox.click()
+  const saved = page.waitForResponse(response =>
+    response.url().includes('/knowledge')
+    && response.request().method() === 'PUT',
+  )
+  await page.getByRole('button', { name: '保存知识范围' }).click()
+  expect((await saved).ok()).toBeTruthy()
+  await expect(page.getByText('知识范围已保存')).toBeVisible()
+}
+
 // startAICCAgent 通过管理页启动智能体，确保公开链接进入 active 接待状态。
 async function startAICCAgent(page: Page): Promise<void> {
   const started = page.waitForResponse(response =>
@@ -120,6 +134,7 @@ test('平台开通 AICC 后企业管理员可创建客服智能体', async ({ pa
   await enableAICCForFixtureOrg(page)
   await clearLoginState(page)
   await createAICCAgentAsOrgAdmin(page)
+  await configureKnowledgeScope(page)
 })
 
 // AICC 线索闭环覆盖：公开访客提交留资后，企业管理员可在线索页看到未读线索、统计变化，并导出 CSV。

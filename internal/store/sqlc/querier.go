@@ -12,6 +12,7 @@ import (
 )
 
 type Querier interface {
+	AddAICCAgentKnowledge(ctx context.Context, arg AddAICCAgentKnowledgeParams) error
 	// 为助手版本追加一个行业知识库关联；只允许关联未删除行业库，复合主键保证同一版本不重复关联。
 	AddAssistantVersionIndustryKnowledgeBase(ctx context.Context, arg AddAssistantVersionIndustryKnowledgeBaseParams) (int64, error)
 	// 判断指定应用下是否存在 status='bound' 的渠道绑定。
@@ -94,6 +95,7 @@ type Querier interface {
 	CreateSkillTicketMessage(ctx context.Context, arg CreateSkillTicketMessageParams) error
 	CreateUser(ctx context.Context, arg CreateUserParams) error
 	DeactivateAICCLeadFieldsByAgent(ctx context.Context, agentID string) error
+	DeleteAICCAgentKnowledgeByAgent(ctx context.Context, agentID string) error
 	DeleteAICCSession(ctx context.Context, id string) error
 	DeleteAppSkillByAppAndName(ctx context.Context, arg DeleteAppSkillByAppAndNameParams) error
 	DeleteCustomSkillTargetsByName(ctx context.Context, customSkillName string) error
@@ -174,6 +176,7 @@ type Querier interface {
 	// 用于组织创建链路失败时回滚刚刚 INSERT 的孤儿记录。
 	// 正常生命周期不可见此查询；普通"删除"必须走 SoftDeleteOrganization。
 	HardDeleteOrganization(ctx context.Context, id string) error
+	ListAICCAgentKnowledge(ctx context.Context, agentID string) ([]AiccAgentKnowledge, error)
 	ListAICCAgentsByOrg(ctx context.Context, arg ListAICCAgentsByOrgParams) ([]AiccAgent, error)
 	ListAICCImageObjectKeysBySession(ctx context.Context, sessionID string) ([]string, error)
 	ListAICCLeadFieldsByAgent(ctx context.Context, agentID string) ([]AiccLeadField, error)

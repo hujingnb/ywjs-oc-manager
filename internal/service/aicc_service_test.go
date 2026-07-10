@@ -22,6 +22,7 @@ type fakeAICCStore struct {
 	org          sqlc.Organization
 	count        int64
 	agents       map[string]sqlc.AiccAgent
+	knowledge    map[string][]sqlc.AiccAgentKnowledge
 	sessions     map[string]sqlc.AiccSession
 	messages     map[string][]sqlc.AiccMessage
 	leads        map[string]sqlc.AiccLead
@@ -29,6 +30,7 @@ type fakeAICCStore struct {
 	todayCount   int64
 	unreadCount  int64
 	createArg    sqlc.CreateAICCAgentParams
+	addKnowledge []sqlc.AddAICCAgentKnowledgeParams
 	updateArg    sqlc.UpdateAICCAgentProfileParams
 	statusArg    sqlc.SetAICCAgentStatusParams
 	readLeadArg  sqlc.MarkAICCLeadReadParams
@@ -116,6 +118,36 @@ func (f *fakeAICCStore) ListAICCAgentsByOrg(_ context.Context, arg sqlc.ListAICC
 		}
 	}
 	return rows, nil
+}
+
+// ListAICCAgentKnowledge 返回智能体已挂载知识范围，用于配置回显。
+func (f *fakeAICCStore) ListAICCAgentKnowledge(_ context.Context, agentID string) ([]sqlc.AiccAgentKnowledge, error) {
+	return append([]sqlc.AiccAgentKnowledge(nil), f.knowledge[agentID]...), nil
+}
+
+// DeleteAICCAgentKnowledgeByAgent 清空智能体知识范围，模拟整组替换的第一步。
+func (f *fakeAICCStore) DeleteAICCAgentKnowledgeByAgent(_ context.Context, agentID string) error {
+	delete(f.knowledge, agentID)
+	return nil
+}
+
+// AddAICCAgentKnowledge 记录并写入单条知识范围。
+func (f *fakeAICCStore) AddAICCAgentKnowledge(_ context.Context, arg sqlc.AddAICCAgentKnowledgeParams) error {
+	f.addKnowledge = append(f.addKnowledge, arg)
+	if f.knowledge == nil {
+		f.knowledge = map[string][]sqlc.AiccAgentKnowledge{}
+	}
+	f.knowledge[arg.AgentID] = append(f.knowledge[arg.AgentID], sqlc.AiccAgentKnowledge{
+		ID:                      arg.ID,
+		AgentID:                 arg.AgentID,
+		AgentOrgID:              arg.AgentOrgID,
+		ScopeType:               arg.ScopeType,
+		OrgID:                   arg.OrgID,
+		AppID:                   arg.AppID,
+		IndustryKnowledgeBaseID: arg.IndustryKnowledgeBaseID,
+		RagflowDocumentID:       arg.RagflowDocumentID,
+	})
+	return nil
 }
 
 // UpdateAICCAgentProfile 记录更新参数，并同步修改内存行。
@@ -360,6 +392,13 @@ func seededAICCStore() *fakeAICCStore {
 				UpdatedAt:     time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC),
 			},
 		},
+		knowledge: map[string][]sqlc.AiccAgentKnowledge{
+			"agent-1": {
+				{ID: "knowledge-org", AgentID: "agent-1", AgentOrgID: "org-1", ScopeType: domain.AICCKnowledgeScopeTypeOrg, OrgID: null.StringFrom("org-1")},
+				{ID: "knowledge-industry", AgentID: "agent-1", AgentOrgID: "org-1", ScopeType: domain.AICCKnowledgeScopeTypeIndustry, IndustryKnowledgeBaseID: null.StringFrom("industry-1")},
+				{ID: "knowledge-doc", AgentID: "agent-1", AgentOrgID: "org-1", ScopeType: domain.AICCKnowledgeScopeTypeAppDocument, OrgID: null.StringFrom("org-1"), AppID: null.StringFrom("app-hidden-1"), RagflowDocumentID: null.StringFrom("doc-1")},
+			},
+		},
 		sessions: map[string]sqlc.AiccSession{
 			"session-1": {
 				ID:               "session-1",
@@ -546,6 +585,66 @@ func TestAICCServiceStatusAndDelete(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "agent-1", store.deletedID)
 	})
+}
+
+// TestAICCServiceGetAgentKnowledge 覆盖知识范围回显：返回企业知识库开关、行业库和专属文档配置。
+func TestAICCServiceGetAgentKnowledge(t *testing.T) {
+	svc := NewAICCService(seededAICCStore(), &fakeAICCHiddenAppCreator{})
+
+	result, err := svc.GetAgentKnowledge(context.Background(), aiccOrgAdmin(), "agent-1")
+
+	require.NoError(t, err)
+	assert.Equal(t, "agent-1", result.AgentID)
+	assert.Equal(t, "app-hidden-1", result.AppID)
+	assert.True(t, result.UseOrgKnowledge)
+	assert.Equal(t, []string{"industry-1"}, result.IndustryKnowledgeBaseIDs)
+	assert.Equal(t, []string{"doc-1"}, result.AppDocumentIDs)
+}
+
+// TestAICCServiceReplaceAgentKnowledge 覆盖知识范围整组保存：输入会 trim、去重并按三类 scope 写回。
+func TestAICCServiceReplaceAgentKnowledge(t *testing.T) {
+	store := seededAICCStore()
+	svc := NewAICCService(store, &fakeAICCHiddenAppCreator{})
+
+	result, err := svc.ReplaceAgentKnowledge(context.Background(), aiccOrgAdmin(), "agent-1", AICCKnowledgeInput{
+		UseOrgKnowledge:          true,
+		IndustryKnowledgeBaseIDs: []string{" industry-2 ", "industry-2"},
+		AppDocumentIDs:           []string{"doc-2", " doc-3 "},
+	})
+
+	require.NoError(t, err)
+	assert.True(t, result.UseOrgKnowledge)
+	assert.Equal(t, []string{"industry-2"}, result.IndustryKnowledgeBaseIDs)
+	assert.Equal(t, []string{"doc-2", "doc-3"}, result.AppDocumentIDs)
+	require.Len(t, store.addKnowledge, 4)
+	assert.Equal(t, domain.AICCKnowledgeScopeTypeOrg, store.addKnowledge[0].ScopeType)
+	assert.Equal(t, null.StringFrom("org-1"), store.addKnowledge[0].OrgID)
+	assert.Equal(t, domain.AICCKnowledgeScopeTypeIndustry, store.addKnowledge[1].ScopeType)
+	assert.Equal(t, domain.AICCKnowledgeScopeTypeAppDocument, store.addKnowledge[2].ScopeType)
+	assert.Equal(t, null.StringFrom("app-hidden-1"), store.addKnowledge[2].AppID)
+}
+
+// TestAICCServiceReplaceAgentKnowledgeValidation 覆盖知识范围保存的权限和参数边界。
+func TestAICCServiceReplaceAgentKnowledgeValidation(t *testing.T) {
+	cases := []struct {
+		name      string         // 子场景说明
+		principal auth.Principal // 调用主体
+		input     AICCKnowledgeInput
+		wantErr   error
+	}{
+		{name: "平台管理员不可保存", principal: auth.Principal{Role: domain.UserRolePlatformAdmin}, input: AICCKnowledgeInput{UseOrgKnowledge: true}, wantErr: ErrForbidden}, // 场景：平台只读排障不能改企业知识范围。
+		{name: "行业库 ID 为空返回参数错误", principal: aiccOrgAdmin(), input: AICCKnowledgeInput{IndustryKnowledgeBaseIDs: []string{" "}}, wantErr: ErrInvalidArgument},       // 场景：空 ID 不应进入数据库外键校验。
+		{name: "专属文档 ID 为空返回参数错误", principal: aiccOrgAdmin(), input: AICCKnowledgeInput{AppDocumentIDs: []string{""}}, wantErr: ErrInvalidArgument},                 // 场景：空文档 ID 不应进入数据库外键校验。
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := NewAICCService(seededAICCStore(), &fakeAICCHiddenAppCreator{})
+
+			_, err := svc.ReplaceAgentKnowledge(context.Background(), tc.principal, "agent-1", tc.input)
+
+			require.ErrorIs(t, err, tc.wantErr)
+		})
+	}
 }
 
 // TestAICCServiceMapsMissingAgent 覆盖底层 sql.ErrNoRows 被转换为 service.ErrNotFound。

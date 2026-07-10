@@ -11,6 +11,8 @@ import type {
   AICCLead,
   AICCLeadField,
   AICCLeadFieldPayload,
+  AICCKnowledge,
+  AICCKnowledgePayload,
   AICCPublicConfig,
   AICCPublicChannel,
   AICCPublicImageResult,
@@ -25,6 +27,7 @@ const AICC_AGENTS_KEY = ['aicc', 'agents'] as const
 const aiccAgentsKey = (orgId?: string) => [...AICC_AGENTS_KEY, orgId ?? 'current'] as const
 const aiccAgentKey = (agentId?: string) => ['aicc', 'agent', agentId] as const
 const aiccLeadFieldsKey = (agentId?: string) => ['aicc', 'lead-fields', agentId] as const
+const aiccKnowledgeKey = (agentId?: string) => ['aicc', 'knowledge', agentId] as const
 const aiccSessionsKey = (agentId?: string) => ['aicc', 'sessions', agentId] as const
 const aiccSessionKey = (sessionId?: string) => ['aicc', 'session', sessionId] as const
 const AICC_LEADS_KEY = ['aicc', 'leads'] as const
@@ -149,6 +152,36 @@ export function useReplaceAICCLeadFields() {
     },
     onSuccess: (_fields, vars) => {
       void client.invalidateQueries({ queryKey: aiccLeadFieldsKey(vars.agentId) })
+    },
+  })
+}
+
+// useAICCKnowledgeQuery 查询选中智能体的知识库挂载范围。
+export function useAICCKnowledgeQuery(agentId: Ref<string | undefined>) {
+  return useQuery<AICCKnowledge | null>({
+    queryKey: computed(() => aiccKnowledgeKey(agentId.value)),
+    enabled: () => Boolean(agentId.value),
+    queryFn: async () => {
+      if (!agentId.value) return null
+      const response = await apiRequest<{ knowledge: AICCKnowledge }>(`/api/v1/aicc/agents/${agentId.value}/knowledge`)
+      return response.knowledge
+    },
+  })
+}
+
+// useReplaceAICCKnowledge 整组保存智能体可检索的企业、行业和专属文档范围。
+export function useReplaceAICCKnowledge() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ agentId, payload }: { agentId: string; payload: AICCKnowledgePayload }) => {
+      const response = await apiRequest<{ knowledge: AICCKnowledge }>(`/api/v1/aicc/agents/${agentId}/knowledge`, {
+        method: 'PUT',
+        body: payload,
+      })
+      return response.knowledge
+    },
+    onSuccess: (_knowledge, vars) => {
+      void client.invalidateQueries({ queryKey: aiccKnowledgeKey(vars.agentId) })
     },
   })
 }

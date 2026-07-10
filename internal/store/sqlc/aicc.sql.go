@@ -12,6 +12,38 @@ import (
 	null "github.com/guregu/null/v5"
 )
 
+const addAICCAgentKnowledge = `-- name: AddAICCAgentKnowledge :exec
+INSERT INTO aicc_agent_knowledge (
+    id, agent_id, agent_org_id, scope_type, org_id, app_id,
+    industry_knowledge_base_id, ragflow_document_id
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type AddAICCAgentKnowledgeParams struct {
+	ID                      string      `db:"id" json:"id"`
+	AgentID                 string      `db:"agent_id" json:"agent_id"`
+	AgentOrgID              string      `db:"agent_org_id" json:"agent_org_id"`
+	ScopeType               string      `db:"scope_type" json:"scope_type"`
+	OrgID                   null.String `db:"org_id" json:"org_id"`
+	AppID                   null.String `db:"app_id" json:"app_id"`
+	IndustryKnowledgeBaseID null.String `db:"industry_knowledge_base_id" json:"industry_knowledge_base_id"`
+	RagflowDocumentID       null.String `db:"ragflow_document_id" json:"ragflow_document_id"`
+}
+
+func (q *Queries) AddAICCAgentKnowledge(ctx context.Context, arg AddAICCAgentKnowledgeParams) error {
+	_, err := q.db.ExecContext(ctx, addAICCAgentKnowledge,
+		arg.ID,
+		arg.AgentID,
+		arg.AgentOrgID,
+		arg.ScopeType,
+		arg.OrgID,
+		arg.AppID,
+		arg.IndustryKnowledgeBaseID,
+		arg.RagflowDocumentID,
+	)
+	return err
+}
+
 const attachAICCLeadValuesToLead = `-- name: AttachAICCLeadValuesToLead :exec
 UPDATE aicc_lead_values
 SET lead_id = ?, lead_org_id = ?
@@ -257,6 +289,16 @@ func (q *Queries) DeactivateAICCLeadFieldsByAgent(ctx context.Context, agentID s
 	return err
 }
 
+const deleteAICCAgentKnowledgeByAgent = `-- name: DeleteAICCAgentKnowledgeByAgent :exec
+DELETE FROM aicc_agent_knowledge
+WHERE agent_id = ?
+`
+
+func (q *Queries) DeleteAICCAgentKnowledgeByAgent(ctx context.Context, agentID string) error {
+	_, err := q.db.ExecContext(ctx, deleteAICCAgentKnowledgeByAgent, agentID)
+	return err
+}
+
 const deleteAICCSession = `-- name: DeleteAICCSession :exec
 DELETE FROM aicc_sessions
 WHERE id = ?
@@ -488,6 +530,48 @@ func (q *Queries) GetAICCSessionByToken(ctx context.Context, sessionToken string
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listAICCAgentKnowledge = `-- name: ListAICCAgentKnowledge :many
+SELECT id, agent_id, agent_org_id, scope_type, org_id, app_id, industry_knowledge_base_id, ragflow_document_id, ragflow_document_scope_type, scope_identity_key, created_at
+FROM aicc_agent_knowledge
+WHERE agent_id = ?
+ORDER BY scope_type ASC, scope_identity_key ASC
+`
+
+func (q *Queries) ListAICCAgentKnowledge(ctx context.Context, agentID string) ([]AiccAgentKnowledge, error) {
+	rows, err := q.db.QueryContext(ctx, listAICCAgentKnowledge, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AiccAgentKnowledge{}
+	for rows.Next() {
+		var i AiccAgentKnowledge
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.AgentOrgID,
+			&i.ScopeType,
+			&i.OrgID,
+			&i.AppID,
+			&i.IndustryKnowledgeBaseID,
+			&i.RagflowDocumentID,
+			&i.RagflowDocumentScopeType,
+			&i.ScopeIdentityKey,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAICCAgentsByOrg = `-- name: ListAICCAgentsByOrg :many

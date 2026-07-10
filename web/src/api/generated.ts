@@ -448,6 +448,164 @@ export interface paths {
         };
         trace?: never;
     };
+    "/aicc/agents/{agentId}/knowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * AICC 智能体知识范围
+         * @description 读取企业知识库、行业知识库和专属文档的挂载配置
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 智能体 ID */
+                    agentId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.AICCKnowledgeResult"];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        /**
+         * 保存 AICC 智能体知识范围
+         * @description 企业管理员整组替换企业知识库、行业知识库和专属文档挂载配置
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 智能体 ID */
+                    agentId: string;
+                };
+                cookie?: never;
+            };
+            /** @description 知识范围配置 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.ReplaceAICCKnowledgeRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.AICCKnowledgeResult"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aicc/agents/{agentId}/lead-fields": {
         parameters: {
             query?: never;
@@ -15127,6 +15285,14 @@ export interface components {
             /** @description 新标题，必填 */
             title: string;
         };
+        "handlers.ReplaceAICCKnowledgeRequest": {
+            /** @description AppDocumentIDs 是该智能体隐藏 app 专属知识库中允许检索的文档 ID 列表。 */
+            app_document_ids?: string[];
+            /** @description IndustryKnowledgeBaseIDs 是额外挂载的平台行业知识库 ID 列表。 */
+            industry_knowledge_base_ids?: string[];
+            /** @description UseOrgKnowledge 表示是否允许智能体检索本企业共享知识库。 */
+            use_org_knowledge?: boolean;
+        };
         "handlers.ReplaceAICCLeadFieldsRequest": {
             /** @description Fields 是当前智能体完整留资字段列表；提交空数组表示关闭留资表单。 */
             fields: components["schemas"]["handlers.AICCLeadFieldRequest"][];
@@ -15630,6 +15796,18 @@ export interface components {
             today_sessions?: number;
             /** @description UnreadLeads 是当前企业未读线索数。 */
             unread_leads?: number;
+        };
+        "service.AICCKnowledgeResult": {
+            /** @description AgentID 是智能体主键。 */
+            agent_id?: string;
+            /** @description AppDocumentIDs 是已挂载的专属文档 ID 列表。 */
+            app_document_ids?: string[];
+            /** @description AppID 是绑定隐藏 app ID，前端用它跳转到专属文档库维护入口。 */
+            app_id?: string;
+            /** @description IndustryKnowledgeBaseIDs 是已挂载的平台行业知识库 ID 列表。 */
+            industry_knowledge_base_ids?: string[];
+            /** @description UseOrgKnowledge 表示是否允许检索本企业共享知识库。 */
+            use_org_knowledge?: boolean;
         };
         "service.AICCLeadFieldResult": {
             /** @description FieldKey 是字段稳定 key。 */

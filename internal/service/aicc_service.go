@@ -26,6 +26,12 @@ type AICCStore interface {
 	GetAICCAgent(ctx context.Context, id string) (sqlc.AiccAgent, error)
 	// ListAICCAgentsByOrg 列出企业下未删除智能体。
 	ListAICCAgentsByOrg(ctx context.Context, arg sqlc.ListAICCAgentsByOrgParams) ([]sqlc.AiccAgent, error)
+	// ListAICCAgentKnowledge 列出智能体当前可检索知识范围。
+	ListAICCAgentKnowledge(ctx context.Context, agentID string) ([]sqlc.AiccAgentKnowledge, error)
+	// DeleteAICCAgentKnowledgeByAgent 清空智能体知识范围，配合 AddAICCAgentKnowledge 整组替换。
+	DeleteAICCAgentKnowledgeByAgent(ctx context.Context, agentID string) error
+	// AddAICCAgentKnowledge 写入单条知识范围配置。
+	AddAICCAgentKnowledge(ctx context.Context, arg sqlc.AddAICCAgentKnowledgeParams) error
 	// UpdateAICCAgentProfile 更新智能体可编辑资料。
 	UpdateAICCAgentProfile(ctx context.Context, arg sqlc.UpdateAICCAgentProfileParams) error
 	// SetAICCAgentStatus 切换智能体运行状态。
@@ -306,6 +312,86 @@ func (s *AICCService) DeleteAgent(ctx context.Context, principal auth.Principal,
 	return nil
 }
 
+// GetAgentKnowledge 读取智能体知识范围；平台管理员可只读查看，企业管理员可回显配置。
+func (s *AICCService) GetAgentKnowledge(ctx context.Context, principal auth.Principal, agentID string) (AICCKnowledgeResult, error) {
+	agent, err := s.getAgentRow(ctx, agentID)
+	if err != nil {
+		return AICCKnowledgeResult{}, err
+	}
+	if !auth.CanViewAICC(principal, agent.OrgID) {
+		return AICCKnowledgeResult{}, ErrForbidden
+	}
+	rows, err := s.store.ListAICCAgentKnowledge(ctx, agentID)
+	if err != nil {
+		return AICCKnowledgeResult{}, fmt.Errorf("查询 AICC 知识范围失败: %w", err)
+	}
+	return toAICCKnowledgeResult(agent, rows), nil
+}
+
+// ReplaceAgentKnowledge 整组替换智能体知识范围，避免局部勾选和删除产生不一致配置。
+func (s *AICCService) ReplaceAgentKnowledge(ctx context.Context, principal auth.Principal, agentID string, input AICCKnowledgeInput) (AICCKnowledgeResult, error) {
+	agent, err := s.getAgentRow(ctx, agentID)
+	if err != nil {
+		return AICCKnowledgeResult{}, err
+	}
+	if !auth.CanManageAICCAgent(principal, agent.OrgID) {
+		return AICCKnowledgeResult{}, ErrForbidden
+	}
+	normalized, err := normalizeAICCKnowledgeInput(input)
+	if err != nil {
+		return AICCKnowledgeResult{}, err
+	}
+	run := func(store AICCStore) error {
+		if err := store.DeleteAICCAgentKnowledgeByAgent(ctx, agentID); err != nil {
+			return fmt.Errorf("清空 AICC 知识范围失败: %w", err)
+		}
+		if normalized.UseOrgKnowledge {
+			if err := store.AddAICCAgentKnowledge(ctx, sqlc.AddAICCAgentKnowledgeParams{
+				ID:         newUUID(),
+				AgentID:    agentID,
+				AgentOrgID: agent.OrgID,
+				ScopeType:  domain.AICCKnowledgeScopeTypeOrg,
+				OrgID:      nullStr(agent.OrgID),
+			}); err != nil {
+				return fmt.Errorf("保存 AICC 企业知识范围失败: %w", err)
+			}
+		}
+		for _, id := range normalized.IndustryKnowledgeBaseIDs {
+			if err := store.AddAICCAgentKnowledge(ctx, sqlc.AddAICCAgentKnowledgeParams{
+				ID:                      newUUID(),
+				AgentID:                 agentID,
+				AgentOrgID:              agent.OrgID,
+				ScopeType:               domain.AICCKnowledgeScopeTypeIndustry,
+				IndustryKnowledgeBaseID: nullStr(id),
+			}); err != nil {
+				return fmt.Errorf("保存 AICC 行业知识范围失败: %w", err)
+			}
+		}
+		for _, id := range normalized.AppDocumentIDs {
+			if err := store.AddAICCAgentKnowledge(ctx, sqlc.AddAICCAgentKnowledgeParams{
+				ID:                newUUID(),
+				AgentID:           agentID,
+				AgentOrgID:        agent.OrgID,
+				ScopeType:         domain.AICCKnowledgeScopeTypeAppDocument,
+				OrgID:             nullStr(agent.OrgID),
+				AppID:             nullStr(agent.AppID),
+				RagflowDocumentID: nullStr(id),
+			}); err != nil {
+				return fmt.Errorf("保存 AICC 专属文档范围失败: %w", err)
+			}
+		}
+		return nil
+	}
+	if s.tx != nil {
+		if err := s.tx.WithAICCTx(ctx, run); err != nil {
+			return AICCKnowledgeResult{}, err
+		}
+	} else if err := run(s.store); err != nil {
+		return AICCKnowledgeResult{}, err
+	}
+	return s.GetAgentKnowledge(ctx, principal, agentID)
+}
+
 // ListSessions 列出指定智能体的会话摘要；权限先通过智能体归属收敛到企业维度。
 func (s *AICCService) ListSessions(ctx context.Context, principal auth.Principal, agentID string, limit, offset int32) ([]AICCSessionResult, error) {
 	agent, err := s.getAgentRow(ctx, agentID)
@@ -529,6 +615,42 @@ func normalizeAICCLeadFields(inputs []AICCLeadFieldInput) ([]AICCLeadFieldInput,
 	return results, nil
 }
 
+func normalizeAICCKnowledgeInput(input AICCKnowledgeInput) (AICCKnowledgeInput, error) {
+	industryIDs, err := normalizeAICCKnowledgeIDs(input.IndustryKnowledgeBaseIDs, 20, "行业知识库")
+	if err != nil {
+		return AICCKnowledgeInput{}, err
+	}
+	documentIDs, err := normalizeAICCKnowledgeIDs(input.AppDocumentIDs, 200, "专属文档")
+	if err != nil {
+		return AICCKnowledgeInput{}, err
+	}
+	return AICCKnowledgeInput{
+		UseOrgKnowledge:          input.UseOrgKnowledge,
+		IndustryKnowledgeBaseIDs: industryIDs,
+		AppDocumentIDs:           documentIDs,
+	}, nil
+}
+
+func normalizeAICCKnowledgeIDs(ids []string, limit int, label string) ([]string, error) {
+	if len(ids) > limit {
+		return nil, fmt.Errorf("%w: AICC %s最多选择 %d 个", ErrInvalidArgument, label, limit)
+	}
+	seen := make(map[string]struct{}, len(ids))
+	results := make([]string, 0, len(ids))
+	for _, raw := range ids {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			return nil, fmt.Errorf("%w: AICC %s ID 不能为空", ErrInvalidArgument, label)
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		results = append(results, id)
+	}
+	return results, nil
+}
+
 func (s *AICCService) ensureAgentLimit(ctx context.Context, org sqlc.Organization) error {
 	if !org.AiccAgentLimit.Valid {
 		return nil
@@ -626,6 +748,30 @@ func toAICCAgentResult(row sqlc.AiccAgent) AICCAgentResult {
 		CreatedAt:      row.CreatedAt,
 		UpdatedAt:      row.UpdatedAt,
 	}
+}
+
+func toAICCKnowledgeResult(agent sqlc.AiccAgent, rows []sqlc.AiccAgentKnowledge) AICCKnowledgeResult {
+	result := AICCKnowledgeResult{
+		AgentID:                  agent.ID,
+		AppID:                    agent.AppID,
+		IndustryKnowledgeBaseIDs: []string{},
+		AppDocumentIDs:           []string{},
+	}
+	for _, row := range rows {
+		switch row.ScopeType {
+		case domain.AICCKnowledgeScopeTypeOrg:
+			result.UseOrgKnowledge = true
+		case domain.AICCKnowledgeScopeTypeIndustry:
+			if row.IndustryKnowledgeBaseID.Valid {
+				result.IndustryKnowledgeBaseIDs = append(result.IndustryKnowledgeBaseIDs, row.IndustryKnowledgeBaseID.String)
+			}
+		case domain.AICCKnowledgeScopeTypeAppDocument:
+			if row.RagflowDocumentID.Valid {
+				result.AppDocumentIDs = append(result.AppDocumentIDs, row.RagflowDocumentID.String)
+			}
+		}
+	}
+	return result
 }
 
 func toAICCSessionResult(row sqlc.AiccSession) AICCSessionResult {

@@ -148,6 +148,53 @@
               </n-space>
             </n-form>
 
+            <div class="knowledge-panel">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">知识库范围</p>
+                  <strong>智能体检索来源</strong>
+                </div>
+                <n-button :disabled="!selectedAgent" @click="openDedicatedKnowledge">
+                  <template #icon><ExternalLink :size="16" /></template>
+                  专属文档
+                </n-button>
+              </div>
+              <div v-if="!selectedAgent" class="state-text">保存智能体后可配置知识库范围。</div>
+              <template v-else>
+                <n-checkbox v-model:checked="knowledgeForm.use_org_knowledge">
+                  使用企业共享知识库
+                </n-checkbox>
+                <n-form-item label="平台行业知识库">
+                  <n-select
+                    v-model:value="knowledgeForm.industry_knowledge_base_ids"
+                    multiple
+                    clearable
+                    filterable
+                    :loading="industryBasesQuery.isFetching.value"
+                    :options="industryKnowledgeOptions"
+                    placeholder="选择可供该智能体检索的行业知识库"
+                  />
+                </n-form-item>
+                <n-form-item label="专属文档">
+                  <n-select
+                    v-model:value="knowledgeForm.app_document_ids"
+                    multiple
+                    clearable
+                    filterable
+                    :loading="appKnowledgeQuery.isFetching.value"
+                    :options="appDocumentOptions"
+                    placeholder="选择隐藏实例知识库中的文档"
+                  />
+                </n-form-item>
+                <n-space justify="end">
+                  <n-button :loading="knowledgeBusy" @click="saveKnowledge">
+                    <template #icon><Save :size="16" /></template>
+                    保存知识范围
+                  </n-button>
+                </n-space>
+              </template>
+            </div>
+
             <div class="lead-field-panel">
               <div class="section-heading">
                 <div>
@@ -247,14 +294,18 @@ import AICCLeadsPage from '@/pages/aicc/AICCLeadsPage.vue'
 import AICCSessionsPage from '@/pages/aicc/AICCSessionsPage.vue'
 import {
   useAICCAgentsQuery,
+  useAICCKnowledgeQuery,
   useAICCLeadFieldsQuery,
   useCreateAICCAgent,
   useDeleteAICCAgent,
+  useReplaceAICCKnowledge,
   useReplaceAICCLeadFields,
   useSetAICCAgentStatus,
   useUpdateAICCAgent,
 } from '@/api/hooks/useAICC'
-import type { AICCAgent, AICCAgentPayload, AICCAgentStatus, AICCLeadField, AICCLeadFieldPayload, AICCPrivacyMode } from '@/domain/aicc'
+import { useIndustryKnowledgeBasesQuery } from '@/api/hooks/useIndustryKnowledge'
+import { useAppKnowledgeQuery } from '@/api/hooks/useKnowledge'
+import type { AICCAgent, AICCAgentPayload, AICCAgentStatus, AICCLeadField, AICCLeadFieldPayload, AICCKnowledgePayload, AICCPrivacyMode } from '@/domain/aicc'
 import { isAICCAgentRunning } from '@/domain/aicc'
 
 // AICCManagerPage 是企业管理员维护 AI Contact Center 在线客服智能体和运营数据的入口。
@@ -268,6 +319,8 @@ interface LeadFieldRow extends AICCLeadFieldPayload {
   local_id: string
 }
 
+interface KnowledgeForm extends AICCKnowledgePayload {}
+
 const selectedAgentId = ref<string | undefined>()
 const deleteModalOpen = ref(false)
 const feedback = ref('')
@@ -275,23 +328,44 @@ const feedbackDanger = ref(false)
 
 const agentsQuery = useAICCAgentsQuery()
 const leadFieldsQuery = useAICCLeadFieldsQuery(selectedAgentId)
+const knowledgeQuery = useAICCKnowledgeQuery(selectedAgentId)
 const createMutation = useCreateAICCAgent()
 const updateMutation = useUpdateAICCAgent()
 const leadFieldMutation = useReplaceAICCLeadFields()
+const knowledgeMutation = useReplaceAICCKnowledge()
 const statusMutation = useSetAICCAgentStatus()
 const deleteMutation = useDeleteAICCAgent()
 
 const agents = computed(() => agentsQuery.data.value ?? [])
 const selectedAgent = computed(() => agents.value.find(agent => agent.id === selectedAgentId.value))
+const selectedKnowledgeAppId = computed(() => knowledgeQuery.data.value?.app_id || selectedAgent.value?.app_id)
+const industryBasesQuery = useIndustryKnowledgeBasesQuery(() => Boolean(selectedAgentId.value))
+const appKnowledgeQuery = useAppKnowledgeQuery(selectedKnowledgeAppId, { pageSize: computed(() => 200) })
 const isSelectedRunning = computed(() => selectedAgent.value ? isAICCAgentRunning(selectedAgent.value) : false)
 const activeAgentCount = computed(() => agents.value.filter(agent => isAICCAgentRunning(agent)).length)
 const submitBusy = computed(() => createMutation.isPending.value || updateMutation.isPending.value)
 const statusBusy = computed(() => statusMutation.isPending.value)
 const deleteBusy = computed(() => deleteMutation.isPending.value)
 const leadFieldBusy = computed(() => leadFieldMutation.isPending.value || leadFieldsQuery.isFetching.value)
+const knowledgeBusy = computed(() => knowledgeMutation.isPending.value || knowledgeQuery.isFetching.value)
 
 const form = reactive<AgentForm>(emptyForm())
 const leadFieldRows = ref<LeadFieldRow[]>([])
+const knowledgeForm = reactive<KnowledgeForm>(emptyKnowledgeForm())
+
+const industryKnowledgeOptions = computed<SelectOption[]>(() =>
+  (industryBasesQuery.data.value?.items ?? []).map(item => ({
+    label: `${item.name} (${item.document_count})`,
+    value: item.id,
+  })),
+)
+
+const appDocumentOptions = computed<SelectOption[]>(() =>
+  (appKnowledgeQuery.data.value?.items ?? []).map(item => ({
+    label: item.name,
+    value: item.id,
+  })),
+)
 
 const privacyOptions: SelectOption[] = [
   { label: '展示隐私提示', value: 'notice' },
@@ -338,6 +412,20 @@ watch(
   { immediate: true },
 )
 
+watch(
+  () => knowledgeQuery.data.value,
+  (knowledge) => {
+    Object.assign(knowledgeForm, knowledge
+      ? {
+          use_org_knowledge: knowledge.use_org_knowledge,
+          industry_knowledge_base_ids: [...knowledge.industry_knowledge_base_ids],
+          app_document_ids: [...knowledge.app_document_ids],
+        }
+      : emptyKnowledgeForm())
+  },
+  { immediate: true },
+)
+
 function emptyForm(): AgentForm {
   return {
     id: undefined,
@@ -348,6 +436,14 @@ function emptyForm(): AgentForm {
     privacy_mode: 'notice',
     privacy_text: '我们会使用本次对话内容来回答您的问题，并按企业数据保留策略保存。',
     retention_days: 180,
+  }
+}
+
+function emptyKnowledgeForm(): KnowledgeForm {
+  return {
+    use_org_knowledge: true,
+    industry_knowledge_base_ids: [],
+    app_document_ids: [],
   }
 }
 
@@ -450,6 +546,23 @@ async function saveLeadFields() {
   }
 }
 
+async function saveKnowledge() {
+  if (!selectedAgent.value) return
+  try {
+    await knowledgeMutation.mutateAsync({
+      agentId: selectedAgent.value.id,
+      payload: {
+        use_org_knowledge: knowledgeForm.use_org_knowledge,
+        industry_knowledge_base_ids: [...knowledgeForm.industry_knowledge_base_ids],
+        app_document_ids: [...knowledgeForm.app_document_ids],
+      },
+    })
+    setFeedback('知识范围已保存')
+  } catch (err) {
+    setFeedback(err instanceof Error ? err.message : '知识范围保存失败', true)
+  }
+}
+
 function statusMeta(status?: AICCAgentStatus): { label: string; type: 'success' | 'warning' | 'default' | 'error' } {
   if (status === 'active') return { label: '接待中', type: 'success' }
   if (status === 'paused') return { label: '已暂停', type: 'warning' }
@@ -512,6 +625,11 @@ async function copyText(text: string) {
 function openPublicLink() {
   if (!publicLink.value) return
   window.open(publicLink.value, '_blank', 'noopener,noreferrer')
+}
+
+function openDedicatedKnowledge() {
+  if (!selectedKnowledgeAppId.value) return
+  window.open(`/apps/${selectedKnowledgeAppId.value}/knowledge`, '_blank', 'noopener,noreferrer')
 }
 </script>
 
@@ -672,6 +790,7 @@ function openPublicLink() {
   grid-column: 1 / -1;
 }
 
+.knowledge-panel,
 .lead-field-panel {
   display: grid;
   gap: 12px;

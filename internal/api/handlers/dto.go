@@ -169,6 +169,16 @@ type ReplaceAICCLeadFieldsRequest struct {
 	Fields []AICCLeadFieldRequest `json:"fields" binding:"required"`
 }
 
+// ReplaceAICCKnowledgeRequest 是整组保存 AICC 知识范围的请求体。
+type ReplaceAICCKnowledgeRequest struct {
+	// UseOrgKnowledge 表示是否允许智能体检索本企业共享知识库。
+	UseOrgKnowledge bool `json:"use_org_knowledge"`
+	// IndustryKnowledgeBaseIDs 是额外挂载的平台行业知识库 ID 列表。
+	IndustryKnowledgeBaseIDs []string `json:"industry_knowledge_base_ids"`
+	// AppDocumentIDs 是该智能体隐藏 app 专属知识库中允许检索的文档 ID 列表。
+	AppDocumentIDs []string `json:"app_document_ids"`
+}
+
 // CreateAICCSessionRequest 是访客创建公开会话的请求体。
 type CreateAICCSessionRequest struct {
 	// Channel 是公开入口渠道：web_link / web_widget。
