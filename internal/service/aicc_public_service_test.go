@@ -376,9 +376,18 @@ func TestAICCPublicCreateSessionCreatesExpiringSession(t *testing.T) {
 // 访客传入仍有效的 session token 时，服务端必须返回原会话，不创建新会话。
 func TestAICCPublicCreateSessionRestoresExistingSession(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
-		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", PublicToken: "pub", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
-		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour), PrivacyNoticeShown: true},
+		org:   sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent: sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", PublicToken: "pub", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		session: sqlc.AiccSession{
+			ID:                 "session-1",
+			AgentID:            "agent-1",
+			OrgID:              "org-1",
+			SessionToken:       "tok",
+			ExpiresAt:          aiccPublicTestNow.Add(time.Hour),
+			PrivacyNoticeShown: true,
+			LastActiveAt:       aiccPublicTestNow.Add(-10 * time.Minute),
+			CreatedAt:          aiccPublicTestNow.Add(-2 * time.Hour),
+		},
 	}
 	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
 	svc.now = func() time.Time { return aiccPublicTestNow }
@@ -389,6 +398,62 @@ func TestAICCPublicCreateSessionRestoresExistingSession(t *testing.T) {
 	assert.Equal(t, "tok", result.SessionToken)
 	assert.True(t, result.Restored)
 	assert.Equal(t, 0, store.createdSessionCount)
+}
+
+// TestAICCPublicCreateSessionRestoresByCreatedAtWhenLastActiveMissing 覆盖历史数据兼容：
+// last_active_at 缺失时使用 created_at 判断续接窗口，避免旧会话数据无法刷新恢复。
+func TestAICCPublicCreateSessionRestoresByCreatedAtWhenLastActiveMissing(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:   sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent: sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", PublicToken: "pub", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		session: sqlc.AiccSession{
+			ID:                 "session-1",
+			AgentID:            "agent-1",
+			OrgID:              "org-1",
+			SessionToken:       "tok",
+			ExpiresAt:          aiccPublicTestNow.Add(time.Hour),
+			PrivacyNoticeShown: true,
+			CreatedAt:          aiccPublicTestNow.Add(-10 * time.Minute),
+		},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	result, err := svc.CreateSession(context.Background(), "pub", AICCPublicSessionInput{SessionToken: "tok"})
+
+	require.NoError(t, err)
+	assert.Equal(t, "tok", result.SessionToken)
+	assert.True(t, result.Restored)
+	assert.Equal(t, 0, store.createdSessionCount)
+}
+
+// TestAICCPublicCreateSessionSkipsRestoreAfterResumeTTL 覆盖刷新续接过期：
+// 有效 session token 超过续接 TTL 后必须创建新会话，避免长期复用旧会话。
+func TestAICCPublicCreateSessionSkipsRestoreAfterResumeTTL(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:      sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:    sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", PublicToken: "pub", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		settings: sqlc.AiccAgentSetting{AgentID: "agent-1", MessageLimitPerSession: 100, BlockedVisitorEnabled: true, SessionResumeTtlMinutes: 30},
+		session: sqlc.AiccSession{
+			ID:                 "session-1",
+			AgentID:            "agent-1",
+			OrgID:              "org-1",
+			SessionToken:       "tok",
+			ExpiresAt:          aiccPublicTestNow.Add(time.Hour),
+			PrivacyNoticeShown: true,
+			LastActiveAt:       aiccPublicTestNow.Add(-31 * time.Minute),
+			CreatedAt:          aiccPublicTestNow.Add(-31 * time.Minute),
+		},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	result, err := svc.CreateSession(context.Background(), "pub", AICCPublicSessionInput{SessionToken: "tok"})
+
+	require.NoError(t, err)
+	assert.NotEqual(t, "tok", result.SessionToken)
+	assert.False(t, result.Restored)
+	assert.Equal(t, 1, store.createdSessionCount)
 }
 
 // TestAICCPublicCreateWidgetSessionRejectsDisallowedOrigin 覆盖挂件域名白名单：

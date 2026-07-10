@@ -259,13 +259,19 @@ func (s *AICCPublicService) CreateSession(ctx context.Context, publicToken strin
 	if sessionToken := strings.TrimSpace(input.SessionToken); sessionToken != "" {
 		session, err := s.store.GetAICCSessionByToken(ctx, sessionToken)
 		if err == nil && session.AgentID == agent.ID && session.ExpiresAt.After(s.now()) {
-			return AICCPublicSessionResult{
-				SessionToken:       session.SessionToken,
-				PrivacyMode:        agent.PrivacyMode,
-				PrivacyText:        strOrEmpty(agent.PrivacyText),
-				PrivacyNoticeShown: session.PrivacyNoticeShown,
-				Restored:           true,
-			}, nil
+			settings, err := s.loadPublicSettings(ctx, agent.ID)
+			if err != nil {
+				return AICCPublicSessionResult{}, err
+			}
+			if aiccSessionResumeAllowed(session, s.now(), settings.SessionResumeTTLMinutes) {
+				return AICCPublicSessionResult{
+					SessionToken:       session.SessionToken,
+					PrivacyMode:        agent.PrivacyMode,
+					PrivacyText:        strOrEmpty(agent.PrivacyText),
+					PrivacyNoticeShown: session.PrivacyNoticeShown,
+					Restored:           true,
+				}, nil
+			}
 		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return AICCPublicSessionResult{}, fmt.Errorf("恢复 AICC 会话失败: %w", err)
@@ -482,6 +488,18 @@ func publicSettingsFromSQLC(row sqlc.AiccAgentSetting) (aiccPublicSettings, erro
 		BlockedVisitorEnabled:   row.BlockedVisitorEnabled,
 		SessionResumeTTLMinutes: row.SessionResumeTtlMinutes,
 	}, nil
+}
+
+// aiccSessionResumeAllowed 根据最后活跃时间判断访客刷新是否仍可续接；历史数据缺失时回退到创建时间。
+func aiccSessionResumeAllowed(session sqlc.AiccSession, now time.Time, ttlMinutes int32) bool {
+	activityAt := session.LastActiveAt
+	if activityAt.IsZero() {
+		activityAt = session.CreatedAt
+	}
+	if activityAt.IsZero() || ttlMinutes <= 0 {
+		return false
+	}
+	return !now.After(activityAt.Add(time.Duration(ttlMinutes) * time.Minute))
 }
 
 // ensureMessageLimit 在写入新访客消息前检查单会话消息上限，避免超额请求继续进入 Hermes。
