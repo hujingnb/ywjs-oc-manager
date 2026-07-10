@@ -121,6 +121,7 @@ import {
 } from '@/api/hooks/useAICC'
 import type { ApiError } from '@/api/client'
 import type { AICCLeadField, AICCPublicConfig } from '@/domain/aicc'
+import { normalizeAICCPublicChannel } from '@/domain/aicc'
 
 // PublicAICCChatPage 是访客公开客服页，不依赖后台登录态。
 // 会话 token 只保存在页面内存，刷新页面会重新创建会话，避免把访客凭证持久化到本地存储。
@@ -175,7 +176,7 @@ async function boot() {
   errorMessage.value = ''
   try {
     config.value = await fetchAICCPublicConfig(publicToken.value)
-    const session = await createAICCPublicSession(publicToken.value)
+    const session = await createAICCPublicSession(publicToken.value, normalizeAICCPublicChannel(route.query.aicc_channel))
     sessionToken.value = session.session_token ?? ''
     hasConsent.value = config.value.privacy_mode !== 'consent_required'
     leadValues.value = Object.fromEntries((config.value.lead_fields ?? []).map(field => [field.field_key, '']))

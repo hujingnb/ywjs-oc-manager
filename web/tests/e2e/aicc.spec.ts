@@ -7,6 +7,7 @@ type AICCAgentResponse = {
     id: string
     name: string
     public_token: string
+    widget_token: string
   }
 }
 
@@ -145,6 +146,22 @@ test('公开访客提交留资后企业管理员可查看线索和导出 CSV', a
   expect((await submitted).ok()).toBeTruthy()
   await expect(publicPage.getByText('请先留下联系信息')).toBeHidden()
   await publicPage.close()
+
+  const widgetPage = await page.context().newPage()
+  await forceZh(widgetPage)
+  await widgetPage.setContent(`
+    <!doctype html>
+    <html lang="zh-CN">
+      <body>
+        <h1>客户官网落地页</h1>
+        <script src="http://ocm.localhost/aicc-widget.js" data-aicc-widget-token="${agent.widget_token}"></script>
+      </body>
+    </html>
+  `)
+  await widgetPage.getByRole('button', { name: '在线客服' }).click()
+  const frame = widgetPage.frameLocator('[data-aicc-widget-frame]')
+  await expect(frame.getByRole('heading', { name: agent.name })).toBeVisible()
+  await widgetPage.close()
 
   await page.goto('/aicc')
   await page.getByText('线索', { exact: true }).click()

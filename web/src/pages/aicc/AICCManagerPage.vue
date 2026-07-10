@@ -312,7 +312,8 @@ const publicLink = computed(() => {
 
 const widgetSnippet = computed(() => {
   const token = selectedAgent.value?.widget_token ?? '保存后生成'
-  return `<script src="/aicc-widget.js" data-aicc-widget-token="${token}"></` + 'script>'
+  const base = typeof window === 'undefined' ? '' : window.location.origin
+  return `<script src="${base}/aicc-widget.js" data-aicc-widget-token="${token}"></` + 'script>'
 })
 
 watch(

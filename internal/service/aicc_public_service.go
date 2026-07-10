@@ -35,8 +35,8 @@ type AICCPublicStore interface {
 	GetOrganization(ctx context.Context, id string) (sqlc.Organization, error)
 	// GetAICCAgent 通过会话内 agent_id 读取未删除智能体，用于消息发送前校验状态。
 	GetAICCAgent(ctx context.Context, id string) (sqlc.AiccAgent, error)
-	// GetAICCAgentByPublicToken 通过公开链接 token 定位 active 智能体。
-	GetAICCAgentByPublicToken(ctx context.Context, token string) (sqlc.AiccAgent, error)
+	// GetAICCAgentByPublicToken 通过公开链接 token 或网页挂件 token 定位 active 智能体。
+	GetAICCAgentByPublicToken(ctx context.Context, arg sqlc.GetAICCAgentByPublicTokenParams) (sqlc.AiccAgent, error)
 	// GetAICCSessionByToken 通过访客 session token 定位单个公开会话。
 	GetAICCSessionByToken(ctx context.Context, token string) (sqlc.AiccSession, error)
 	// CreateAICCSession 创建公开访客会话。
@@ -590,7 +590,10 @@ func (s *AICCPublicService) activeAgentByPublicToken(ctx context.Context, public
 	if token == "" {
 		return sqlc.AiccAgent{}, ErrAICCOffline
 	}
-	agent, err := s.store.GetAICCAgentByPublicToken(ctx, token)
+	agent, err := s.store.GetAICCAgentByPublicToken(ctx, sqlc.GetAICCAgentByPublicTokenParams{
+		PublicToken: token,
+		WidgetToken: token,
+	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return sqlc.AiccAgent{}, ErrAICCOffline
 	}

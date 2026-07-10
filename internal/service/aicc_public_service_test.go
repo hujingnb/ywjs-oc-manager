@@ -340,6 +340,29 @@ func TestAICCPublicConfigStopsWhenOrgDisabled(t *testing.T) {
 	require.ErrorIs(t, err, ErrAICCOffline)
 }
 
+// TestAICCPublicConfigAcceptsWidgetToken 覆盖网页挂件入口：管理页嵌入代码使用 widget_token，
+// 公开配置读取必须把它视为公开访问 token，否则 iframe 挂件会一直显示下线。
+func TestAICCPublicConfigAcceptsWidgetToken(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org: sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent: sqlc.AiccAgent{
+			ID:          "agent-1",
+			OrgID:       "org-1",
+			Name:        "售前接待",
+			Status:      domain.AICCAgentStatusActive,
+			PrivacyMode: domain.AICCPrivacyModeNotice,
+			PublicToken: "public-token",
+			WidgetToken: "widget-token",
+		},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+
+	result, err := svc.PublicConfig(context.Background(), "widget-token")
+
+	require.NoError(t, err)
+	assert.Equal(t, "售前接待", result.Name)
+}
+
 // TestAICCPublicSubmitFeedbackUpdatesResolution 覆盖反馈正常路径：助手回复可写入反馈并同步会话解决状态。
 func TestAICCPublicSubmitFeedbackUpdatesResolution(t *testing.T) {
 	store := &fakeAICCPublicStore{
@@ -421,8 +444,8 @@ func (f *fakeAICCPublicStore) GetAICCAgent(_ context.Context, id string) (sqlc.A
 	return f.agent, nil
 }
 
-func (f *fakeAICCPublicStore) GetAICCAgentByPublicToken(_ context.Context, token string) (sqlc.AiccAgent, error) {
-	if f.agent.PublicToken != token {
+func (f *fakeAICCPublicStore) GetAICCAgentByPublicToken(_ context.Context, arg sqlc.GetAICCAgentByPublicTokenParams) (sqlc.AiccAgent, error) {
+	if f.agent.PublicToken != arg.PublicToken && f.agent.WidgetToken != arg.WidgetToken {
 		return sqlc.AiccAgent{}, sql.ErrNoRows
 	}
 	return f.agent, nil

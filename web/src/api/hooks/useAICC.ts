@@ -12,6 +12,7 @@ import type {
   AICCLeadField,
   AICCLeadFieldPayload,
   AICCPublicConfig,
+  AICCPublicChannel,
   AICCPublicImageResult,
   AICCPublicLeadValuesResult,
   AICCPublicMessageResult,
@@ -230,12 +231,12 @@ export async function fetchAICCPublicConfig(publicToken: string): Promise<AICCPu
 }
 
 // createAICCPublicSession 为公开访客创建短期会话 token。
-export async function createAICCPublicSession(publicToken: string): Promise<AICCPublicSession> {
+export async function createAICCPublicSession(publicToken: string, channel: AICCPublicChannel = 'web_link'): Promise<AICCPublicSession> {
   const response = await apiRequest<{ session: AICCPublicSession }>(`/api/v1/public/aicc/agents/${publicToken}/sessions`, {
     method: 'POST',
     withAuth: false,
     body: {
-      channel: 'web_link',
+      channel,
       referrer: typeof document === 'undefined' ? '' : document.referrer,
       source_url: typeof window === 'undefined' ? '' : window.location.href,
     },

@@ -28,6 +28,7 @@ sql:
       - internal/migrations/000026_org_default_app_kb_quota.up.sql
       - internal/migrations/000027_apps_platform_prompt_hash.up.sql
       - internal/migrations/000028_aicc.up.sql
+      - internal/migrations/000029_aicc_lead_fields_soft_delete.up.sql
     queries: internal/store/queries
     gen:
       go:

@@ -6,6 +6,9 @@ export type AICCAgentStatus = 'draft' | 'active' | 'paused' | 'deleted'
 // AICCPrivacyMode 是访客隐私提示模式。
 export type AICCPrivacyMode = 'notice' | 'consent_required'
 
+// AICCPublicChannel 是公开访客入口渠道；前端当前只允许链接和网页挂件两种。
+export type AICCPublicChannel = 'web_link' | 'web_widget'
+
 // AICCAgent 是管理面展示和编辑 AICC 智能体所需的基础视图。
 export interface AICCAgent {
   // 智能体主键。
@@ -216,4 +219,9 @@ export interface AICCAnalytics {
 // isAICCAgentRunning 判断智能体是否处于可对外接待状态。
 export function isAICCAgentRunning(agent: Pick<AICCAgent, 'status'>): boolean {
   return agent.status === 'active'
+}
+
+// normalizeAICCPublicChannel 把路由 query 中的渠道归一化，避免未知值触发后端 CHECK 约束。
+export function normalizeAICCPublicChannel(value: unknown): AICCPublicChannel {
+  return value === 'web_widget' ? 'web_widget' : 'web_link'
 }
