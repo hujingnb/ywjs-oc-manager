@@ -230,7 +230,7 @@
               </template>
             </div>
 
-            <div class="knowledge-panel">
+            <div ref="knowledgePanelEl" class="knowledge-panel">
               <div class="section-heading">
                 <div>
                   <p class="eyebrow">{{ t('aicc.manager.knowledge.eyebrow') }}</p>
@@ -423,6 +423,7 @@ const deleteModalOpen = ref(false)
 const feedback = ref('')
 const feedbackDanger = ref(false)
 const activeSection = ref<ManagerTab>(sectionToTab(props.initialSection))
+const knowledgePanelEl = ref<HTMLElement>()
 const { t } = useI18n()
 
 const agentsQuery = useAICCAgentsQuery()
@@ -568,10 +569,8 @@ function sectionToTab(section: InitialSection): ManagerTab {
 
 async function scrollKnowledgePanelIntoView() {
   await nextTick()
-  if (typeof document === 'undefined') return
-  const knowledgePanel = document.querySelector('.knowledge-panel')
-  if (knowledgePanel instanceof HTMLElement && typeof knowledgePanel.scrollIntoView === 'function') {
-    knowledgePanel.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  if (typeof knowledgePanelEl.value?.scrollIntoView === 'function') {
+    knowledgePanelEl.value.scrollIntoView({ block: 'start', behavior: 'smooth' })
   }
 }
 

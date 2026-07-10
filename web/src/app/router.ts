@@ -65,12 +65,12 @@ export const router = createRouter({
       component: AICCConsoleLayout,
       meta: { allowedRoles: ORG_ADMIN_ONLY },
       children: [
-        { path: '', component: AICCManagerPage },
+        { path: '', component: AICCManagerPage, props: { initialSection: 'reception' } },
         { path: 'sessions', component: () => import('@/pages/aicc/AICCWorkbenchSessionsPage.vue') },
         { path: 'knowledge', component: () => import('@/pages/aicc/AICCWorkbenchKnowledgePage.vue') },
         { path: 'leads', component: () => import('@/pages/aicc/AICCWorkbenchLeadsPage.vue') },
         { path: 'analytics', component: () => import('@/pages/aicc/AICCWorkbenchAnalyticsPage.vue') },
-        { path: 'settings', component: AICCManagerPage },
+        { path: 'settings', component: AICCManagerPage, props: { initialSection: 'settings' } },
       ],
     },
     {
