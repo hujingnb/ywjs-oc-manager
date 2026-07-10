@@ -2,13 +2,26 @@ import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { AuthUser } from '@/api'
 import { i18n } from '@/i18n'
 import RoleAwareHome from './RoleAwareHome.vue'
 
 const routerReplace = vi.hoisted(() => vi.fn())
 const authState = vi.hoisted(() => ({
-  user: { id: 'member-1', username: 'member', display_name: '成员', role: 'org_member', org_id: 'org-1' },
+  user: makeAuthUser({ id: 'member-1', username: 'member', display_name: '成员', role: 'org_member', org_id: 'org-1' }),
 }))
+
+// makeAuthUser 生成完整 AuthUser 测试对象；status 是登录接口必返字段，避免 mock 与真实用户结构漂移。
+function makeAuthUser(overrides: Partial<AuthUser>): AuthUser {
+  return {
+    id: 'user-1',
+    username: 'user',
+    display_name: '用户',
+    role: 'org_member',
+    status: 'enabled',
+    ...overrides,
+  }
+}
 const memberAppState = vi.hoisted(() => {
   const { ref } = require('vue') as typeof import('vue')
 
@@ -63,7 +76,7 @@ function mountHome() {
 describe('RoleAwareHome', () => {
   beforeEach(() => {
     routerReplace.mockClear()
-    authState.user = { id: 'member-1', username: 'member', display_name: '成员', role: 'org_member', org_id: 'org-1' }
+    authState.user = makeAuthUser({ id: 'member-1', username: 'member', display_name: '成员', role: 'org_member', org_id: 'org-1' })
     memberAppState.appId.value = 'app-1'
     memberAppState.hasApp.value = true
     memberAppState.isLoading.value = false
@@ -82,7 +95,7 @@ describe('RoleAwareHome', () => {
 
   // 覆盖平台管理员默认首页：AICC 企业概览入口调整后仍必须直接进入平台控制台。
   it('redirects platform_admin home to platform console', async () => {
-    authState.user = { id: 'platform-1', username: 'platform', display_name: '平台管理员', role: 'platform_admin', org_id: undefined }
+    authState.user = makeAuthUser({ id: 'platform-1', username: 'platform', display_name: '平台管理员', role: 'platform_admin', org_id: undefined })
 
     mountHome()
     await nextTick()
@@ -126,7 +139,7 @@ describe('RoleAwareHome', () => {
 
   // 覆盖组织管理员首页文案：组织级知识库入口统一使用「企业知识库」。
   it('shows enterprise knowledge copy for org_admin quick card', () => {
-    authState.user = { id: 'owner-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' }
+    authState.user = makeAuthUser({ id: 'owner-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' })
 
     const wrapper = mountHome()
 
@@ -136,7 +149,7 @@ describe('RoleAwareHome', () => {
 
   // 覆盖企业管理员默认落点：org_admin 不再被首页自动替换到 /org-console，而是在概览页看到子系统入口。
   it('keeps org_admin on enterprise overview and shows enabled AICC subsystem card', async () => {
-    authState.user = { id: 'owner-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' }
+    authState.user = makeAuthUser({ id: 'owner-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' })
     organizationState.data.value = {
       id: 'org-1',
       name: '测试企业',
@@ -156,7 +169,7 @@ describe('RoleAwareHome', () => {
 
   // 覆盖未开通企业边界：未开通 AICC 时概览页不能暴露客服子系统入口。
   it('hides AICC subsystem card for org_admin when AICC is disabled', () => {
-    authState.user = { id: 'owner-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' }
+    authState.user = makeAuthUser({ id: 'owner-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' })
     organizationState.data.value = {
       id: 'org-1',
       name: '测试企业',
