@@ -91,9 +91,11 @@ func TestConfigureEncryptsCredentials(t *testing.T) {
 	require.NotNil(t, st.upserted)
 	require.True(t, st.upserted.DnsCredentialsCiphertext.Valid, "凭证密文字段应有效")
 
-	// 明文不应直接出现在密文字符串中。
-	assert.NotContains(t, st.upserted.DnsCredentialsCiphertext.String, "SK",
-		"密文中不应包含明文 access_key_secret")
+	// 密文字段不应退化成原始 JSON 明文；短字符串子串可能随机出现在 base64 密文中，故只比较完整明文。
+	plainCredentials, err := json.Marshal(map[string]string{"access_key_id": "AK", "access_key_secret": "SK"})
+	require.NoError(t, err)
+	assert.NotEqual(t, string(plainCredentials), st.upserted.DnsCredentialsCiphertext.String,
+		"凭证应以加密密文保存，不能直接保存原始 JSON 明文")
 
 	// 解密后的内容应与原始凭证一致。
 	raw, derr := cipher.Decrypt(st.upserted.DnsCredentialsCiphertext.String)
