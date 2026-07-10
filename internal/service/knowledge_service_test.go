@@ -257,6 +257,63 @@ func TestRuntimeSearchOrgRetrieveErrorUsesEnterpriseCopy(t *testing.T) {
 	require.ErrorContains(t, err, "RAGFlow 检索企业知识库失败")
 }
 
+// TestRuntimeSearchAICCUsesConfiguredKnowledgeScope 验证 AICC 隐藏 app 的 runtime 检索只使用
+// 智能体配置的知识范围，专属文档结果还必须按允许的 RAGFlow document id 过滤。
+func TestRuntimeSearchAICCUsesConfiguredKnowledgeScope(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	store.aiccAgentsByApp = map[string]sqlc.AiccAgent{
+		testKnowledgeApp: {ID: "aicc-agent-1", AppID: testKnowledgeApp, OrgID: testKnowledgeOrg},
+	}
+	store.aiccKnowledge = map[string][]sqlc.AiccAgentKnowledge{
+		"aicc-agent-1": {
+			{AgentID: "aicc-agent-1", ScopeType: domain.AICCKnowledgeScopeTypeAppDocument, RagflowDocumentID: null.StringFrom("allowed-doc")},
+			{AgentID: "aicc-agent-1", ScopeType: domain.AICCKnowledgeScopeTypeOrg, OrgID: null.StringFrom(testKnowledgeOrg)},
+			{AgentID: "aicc-agent-1", ScopeType: domain.AICCKnowledgeScopeTypeIndustry, IndustryKnowledgeBaseID: null.StringFrom(testIndustryKnowledgeBaseID)},
+		},
+	}
+	rf.retrieveChunksByDataset = map[string][]ragflow.RetrievalChunk{
+		testRemoteAppDatasetID: {
+			{DocumentID: "blocked-doc", DocumentName: "blocked.md", DatasetID: testRemoteAppDatasetID, Content: "不应返回", Similarity: 0.99},
+			{DocumentID: "allowed-doc", DocumentName: "allowed.md", DatasetID: testRemoteAppDatasetID, Content: "允许返回", Similarity: 0.8},
+		},
+		testRemoteOrgDatasetID: {
+			{DocumentID: "org-doc", DocumentName: "org.md", DatasetID: testRemoteOrgDatasetID, Content: "企业知识", Similarity: 0.7},
+		},
+		testRemoteIndustryDatasetID: {
+			{DocumentID: "industry-doc", DocumentName: "industry.md", DatasetID: testRemoteIndustryDatasetID, Content: "行业知识", Similarity: 0.6},
+		},
+	}
+
+	result, err := svc.RuntimeSearch(context.Background(), testRuntimeToken, "退款政策", 8)
+	require.NoError(t, err)
+
+	require.Len(t, rf.retrieveCalls, 3)
+	assert.Equal(t, []string{testRemoteAppDatasetID}, rf.retrieveCalls[0].datasetIDs)
+	assert.Equal(t, []string{testRemoteOrgDatasetID}, rf.retrieveCalls[1].datasetIDs)
+	assert.Equal(t, []string{testRemoteIndustryDatasetID}, rf.retrieveCalls[2].datasetIDs)
+	require.Len(t, result.Results, 3)
+	assert.Equal(t, []string{"app", "org", "industry"}, []string{result.Results[0].Scope, result.Results[1].Scope, result.Results[2].Scope})
+	assert.Equal(t, "allowed-doc", result.Results[0].DocumentID)
+	for _, hit := range result.Results {
+		assert.NotEqual(t, "blocked-doc", hit.DocumentID)
+	}
+}
+
+// TestRuntimeSearchAICCWithEmptyScopeReturnsNoHits 验证 AICC 智能体存在但未配置知识范围时，
+// runtime 不再回退到普通 app 的 app/org/版本行业库默认检索。
+func TestRuntimeSearchAICCWithEmptyScopeReturnsNoHits(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	store.aiccAgentsByApp = map[string]sqlc.AiccAgent{
+		testKnowledgeApp: {ID: "aicc-agent-1", AppID: testKnowledgeApp, OrgID: testKnowledgeOrg},
+	}
+
+	result, err := svc.RuntimeSearch(context.Background(), testRuntimeToken, "退款政策", 8)
+
+	require.NoError(t, err)
+	assert.Empty(t, rf.retrieveCalls)
+	assert.Empty(t, result.Results)
+}
+
 // TestCreateIndustryKnowledgeBasePlatformOnly 验证行业库创建只允许平台管理员，且名称会去除首尾空白。
 func TestCreateIndustryKnowledgeBasePlatformOnly(t *testing.T) {
 	svc, store, _ := newRAGFlowKnowledgeTestService(t)
@@ -1072,6 +1129,8 @@ type fakeKnowledgeStore struct {
 	industryDataset             sqlc.RagflowDataset
 	industryDatasets            map[string]sqlc.RagflowDataset
 	versionIndustryBases        map[string][]sqlc.IndustryKnowledgeBasis
+	aiccAgentsByApp             map[string]sqlc.AiccAgent
+	aiccKnowledge               map[string][]sqlc.AiccAgentKnowledge
 	missingOrgDataset           bool
 	missingAppDataset           bool
 	missingIndustryDataset      bool
@@ -1143,6 +1202,18 @@ func (s *fakeKnowledgeStore) GetAppByRuntimeTokenHash(_ context.Context, runtime
 		return sqlc.App{}, sql.ErrNoRows
 	}
 	return app, nil
+}
+
+func (s *fakeKnowledgeStore) GetAICCAgentByAppID(_ context.Context, appID string) (sqlc.AiccAgent, error) {
+	row, ok := s.aiccAgentsByApp[appID]
+	if !ok {
+		return sqlc.AiccAgent{}, sql.ErrNoRows
+	}
+	return row, nil
+}
+
+func (s *fakeKnowledgeStore) ListAICCAgentKnowledge(_ context.Context, agentID string) ([]sqlc.AiccAgentKnowledge, error) {
+	return append([]sqlc.AiccAgentKnowledge(nil), s.aiccKnowledge[agentID]...), nil
 }
 
 func (s *fakeKnowledgeStore) CreateIndustryKnowledgeBase(_ context.Context, arg sqlc.CreateIndustryKnowledgeBaseParams) error {

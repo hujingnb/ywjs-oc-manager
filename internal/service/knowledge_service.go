@@ -129,6 +129,10 @@ type KnowledgeStore interface {
 	GetRAGFlowIndustryDocumentByName(ctx context.Context, arg sqlc.GetRAGFlowIndustryDocumentByNameParams) (sqlc.RagflowDocument, error)
 	// ListIndustryKnowledgeBasesByAssistantVersion 列出指定助手版本关联的行业库。
 	ListIndustryKnowledgeBasesByAssistantVersion(ctx context.Context, versionID string) ([]sqlc.IndustryKnowledgeBasis, error)
+	// GetAICCAgentByAppID 识别 AICC 隐藏 app，并读取该智能体绑定的知识范围。
+	GetAICCAgentByAppID(ctx context.Context, appID string) (sqlc.AiccAgent, error)
+	// ListAICCAgentKnowledge 列出 AICC 智能体配置的可检索知识范围。
+	ListAICCAgentKnowledge(ctx context.Context, agentID string) ([]sqlc.AiccAgentKnowledge, error)
 }
 
 // KnowledgeDatasetProvisioner 抽象组织 / 实例生命周期中预创建 RAGFlow dataset 的能力。
@@ -482,6 +486,10 @@ func (s *KnowledgeService) RuntimeSearch(ctx context.Context, appToken, question
 	if err != nil {
 		return KnowledgeSearchResult{}, err
 	}
+	topK = normalizeRuntimeTopK(topK)
+	if result, handled, err := s.runtimeSearchAICC(ctx, app, question, topK); handled || err != nil {
+		return result, err
+	}
 	appDataset, err := s.getAppDataset(ctx, app.ID)
 	if err != nil {
 		return KnowledgeSearchResult{}, err
@@ -498,7 +506,6 @@ func (s *KnowledgeService) RuntimeSearch(ctx context.Context, appToken, question
 	if err != nil {
 		return KnowledgeSearchResult{}, err
 	}
-	topK = normalizeRuntimeTopK(topK)
 	// 两路检索避免 RAGFlow 在 top_k 截断时让企业知识库命中挤占实例知识库命中。
 	appChunks, err := s.ragflowClient().Retrieve(ctx, []string{appRemoteID}, question, topK)
 	if err != nil {
@@ -534,6 +541,120 @@ func (s *KnowledgeService) RuntimeSearch(ctx context.Context, appToken, question
 		}
 	}
 	return KnowledgeSearchResult{Results: hits}, nil
+}
+
+func (s *KnowledgeService) runtimeSearchAICC(ctx context.Context, app sqlc.App, question string, topK int32) (KnowledgeSearchResult, bool, error) {
+	agent, err := s.store.GetAICCAgentByAppID(ctx, app.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return KnowledgeSearchResult{}, false, nil
+	}
+	if err != nil {
+		return KnowledgeSearchResult{}, true, fmt.Errorf("查询 AICC 智能体知识范围失败: %w", err)
+	}
+	rows, err := s.store.ListAICCAgentKnowledge(ctx, agent.ID)
+	if err != nil {
+		return KnowledgeSearchResult{}, true, fmt.Errorf("查询 AICC 知识范围失败: %w", err)
+	}
+	scope := normalizeRuntimeAICCKnowledgeScope(rows)
+	hits := []KnowledgeSearchHit{}
+	if len(scope.AppDocumentIDs) > 0 {
+		appDataset, err := s.getAppDataset(ctx, app.ID)
+		if err != nil {
+			return KnowledgeSearchResult{}, true, err
+		}
+		appRemoteID, err := requireRemoteDatasetID(appDataset)
+		if err != nil {
+			return KnowledgeSearchResult{}, true, err
+		}
+		chunks, err := s.ragflowClient().Retrieve(ctx, []string{appRemoteID}, question, topK)
+		if err != nil {
+			return KnowledgeSearchResult{}, true, fmt.Errorf("RAGFlow 检索 AICC 专属知识库失败: %w", err)
+		}
+		hits = append(hits, searchHitsFromChunks("app", filterRuntimeChunksByDocument(chunks, scope.AppDocumentIDs))...)
+	}
+	if scope.UseOrgKnowledge {
+		orgDataset, err := s.getOrgDataset(ctx, app.OrgID)
+		if err != nil {
+			return KnowledgeSearchResult{}, true, err
+		}
+		orgRemoteID, err := requireRemoteDatasetID(orgDataset)
+		if err != nil {
+			return KnowledgeSearchResult{}, true, err
+		}
+		chunks, err := s.ragflowClient().Retrieve(ctx, []string{orgRemoteID}, question, topK)
+		if err != nil {
+			return KnowledgeSearchResult{}, true, fmt.Errorf("RAGFlow 检索 AICC 企业知识库失败: %w", err)
+		}
+		hits = append(hits, searchHitsFromChunks("org", chunks)...)
+	}
+	for _, industryID := range scope.IndustryKnowledgeBaseIDs {
+		base, err := s.store.GetIndustryKnowledgeBase(ctx, industryID)
+		if err != nil {
+			return KnowledgeSearchResult{}, true, fmt.Errorf("查询 AICC 行业知识库失败: %w", err)
+		}
+		dataset, err := s.getIndustryDataset(ctx, base)
+		if err != nil {
+			return KnowledgeSearchResult{}, true, err
+		}
+		remoteID, err := requireRemoteDatasetID(dataset)
+		if err != nil {
+			return KnowledgeSearchResult{}, true, err
+		}
+		chunks, err := s.ragflowClient().Retrieve(ctx, []string{remoteID}, question, topK)
+		if err != nil {
+			return KnowledgeSearchResult{}, true, fmt.Errorf("RAGFlow 检索 AICC 行业知识库失败: %w", err)
+		}
+		hits = append(hits, searchHitsFromIndustryChunks(base, chunks)...)
+	}
+	return KnowledgeSearchResult{Results: hits}, true, nil
+}
+
+type runtimeAICCKnowledgeScope struct {
+	UseOrgKnowledge          bool
+	IndustryKnowledgeBaseIDs []string
+	AppDocumentIDs           []string
+}
+
+func normalizeRuntimeAICCKnowledgeScope(rows []sqlc.AiccAgentKnowledge) runtimeAICCKnowledgeScope {
+	scope := runtimeAICCKnowledgeScope{}
+	industrySeen := map[string]bool{}
+	documentSeen := map[string]bool{}
+	for _, row := range rows {
+		switch row.ScopeType {
+		case "org":
+			scope.UseOrgKnowledge = true
+		case "industry":
+			id := strings.TrimSpace(row.IndustryKnowledgeBaseID.String)
+			if id != "" && !industrySeen[id] {
+				industrySeen[id] = true
+				scope.IndustryKnowledgeBaseIDs = append(scope.IndustryKnowledgeBaseIDs, id)
+			}
+		case "app_document":
+			id := strings.TrimSpace(row.RagflowDocumentID.String)
+			if id != "" && !documentSeen[id] {
+				documentSeen[id] = true
+				scope.AppDocumentIDs = append(scope.AppDocumentIDs, id)
+			}
+		}
+	}
+	return scope
+}
+
+func filterRuntimeChunksByDocument(chunks []ragflow.RetrievalChunk, allowedDocumentIDs []string) []ragflow.RetrievalChunk {
+	if len(chunks) == 0 || len(allowedDocumentIDs) == 0 {
+		return nil
+	}
+	allowed := map[string]bool{}
+	for _, id := range allowedDocumentIDs {
+		allowed[id] = true
+	}
+	filtered := make([]ragflow.RetrievalChunk, 0, len(chunks))
+	for _, chunk := range chunks {
+		if allowed[chunk.DocumentID] {
+			filtered = append(filtered, chunk)
+		}
+	}
+	return filtered
 }
 
 // RuntimeAddFile 供 Hermes 把工作目录中的报告写入当前实例知识库。

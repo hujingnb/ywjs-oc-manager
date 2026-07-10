@@ -389,6 +389,38 @@ func (q *Queries) GetAICCAgent(ctx context.Context, id string) (AiccAgent, error
 	return i, err
 }
 
+const getAICCAgentByAppID = `-- name: GetAICCAgentByAppID :one
+SELECT id, org_id, app_id, name, status, scenario, greeting, answer_boundary, privacy_mode, privacy_text, retention_days, theme_json, allowed_domains_json, public_token, widget_token, created_at, updated_at, deleted_at
+FROM aicc_agents
+WHERE app_id = ? AND deleted_at IS NULL
+`
+
+func (q *Queries) GetAICCAgentByAppID(ctx context.Context, appID string) (AiccAgent, error) {
+	row := q.db.QueryRowContext(ctx, getAICCAgentByAppID, appID)
+	var i AiccAgent
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.AppID,
+		&i.Name,
+		&i.Status,
+		&i.Scenario,
+		&i.Greeting,
+		&i.AnswerBoundary,
+		&i.PrivacyMode,
+		&i.PrivacyText,
+		&i.RetentionDays,
+		&i.ThemeJson,
+		&i.AllowedDomainsJson,
+		&i.PublicToken,
+		&i.WidgetToken,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const getAICCAgentByPublicToken = `-- name: GetAICCAgentByPublicToken :one
 SELECT id, org_id, app_id, name, status, scenario, greeting, answer_boundary, privacy_mode, privacy_text, retention_days, theme_json, allowed_domains_json, public_token, widget_token, created_at, updated_at, deleted_at
 FROM aicc_agents

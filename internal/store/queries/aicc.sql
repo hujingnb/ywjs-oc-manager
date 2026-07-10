@@ -20,6 +20,11 @@ SELECT *
 FROM aicc_agents
 WHERE widget_token = ? AND status = 'active' AND deleted_at IS NULL;
 
+-- name: GetAICCAgentByAppID :one
+SELECT *
+FROM aicc_agents
+WHERE app_id = ? AND deleted_at IS NULL;
+
 -- name: ListAICCAgentsByOrg :many
 SELECT *
 FROM aicc_agents

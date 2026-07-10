@@ -109,6 +109,7 @@ type Querier interface {
 	// 删除本地 document 缓存；RAGFlow 远端删除由 service 在同一业务流程中处理。
 	DeleteRAGFlowDocumentMapping(ctx context.Context, id string) error
 	GetAICCAgent(ctx context.Context, id string) (AiccAgent, error)
+	GetAICCAgentByAppID(ctx context.Context, appID string) (AiccAgent, error)
 	GetAICCAgentByPublicToken(ctx context.Context, publicToken string) (AiccAgent, error)
 	GetAICCAgentByWidgetToken(ctx context.Context, widgetToken string) (AiccAgent, error)
 	GetAICCAssistantMessageForFeedback(ctx context.Context, arg GetAICCAssistantMessageForFeedbackParams) (AiccMessage, error)
