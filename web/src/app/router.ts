@@ -3,6 +3,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import { getStoredAccessToken } from '@/api/client'
+import AICCConsoleLayout from '@/layouts/AICCConsoleLayout.vue'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import AICCManagerPage from '@/pages/aicc/AICCManagerPage.vue'
 import PublicAICCChatPage from '@/pages/aicc/PublicAICCChatPage.vue'
@@ -60,6 +61,15 @@ export const router = createRouter({
       meta: { public: true },
     },
     {
+      path: '/aicc-console',
+      component: AICCConsoleLayout,
+      meta: { allowedRoles: ORG_ADMIN_ONLY },
+      children: [
+        { path: '', component: AICCManagerPage },
+        { path: 'settings', component: AICCManagerPage },
+      ],
+    },
+    {
       path: '/',
       component: DashboardLayout,
       children: [
@@ -79,7 +89,7 @@ export const router = createRouter({
         // 企业管理员可配置「自己企业且平台已开通」的 web-publish（页面按角色自适应，开通/停用仍仅平台管理员）。
         { path: 'platform/web-publish-config', component: WebPublishConfigPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },
         { path: 'members', component: MembersPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },
-        { path: 'aicc', component: AICCManagerPage, meta: { allowedRoles: ORG_ADMIN_ONLY } },
+        { path: 'aicc', redirect: '/aicc-console', meta: { allowedRoles: ORG_ADMIN_ONLY } },
         // published-sites：企业已发布站点列表 + 证书状态面板；平台管理员可跨企业查看并重试证书。
         { path: 'published-sites', component: PublishedSitesPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },
         { path: 'members/new', component: CreateMemberPage, meta: { allowedRoles: ORG_ADMIN_ONLY } },

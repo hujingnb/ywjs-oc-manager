@@ -1,4 +1,18 @@
 export default {
+  console: {
+    eyebrow: 'AI Contact Center',
+    title: 'AICC 工作台',
+    returnToOverview: '返回概览',
+    navLabel: 'AICC 工作台内容',
+    nav: {
+      reception: '接待台',
+      sessions: '会话',
+      knowledge: '知识库',
+      leads: '线索',
+      analytics: '分析',
+      settings: '设置',
+    },
+  },
   manager: {
     title: 'AICC 接待台',
     subtitle: '统一维护在线客服智能体、公开链接和访客隐私口径。',

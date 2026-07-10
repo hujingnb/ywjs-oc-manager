@@ -1,4 +1,18 @@
 export default {
+  console: {
+    eyebrow: 'AI Contact Center',
+    title: 'AICC Console',
+    returnToOverview: 'Back to overview',
+    navLabel: 'AICC console content',
+    nav: {
+      reception: 'Reception',
+      sessions: 'Sessions',
+      knowledge: 'Knowledge',
+      leads: 'Leads',
+      analytics: 'Analytics',
+      settings: 'Settings',
+    },
+  },
   manager: {
     title: 'AICC Desk',
     subtitle: 'Manage customer-care agents, public links, and visitor privacy settings in one place.',
