@@ -5,6 +5,12 @@ export default {
     returnToOverview: 'Back to overview',
     navLabel: 'AICC console content',
     checkingAccess: 'Checking customer-care access',
+    currentAgent: 'Current agent',
+    noAgentSelected: 'No agent selected',
+    switchAgent: 'Switch agent',
+    createAgent: 'New agent',
+    agentLoading: 'Loading agents',
+    agentLoadFailed: 'Failed to load agents',
     nav: {
       reception: 'Reception',
       sessions: 'Sessions',

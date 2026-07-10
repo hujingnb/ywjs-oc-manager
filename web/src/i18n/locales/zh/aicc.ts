@@ -5,6 +5,12 @@ export default {
     returnToOverview: '返回概览',
     navLabel: 'AICC 工作台内容',
     checkingAccess: '正在检查客服开通状态',
+    currentAgent: '当前智能体',
+    noAgentSelected: '未选择智能体',
+    switchAgent: '切换智能体',
+    createAgent: '新建智能体',
+    agentLoading: '正在加载智能体',
+    agentLoadFailed: '智能体加载失败',
     nav: {
       reception: '接待台',
       sessions: '会话',
