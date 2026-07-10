@@ -80,6 +80,16 @@ describe('RoleAwareHome', () => {
     mountedWrappers.splice(0).forEach((wrapper) => wrapper.unmount())
   })
 
+  // 覆盖平台管理员默认首页：AICC 企业概览入口调整后仍必须直接进入平台控制台。
+  it('redirects platform_admin home to platform console', async () => {
+    authState.user = { id: 'platform-1', username: 'platform', display_name: '平台管理员', role: 'platform_admin', org_id: undefined }
+
+    mountHome()
+    await nextTick()
+
+    expect(routerReplace).toHaveBeenCalledWith('/console')
+  })
+
   // 覆盖组织成员默认首页：有唯一实例时直接进入该实例的 overview。
   it('redirects org_member home to their app overview', async () => {
     mountHome()
