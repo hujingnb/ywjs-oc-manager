@@ -12,10 +12,10 @@ import (
 )
 
 // TestAICCRetentionCleanupDeletesExpiredSessions 覆盖保留期清理：
-// 过期会话会先删除其图片对象、清空线索最近会话引用，再删除数据库会话，避免对象存储残留访客图片或外键阻塞。
+// 过期会话会先删除其图片对象、清空线索最近会话引用，再删除数据库会话和空壳线索，避免对象存储残留访客图片或外键阻塞。
 func TestAICCRetentionCleanupDeletesExpiredSessions(t *testing.T) {
 	store := &fakeAICCRetentionStore{
-		expired: []sqlc.AiccSession{{ID: "session-1"}},
+		expired: []sqlc.AiccSession{{ID: "session-1", OrgID: "org-1"}},
 		objects: map[string][]string{
 			"session-1": {"apps/app-1/aicc/session-1/file.png"},
 		},
@@ -30,6 +30,7 @@ func TestAICCRetentionCleanupDeletesExpiredSessions(t *testing.T) {
 	assert.Equal(t, []string{"apps/app-1/aicc/session-1/file.png"}, blob.deleted)
 	assert.Equal(t, []string{"session-1"}, store.clearedLatestSessions)
 	assert.Equal(t, []string{"session-1"}, store.deletedSessions)
+	assert.Equal(t, []string{"org-1"}, store.cleanedLeadOrgs)
 }
 
 type fakeAICCRetentionStore struct {
@@ -37,6 +38,7 @@ type fakeAICCRetentionStore struct {
 	objects               map[string][]string
 	clearedLatestSessions []string
 	deletedSessions       []string
+	cleanedLeadOrgs       []string
 }
 
 func (f *fakeAICCRetentionStore) ListExpiredAICCSessions(ctx context.Context, limit int32) ([]sqlc.AiccSession, error) {
@@ -49,6 +51,11 @@ func (f *fakeAICCRetentionStore) ListAICCImageObjectKeysBySession(ctx context.Co
 
 func (f *fakeAICCRetentionStore) ClearAICCLeadLatestSession(ctx context.Context, latestSessionID null.String) error {
 	f.clearedLatestSessions = append(f.clearedLatestSessions, latestSessionID.String)
+	return nil
+}
+
+func (f *fakeAICCRetentionStore) DeleteOrphanAICCLeadsByOrg(ctx context.Context, orgID string) error {
+	f.cleanedLeadOrgs = append(f.cleanedLeadOrgs, orgID)
 	return nil
 }
 

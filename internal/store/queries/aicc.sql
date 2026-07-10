@@ -282,6 +282,17 @@ UPDATE aicc_leads
 SET latest_session_id = NULL, updated_at = now()
 WHERE latest_session_id = ?;
 
+-- name: DeleteOrphanAICCLeadsByOrg :exec
+DELETE l
+FROM aicc_leads l
+WHERE l.org_id = ?
+  AND l.latest_session_id IS NULL
+  AND NOT EXISTS (
+      SELECT 1
+      FROM aicc_lead_values v
+      WHERE v.lead_id = l.id AND v.lead_org_id = l.org_id
+  );
+
 -- name: DeleteAICCSession :exec
 DELETE FROM aicc_sessions
 WHERE id = ?;

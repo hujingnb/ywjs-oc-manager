@@ -340,6 +340,23 @@ func (q *Queries) DeleteAICCSession(ctx context.Context, id string) error {
 	return err
 }
 
+const deleteOrphanAICCLeadsByOrg = `-- name: DeleteOrphanAICCLeadsByOrg :exec
+DELETE l
+FROM aicc_leads l
+WHERE l.org_id = ?
+  AND l.latest_session_id IS NULL
+  AND NOT EXISTS (
+      SELECT 1
+      FROM aicc_lead_values v
+      WHERE v.lead_id = l.id AND v.lead_org_id = l.org_id
+  )
+`
+
+func (q *Queries) DeleteOrphanAICCLeadsByOrg(ctx context.Context, orgID string) error {
+	_, err := q.db.ExecContext(ctx, deleteOrphanAICCLeadsByOrg, orgID)
+	return err
+}
+
 const getAICCAgent = `-- name: GetAICCAgent :one
 SELECT id, org_id, app_id, name, status, scenario, greeting, answer_boundary, privacy_mode, privacy_text, retention_days, theme_json, allowed_domains_json, public_token, widget_token, created_at, updated_at, deleted_at
 FROM aicc_agents

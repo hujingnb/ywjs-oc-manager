@@ -17,6 +17,8 @@ type AICCRetentionStore interface {
 	ListAICCImageObjectKeysBySession(ctx context.Context, sessionID string) ([]string, error)
 	// ClearAICCLeadLatestSession 清空引用待删除会话的线索最近会话，避免删除 session 时被外键阻塞。
 	ClearAICCLeadLatestSession(ctx context.Context, latestSessionID null.String) error
+	// DeleteOrphanAICCLeadsByOrg 删除已无会话引用且没有留资值的线索，避免保留期清理留下空壳联系人。
+	DeleteOrphanAICCLeadsByOrg(ctx context.Context, orgID string) error
 	// DeleteAICCSession 删除会话；消息、图片和留资值由外键级联或置空处理。
 	DeleteAICCSession(ctx context.Context, id string) error
 }
@@ -66,6 +68,9 @@ func (s *AICCRetentionService) CleanupExpiredSessions(ctx context.Context, limit
 		}
 		if err := s.store.DeleteAICCSession(ctx, session.ID); err != nil {
 			return deleted, fmt.Errorf("删除 AICC 会话失败: %w", err)
+		}
+		if err := s.store.DeleteOrphanAICCLeadsByOrg(ctx, session.OrgID); err != nil {
+			return deleted, fmt.Errorf("清理 AICC 孤儿线索失败: %w", err)
 		}
 		deleted++
 	}

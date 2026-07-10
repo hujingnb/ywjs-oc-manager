@@ -102,6 +102,7 @@ type Querier interface {
 	DeleteAppSkillByAppAndName(ctx context.Context, arg DeleteAppSkillByAppAndNameParams) error
 	DeleteCustomSkillTargetsByName(ctx context.Context, customSkillName string) error
 	DeleteExpiredRefreshTokens(ctx context.Context) error
+	DeleteOrphanAICCLeadsByOrg(ctx context.Context, orgID string) error
 	DeletePlatformSkill(ctx context.Context, id string) error
 	// 删除本地 dataset 映射；document 缓存通过外键级联清理。
 	DeleteRAGFlowDatasetMapping(ctx context.Context, id string) error
