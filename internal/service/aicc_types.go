@@ -267,9 +267,11 @@ type AICCAgentSettingsResult struct {
 	SensitiveWords []string `json:"sensitive_words"`
 	// BlockedVisitorEnabled 表示是否启用访客封禁检查。
 	BlockedVisitorEnabled bool `json:"blocked_visitor_enabled"`
+	// BlockedVisitorThresholdJSON 是异常访客自动封禁阈值配置，使用对象避免 JSON 响应被 base64 编码。
+	BlockedVisitorThresholdJSON map[string]any `json:"blocked_visitor_threshold_json"`
 	// SessionResumeTTLMinutes 控制公开端刷新续接有效期。
 	SessionResumeTTLMinutes int32 `json:"session_resume_ttl_minutes"`
-	// BlockedVisitorCount 是当前已封禁访客数量；没有统计查询时保持 0。
+	// BlockedVisitorCount 是当前有效封禁访客数量。
 	BlockedVisitorCount int64 `json:"blocked_visitor_count"`
 }
 

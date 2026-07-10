@@ -15983,10 +15983,14 @@ export interface components {
         "service.AICCAgentSettingsResult": {
             /** @description AgentID 是智能体主键。 */
             agent_id?: string;
-            /** @description BlockedVisitorCount 是当前已封禁访客数量；没有统计查询时保持 0。 */
+            /** @description BlockedVisitorCount 是当前有效封禁访客数量。 */
             blocked_visitor_count?: number;
             /** @description BlockedVisitorEnabled 表示是否启用访客封禁检查。 */
             blocked_visitor_enabled?: boolean;
+            /** @description BlockedVisitorThresholdJSON 是异常访客自动封禁阈值配置，使用对象避免 JSON 响应被 base64 编码。 */
+            blocked_visitor_threshold_json?: {
+                [key: string]: unknown;
+            };
             /** @description MessageLimitPerSession 限制单个公开会话最多发送多少条访客消息。 */
             message_limit_per_session?: number;
             /** @description SensitiveWords 是公开端发送前拦截的敏感词列表。 */

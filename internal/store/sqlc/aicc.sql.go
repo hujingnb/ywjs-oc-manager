@@ -91,19 +91,6 @@ func (q *Queries) CountAICCAgentsByOrg(ctx context.Context, orgID string) (int64
 	return count, err
 }
 
-const countAICCBlockedVisitorsByAgent = `-- name: CountAICCBlockedVisitorsByAgent :one
-SELECT COUNT(*)
-FROM aicc_blocked_visitors
-WHERE agent_id = ?
-`
-
-func (q *Queries) CountAICCBlockedVisitorsByAgent(ctx context.Context, agentID string) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countAICCBlockedVisitorsByAgent, agentID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countAICCCompletedLeadSessions = `-- name: CountAICCCompletedLeadSessions :one
 SELECT COUNT(*)
 FROM aicc_sessions
@@ -169,6 +156,19 @@ WHERE session_id = ? AND direction = 'visitor'
 
 func (q *Queries) CountAICCVisitorMessagesBySession(ctx context.Context, sessionID string) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countAICCVisitorMessagesBySession, sessionID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countActiveAICCBlockedVisitorsByAgent = `-- name: CountActiveAICCBlockedVisitorsByAgent :one
+SELECT COUNT(*)
+FROM aicc_blocked_visitors
+WHERE agent_id = ? AND expires_at > now()
+`
+
+func (q *Queries) CountActiveAICCBlockedVisitorsByAgent(ctx context.Context, agentID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countActiveAICCBlockedVisitorsByAgent, agentID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -1632,7 +1632,6 @@ ON DUPLICATE KEY UPDATE
     blocked_visitor_enabled = VALUES(blocked_visitor_enabled),
     blocked_visitor_threshold_json = VALUES(blocked_visitor_threshold_json),
     session_resume_ttl_minutes = VALUES(session_resume_ttl_minutes),
-    analytics_config_json = VALUES(analytics_config_json),
     updated_at = now()
 `
 

@@ -394,11 +394,12 @@ func TestAICCHandlerBasicRoutes(t *testing.T) {
 func TestAICCHandlerSettingsRoutes(t *testing.T) {
 	svc := &aiccServiceStub{
 		settingsResult: service.AICCAgentSettingsResult{
-			AgentID:                 "agent-1",
-			MessageLimitPerSession:  80,
-			SensitiveWords:          []string{"违禁词"},
-			BlockedVisitorEnabled:   true,
-			SessionResumeTTLMinutes: 45,
+			AgentID:                     "agent-1",
+			MessageLimitPerSession:      80,
+			SensitiveWords:              []string{"违禁词"},
+			BlockedVisitorEnabled:       true,
+			BlockedVisitorThresholdJSON: map[string]any{"message_count": float64(3)},
+			SessionResumeTTLMinutes:     45,
 		},
 	}
 	router := newAICCTestRouter(t, svc)
@@ -412,6 +413,7 @@ func TestAICCHandlerSettingsRoutes(t *testing.T) {
 	assert.Equal(t, "agent-1", svc.lastAgentID)
 	assert.Contains(t, getRec.Body.String(), `"settings"`)
 	assert.Contains(t, getRec.Body.String(), `"message_limit_per_session":80`)
+	assert.Contains(t, getRec.Body.String(), `"blocked_visitor_threshold_json":{"message_count":3}`)
 
 	putReq := httptest.NewRequest(http.MethodPut, "/api/v1/aicc/agents/agent-1/settings", bytes.NewBufferString(`{"message_limit_per_session":80,"sensitive_words":["违禁词"],"blocked_visitor_enabled":true,"blocked_visitor_threshold_json":{"message_count":3},"session_resume_ttl_minutes":45}`))
 	putReq.Header.Set("Content-Type", "application/json")

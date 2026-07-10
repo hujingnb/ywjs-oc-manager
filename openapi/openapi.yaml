@@ -1519,11 +1519,16 @@ components:
           description: AgentID 是智能体主键。
           type: string
         blocked_visitor_count:
-          description: BlockedVisitorCount 是当前已封禁访客数量；没有统计查询时保持 0。
+          description: BlockedVisitorCount 是当前有效封禁访客数量。
           type: integer
         blocked_visitor_enabled:
           description: BlockedVisitorEnabled 表示是否启用访客封禁检查。
           type: boolean
+        blocked_visitor_threshold_json:
+          additionalProperties: {}
+          description: BlockedVisitorThresholdJSON 是异常访客自动封禁阈值配置，使用对象避免 JSON 响应被 base64
+            编码。
+          type: object
         message_limit_per_session:
           description: MessageLimitPerSession 限制单个公开会话最多发送多少条访客消息。
           type: integer

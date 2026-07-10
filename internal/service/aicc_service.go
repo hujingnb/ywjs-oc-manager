@@ -42,8 +42,8 @@ type AICCStore interface {
 	GetAICCAgentSettings(ctx context.Context, agentID string) (sqlc.AiccAgentSetting, error)
 	// UpsertAICCAgentSettings 保存智能体运营配置快照。
 	UpsertAICCAgentSettings(ctx context.Context, arg sqlc.UpsertAICCAgentSettingsParams) error
-	// CountAICCBlockedVisitorsByAgent 统计当前智能体的封禁访客数量，用于 settings 面板回显。
-	CountAICCBlockedVisitorsByAgent(ctx context.Context, agentID string) (int64, error)
+	// CountActiveAICCBlockedVisitorsByAgent 统计当前智能体的有效封禁访客数量，用于 settings 面板回显。
+	CountActiveAICCBlockedVisitorsByAgent(ctx context.Context, agentID string) (int64, error)
 	// ListAICCAgentsByOrg 列出企业下未删除智能体。
 	ListAICCAgentsByOrg(ctx context.Context, arg sqlc.ListAICCAgentsByOrgParams) ([]sqlc.AiccAgent, error)
 	// ListAICCAgentKnowledge 列出智能体当前可检索知识范围。
@@ -332,9 +332,9 @@ func (s *AICCService) UpdateAgentSettings(ctx context.Context, principal auth.Pr
 	return s.GetAgentSettings(ctx, principal, agentID)
 }
 
-// populateAICCBlockedVisitorCount 填充封禁访客数量，保证 settings 回显与封禁名单保持一致。
+// populateAICCBlockedVisitorCount 填充有效封禁访客数量，保证 settings 回显与当前封禁名单保持一致。
 func (s *AICCService) populateAICCBlockedVisitorCount(ctx context.Context, result *AICCAgentSettingsResult) error {
-	count, err := s.store.CountAICCBlockedVisitorsByAgent(ctx, result.AgentID)
+	count, err := s.store.CountActiveAICCBlockedVisitorsByAgent(ctx, result.AgentID)
 	if err != nil {
 		return fmt.Errorf("统计 AICC 封禁访客失败: %w", err)
 	}
@@ -1060,11 +1060,12 @@ func toAICCAgentResult(row sqlc.AiccAgent) AICCAgentResult {
 // defaultAICCAgentSettingsResult 为历史无配置行智能体提供管理端可直接渲染的默认运营配置。
 func defaultAICCAgentSettingsResult(agentID string) AICCAgentSettingsResult {
 	return AICCAgentSettingsResult{
-		AgentID:                 agentID,
-		MessageLimitPerSession:  aiccDefaultMessageLimitPerSession,
-		SensitiveWords:          []string{},
-		BlockedVisitorEnabled:   true,
-		SessionResumeTTLMinutes: aiccDefaultSessionResumeTTLMin,
+		AgentID:                     agentID,
+		MessageLimitPerSession:      aiccDefaultMessageLimitPerSession,
+		SensitiveWords:              []string{},
+		BlockedVisitorEnabled:       true,
+		BlockedVisitorThresholdJSON: map[string]any{},
+		SessionResumeTTLMinutes:     aiccDefaultSessionResumeTTLMin,
 	}
 }
 
@@ -1079,12 +1080,22 @@ func toAICCAgentSettingsResult(row sqlc.AiccAgentSetting) (AICCAgentSettingsResu
 			words = []string{}
 		}
 	}
+	threshold := map[string]any{}
+	if len(row.BlockedVisitorThresholdJson) > 0 {
+		if err := json.Unmarshal(row.BlockedVisitorThresholdJson, &threshold); err != nil {
+			return AICCAgentSettingsResult{}, fmt.Errorf("解析 AICC 封禁阈值配置失败: %w", err)
+		}
+		if threshold == nil {
+			threshold = map[string]any{}
+		}
+	}
 	return AICCAgentSettingsResult{
-		AgentID:                 row.AgentID,
-		MessageLimitPerSession:  row.MessageLimitPerSession,
-		SensitiveWords:          words,
-		BlockedVisitorEnabled:   row.BlockedVisitorEnabled,
-		SessionResumeTTLMinutes: row.SessionResumeTtlMinutes,
+		AgentID:                     row.AgentID,
+		MessageLimitPerSession:      row.MessageLimitPerSession,
+		SensitiveWords:              words,
+		BlockedVisitorEnabled:       row.BlockedVisitorEnabled,
+		BlockedVisitorThresholdJSON: threshold,
+		SessionResumeTTLMinutes:     row.SessionResumeTtlMinutes,
 	}, nil
 }
 

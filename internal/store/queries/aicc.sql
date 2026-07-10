@@ -357,7 +357,6 @@ ON DUPLICATE KEY UPDATE
     blocked_visitor_enabled = VALUES(blocked_visitor_enabled),
     blocked_visitor_threshold_json = VALUES(blocked_visitor_threshold_json),
     session_resume_ttl_minutes = VALUES(session_resume_ttl_minutes),
-    analytics_config_json = VALUES(analytics_config_json),
     updated_at = now();
 
 -- name: ListAICCBlockedVisitorsByAgent :many
@@ -367,10 +366,10 @@ WHERE agent_id = ?
 ORDER BY created_at DESC, id DESC
 LIMIT ? OFFSET ?;
 
--- name: CountAICCBlockedVisitorsByAgent :one
+-- name: CountActiveAICCBlockedVisitorsByAgent :one
 SELECT COUNT(*)
 FROM aicc_blocked_visitors
-WHERE agent_id = ?;
+WHERE agent_id = ? AND expires_at > now();
 
 -- name: GetActiveAICCBlockedVisitor :one
 SELECT *

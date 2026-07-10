@@ -149,6 +149,7 @@ func (f *fakeAICCStore) UpsertAICCAgentSettings(_ context.Context, arg sqlc.Upse
 	if f.settings == nil {
 		f.settings = map[string]sqlc.AiccAgentSetting{}
 	}
+	analyticsConfigJSON := f.settings[arg.AgentID].AnalyticsConfigJson
 	f.settings[arg.AgentID] = sqlc.AiccAgentSetting{
 		AgentID:                     arg.AgentID,
 		MessageLimitPerSession:      arg.MessageLimitPerSession,
@@ -156,13 +157,13 @@ func (f *fakeAICCStore) UpsertAICCAgentSettings(_ context.Context, arg sqlc.Upse
 		BlockedVisitorEnabled:       arg.BlockedVisitorEnabled,
 		BlockedVisitorThresholdJson: arg.BlockedVisitorThresholdJson,
 		SessionResumeTtlMinutes:     arg.SessionResumeTtlMinutes,
-		AnalyticsConfigJson:         arg.AnalyticsConfigJson,
+		AnalyticsConfigJson:         analyticsConfigJSON,
 	}
 	return nil
 }
 
-// CountAICCBlockedVisitorsByAgent 返回测试预置的封禁访客数量，用于 settings 回显统计。
-func (f *fakeAICCStore) CountAICCBlockedVisitorsByAgent(_ context.Context, agentID string) (int64, error) {
+// CountActiveAICCBlockedVisitorsByAgent 返回测试预置的有效封禁访客数量，用于 settings 回显统计。
+func (f *fakeAICCStore) CountActiveAICCBlockedVisitorsByAgent(_ context.Context, agentID string) (int64, error) {
 	f.countBlockedArg = agentID
 	if f.blockedCountErr != nil {
 		return 0, f.blockedCountErr
@@ -719,6 +720,7 @@ func TestAICCSettingsDefaults(t *testing.T) {
 	assert.Equal(t, int32(30), result.SessionResumeTTLMinutes)
 	assert.True(t, result.BlockedVisitorEnabled)
 	assert.Empty(t, result.SensitiveWords)
+	assert.Empty(t, result.BlockedVisitorThresholdJSON)
 	assert.Nil(t, store.upsertSettings)
 }
 
@@ -728,6 +730,17 @@ func TestAICCSettingsUpdateNormalizesInput(t *testing.T) {
 	store := &fakeAICCStore{
 		agents: map[string]sqlc.AiccAgent{
 			"agent-1": {ID: "agent-1", OrgID: "org-1"},
+		},
+		settings: map[string]sqlc.AiccAgentSetting{
+			"agent-1": {
+				AgentID:                     "agent-1",
+				MessageLimitPerSession:      100,
+				SensitiveWordsJson:          []byte(`[]`),
+				BlockedVisitorEnabled:       true,
+				BlockedVisitorThresholdJson: []byte(`{"old":1}`),
+				SessionResumeTtlMinutes:     30,
+				AnalyticsConfigJson:         []byte(`{"window":"7d"}`),
+			},
 		},
 		blockedCount: 2,
 	}
@@ -746,10 +759,12 @@ func TestAICCSettingsUpdateNormalizesInput(t *testing.T) {
 	assert.Equal(t, []string{"违禁词"}, result.SensitiveWords)
 	assert.Equal(t, int32(60), result.SessionResumeTTLMinutes)
 	assert.Equal(t, int64(2), result.BlockedVisitorCount)
+	assert.Equal(t, float64(3), result.BlockedVisitorThresholdJSON["message_count"])
 	assert.Equal(t, "agent-1", store.countBlockedArg)
 	require.NotNil(t, store.upsertSettings)
 	assert.JSONEq(t, `["违禁词"]`, string(store.upsertSettings.SensitiveWordsJson))
 	assert.JSONEq(t, `{"message_count":3}`, string(store.upsertSettings.BlockedVisitorThresholdJson))
+	assert.JSONEq(t, `{"window":"7d"}`, string(store.settings["agent-1"].AnalyticsConfigJson))
 }
 
 // TestAICCSettingsUpdateRejectsInvalidRanges 覆盖设置保存的数值边界：

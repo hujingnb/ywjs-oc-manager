@@ -27,12 +27,12 @@ type Querier interface {
 	// transitionTo / RequestInitialize 强制清空进度字段。
 	ClearAppProgress(ctx context.Context, id string) error
 	CountAICCAgentsByOrg(ctx context.Context, orgID string) (int64, error)
-	CountAICCBlockedVisitorsByAgent(ctx context.Context, agentID string) (int64, error)
 	CountAICCCompletedLeadSessions(ctx context.Context, orgID string) (int64, error)
 	CountAICCSessionsByResolution(ctx context.Context, arg CountAICCSessionsByResolutionParams) (int64, error)
 	CountAICCTodaySessions(ctx context.Context, orgID string) (int64, error)
 	CountAICCUnreadLeads(ctx context.Context, orgID string) (int64, error)
 	CountAICCVisitorMessagesBySession(ctx context.Context, sessionID string) (int64, error)
+	CountActiveAICCBlockedVisitorsByAgent(ctx context.Context, agentID string) (int64, error)
 	// 统计企业当前未删除普通实例数；AICC 隐藏 app 使用独立 aicc_agent_limit，不占用普通实例上限。
 	CountActiveAppsByOrg(ctx context.Context, orgID string) (int64, error)
 	// 平台总览组织计数：剔除 soft-deleted；status='active' 与 'disabled' 都算入册组织。
