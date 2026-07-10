@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"net/http"
 	"sort"
 	"strings"
@@ -292,11 +293,21 @@ func (h *AICCHandler) UpdateAgentSettings(c *gin.Context) {
 		writeBindError(c, err)
 		return
 	}
+	var thresholdJSON []byte
+	if req.BlockedVisitorThresholdJSON != nil {
+		var err error
+		thresholdJSON, err = json.Marshal(req.BlockedVisitorThresholdJSON)
+		if err != nil {
+			writeServiceError(c, err)
+			return
+		}
+	}
 	result, err := h.service.UpdateAgentSettings(c.Request.Context(), principalFromCtx(c), c.Param("agentId"), service.AICCAgentSettingsInput{
-		MessageLimitPerSession:  req.MessageLimitPerSession,
-		SensitiveWords:          req.SensitiveWords,
-		BlockedVisitorEnabled:   req.BlockedVisitorEnabled,
-		SessionResumeTTLMinutes: req.SessionResumeTTLMinutes,
+		MessageLimitPerSession:      req.MessageLimitPerSession,
+		SensitiveWords:              req.SensitiveWords,
+		BlockedVisitorEnabled:       req.BlockedVisitorEnabled,
+		BlockedVisitorThresholdJSON: thresholdJSON,
+		SessionResumeTTLMinutes:     req.SessionResumeTTLMinutes,
 	})
 	if err != nil {
 		writeServiceError(c, err)

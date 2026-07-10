@@ -33,6 +33,7 @@ type fakeAICCStore struct {
 	leadFields        map[string][]sqlc.AiccLeadField
 	todayCount        int64
 	unreadCount       int64
+	blockedCount      int64
 	resolved          int64
 	unresolved        int64
 	completeLead      int64
@@ -45,6 +46,7 @@ type fakeAICCStore struct {
 	updateArg         sqlc.UpdateAICCAgentProfileParams
 	statusArg         sqlc.SetAICCAgentStatusParams
 	sessionArg        sqlc.ListAICCSessionsByAgentParams
+	countBlockedArg   string
 	readLeadArg       sqlc.MarkAICCLeadReadParams
 	createField       sqlc.UpsertAICCLeadFieldParams
 	deletedID         string
@@ -52,6 +54,7 @@ type fakeAICCStore struct {
 	getErr            error
 	getSettingsErr    error
 	upsertSettingsErr error
+	blockedCountErr   error
 	listErr           error
 	updateErr         error
 	statusErr         error
@@ -156,6 +159,15 @@ func (f *fakeAICCStore) UpsertAICCAgentSettings(_ context.Context, arg sqlc.Upse
 		AnalyticsConfigJson:         arg.AnalyticsConfigJson,
 	}
 	return nil
+}
+
+// CountAICCBlockedVisitorsByAgent 返回测试预置的封禁访客数量，用于 settings 回显统计。
+func (f *fakeAICCStore) CountAICCBlockedVisitorsByAgent(_ context.Context, agentID string) (int64, error) {
+	f.countBlockedArg = agentID
+	if f.blockedCountErr != nil {
+		return 0, f.blockedCountErr
+	}
+	return f.blockedCount, nil
 }
 
 // ListAICCAgentsByOrg 返回同企业下的未删除智能体。
@@ -707,6 +719,7 @@ func TestAICCSettingsDefaults(t *testing.T) {
 	assert.Equal(t, int32(30), result.SessionResumeTTLMinutes)
 	assert.True(t, result.BlockedVisitorEnabled)
 	assert.Empty(t, result.SensitiveWords)
+	assert.Nil(t, store.upsertSettings)
 }
 
 // TestAICCSettingsUpdateNormalizesInput 覆盖设置保存：
@@ -716,22 +729,56 @@ func TestAICCSettingsUpdateNormalizesInput(t *testing.T) {
 		agents: map[string]sqlc.AiccAgent{
 			"agent-1": {ID: "agent-1", OrgID: "org-1"},
 		},
+		blockedCount: 2,
 	}
 	svc := NewAICCService(store, nil)
 
 	result, err := svc.UpdateAgentSettings(context.Background(), aiccOrgAdmin(), "agent-1", AICCAgentSettingsInput{
-		MessageLimitPerSession:  50,
-		SensitiveWords:          []string{"  违禁词  ", "", "违禁词"},
-		BlockedVisitorEnabled:   true,
-		SessionResumeTTLMinutes: 60,
+		MessageLimitPerSession:      50,
+		SensitiveWords:              []string{"  违禁词  ", "", "违禁词"},
+		BlockedVisitorEnabled:       true,
+		BlockedVisitorThresholdJSON: []byte(`{"message_count":3}`),
+		SessionResumeTTLMinutes:     60,
 	})
 
 	require.NoError(t, err)
 	assert.Equal(t, int32(50), result.MessageLimitPerSession)
 	assert.Equal(t, []string{"违禁词"}, result.SensitiveWords)
 	assert.Equal(t, int32(60), result.SessionResumeTTLMinutes)
+	assert.Equal(t, int64(2), result.BlockedVisitorCount)
+	assert.Equal(t, "agent-1", store.countBlockedArg)
 	require.NotNil(t, store.upsertSettings)
 	assert.JSONEq(t, `["违禁词"]`, string(store.upsertSettings.SensitiveWordsJson))
+	assert.JSONEq(t, `{"message_count":3}`, string(store.upsertSettings.BlockedVisitorThresholdJson))
+}
+
+// TestAICCSettingsUpdateRejectsInvalidRanges 覆盖设置保存的数值边界：
+// 消息上限和续接时间必须在数据库约束范围内，避免写库后才暴露 CHECK 错误。
+func TestAICCSettingsUpdateRejectsInvalidRanges(t *testing.T) {
+	cases := []struct {
+		name  string                 // 子场景说明
+		input AICCAgentSettingsInput // 待校验的运营配置
+	}{
+		{name: "消息上限低于下限", input: AICCAgentSettingsInput{MessageLimitPerSession: 0, SessionResumeTTLMinutes: 30}},     // 场景：消息上限必须至少为 1。
+		{name: "消息上限超过上限", input: AICCAgentSettingsInput{MessageLimitPerSession: 1001, SessionResumeTTLMinutes: 30}},  // 场景：消息上限不能超过数据库 CHECK 上限。
+		{name: "续接时间低于下限", input: AICCAgentSettingsInput{MessageLimitPerSession: 100, SessionResumeTTLMinutes: 0}},    // 场景：会话续接时间必须至少为 1 分钟。
+		{name: "续接时间超过上限", input: AICCAgentSettingsInput{MessageLimitPerSession: 100, SessionResumeTTLMinutes: 1441}}, // 场景：会话续接时间不能超过 24 小时。
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeAICCStore{
+				agents: map[string]sqlc.AiccAgent{
+					"agent-1": {ID: "agent-1", OrgID: "org-1"},
+				},
+			}
+			svc := NewAICCService(store, nil)
+
+			_, err := svc.UpdateAgentSettings(context.Background(), aiccOrgAdmin(), "agent-1", tc.input)
+
+			require.ErrorIs(t, err, ErrInvalidArgument)
+			assert.Nil(t, store.upsertSettings)
+		})
+	}
 }
 
 // TestAICCServiceUpdateAgentRequiresManagePermission 覆盖更新路径：本企业管理员可更新，平台管理员只读不可写。

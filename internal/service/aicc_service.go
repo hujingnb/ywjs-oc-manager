@@ -42,6 +42,8 @@ type AICCStore interface {
 	GetAICCAgentSettings(ctx context.Context, agentID string) (sqlc.AiccAgentSetting, error)
 	// UpsertAICCAgentSettings 保存智能体运营配置快照。
 	UpsertAICCAgentSettings(ctx context.Context, arg sqlc.UpsertAICCAgentSettingsParams) error
+	// CountAICCBlockedVisitorsByAgent 统计当前智能体的封禁访客数量，用于 settings 面板回显。
+	CountAICCBlockedVisitorsByAgent(ctx context.Context, agentID string) (int64, error)
 	// ListAICCAgentsByOrg 列出企业下未删除智能体。
 	ListAICCAgentsByOrg(ctx context.Context, arg sqlc.ListAICCAgentsByOrgParams) ([]sqlc.AiccAgent, error)
 	// ListAICCAgentKnowledge 列出智能体当前可检索知识范围。
@@ -281,12 +283,23 @@ func (s *AICCService) GetAgentSettings(ctx context.Context, principal auth.Princ
 	}
 	settings, err := s.store.GetAICCAgentSettings(ctx, agentID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return defaultAICCAgentSettingsResult(agentID), nil
+		result := defaultAICCAgentSettingsResult(agentID)
+		if err := s.populateAICCBlockedVisitorCount(ctx, &result); err != nil {
+			return AICCAgentSettingsResult{}, err
+		}
+		return result, nil
 	}
 	if err != nil {
 		return AICCAgentSettingsResult{}, fmt.Errorf("查询 AICC 运营配置失败: %w", err)
 	}
-	return toAICCAgentSettingsResult(settings)
+	result, err := toAICCAgentSettingsResult(settings)
+	if err != nil {
+		return AICCAgentSettingsResult{}, err
+	}
+	if err := s.populateAICCBlockedVisitorCount(ctx, &result); err != nil {
+		return AICCAgentSettingsResult{}, err
+	}
+	return result, nil
 }
 
 // UpdateAgentSettings 保存智能体运营配置，并按公开端运行约束归一化敏感词和数值边界。
@@ -317,6 +330,16 @@ func (s *AICCService) UpdateAgentSettings(ctx context.Context, principal auth.Pr
 		return AICCAgentSettingsResult{}, fmt.Errorf("保存 AICC 运营配置失败: %w", err)
 	}
 	return s.GetAgentSettings(ctx, principal, agentID)
+}
+
+// populateAICCBlockedVisitorCount 填充封禁访客数量，保证 settings 回显与封禁名单保持一致。
+func (s *AICCService) populateAICCBlockedVisitorCount(ctx context.Context, result *AICCAgentSettingsResult) error {
+	count, err := s.store.CountAICCBlockedVisitorsByAgent(ctx, result.AgentID)
+	if err != nil {
+		return fmt.Errorf("统计 AICC 封禁访客失败: %w", err)
+	}
+	result.BlockedVisitorCount = count
+	return nil
 }
 
 // UpdateAgent 更新智能体资料；平台管理员只有读权限，不能管理企业智能体。

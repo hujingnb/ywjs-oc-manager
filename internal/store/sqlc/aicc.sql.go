@@ -91,6 +91,19 @@ func (q *Queries) CountAICCAgentsByOrg(ctx context.Context, orgID string) (int64
 	return count, err
 }
 
+const countAICCBlockedVisitorsByAgent = `-- name: CountAICCBlockedVisitorsByAgent :one
+SELECT COUNT(*)
+FROM aicc_blocked_visitors
+WHERE agent_id = ?
+`
+
+func (q *Queries) CountAICCBlockedVisitorsByAgent(ctx context.Context, agentID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countAICCBlockedVisitorsByAgent, agentID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countAICCCompletedLeadSessions = `-- name: CountAICCCompletedLeadSessions :one
 SELECT COUNT(*)
 FROM aicc_sessions

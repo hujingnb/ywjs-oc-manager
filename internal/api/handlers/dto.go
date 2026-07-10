@@ -159,6 +159,8 @@ type UpdateAICCAgentSettingsRequest struct {
 	SensitiveWords []string `json:"sensitive_words"`
 	// BlockedVisitorEnabled 控制是否启用访客封禁检查。
 	BlockedVisitorEnabled bool `json:"blocked_visitor_enabled"`
+	// BlockedVisitorThresholdJSON 保留异常访客自动封禁阈值配置。
+	BlockedVisitorThresholdJSON map[string]any `json:"blocked_visitor_threshold_json"`
 	// SessionResumeTTLMinutes 控制公开端刷新续接有效期。
 	SessionResumeTTLMinutes int32 `json:"session_resume_ttl_minutes" binding:"required,min=1,max=1440"`
 }

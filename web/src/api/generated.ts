@@ -15523,6 +15523,10 @@ export interface components {
         "handlers.UpdateAICCAgentSettingsRequest": {
             /** @description BlockedVisitorEnabled 控制是否启用访客封禁检查。 */
             blocked_visitor_enabled?: boolean;
+            /** @description BlockedVisitorThresholdJSON 保留异常访客自动封禁阈值配置。 */
+            blocked_visitor_threshold_json?: {
+                [key: string]: unknown;
+            };
             /** @description MessageLimitPerSession 限制单个公开会话最多发送多少条访客消息。 */
             message_limit_per_session: number;
             /** @description SensitiveWords 是公开端发送前拦截的敏感词列表。 */

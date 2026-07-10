@@ -367,6 +367,11 @@ WHERE agent_id = ?
 ORDER BY created_at DESC, id DESC
 LIMIT ? OFFSET ?;
 
+-- name: CountAICCBlockedVisitorsByAgent :one
+SELECT COUNT(*)
+FROM aicc_blocked_visitors
+WHERE agent_id = ?;
+
 -- name: GetActiveAICCBlockedVisitor :one
 SELECT *
 FROM aicc_blocked_visitors

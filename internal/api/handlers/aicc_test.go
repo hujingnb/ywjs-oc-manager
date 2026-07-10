@@ -413,7 +413,7 @@ func TestAICCHandlerSettingsRoutes(t *testing.T) {
 	assert.Contains(t, getRec.Body.String(), `"settings"`)
 	assert.Contains(t, getRec.Body.String(), `"message_limit_per_session":80`)
 
-	putReq := httptest.NewRequest(http.MethodPut, "/api/v1/aicc/agents/agent-1/settings", bytes.NewBufferString(`{"message_limit_per_session":80,"sensitive_words":["违禁词"],"blocked_visitor_enabled":true,"session_resume_ttl_minutes":45}`))
+	putReq := httptest.NewRequest(http.MethodPut, "/api/v1/aicc/agents/agent-1/settings", bytes.NewBufferString(`{"message_limit_per_session":80,"sensitive_words":["违禁词"],"blocked_visitor_enabled":true,"blocked_visitor_threshold_json":{"message_count":3},"session_resume_ttl_minutes":45}`))
 	putReq.Header.Set("Content-Type", "application/json")
 	putReq = withPrincipal(putReq, auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: "org-1", UserID: "admin-1"})
 	putRec := httptest.NewRecorder()
@@ -424,6 +424,7 @@ func TestAICCHandlerSettingsRoutes(t *testing.T) {
 	assert.Equal(t, int32(80), svc.lastSettings.MessageLimitPerSession)
 	assert.Equal(t, []string{"违禁词"}, svc.lastSettings.SensitiveWords)
 	assert.True(t, svc.lastSettings.BlockedVisitorEnabled)
+	assert.JSONEq(t, `{"message_count":3}`, string(svc.lastSettings.BlockedVisitorThresholdJSON))
 	assert.Equal(t, int32(45), svc.lastSettings.SessionResumeTTLMinutes)
 }
 
