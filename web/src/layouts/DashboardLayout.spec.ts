@@ -71,7 +71,7 @@ vi.mock('@/api/hooks/useWebPublish', () => ({
   useWebPublishConfigQuery: () => ({ data: { value: null } }),
 }))
 
-// 当前企业详情 query 桩：org_admin 菜单需要读取 aicc_enabled 决定是否展示 AICC 入口。
+// 当前企业详情 query 桩：保留企业状态给菜单不变量测试使用，避免实例化真实 useQuery。
 vi.mock('@/api/hooks/useOrganizations', () => ({
   useOrganizationQuery: () => organizationState,
 }))
@@ -357,8 +357,8 @@ describe('DashboardLayout', () => {
     expect(menuLabels(wrapper)).not.toContain('知识库')
   })
 
-  // 覆盖 org_admin 企业管理视角菜单:管理项齐全,且「技能」已迁出(不在此视角)。
-  it('renders management menu without skills for org_admin manage perspective', () => {
+  // 覆盖 org_admin 企业管理视角菜单：AICC 不再作为左侧菜单项出现，入口由企业概览页承载。
+  it('renders management menu without skills or AICC for org_admin manage perspective', () => {
     routeState.path = '/'
     authState.user = { id: 'org-admin-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' }
     authState.isPlatformAdmin = false
@@ -368,12 +368,13 @@ describe('DashboardLayout', () => {
 
     const wrapper = mountLayout()
 
-    expect(menuLabels(wrapper)).toEqual(['总览', '成员', 'AICC 客服', '已发布站点', '实例', '企业知识库', '账户余额', '审计', '用量'])
+    expect(menuLabels(wrapper)).toEqual(['总览', '成员', '已发布站点', '实例', '企业知识库', '账户余额', '审计', '用量'])
     expect(menuLabels(wrapper)).not.toContain('技能')
+    expect(menuLabels(wrapper)).not.toContain('AICC 客服')
   })
 
-  // 覆盖企业未开通 AICC 的菜单裁剪：org_admin 不应看到不可用的 AICC 客服入口。
-  it('hides AICC menu for org_admin when organization has not enabled AICC', () => {
+  // 覆盖 AICC 入口归属：即使企业已开通 AICC，左侧菜单也不展示客服入口。
+  it('does not render AICC in the main menu even when organization has enabled AICC', () => {
     routeState.path = '/'
     authState.user = { id: 'org-admin-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' }
     authState.isPlatformAdmin = false
@@ -384,12 +385,14 @@ describe('DashboardLayout', () => {
       name: '测试企业',
       status: 'enabled',
       code: 'test-org',
-      aicc_enabled: false,
+      aicc_enabled: true,
     }
 
     const wrapper = mountLayout()
 
     expect(menuLabels(wrapper)).not.toContain('AICC 客服')
+    expect(menuKeys(wrapper)).not.toContain('/aicc')
+    expect(menuKeys(wrapper)).not.toContain('/aicc-console')
   })
 
   // 覆盖 org_admin 我的实例视角菜单:与组织成员同款(含「技能」),由自有实例 appId 驱动。

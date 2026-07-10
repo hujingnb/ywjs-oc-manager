@@ -176,7 +176,7 @@ import {
 } from 'naive-ui'
 import {
   BarChart3, BookOpen, Bot, Boxes, Building2, CalendarClock, FileSearch,
-  FolderOpen, Gauge, Globe, Headphones, KeyRound, LayoutDashboard, ListChecks, LogOut, MessageSquare, Package, Puzzle, Radio, RefreshCw,
+  FolderOpen, Gauge, Globe, KeyRound, LayoutDashboard, ListChecks, LogOut, MessageSquare, Package, Puzzle, Radio, RefreshCw,
   ShieldCheck, Users, Wallet, Wrench,
 } from 'lucide-vue-next'
 
@@ -187,7 +187,6 @@ import { useOwnApp } from '@/composables/useOwnApp'
 import { useAdminPerspective, type AdminPerspective } from '@/composables/useAdminPerspective'
 import { useSkillTicketBadgeQuery } from '@/api/hooks/useSkillTickets'
 import { useWebPublishConfigQuery } from '@/api/hooks/useWebPublish'
-import { useOrganizationQuery } from '@/api/hooks/useOrganizations'
 
 // DashboardLayout 负责已登录后台的导航外壳、环境标识和退出入口。
 // 具体页面权限仍由路由和页面级查询控制，这里只隐藏不适合当前角色的导航项。
@@ -230,7 +229,6 @@ const activeKey = computed(() => {
     '/platform/custom-skills',
     '/platform/web-publish-config',
     '/members',
-    '/aicc',
     '/published-sites',
     '/knowledge',
     // /skills 成员技能页顶级路由；需早于更短 prefix 匹配，放在 /knowledge 后面即可。
@@ -256,9 +254,7 @@ const ticketBadge = useSkillTicketBadgeQuery(isPlatformAdmin)
 // 仅 org_admin 触发查询（ownOrgId 为空时 query 暂停），平台管理员/成员不拉取。
 const ownOrgId = computed(() => (isOrgAdmin.value ? auth.user?.org_id ?? undefined : undefined))
 const { data: ownWebPublishConfig } = useWebPublishConfigQuery(ownOrgId)
-const { data: ownOrganization } = useOrganizationQuery(ownOrgId)
 const webPublishEnabledForOrg = computed(() => Boolean(ownWebPublishConfig.value?.enabled))
-const aiccEnabledForOrg = computed(() => Boolean(ownOrganization.value?.aicc_enabled))
 // pendingTicketCount 是待处理工单数；查询未就绪时为 0（不显示角标）。
 const pendingTicketCount = computed(() => ticketBadge.data.value ?? 0)
 
@@ -341,9 +337,6 @@ const menuOptions = computed<MenuOption[]>(() => {
   // 成员/审计 是组织管理视角，普通成员不展示。
   if (!isOrgMember.value) {
     items.push({ key: '/members', label: t('layout.nav.members'), icon: () => h(Users, { size: 18 }) })
-    if (isOrgAdmin.value && aiccEnabledForOrg.value) {
-      items.push({ key: '/aicc', label: t('layout.nav.aicc'), icon: () => h(Headphones, { size: 18 }) })
-    }
     // 已发布站点入口：与 members/audit 同属组织管理视角，org_admin 与 platform_admin 可见，
     // 路由 allowedRoles 为 ORG_ADMIN_ABOVE，普通成员不展示。
     items.push({ key: '/published-sites', label: t('layout.nav.publishedSites'), icon: () => h(Globe, { size: 18 }) })
