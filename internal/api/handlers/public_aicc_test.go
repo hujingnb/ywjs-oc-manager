@@ -195,6 +195,19 @@ func TestPublicAICCHandlerMapsInvalidMessage(t *testing.T) {
 	assert.Contains(t, recorder.Body.String(), "AICC_INVALID_MESSAGE")
 }
 
+// TestPublicAICCHandlerMapsImageTooLarge 覆盖公开图片上传：超过限制时返回 413 而非 500。
+func TestPublicAICCHandlerMapsImageTooLarge(t *testing.T) {
+	router := newPublicAICCTestRouter(t, &publicAICCServiceStub{imageErr: service.ErrConversationFileTooLarge})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/sessions/sess-1/images?filename=a.png", bytes.NewBufferString("image-bytes"))
+	request.Header.Set("Content-Type", "application/octet-stream")
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusRequestEntityTooLarge, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "CONVERSATION_FILE_TOO_LARGE")
+}
+
 // TestPublicAICCHandlerCreateSession 覆盖公开创建会话入口：公开 token 来自路径，返回 session token。
 func TestPublicAICCHandlerCreateSession(t *testing.T) {
 	svc := &publicAICCServiceStub{sessionResult: service.AICCPublicSessionResult{SessionToken: "sess-token", PrivacyMode: "notice", PrivacyNoticeShown: true}}

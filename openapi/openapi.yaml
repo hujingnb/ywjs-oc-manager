@@ -1,5 +1,30 @@
 components:
   schemas:
+    handlers.AICCLeadFieldRequest:
+      properties:
+        field_key:
+          description: FieldKey 是字段稳定 key，访客提交时使用。
+          type: string
+        field_type:
+          description: FieldType 是字段输入类型：text / phone / email / number。
+          type: string
+        label:
+          description: Label 是公开页展示名称。
+          type: string
+        prompt_text:
+          description: PromptText 是输入提示。
+          type: string
+        required:
+          description: Required 表示是否为发送消息前必填字段。
+          type: boolean
+        sort_order:
+          description: SortOrder 是公开页展示顺序。
+          type: integer
+      required:
+      - field_key
+      - field_type
+      - label
+      type: object
     handlers.AddSkillFromLibraryRequest:
       properties:
         name:
@@ -620,6 +645,17 @@ components:
           type: string
       required:
       - title
+      type: object
+    handlers.ReplaceAICCLeadFieldsRequest:
+      properties:
+        fields:
+          description: Fields 是当前智能体完整留资字段列表；提交空数组表示关闭留资表单。
+          items:
+            $ref: '#/components/schemas/handlers.AICCLeadFieldRequest'
+          type: array
+          uniqueItems: false
+      required:
+      - fields
       type: object
     handlers.ResetPasswordRequest:
       properties:
@@ -1412,10 +1448,108 @@ components:
           description: WidgetToken 是嵌入组件 token；仅管理面返回。
           type: string
       type: object
+    service.AICCAnalyticsResult:
+      properties:
+        today_sessions:
+          description: TodaySessions 是当前企业今日会话数。
+          type: integer
+        unread_leads:
+          description: UnreadLeads 是当前企业未读线索数。
+          type: integer
+      type: object
+    service.AICCLeadFieldResult:
+      properties:
+        field_key:
+          description: FieldKey 是字段稳定 key。
+          type: string
+        field_type:
+          description: FieldType 是字段输入类型。
+          type: string
+        id:
+          description: ID 是字段主键；公开页只用于稳定渲染，不参与提交。
+          type: string
+        label:
+          description: Label 是字段展示名称。
+          type: string
+        prompt_text:
+          description: PromptText 是输入提示。
+          type: string
+        required:
+          description: Required 表示是否必填。
+          type: boolean
+        sort_order:
+          description: SortOrder 是展示顺序。
+          type: integer
+      type: object
+    service.AICCLeadResult:
+      properties:
+        created_at:
+          description: CreatedAt 是线索首次创建时间。
+          type: string
+        display_name:
+          description: DisplayName 是可展示联系人名称或联系方式摘要。
+          type: string
+        id:
+          description: ID 是线索主键。
+          type: string
+        latest_session_id:
+          description: LatestSessionID 是最近关联会话。
+          type: string
+        org_id:
+          description: OrgID 是线索所属企业。
+          type: string
+        unread:
+          description: Unread 表示是否未读。
+          type: boolean
+        updated_at:
+          description: UpdatedAt 是线索最近更新时间。
+          type: string
+      type: object
+    service.AICCMessageResult:
+      properties:
+        content_type:
+          description: ContentType 描述文本、图片或混合消息。
+          type: string
+        created_at:
+          description: CreatedAt 是消息创建时间。
+          type: string
+        direction:
+          description: Direction 区分访客、助手或系统消息。
+          type: string
+        error_summary:
+          description: ErrorSummary 是运行时错误摘要。
+          type: string
+        id:
+          description: ID 是消息主键。
+          type: string
+        image_mime:
+          description: ImageMime 是图片 MIME。
+          type: string
+        image_object_key:
+          description: ImageObjectKey 是图片对象 key，仅管理端排障使用。
+          type: string
+        image_size_bytes:
+          description: ImageSizeBytes 是图片大小。
+          type: integer
+        is_fallback:
+          description: IsFallback 表示是否为兜底回答。
+          type: boolean
+        is_refusal:
+          description: IsRefusal 表示是否为拒答。
+          type: boolean
+        text:
+          description: Text 是文本内容，可为空。
+          type: string
+      type: object
     service.AICCPublicConfigResult:
       properties:
         greeting:
           type: string
+        lead_fields:
+          items:
+            $ref: '#/components/schemas/service.AICCLeadFieldResult'
+          type: array
+          uniqueItems: false
         name:
           type: string
         privacy_mode:
@@ -1465,6 +1599,54 @@ components:
         privacy_text:
           type: string
         session_token:
+          type: string
+      type: object
+    service.AICCSessionDetailResult:
+      properties:
+        messages:
+          description: Messages 是会话消息镜像。
+          items:
+            $ref: '#/components/schemas/service.AICCMessageResult'
+          type: array
+          uniqueItems: false
+        session:
+          $ref: '#/components/schemas/service.AICCSessionResult'
+      type: object
+    service.AICCSessionResult:
+      description: Session 是会话摘要。
+      properties:
+        agent_id:
+          description: AgentID 是会话所属智能体。
+          type: string
+        channel:
+          description: Channel 是访客入口渠道。
+          type: string
+        created_at:
+          description: CreatedAt 是会话创建时间。
+          type: string
+        id:
+          description: ID 是会话主键。
+          type: string
+        last_active_at:
+          description: LastActiveAt 是最近活跃时间。
+          type: string
+        lead_status:
+          description: LeadStatus 是当前留资状态。
+          type: string
+        org_id:
+          description: OrgID 是会话所属企业。
+          type: string
+        referrer:
+          description: Referrer 是浏览器 referrer，可为空。
+          type: string
+        resolution_status:
+          description: ResolutionStatus 是当前解决状态。
+          type: string
+        source_url:
+          description: SourceURL 是访客进入会话时所在页面，可为空。
+          type: string
+        updated_at:
+          description: UpdatedAt 是最近更新时间。
           type: string
       type: object
     service.AppResult:
@@ -2816,6 +2998,182 @@ paths:
       summary: 更新 AICC 智能体
       tags:
       - aicc
+  /aicc/agents/{agentId}/lead-fields:
+    get:
+      description: 企业管理员查看指定智能体公开页留资字段配置
+      parameters:
+      - description: 智能体 ID
+        in: path
+        name: agentId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.AICCLeadFieldResult'
+                  type: array
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: AICC 留资字段列表
+      tags:
+      - aicc
+    put:
+      description: 企业管理员整组替换指定智能体公开页留资字段配置
+      parameters:
+      - description: 智能体 ID
+        in: path
+        name: agentId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.ReplaceAICCLeadFieldsRequest'
+                description: 留资字段配置
+                summary: body
+        description: 留资字段配置
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.AICCLeadFieldResult'
+                  type: array
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 保存 AICC 留资字段
+      tags:
+      - aicc
+  /aicc/agents/{agentId}/sessions:
+    get:
+      description: 企业管理员查看指定智能体的访客会话列表
+      parameters:
+      - description: 智能体 ID
+        in: path
+        name: agentId
+        required: true
+        schema:
+          type: string
+      - description: 每页条数（默认 50）
+        in: query
+        name: limit
+        schema:
+          type: integer
+      - description: 分页偏移（默认 0）
+        in: query
+        name: offset
+        schema:
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.AICCSessionResult'
+                  type: array
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: AICC 会话列表
+      tags:
+      - aicc
   /aicc/agents/{agentId}/start:
     post:
       description: 企业管理员将 AICC 智能体切换为 active
@@ -2922,6 +3280,227 @@ paths:
       security:
       - BearerAuth: []
       summary: 停止 AICC 智能体
+      tags:
+      - aicc
+  /aicc/analytics:
+    get:
+      description: 返回今日会话数和未读线索数
+      parameters:
+      - description: 企业 ID（平台管理员排障使用）
+        in: query
+        name: org_id
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AICCAnalyticsResult'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: AICC 运营统计
+      tags:
+      - aicc
+  /aicc/leads:
+    get:
+      description: 企业管理员查看本企业线索，平台管理员可通过 org_id 只读排障
+      parameters:
+      - description: 企业 ID（平台管理员排障使用）
+        in: query
+        name: org_id
+        schema:
+          type: string
+      - description: 每页条数（默认 50）
+        in: query
+        name: limit
+        schema:
+          type: integer
+      - description: 分页偏移（默认 0）
+        in: query
+        name: offset
+        schema:
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  items:
+                    $ref: '#/components/schemas/service.AICCLeadResult'
+                  type: array
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: AICC 线索列表
+      tags:
+      - aicc
+  /aicc/leads/{leadId}/read:
+    post:
+      description: 企业管理员将本企业线索标记为已读
+      parameters:
+      - description: 线索 ID
+        in: path
+        name: leadId
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 标记 AICC 线索已读
+      tags:
+      - aicc
+  /aicc/leads/export:
+    get:
+      description: 导出当前筛选企业的线索基础字段
+      parameters:
+      - description: 企业 ID（平台管理员排障使用）
+        in: query
+        name: org_id
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            text/csv:
+              schema:
+                type: string
+          description: OK
+        "401":
+          content:
+            text/csv:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            text/csv:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "500":
+          content:
+            text/csv:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 导出 AICC 线索
+      tags:
+      - aicc
+  /aicc/sessions/{sessionId}:
+    get:
+      description: 企业管理员查看会话摘要和消息镜像
+      parameters:
+      - description: 会话 ID
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/service.AICCSessionDetailResult'
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: AICC 会话详情
       tags:
       - aicc
   /apps/{appId}:

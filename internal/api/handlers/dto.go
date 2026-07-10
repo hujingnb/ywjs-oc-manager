@@ -147,6 +147,28 @@ type UpdateAICCAgentRequest struct {
 	RetentionDays int32 `json:"retention_days"`
 }
 
+// AICCLeadFieldRequest 是企业管理员维护公开页留资字段的单条配置。
+type AICCLeadFieldRequest struct {
+	// FieldKey 是字段稳定 key，访客提交时使用。
+	FieldKey string `json:"field_key" binding:"required"`
+	// Label 是公开页展示名称。
+	Label string `json:"label" binding:"required"`
+	// FieldType 是字段输入类型：text / phone / email / number。
+	FieldType string `json:"field_type" binding:"required"`
+	// Required 表示是否为发送消息前必填字段。
+	Required bool `json:"required"`
+	// PromptText 是输入提示。
+	PromptText string `json:"prompt_text"`
+	// SortOrder 是公开页展示顺序。
+	SortOrder int32 `json:"sort_order"`
+}
+
+// ReplaceAICCLeadFieldsRequest 是整组保存 AICC 留资字段的请求体。
+type ReplaceAICCLeadFieldsRequest struct {
+	// Fields 是当前智能体完整留资字段列表；提交空数组表示关闭留资表单。
+	Fields []AICCLeadFieldRequest `json:"fields" binding:"required"`
+}
+
 // CreateAICCSessionRequest 是访客创建公开会话的请求体。
 type CreateAICCSessionRequest struct {
 	// Channel 是公开入口渠道：web_link / web_widget。

@@ -11,14 +11,14 @@ import {
 } from './permissions'
 
 describe('role permissions', () => {
-  // 覆盖平台管理员：不能通过组织入口创建/管理实例，但可作为运维兜底维护组织知识库并查看审计。
+  // 覆盖平台管理员：不能通过组织入口创建实例，但可作为运维兜底维护组织知识库、管理实例并查看审计。
   it('keeps platform admin read-only for organization-side app writes while allowing org knowledge maintenance', () => {
     const user = { id: 'platform-user', role: 'platform_admin' as const }
     const app = { org_id: 'org-1', owner_user_id: 'member-1' }
 
     expect(canCreateAppForOrg(user, 'org-1')).toBe(false)
     expect(canManageOrgKnowledge(user, 'org-1')).toBe(true)
-    expect(canManageApp(user, app)).toBe(false)
+    expect(canManageApp(user, app)).toBe(true)
     expect(canViewOrgAudit(user, 'org-1')).toBe(true)
   })
 

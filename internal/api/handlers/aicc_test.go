@@ -20,23 +20,32 @@ import (
 
 // aiccServiceStub 实现 AICC handler 依赖的最小接口，并记录请求入参。
 type aiccServiceStub struct {
-	createResult service.AICCAgentResult
-	createErr    error
-	listResult   []service.AICCAgentResult
-	listErr      error
-	getResult    service.AICCAgentResult
-	getErr       error
-	updateResult service.AICCAgentResult
-	updateErr    error
-	statusResult service.AICCAgentResult
-	statusErr    error
-	deleteErr    error
+	createResult    service.AICCAgentResult
+	createErr       error
+	listResult      []service.AICCAgentResult
+	listErr         error
+	getResult       service.AICCAgentResult
+	getErr          error
+	updateResult    service.AICCAgentResult
+	updateErr       error
+	statusResult    service.AICCAgentResult
+	statusErr       error
+	deleteErr       error
+	sessionsResult  []service.AICCSessionResult
+	sessionResult   service.AICCSessionDetailResult
+	leadsResult     []service.AICCLeadResult
+	fieldsResult    []service.AICCLeadFieldResult
+	analyticsResult service.AICCAnalyticsResult
+	markLeadErr     error
 
 	lastPrincipal auth.Principal
 	lastInput     service.AICCAgentInput
 	lastOrgID     string
 	lastAgentID   string
+	lastSessionID string
+	lastLeadID    string
 	lastAction    string
+	lastFields    []service.AICCLeadFieldInput
 }
 
 // CreateAgent 记录创建请求并返回预设结果。
@@ -81,6 +90,75 @@ func (s *aiccServiceStub) DeleteAgent(_ context.Context, principal auth.Principa
 	s.lastPrincipal = principal
 	s.lastAgentID = agentID
 	return s.deleteErr
+}
+
+// ListSessions 记录智能体 ID 并返回预设会话摘要。
+func (s *aiccServiceStub) ListSessions(_ context.Context, principal auth.Principal, agentID string, _, _ int32) ([]service.AICCSessionResult, error) {
+	s.lastPrincipal = principal
+	s.lastAgentID = agentID
+	return s.sessionsResult, nil
+}
+
+// GetSession 记录会话 ID 并返回预设详情。
+func (s *aiccServiceStub) GetSession(_ context.Context, principal auth.Principal, sessionID string) (service.AICCSessionDetailResult, error) {
+	s.lastPrincipal = principal
+	s.lastSessionID = sessionID
+	return s.sessionResult, nil
+}
+
+// ListLeads 记录企业 ID 并返回预设线索列表。
+func (s *aiccServiceStub) ListLeads(_ context.Context, principal auth.Principal, orgID string, _, _ int32) ([]service.AICCLeadResult, error) {
+	s.lastPrincipal = principal
+	s.lastOrgID = orgID
+	return s.leadsResult, nil
+}
+
+// ExportLeads 记录企业 ID 并返回预设全量线索。
+func (s *aiccServiceStub) ExportLeads(_ context.Context, principal auth.Principal, orgID string) ([]service.AICCLeadResult, error) {
+	s.lastPrincipal = principal
+	s.lastOrgID = orgID
+	return s.leadsResult, nil
+}
+
+// MarkLeadRead 记录线索 ID 并返回预设错误。
+func (s *aiccServiceStub) MarkLeadRead(_ context.Context, principal auth.Principal, leadID string) error {
+	s.lastPrincipal = principal
+	s.lastLeadID = leadID
+	return s.markLeadErr
+}
+
+// ListLeadFields 记录智能体 ID 并返回预设留资字段。
+func (s *aiccServiceStub) ListLeadFields(_ context.Context, principal auth.Principal, agentID string) ([]service.AICCLeadFieldResult, error) {
+	s.lastPrincipal = principal
+	s.lastAgentID = agentID
+	return s.fieldsResult, nil
+}
+
+// ReplaceLeadFields 记录整组留资字段入参并返回预设字段列表。
+func (s *aiccServiceStub) ReplaceLeadFields(_ context.Context, principal auth.Principal, agentID string, fields []service.AICCLeadFieldInput) ([]service.AICCLeadFieldResult, error) {
+	s.lastPrincipal = principal
+	s.lastAgentID = agentID
+	s.lastFields = fields
+	if s.fieldsResult != nil {
+		return s.fieldsResult, nil
+	}
+	results := make([]service.AICCLeadFieldResult, 0, len(fields))
+	for _, field := range fields {
+		results = append(results, service.AICCLeadFieldResult{
+			FieldKey:  field.FieldKey,
+			Label:     field.Label,
+			FieldType: field.FieldType,
+			Required:  field.Required,
+		})
+	}
+	return results, nil
+}
+
+// Analytics 记录企业 ID 并返回预设统计。
+func (s *aiccServiceStub) Analytics(_ context.Context, principal auth.Principal, orgID string) (service.AICCAnalyticsResult, error) {
+	s.lastPrincipal = principal
+	s.lastOrgID = orgID
+	return s.analyticsResult, nil
 }
 
 // newAICCTestRouter 构建用于测试的 AICC router。
@@ -158,6 +236,7 @@ func TestAICCHandlerCreateAgentMapsServiceErrors(t *testing.T) {
 	}{
 		{name: "无权限映射为 403", err: service.ErrForbidden, code: http.StatusForbidden},                                   // 场景：普通成员或跨组织管理员创建。
 		{name: "参数错误映射为 400", err: fmt.Errorf("%w: 名称不能为空", service.ErrInvalidArgument), code: http.StatusBadRequest}, // 场景：service 业务校验失败。
+		{name: "版本未授权映射为 400", err: service.ErrVersionNotInAllowlist, code: http.StatusBadRequest},                    // 场景：企业未配置可用助手版本，隐藏 app 无法选择初始化版本。
 		{name: "超限映射为 409", err: service.ErrQuotaExceeded, code: http.StatusConflict},                                 // 场景：达到 aicc_agent_limit。
 	}
 	for _, tc := range cases {
@@ -231,6 +310,65 @@ func TestAICCHandlerBasicRoutes(t *testing.T) {
 			if tc.assertion != nil {
 				tc.assertion(t, svc, recorder.Body.String())
 			}
+		})
+	}
+}
+
+// TestAICCHandlerOperationsRoutes 覆盖 AICC 会话、线索、统计和导出路由接线。
+func TestAICCHandlerOperationsRoutes(t *testing.T) {
+	now := time.Date(2026, 7, 10, 9, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name       string // 子场景说明
+		method     string
+		path       string
+		wantStatus int
+		assertion  func(t *testing.T, svc *aiccServiceStub, recorder *httptest.ResponseRecorder)
+	}{
+		{name: "会话列表路由返回 sessions", method: http.MethodGet, path: "/api/v1/aicc/agents/agent-1/sessions", wantStatus: http.StatusOK, assertion: func(t *testing.T, svc *aiccServiceStub, recorder *httptest.ResponseRecorder) {
+			assert.Equal(t, "agent-1", svc.lastAgentID)
+			assert.Contains(t, recorder.Body.String(), "sessions")
+		}}, // 场景：企业管理员查看某智能体会话列表。
+		{name: "会话详情路由返回 session 和 messages", method: http.MethodGet, path: "/api/v1/aicc/sessions/session-1", wantStatus: http.StatusOK, assertion: func(t *testing.T, svc *aiccServiceStub, recorder *httptest.ResponseRecorder) {
+			assert.Equal(t, "session-1", svc.lastSessionID)
+			assert.Contains(t, recorder.Body.String(), "messages")
+		}}, // 场景：企业管理员查看单个会话详情。
+		{name: "线索列表路由返回 leads", method: http.MethodGet, path: "/api/v1/aicc/leads?org_id=org-1", wantStatus: http.StatusOK, assertion: func(t *testing.T, svc *aiccServiceStub, recorder *httptest.ResponseRecorder) {
+			assert.Equal(t, "org-1", svc.lastOrgID)
+			assert.Contains(t, recorder.Body.String(), "leads")
+		}}, // 场景：平台只读或企业管理员查看线索列表。
+		{name: "线索已读路由返回 204", method: http.MethodPost, path: "/api/v1/aicc/leads/lead-1/read", wantStatus: http.StatusNoContent, assertion: func(t *testing.T, svc *aiccServiceStub, _ *httptest.ResponseRecorder) {
+			assert.Equal(t, "lead-1", svc.lastLeadID)
+		}}, // 场景：企业管理员把线索标记为已读。
+		{name: "统计路由返回 analytics", method: http.MethodGet, path: "/api/v1/aicc/analytics", wantStatus: http.StatusOK, assertion: func(t *testing.T, svc *aiccServiceStub, recorder *httptest.ResponseRecorder) {
+			assert.Contains(t, recorder.Body.String(), "today_sessions")
+		}}, // 场景：企业管理员查看运营统计卡片。
+		{name: "线索导出路由返回 CSV", method: http.MethodGet, path: "/api/v1/aicc/leads/export", wantStatus: http.StatusOK, assertion: func(t *testing.T, svc *aiccServiceStub, recorder *httptest.ResponseRecorder) {
+			assert.Contains(t, recorder.Header().Get("Content-Type"), "text/csv")
+			assert.Contains(t, recorder.Header().Get("Content-Disposition"), "aicc-leads.csv")
+			assert.Contains(t, recorder.Body.String(), "lead_id,display_name,unread,updated_at")
+			assert.Contains(t, recorder.Body.String(), "'=HYPERLINK")
+		}}, // 场景：企业管理员导出线索 CSV。
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &aiccServiceStub{
+				sessionsResult: []service.AICCSessionResult{{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", Channel: domain.AICCChannelWebLink, CreatedAt: now, UpdatedAt: now}},
+				sessionResult: service.AICCSessionDetailResult{
+					Session:  service.AICCSessionResult{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", Channel: domain.AICCChannelWebLink, CreatedAt: now, UpdatedAt: now},
+					Messages: []service.AICCMessageResult{{ID: "msg-1", Direction: domain.AICCMessageDirectionVisitor, ContentType: domain.AICCMessageContentTypeText, Text: "你好", CreatedAt: now}},
+				},
+				leadsResult:     []service.AICCLeadResult{{ID: "lead-1", OrgID: "org-1", DisplayName: "=HYPERLINK(\"https://example.com\")", Unread: true, UpdatedAt: now}},
+				analyticsResult: service.AICCAnalyticsResult{TodaySessions: 3, UnreadLeads: 1},
+			}
+			router := newAICCTestRouter(t, svc)
+
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(tc.method, tc.path, nil)
+			request = withPrincipal(request, auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: "org-1", UserID: "admin-1"})
+			router.ServeHTTP(recorder, request)
+
+			require.Equal(t, tc.wantStatus, recorder.Code)
+			tc.assertion(t, svc, recorder)
 		})
 	}
 }

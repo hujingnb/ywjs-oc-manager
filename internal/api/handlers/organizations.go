@@ -311,6 +311,9 @@ func writeServiceError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, apierror.New("QUOTA_EXCEEDED", validationServiceMessage(err, service.ErrQuotaExceeded)))
 	case errors.Is(err, service.ErrInvalidArgument):
 		c.JSON(http.StatusBadRequest, apierror.New("INVALID_ARGUMENT", validationServiceMessage(err, service.ErrInvalidArgument)))
+	case errors.Is(err, service.ErrVersionNotInAllowlist):
+		// AICC 隐藏 app 复用企业助手版本 allowlist；未配置版本属于可修正的业务配置错误，不应暴露为 500。
+		apierror.JSON(c, http.StatusBadRequest, "VERSION_NOT_ALLOWED", apierror.MsgAppVersionNotAllowed)
 	case errors.Is(err, service.ErrMemberCreateInvalid):
 		c.JSON(http.StatusBadRequest, apierror.New("MEMBER_INVALID", validationServiceMessage(err, service.ErrMemberCreateInvalid)))
 	default:

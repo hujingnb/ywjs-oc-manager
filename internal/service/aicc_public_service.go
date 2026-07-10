@@ -53,6 +53,12 @@ type AICCPublicStore interface {
 	ListAICCLeadFieldsByAgent(ctx context.Context, agentID string) ([]sqlc.AiccLeadField, error)
 	// UpsertAICCLeadValue 写入或覆盖会话内某个留资字段值。
 	UpsertAICCLeadValue(ctx context.Context, arg sqlc.UpsertAICCLeadValueParams) error
+	// UpsertAICCLead 按企业和联系方式归并线索主记录，供管理端列表和导出使用。
+	UpsertAICCLead(ctx context.Context, arg sqlc.UpsertAICCLeadParams) error
+	// GetAICCLeadByContact 读取刚归并的线索主记录，获得稳定 lead_id 用于关联字段值。
+	GetAICCLeadByContact(ctx context.Context, arg sqlc.GetAICCLeadByContactParams) (sqlc.AiccLead, error)
+	// AttachAICCLeadValuesToLead 把本次会话已提交的字段值关联到归并后的线索主记录。
+	AttachAICCLeadValuesToLead(ctx context.Context, arg sqlc.AttachAICCLeadValuesToLeadParams) error
 	// ListRequiredAICCLeadFieldsMissing 查询当前会话尚未提交的必填留资字段。
 	ListRequiredAICCLeadFieldsMissing(ctx context.Context, sessionID string) ([]sqlc.AiccLeadField, error)
 	// UpdateAICCSessionLeadStatus 同步会话留资完成状态。
@@ -100,11 +106,12 @@ type AICCPublicSessionResult struct {
 
 // AICCPublicConfigResult 是公开访客端可读取的智能体展示配置。
 type AICCPublicConfigResult struct {
-	Name          string `json:"name"`
-	Greeting      string `json:"greeting,omitempty"`
-	PrivacyMode   string `json:"privacy_mode"`
-	PrivacyText   string `json:"privacy_text,omitempty"`
-	RetentionDays int32  `json:"retention_days"`
+	Name          string                `json:"name"`
+	Greeting      string                `json:"greeting,omitempty"`
+	PrivacyMode   string                `json:"privacy_mode"`
+	PrivacyText   string                `json:"privacy_text,omitempty"`
+	RetentionDays int32                 `json:"retention_days"`
+	LeadFields    []AICCLeadFieldResult `json:"lead_fields"`
 }
 
 // AICCPublicMessageInput 是访客发送消息的入参。
@@ -185,12 +192,17 @@ func (s *AICCPublicService) PublicConfig(ctx context.Context, publicToken string
 	if err != nil {
 		return AICCPublicConfigResult{}, err
 	}
+	fields, err := s.store.ListAICCLeadFieldsByAgent(ctx, agent.ID)
+	if err != nil {
+		return AICCPublicConfigResult{}, fmt.Errorf("查询 AICC 公开留资字段失败: %w", err)
+	}
 	return AICCPublicConfigResult{
 		Name:          agent.Name,
 		Greeting:      strOrEmpty(agent.Greeting),
 		PrivacyMode:   agent.PrivacyMode,
 		PrivacyText:   strOrEmpty(agent.PrivacyText),
 		RetentionDays: agent.RetentionDays,
+		LeadFields:    toAICCLeadFieldResults(fields),
 	}, nil
 }
 
@@ -474,6 +486,9 @@ func (s *AICCPublicService) submitLeadValues(ctx context.Context, input AICCPubl
 	status := domain.AICCLeadStatusPending
 	if len(missing) == 0 {
 		status = domain.AICCLeadStatusComplete
+		if err := s.upsertLeadForCompletedSession(ctx, session, fieldsByKey, input.Values); err != nil {
+			return AICCPublicLeadValuesResult{}, err
+		}
 	}
 	if err := s.store.UpdateAICCSessionLeadStatus(ctx, sqlc.UpdateAICCSessionLeadStatusParams{
 		ID:         session.ID,
@@ -482,6 +497,36 @@ func (s *AICCPublicService) submitLeadValues(ctx context.Context, input AICCPubl
 		return AICCPublicLeadValuesResult{}, fmt.Errorf("更新 AICC 留资状态失败: %w", err)
 	}
 	return AICCPublicLeadValuesResult{LeadStatus: status, MissingRequiredKeys: aiccLeadFieldKeys(missing)}, nil
+}
+
+func (s *AICCPublicService) upsertLeadForCompletedSession(ctx context.Context, session sqlc.AiccSession, fieldsByKey map[string]sqlc.AiccLeadField, values map[string]string) error {
+	contactValue := primaryAICCContactValue(fieldsByKey, values)
+	if contactValue == "" {
+		return fmt.Errorf("%w: 缺少可归并的联系方式", ErrInvalidArgument)
+	}
+	contactHash := hashAICCLeadValue(contactValue)
+	if err := s.store.UpsertAICCLead(ctx, sqlc.UpsertAICCLeadParams{
+		ID:                 newUUID(),
+		OrgID:              session.OrgID,
+		PrimaryContactHash: contactHash,
+		DisplayName:        nullStr(contactValue),
+		LatestSessionID:    null.StringFrom(session.ID),
+	}); err != nil {
+		return fmt.Errorf("归并 AICC 线索失败: %w", err)
+	}
+	lead, err := s.store.GetAICCLeadByContact(ctx, sqlc.GetAICCLeadByContactParams{OrgID: session.OrgID, PrimaryContactHash: contactHash})
+	if err != nil {
+		return fmt.Errorf("读取 AICC 线索失败: %w", err)
+	}
+	if err := s.store.AttachAICCLeadValuesToLead(ctx, sqlc.AttachAICCLeadValuesToLeadParams{
+		LeadID:    null.StringFrom(lead.ID),
+		LeadOrgID: null.StringFrom(lead.OrgID),
+		SessionID: session.ID,
+		OrgID:     session.OrgID,
+	}); err != nil {
+		return fmt.Errorf("关联 AICC 留资字段失败: %w", err)
+	}
+	return nil
 }
 
 // SubmitFeedback 写入助手回复反馈，并同步会话解决状态。
@@ -617,6 +662,30 @@ func aiccLeadFieldKeys(fields []sqlc.AiccLeadField) []string {
 		keys = append(keys, field.FieldKey)
 	}
 	return keys
+}
+
+func primaryAICCContactValue(fieldsByKey map[string]sqlc.AiccLeadField, values map[string]string) string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, fieldType := range []string{"phone", "email"} {
+		for _, key := range keys {
+			field := fieldsByKey[key]
+			if field.FieldType == fieldType {
+				if value := strings.TrimSpace(values[key]); value != "" {
+					return value
+				}
+			}
+		}
+	}
+	for _, key := range keys {
+		if value := strings.TrimSpace(values[key]); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func int64PtrIfValid(v int64, valid bool) *int64 {

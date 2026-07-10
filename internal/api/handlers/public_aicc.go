@@ -252,17 +252,19 @@ func (h *PublicAICCHandler) Feedback(c *gin.Context) {
 func writePublicAICCError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrAICCConsentRequired):
-		c.JSON(http.StatusConflict, apierror.New("AICC_CONSENT_REQUIRED", "需要先同意隐私说明"))
+		apierror.JSON(c, http.StatusConflict, "AICC_CONSENT_REQUIRED", apierror.MsgAICCConsentRequired)
 	case errors.Is(err, service.ErrAICCLeadRequired):
-		c.JSON(http.StatusConflict, apierror.New("AICC_LEAD_REQUIRED", "需要先提交必填联系信息"))
+		apierror.JSON(c, http.StatusConflict, "AICC_LEAD_REQUIRED", apierror.MsgAICCLeadRequired)
 	case errors.Is(err, service.ErrAICCOffline):
-		c.JSON(http.StatusNotFound, apierror.New("AICC_OFFLINE", "客服已下线"))
+		apierror.JSON(c, http.StatusNotFound, "AICC_OFFLINE", apierror.MsgAICCOffline)
 	case errors.Is(err, service.ErrAICCInvalidSession):
-		c.JSON(http.StatusUnauthorized, apierror.New("AICC_INVALID_SESSION", "会话已失效"))
+		apierror.JSON(c, http.StatusUnauthorized, "AICC_INVALID_SESSION", apierror.MsgAICCInvalidSession)
 	case errors.Is(err, service.ErrAICCInvalidMessage):
-		c.JSON(http.StatusNotFound, apierror.New("AICC_INVALID_MESSAGE", "消息不可反馈"))
+		apierror.JSON(c, http.StatusNotFound, "AICC_INVALID_MESSAGE", apierror.MsgAICCInvalidMessage)
 	case errors.Is(err, service.ErrAICCImageUnavailable):
-		c.JSON(http.StatusServiceUnavailable, apierror.New("AICC_IMAGE_UNAVAILABLE", "图片上传不可用"))
+		apierror.JSON(c, http.StatusServiceUnavailable, "AICC_IMAGE_UNAVAILABLE", apierror.MsgAICCImageUnavailable)
+	case errors.Is(err, service.ErrConversationFileTooLarge):
+		apierror.JSON(c, http.StatusRequestEntityTooLarge, "CONVERSATION_FILE_TOO_LARGE", apierror.MsgConversationFileTooLarge)
 	case errors.Is(err, service.ErrInvalidArgument):
 		c.JSON(http.StatusBadRequest, apierror.New("BAD_REQUEST", validationServiceMessage(err, service.ErrInvalidArgument)))
 	default:

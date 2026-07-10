@@ -164,6 +164,9 @@ func TestAICCMigrationGuardrails(t *testing.T) {
 	upBytes, err := FS.ReadFile("000028_aicc.up.sql")
 	require.NoError(t, err)
 	up := string(upBytes)
+	up29Bytes, err := FS.ReadFile("000029_aicc_lead_fields_soft_delete.up.sql")
+	require.NoError(t, err)
+	up29 := string(up29Bytes)
 
 	assert.Contains(t, up, "ADD COLUMN aicc_enabled BOOLEAN NOT NULL DEFAULT FALSE")
 	assert.Contains(t, up, "ADD COLUMN aicc_agent_limit INT NULL")
@@ -210,17 +213,24 @@ func TestAICCMigrationGuardrails(t *testing.T) {
 	assert.Contains(t, up, "CONSTRAINT fk_aicc_images_session_agent FOREIGN KEY (session_id, agent_id)")
 	assert.Contains(t, up, "KEY idx_aicc_images_session (session_id, id)")
 	assert.Contains(t, up, "CREATE TABLE aicc_leads")
-	assert.Contains(t, up, "latest_session_org_id CHAR(36) NULL")
+	assert.Contains(t, up, "latest_session_org_id CHAR(36) GENERATED ALWAYS AS")
+	assert.Contains(t, up, "CASE WHEN latest_session_id IS NULL THEN NULL ELSE org_id END")
 	assert.Contains(t, up, "CONSTRAINT fk_aicc_leads_latest_session FOREIGN KEY (latest_session_id, latest_session_org_id)")
 	assert.Contains(t, up, "UNIQUE KEY uk_aicc_leads_identity (id, org_id)")
 	assert.Contains(t, up, "KEY idx_aicc_leads_latest_session (latest_session_id, latest_session_org_id)")
 	assert.Contains(t, up, "CREATE TABLE aicc_feedback")
 	assert.Contains(t, up, "org_id CHAR(36) NOT NULL")
 	assert.Contains(t, up, "lead_org_id CHAR(36) NULL")
+	assert.Contains(t, up29, "ADD COLUMN deleted_at DATETIME NULL")
+	assert.Contains(t, up29, "ADD KEY idx_aicc_lead_fields_agent_active (agent_id, deleted_at, sort_order, id)")
+	assert.Contains(t, up29, "DROP FOREIGN KEY fk_aicc_lead_values_session_agent")
+	assert.Contains(t, up29, "REFERENCES aicc_sessions(id, agent_id) ON DELETE CASCADE")
 	assert.Contains(t, up, "CONSTRAINT fk_aicc_lead_values_session_org FOREIGN KEY (session_id, org_id)")
 	assert.Contains(t, up, "CONSTRAINT fk_aicc_lead_values_session_agent FOREIGN KEY (session_id, agent_id)")
 	assert.Contains(t, up, "CONSTRAINT fk_aicc_lead_values_lead_org FOREIGN KEY (lead_id, lead_org_id)")
-	assert.Contains(t, up, "CONSTRAINT aicc_lead_values_lead_org_check CHECK")
+	// MySQL 不允许 CHECK 引用参与外键级联动作的列；跨租户约束由生成列 + 复合外键保证。
+	assert.NotContains(t, up, "CONSTRAINT aicc_leads_latest_session_org_check CHECK")
+	assert.NotContains(t, up, "CONSTRAINT aicc_lead_values_lead_org_check CHECK")
 	assert.Contains(t, up, "CONSTRAINT fk_aicc_lead_values_field_agent FOREIGN KEY (field_id, agent_id)")
 	assert.Contains(t, up, "UNIQUE KEY uk_aicc_lead_values_session_field (session_id, field_id)")
 	assert.Contains(t, up, "KEY idx_aicc_lead_values_session_org (session_id, org_id)")
@@ -294,11 +304,12 @@ func TestAICCMigrationExecutesOnMySQL(t *testing.T) {
 		"app-a", "org-a", "user-a", "App A", nil, "draft", "pending", nil, nil, int64(1024),
 		"app-b", "org-b", "user-b", "App B", nil, "draft", "pending", nil, nil, int64(1024),
 	)
-	mustExecMigrationSQL(t, testDB, "INSERT INTO aicc_agents (id, org_id, app_id, name, status, public_token, widget_token) VALUES (?, ?, ?, ?, ?, ?, ?)",
+	mustExecMigrationSQL(t, testDB, "INSERT INTO aicc_agents (id, org_id, app_id, name, status, public_token, widget_token) VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)",
 		"agent-a", "org-a", "app-a", "Agent A", "draft", "public-a", "widget-a",
+		"agent-b", "org-b", "app-b", "Agent B", "draft", "public-b", "widget-b",
 	)
 	mustExecMigrationSQL(t, testDB, "INSERT INTO industry_knowledge_bases (id, name, created_by) VALUES (?, ?, ?)", "industry-1", "Industry 1", "system")
-	mustExecMigrationSQL(t, testDB, "INSERT INTO ragflow_datasets (id, scope_type, org_id, app_id, ragflow_dataset_id, name, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+	mustExecMigrationSQL(t, testDB, "INSERT INTO ragflow_datasets (id, scope_type, org_id, app_id, ragflow_dataset_id, name, status) VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)",
 		"dataset-a", "app", "org-a", "app-a", "remote-dataset-a", "Dataset A", "active",
 		"dataset-b", "app", "org-b", "app-b", "remote-dataset-b", "Dataset B", "active",
 	)
@@ -369,24 +380,39 @@ func TestAICCMigrationExecutesOnMySQL(t *testing.T) {
 	mustExecMigrationSQL(t, testDB, "INSERT INTO aicc_lead_fields (id, agent_id, field_key, label) VALUES (?, ?, ?, ?)",
 		"field-a", "agent-a", "contact_phone", "联系电话",
 	)
+	mustExecMigrationSQL(t, testDB, "INSERT INTO aicc_lead_fields (id, agent_id, field_key, label) VALUES (?, ?, ?, ?)",
+		"field-b", "agent-b", "contact_phone", "联系电话",
+	)
 	mustExecMigrationSQL(t, testDB, "INSERT INTO aicc_leads (id, org_id, primary_contact_hash) VALUES (?, ?, ?), (?, ?, ?)",
 		"lead-a", "org-a", "hash-a",
 		"lead-b", "org-b", "hash-b",
 	)
 
-	// 跨组织 lead 绑定必须被复合外键拒绝。
+	// lead 指向 latest_session 时，数据库会阻止直接物理删除 session；保留任务必须先清空引用再删会话。
+	mustExecMigrationSQL(t, testDB, "INSERT INTO aicc_sessions (id, agent_id, org_id, session_token, expires_at) VALUES (?, ?, ?, ?, ?)",
+		"session-retention", "agent-a", "org-a", "session-token-retention", time.Now().Add(-24*time.Hour),
+	)
+	mustExecMigrationSQL(t, testDB, "INSERT INTO aicc_leads (id, org_id, primary_contact_hash, latest_session_id) VALUES (?, ?, ?, ?)",
+		"lead-retention", "org-a", "hash-retention", "session-retention",
+	)
+	_, err = testDB.Exec("DELETE FROM aicc_sessions WHERE id = ? AND org_id = ?", "session-retention", "org-a")
+	require.Error(t, err)
+	mustExecMigrationSQL(t, testDB, "UPDATE aicc_leads SET latest_session_id = NULL WHERE id = ? AND org_id = ?", "lead-retention", "org-a")
+	mustExecMigrationSQL(t, testDB, "DELETE FROM aicc_sessions WHERE id = ? AND org_id = ?", "session-retention", "org-a")
+
+	// 不存在的 lead_id 与当前 org_id 组合必须由 lead 复合外键拒绝。
 	_, err = testDB.Exec(`INSERT INTO aicc_lead_values (
 		id, session_id, agent_id, org_id, lead_id, lead_org_id, field_id, value_text
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		"lead-value-cross-org", "session-a", "agent-a", "org-a", "lead-b", "org-b", "field-a", "13800138000",
+		"lead-value-missing-lead-org", "session-a", "agent-a", "org-a", "missing-lead", "org-a", "field-a", "13800138002",
 	)
 	require.Error(t, err)
 
-	// lead_id 与当前 org_id 组合不存在时，必须由 lead 复合外键拒绝，避免仅依赖 CHECK 覆盖跨租户写入。
+	// 即使 org_id 与 session 匹配、field_id 与 agent 匹配，也不能把 session-a 伪造成 agent-b 的留资值。
 	_, err = testDB.Exec(`INSERT INTO aicc_lead_values (
 		id, session_id, agent_id, org_id, lead_id, lead_org_id, field_id, value_text
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		"lead-value-missing-lead-org", "session-a", "agent-a", "org-a", "lead-b", "org-a", "field-a", "13800138002",
+		"lead-value-cross-agent", "session-a", "agent-b", "org-a", nil, nil, "field-b", "13800138003",
 	)
 	require.Error(t, err)
 
@@ -397,8 +423,41 @@ func TestAICCMigrationExecutesOnMySQL(t *testing.T) {
 		"lead-value-ok", "session-a", "agent-a", "org-a", "lead-a", "org-a", "field-a", "13800138001",
 	)
 
-	// 删除 lead 后，复合外键应把 lead_id/lead_org_id 置空，而不是删除整条留资值。
-	mustExecMigrationSQL(t, testDB, "DELETE FROM aicc_leads WHERE id = ? AND org_id = ?", "lead-a", "org-a")
+	// 会话被物理清理时，已提交的留资字段值必须随 session 级联删除，避免保留期清理被 FK 阻塞。
+	mustExecMigrationSQL(t, testDB, "INSERT INTO aicc_sessions (id, agent_id, org_id, session_token, expires_at) VALUES (?, ?, ?, ?, ?)",
+		"session-lead-cascade", "agent-a", "org-a", "session-token-lead-cascade", time.Now().Add(-24*time.Hour),
+	)
+	mustExecMigrationSQL(t, testDB, `INSERT INTO aicc_lead_values (
+		id, session_id, agent_id, org_id, field_id, value_text
+	) VALUES (?, ?, ?, ?, ?, ?)`,
+		"lead-value-cascade", "session-lead-cascade", "agent-a", "org-a", "field-a", "13800138009",
+	)
+	mustExecMigrationSQL(t, testDB, "DELETE FROM aicc_sessions WHERE id = ? AND org_id = ?", "session-lead-cascade", "org-a")
+	var leadValueCount int
+	require.NoError(t, testDB.QueryRow("SELECT COUNT(*) FROM aicc_lead_values WHERE id = ?", "lead-value-cascade").Scan(&leadValueCount))
+	assert.Equal(t, 0, leadValueCount)
+
+	// 已有历史留资值引用字段后，管理端保存字段配置只能软停用/恢复字段，不能物理删除字段行。
+	mustExecMigrationSQL(t, testDB, "UPDATE aicc_lead_fields SET deleted_at = NOW() WHERE agent_id = ? AND deleted_at IS NULL", "agent-a")
+	mustExecMigrationSQL(t, testDB, `INSERT INTO aicc_lead_fields (
+		id, agent_id, field_key, label, field_type, required, sort_order
+	) VALUES (?, ?, ?, ?, ?, ?, ?)
+	ON DUPLICATE KEY UPDATE
+		label = VALUES(label),
+		field_type = VALUES(field_type),
+		required = VALUES(required),
+		sort_order = VALUES(sort_order),
+		deleted_at = NULL`,
+		"field-restored", "agent-a", "contact_phone", "联系电话", "phone", true, 1,
+	)
+	var restoredDeletedAt sql.NullTime
+	require.NoError(t, testDB.QueryRow("SELECT deleted_at FROM aicc_lead_fields WHERE agent_id = ? AND field_key = ?", "agent-a", "contact_phone").Scan(&restoredDeletedAt))
+	assert.False(t, restoredDeletedAt.Valid)
+
+	// 已被留资值引用的 lead 不允许被物理删除；需先清空引用，避免历史留资值跨租户失去归属锚点。
+	_, err = testDB.Exec("DELETE FROM aicc_leads WHERE id = ? AND org_id = ?", "lead-a", "org-a")
+	require.Error(t, err)
+	mustExecMigrationSQL(t, testDB, "UPDATE aicc_lead_values SET lead_id = NULL, lead_org_id = NULL WHERE id = ?", "lead-value-ok")
 	var leadID, leadOrgID sql.NullString
 	require.NoError(t, testDB.QueryRow(
 		"SELECT lead_id, lead_org_id FROM aicc_lead_values WHERE id = ?",
@@ -406,6 +465,7 @@ func TestAICCMigrationExecutesOnMySQL(t *testing.T) {
 	).Scan(&leadID, &leadOrgID))
 	assert.False(t, leadID.Valid)
 	assert.False(t, leadOrgID.Valid)
+	mustExecMigrationSQL(t, testDB, "DELETE FROM aicc_leads WHERE id = ? AND org_id = ?", "lead-a", "org-a")
 
 	// down 迁移必须能在真实 MySQL 上成功回滚 000028，避免 parent 索引因 FK 依赖删除失败。
 	require.NoError(t, migrator.Steps(-1))

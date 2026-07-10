@@ -51,6 +51,7 @@ import (
 	"oc-manager/internal/service"
 	"oc-manager/internal/store"
 	"oc-manager/internal/worker"
+	aiccworker "oc-manager/internal/worker/aicc"
 	"oc-manager/internal/worker/handlers"
 	"oc-manager/internal/worker/reaper"
 	"oc-manager/internal/worker/webpublish"
@@ -170,6 +171,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	appService.SetImageResolver(runtimeImageAdapter{images: cfg.Hermes.RuntimeImages})
 	// AICC 智能体复用 AppService 创建隐藏 app，并由 app_initialize worker 继续完成 runtime 初始化。
 	aiccService := service.NewAICCService(dbStore.Queries, appService)
+	aiccService.SetTxRunner(store.NewAICCRunner(dbStore))
 	runtimeOpService := service.NewRuntimeOperationService(dbStore.Queries, logger, redisQueue)
 	// usage / organization service 在装配 newapi client 之后再实例化（见下方）；
 	// 这里仅声明变量，真实赋值发生在 newapi wiring 段。
@@ -345,6 +347,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// workspaceObjStore 供 WorkspaceService 浏览 app workspace；S3 未启用时为 nil，
 	// Task 14 将完整接入；此处 nil 时 service 层返回 ErrWorkspaceMissing。
 	var workspaceObjStore storage.ObjectStore
+	// aiccImageCleaner 供 AICC 保留期清理删除公开图片对象；未启用 S3 时保持 nil。
+	var aiccImageCleaner service.AICCObjectCleaner
 	// workspacePresignTTL 为 workspace 文件下载预签名 URL 有效期；S3 启用时从配置读取。
 	workspacePresignTTL := 15 * time.Minute
 	if cfg.Storage.S3.Enabled {
@@ -358,6 +362,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		}
 		objStore := storage.NewS3ObjectStore(s3cfg)
 		aiccPublicService.SetImageBlob(objStore)
+		aiccImageCleaner = objStore
 		// s3Skills 供 BootstrapService 生成 skill 预签名读 URL；
 		// 助手版本 skill 已改为从平台库选（快照引用库路径），不再需要独立 tar 写入副本。
 		s3Skills := service.NewS3SkillBlobStore(objStore, cfg.Storage.S3.PresignTTL.Duration)
@@ -853,6 +858,11 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		logger,
 	)
 	reaperInstance.Start(gctx)
+
+	// AICC 保留期清理：周期扫描过期公开会话，删除对象存储图片并清理数据库会话数据。
+	// 多副本通过 Redis 锁 ocm:aicc-retention:lock 互斥；S3 未启用时只清理数据库侧数据。
+	aiccRetention := service.NewAICCRetentionService(dbStore.Queries, aiccImageCleaner)
+	aiccworker.NewRetentionLoop(aiccRetention, distLocker, uuid.NewString(), logger).Start(gctx)
 
 	// SiteReaper Loop：周期（60s）扫描过期 active 站点，置 expired 并删整站前缀。
 	// 多副本通过 Redis 锁 ocm:webpublish-reaper:lock 互斥，复用 distLocker + 新 uuid instanceID。

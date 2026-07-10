@@ -16,6 +16,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -54,8 +55,8 @@ type fixture struct {
 }
 
 func main() {
-	if os.Getenv("OCM_E2E") != "1" {
-		log.Fatalf("seed-e2e 需要 OCM_E2E=1 环境变量；本命令会 TRUNCATE 业务表，禁止误在生产执行")
+	if err := requireE2EGuard(); err != nil {
+		log.Fatal(err)
 	}
 
 	configPath := os.Getenv("OCM_CONFIG")
@@ -97,6 +98,14 @@ func main() {
 	if err := enc.Encode(fx); err != nil {
 		log.Fatalf("打印 fixture 失败: %v", err)
 	}
+}
+
+// requireE2EGuard 强制要求调用方显式声明 e2e 场景，防止误执行清库型 fixture 初始化。
+func requireE2EGuard() error {
+	if os.Getenv("OCM_E2E") != "1" {
+		return errors.New("seed-e2e 需要 OCM_E2E=1 环境变量；本命令会 TRUNCATE 业务表，禁止误在生产执行")
+	}
+	return nil
 }
 
 // truncate 清掉 e2e 相关表；users 表只保留 platform_admin 行（保留 cmd/seed-admin
@@ -224,6 +233,16 @@ func buildFixture(ctx context.Context, db *sql.DB) (fixture, error) {
 		versionID,
 	); err != nil {
 		return fx, fmt.Errorf("create assistant_version: %w", err)
+	}
+	// AICC 隐藏 app 创建会复用企业可用助手版本 allowlist；fixture 组织需要显式允许
+	// 刚创建的版本，避免端到端用例在创建 AICC 智能体时因缺少版本配置失败。
+	if _, err := db.ExecContext(ctx, `
+		UPDATE organizations
+		SET assistant_version_ids = JSON_ARRAY(?)
+		WHERE id = ?`,
+		versionID, fx.OrgID,
+	); err != nil {
+		return fx, fmt.Errorf("allow assistant_version for org: %w", err)
 	}
 
 	// 4) 创建 fixture app（status=running，绑定上面的版本）。owner_user_id 用 org_admin。

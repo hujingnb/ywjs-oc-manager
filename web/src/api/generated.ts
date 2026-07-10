@@ -448,6 +448,249 @@ export interface paths {
         };
         trace?: never;
     };
+    "/aicc/agents/{agentId}/lead-fields": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * AICC 留资字段列表
+         * @description 企业管理员查看指定智能体公开页留资字段配置
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 智能体 ID */
+                    agentId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.AICCLeadFieldResult"][];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        /**
+         * 保存 AICC 留资字段
+         * @description 企业管理员整组替换指定智能体公开页留资字段配置
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 智能体 ID */
+                    agentId: string;
+                };
+                cookie?: never;
+            };
+            /** @description 留资字段配置 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.ReplaceAICCLeadFieldsRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.AICCLeadFieldResult"][];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aicc/agents/{agentId}/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * AICC 会话列表
+         * @description 企业管理员查看指定智能体的访客会话列表
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 每页条数（默认 50） */
+                    limit?: number;
+                    /** @description 分页偏移（默认 0） */
+                    offset?: number;
+                };
+                header?: never;
+                path: {
+                    /** @description 智能体 ID */
+                    agentId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.AICCSessionResult"][];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aicc/agents/{agentId}/start": {
         parameters: {
             query?: never;
@@ -620,6 +863,375 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aicc/analytics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * AICC 运营统计
+         * @description 返回今日会话数和未读线索数
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 企业 ID（平台管理员排障使用） */
+                    org_id?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.AICCAnalyticsResult"];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aicc/leads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * AICC 线索列表
+         * @description 企业管理员查看本企业线索，平台管理员可通过 org_id 只读排障
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 企业 ID（平台管理员排障使用） */
+                    org_id?: string;
+                    /** @description 每页条数（默认 50） */
+                    limit?: number;
+                    /** @description 分页偏移（默认 0） */
+                    offset?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.AICCLeadResult"][];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aicc/leads/{leadId}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 标记 AICC 线索已读
+         * @description 企业管理员将本企业线索标记为已读
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 线索 ID */
+                    leadId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aicc/leads/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 导出 AICC 线索
+         * @description 导出当前筛选企业的线索基础字段
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description 企业 ID（平台管理员排障使用） */
+                    org_id?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": string;
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aicc/sessions/{sessionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * AICC 会话详情
+         * @description 企业管理员查看会话摘要和消息镜像
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 会话 ID */
+                    sessionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["service.AICCSessionDetailResult"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -14106,6 +14718,20 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        "handlers.AICCLeadFieldRequest": {
+            /** @description FieldKey 是字段稳定 key，访客提交时使用。 */
+            field_key: string;
+            /** @description FieldType 是字段输入类型：text / phone / email / number。 */
+            field_type: string;
+            /** @description Label 是公开页展示名称。 */
+            label: string;
+            /** @description PromptText 是输入提示。 */
+            prompt_text?: string;
+            /** @description Required 表示是否为发送消息前必填字段。 */
+            required?: boolean;
+            /** @description SortOrder 是公开页展示顺序。 */
+            sort_order?: number;
+        };
         "handlers.AddSkillFromLibraryRequest": {
             /** @description Name 是 skill 在版本内的目录名；clawhub 必填（displayName），platform 可空（以 DB 为准）。 */
             name?: string;
@@ -14464,6 +15090,10 @@ export interface components {
         "handlers.RenameConversationRequest": {
             /** @description 新标题，必填 */
             title: string;
+        };
+        "handlers.ReplaceAICCLeadFieldsRequest": {
+            /** @description Fields 是当前智能体完整留资字段列表；提交空数组表示关闭留资表单。 */
+            fields: components["schemas"]["handlers.AICCLeadFieldRequest"][];
         };
         "handlers.ResetPasswordRequest": {
             /** @description Password 是新密码，service 层只保存 hash。 */
@@ -14959,8 +15589,71 @@ export interface components {
             /** @description WidgetToken 是嵌入组件 token；仅管理面返回。 */
             widget_token?: string;
         };
+        "service.AICCAnalyticsResult": {
+            /** @description TodaySessions 是当前企业今日会话数。 */
+            today_sessions?: number;
+            /** @description UnreadLeads 是当前企业未读线索数。 */
+            unread_leads?: number;
+        };
+        "service.AICCLeadFieldResult": {
+            /** @description FieldKey 是字段稳定 key。 */
+            field_key?: string;
+            /** @description FieldType 是字段输入类型。 */
+            field_type?: string;
+            /** @description ID 是字段主键；公开页只用于稳定渲染，不参与提交。 */
+            id?: string;
+            /** @description Label 是字段展示名称。 */
+            label?: string;
+            /** @description PromptText 是输入提示。 */
+            prompt_text?: string;
+            /** @description Required 表示是否必填。 */
+            required?: boolean;
+            /** @description SortOrder 是展示顺序。 */
+            sort_order?: number;
+        };
+        "service.AICCLeadResult": {
+            /** @description CreatedAt 是线索首次创建时间。 */
+            created_at?: string;
+            /** @description DisplayName 是可展示联系人名称或联系方式摘要。 */
+            display_name?: string;
+            /** @description ID 是线索主键。 */
+            id?: string;
+            /** @description LatestSessionID 是最近关联会话。 */
+            latest_session_id?: string;
+            /** @description OrgID 是线索所属企业。 */
+            org_id?: string;
+            /** @description Unread 表示是否未读。 */
+            unread?: boolean;
+            /** @description UpdatedAt 是线索最近更新时间。 */
+            updated_at?: string;
+        };
+        "service.AICCMessageResult": {
+            /** @description ContentType 描述文本、图片或混合消息。 */
+            content_type?: string;
+            /** @description CreatedAt 是消息创建时间。 */
+            created_at?: string;
+            /** @description Direction 区分访客、助手或系统消息。 */
+            direction?: string;
+            /** @description ErrorSummary 是运行时错误摘要。 */
+            error_summary?: string;
+            /** @description ID 是消息主键。 */
+            id?: string;
+            /** @description ImageMime 是图片 MIME。 */
+            image_mime?: string;
+            /** @description ImageObjectKey 是图片对象 key，仅管理端排障使用。 */
+            image_object_key?: string;
+            /** @description ImageSizeBytes 是图片大小。 */
+            image_size_bytes?: number;
+            /** @description IsFallback 表示是否为兜底回答。 */
+            is_fallback?: boolean;
+            /** @description IsRefusal 表示是否为拒答。 */
+            is_refusal?: boolean;
+            /** @description Text 是文本内容，可为空。 */
+            text?: string;
+        };
         "service.AICCPublicConfigResult": {
             greeting?: string;
+            lead_fields?: components["schemas"]["service.AICCLeadFieldResult"][];
             name?: string;
             privacy_mode?: string;
             privacy_text?: string;
@@ -14987,6 +15680,36 @@ export interface components {
             privacy_notice_shown?: boolean;
             privacy_text?: string;
             session_token?: string;
+        };
+        "service.AICCSessionDetailResult": {
+            /** @description Messages 是会话消息镜像。 */
+            messages?: components["schemas"]["service.AICCMessageResult"][];
+            session?: components["schemas"]["service.AICCSessionResult"];
+        };
+        /** @description Session 是会话摘要。 */
+        "service.AICCSessionResult": {
+            /** @description AgentID 是会话所属智能体。 */
+            agent_id?: string;
+            /** @description Channel 是访客入口渠道。 */
+            channel?: string;
+            /** @description CreatedAt 是会话创建时间。 */
+            created_at?: string;
+            /** @description ID 是会话主键。 */
+            id?: string;
+            /** @description LastActiveAt 是最近活跃时间。 */
+            last_active_at?: string;
+            /** @description LeadStatus 是当前留资状态。 */
+            lead_status?: string;
+            /** @description OrgID 是会话所属企业。 */
+            org_id?: string;
+            /** @description Referrer 是浏览器 referrer，可为空。 */
+            referrer?: string;
+            /** @description ResolutionStatus 是当前解决状态。 */
+            resolution_status?: string;
+            /** @description SourceURL 是访客进入会话时所在页面，可为空。 */
+            source_url?: string;
+            /** @description UpdatedAt 是最近更新时间。 */
+            updated_at?: string;
         };
         "service.AppResult": {
             api_key_status?: string;

@@ -89,6 +89,7 @@ type AiccLeadField struct {
 	SortOrder  int32       `db:"sort_order" json:"sort_order"`
 	CreatedAt  time.Time   `db:"created_at" json:"created_at"`
 	UpdatedAt  time.Time   `db:"updated_at" json:"updated_at"`
+	DeletedAt  null.Time   `db:"deleted_at" json:"deleted_at"`
 }
 
 type AiccLeadValue struct {

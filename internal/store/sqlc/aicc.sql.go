@@ -12,6 +12,40 @@ import (
 	null "github.com/guregu/null/v5"
 )
 
+const attachAICCLeadValuesToLead = `-- name: AttachAICCLeadValuesToLead :exec
+UPDATE aicc_lead_values
+SET lead_id = ?, lead_org_id = ?
+WHERE session_id = ? AND org_id = ?
+`
+
+type AttachAICCLeadValuesToLeadParams struct {
+	LeadID    null.String `db:"lead_id" json:"lead_id"`
+	LeadOrgID null.String `db:"lead_org_id" json:"lead_org_id"`
+	SessionID string      `db:"session_id" json:"session_id"`
+	OrgID     string      `db:"org_id" json:"org_id"`
+}
+
+func (q *Queries) AttachAICCLeadValuesToLead(ctx context.Context, arg AttachAICCLeadValuesToLeadParams) error {
+	_, err := q.db.ExecContext(ctx, attachAICCLeadValuesToLead,
+		arg.LeadID,
+		arg.LeadOrgID,
+		arg.SessionID,
+		arg.OrgID,
+	)
+	return err
+}
+
+const clearAICCLeadLatestSession = `-- name: ClearAICCLeadLatestSession :exec
+UPDATE aicc_leads
+SET latest_session_id = NULL, updated_at = now()
+WHERE latest_session_id = ?
+`
+
+func (q *Queries) ClearAICCLeadLatestSession(ctx context.Context, latestSessionID null.String) error {
+	_, err := q.db.ExecContext(ctx, clearAICCLeadLatestSession, latestSessionID)
+	return err
+}
+
 const countAICCAgentsByOrg = `-- name: CountAICCAgentsByOrg :one
 SELECT COUNT(*)
 FROM aicc_agents
@@ -20,6 +54,32 @@ WHERE org_id = ? AND deleted_at IS NULL
 
 func (q *Queries) CountAICCAgentsByOrg(ctx context.Context, orgID string) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countAICCAgentsByOrg, orgID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countAICCTodaySessions = `-- name: CountAICCTodaySessions :one
+SELECT COUNT(*)
+FROM aicc_sessions
+WHERE org_id = ? AND created_at >= CURRENT_DATE()
+`
+
+func (q *Queries) CountAICCTodaySessions(ctx context.Context, orgID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countAICCTodaySessions, orgID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countAICCUnreadLeads = `-- name: CountAICCUnreadLeads :one
+SELECT COUNT(*)
+FROM aicc_leads
+WHERE org_id = ? AND unread = TRUE
+`
+
+func (q *Queries) CountAICCUnreadLeads(ctx context.Context, orgID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countAICCUnreadLeads, orgID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -186,6 +246,17 @@ func (q *Queries) CreateAICCSession(ctx context.Context, arg CreateAICCSessionPa
 	return err
 }
 
+const deactivateAICCLeadFieldsByAgent = `-- name: DeactivateAICCLeadFieldsByAgent :exec
+UPDATE aicc_lead_fields
+SET deleted_at = now(), updated_at = now()
+WHERE agent_id = ? AND deleted_at IS NULL
+`
+
+func (q *Queries) DeactivateAICCLeadFieldsByAgent(ctx context.Context, agentID string) error {
+	_, err := q.db.ExecContext(ctx, deactivateAICCLeadFieldsByAgent, agentID)
+	return err
+}
+
 const deleteAICCSession = `-- name: DeleteAICCSession :exec
 DELETE FROM aicc_sessions
 WHERE id = ?
@@ -322,6 +393,66 @@ func (q *Queries) GetAICCImageBySession(ctx context.Context, arg GetAICCImageByS
 	return i, err
 }
 
+const getAICCLeadByContact = `-- name: GetAICCLeadByContact :one
+SELECT id, org_id, primary_contact_hash, display_name, unread, latest_session_id, latest_session_org_id, created_at, updated_at
+FROM aicc_leads
+WHERE org_id = ? AND primary_contact_hash = ?
+`
+
+type GetAICCLeadByContactParams struct {
+	OrgID              string `db:"org_id" json:"org_id"`
+	PrimaryContactHash string `db:"primary_contact_hash" json:"primary_contact_hash"`
+}
+
+func (q *Queries) GetAICCLeadByContact(ctx context.Context, arg GetAICCLeadByContactParams) (AiccLead, error) {
+	row := q.db.QueryRowContext(ctx, getAICCLeadByContact, arg.OrgID, arg.PrimaryContactHash)
+	var i AiccLead
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.PrimaryContactHash,
+		&i.DisplayName,
+		&i.Unread,
+		&i.LatestSessionID,
+		&i.LatestSessionOrgID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAICCSession = `-- name: GetAICCSession :one
+SELECT id, agent_id, org_id, session_token, channel, source_url, referrer, region, ip_hash, user_agent_hash, privacy_notice_shown, privacy_consented_at, resolution_status, lead_status, last_active_at, expires_at, created_at, updated_at
+FROM aicc_sessions
+WHERE id = ?
+`
+
+func (q *Queries) GetAICCSession(ctx context.Context, id string) (AiccSession, error) {
+	row := q.db.QueryRowContext(ctx, getAICCSession, id)
+	var i AiccSession
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.OrgID,
+		&i.SessionToken,
+		&i.Channel,
+		&i.SourceUrl,
+		&i.Referrer,
+		&i.Region,
+		&i.IpHash,
+		&i.UserAgentHash,
+		&i.PrivacyNoticeShown,
+		&i.PrivacyConsentedAt,
+		&i.ResolutionStatus,
+		&i.LeadStatus,
+		&i.LastActiveAt,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getAICCSessionByToken = `-- name: GetAICCSessionByToken :one
 SELECT id, agent_id, org_id, session_token, channel, source_url, referrer, region, ip_hash, user_agent_hash, privacy_notice_shown, privacy_consented_at, resolution_status, lead_status, last_active_at, expires_at, created_at, updated_at
 FROM aicc_sessions
@@ -410,10 +541,40 @@ func (q *Queries) ListAICCAgentsByOrg(ctx context.Context, arg ListAICCAgentsByO
 	return items, nil
 }
 
+const listAICCImageObjectKeysBySession = `-- name: ListAICCImageObjectKeysBySession :many
+SELECT object_key
+FROM aicc_images
+WHERE session_id = ?
+ORDER BY created_at ASC, id ASC
+`
+
+func (q *Queries) ListAICCImageObjectKeysBySession(ctx context.Context, sessionID string) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listAICCImageObjectKeysBySession, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var object_key string
+		if err := rows.Scan(&object_key); err != nil {
+			return nil, err
+		}
+		items = append(items, object_key)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAICCLeadFieldsByAgent = `-- name: ListAICCLeadFieldsByAgent :many
-SELECT id, agent_id, field_key, label, field_type, required, prompt_text, sort_order, created_at, updated_at
+SELECT id, agent_id, field_key, label, field_type, required, prompt_text, sort_order, created_at, updated_at, deleted_at
 FROM aicc_lead_fields
-WHERE agent_id = ?
+WHERE agent_id = ? AND deleted_at IS NULL
 ORDER BY sort_order ASC, id ASC
 `
 
@@ -435,6 +596,54 @@ func (q *Queries) ListAICCLeadFieldsByAgent(ctx context.Context, agentID string)
 			&i.Required,
 			&i.PromptText,
 			&i.SortOrder,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAICCLeadsByOrg = `-- name: ListAICCLeadsByOrg :many
+SELECT id, org_id, primary_contact_hash, display_name, unread, latest_session_id, latest_session_org_id, created_at, updated_at
+FROM aicc_leads
+WHERE org_id = ?
+ORDER BY unread DESC, updated_at DESC, id DESC
+LIMIT ? OFFSET ?
+`
+
+type ListAICCLeadsByOrgParams struct {
+	OrgID  string `db:"org_id" json:"org_id"`
+	Limit  int32  `db:"limit" json:"limit"`
+	Offset int32  `db:"offset" json:"offset"`
+}
+
+func (q *Queries) ListAICCLeadsByOrg(ctx context.Context, arg ListAICCLeadsByOrgParams) ([]AiccLead, error) {
+	rows, err := q.db.QueryContext(ctx, listAICCLeadsByOrg, arg.OrgID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AiccLead{}
+	for rows.Next() {
+		var i AiccLead
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.PrimaryContactHash,
+			&i.DisplayName,
+			&i.Unread,
+			&i.LatestSessionID,
+			&i.LatestSessionOrgID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -482,6 +691,108 @@ func (q *Queries) ListAICCMessagesBySession(ctx context.Context, sessionID strin
 			&i.IsRefusal,
 			&i.ErrorSummary,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAICCSessionsByAgent = `-- name: ListAICCSessionsByAgent :many
+SELECT id, agent_id, org_id, session_token, channel, source_url, referrer, region, ip_hash, user_agent_hash, privacy_notice_shown, privacy_consented_at, resolution_status, lead_status, last_active_at, expires_at, created_at, updated_at
+FROM aicc_sessions
+WHERE agent_id = ?
+ORDER BY created_at DESC, id DESC
+LIMIT ? OFFSET ?
+`
+
+type ListAICCSessionsByAgentParams struct {
+	AgentID string `db:"agent_id" json:"agent_id"`
+	Limit   int32  `db:"limit" json:"limit"`
+	Offset  int32  `db:"offset" json:"offset"`
+}
+
+func (q *Queries) ListAICCSessionsByAgent(ctx context.Context, arg ListAICCSessionsByAgentParams) ([]AiccSession, error) {
+	rows, err := q.db.QueryContext(ctx, listAICCSessionsByAgent, arg.AgentID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AiccSession{}
+	for rows.Next() {
+		var i AiccSession
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.OrgID,
+			&i.SessionToken,
+			&i.Channel,
+			&i.SourceUrl,
+			&i.Referrer,
+			&i.Region,
+			&i.IpHash,
+			&i.UserAgentHash,
+			&i.PrivacyNoticeShown,
+			&i.PrivacyConsentedAt,
+			&i.ResolutionStatus,
+			&i.LeadStatus,
+			&i.LastActiveAt,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllAICCLeadsByOrg = `-- name: ListAllAICCLeadsByOrg :many
+SELECT id, org_id, primary_contact_hash, display_name, unread, latest_session_id, latest_session_org_id, created_at, updated_at
+FROM aicc_leads
+WHERE org_id = ?
+ORDER BY unread DESC, updated_at DESC, id DESC
+LIMIT ?
+`
+
+type ListAllAICCLeadsByOrgParams struct {
+	OrgID string `db:"org_id" json:"org_id"`
+	Limit int32  `db:"limit" json:"limit"`
+}
+
+func (q *Queries) ListAllAICCLeadsByOrg(ctx context.Context, arg ListAllAICCLeadsByOrgParams) ([]AiccLead, error) {
+	rows, err := q.db.QueryContext(ctx, listAllAICCLeadsByOrg, arg.OrgID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AiccLead{}
+	for rows.Next() {
+		var i AiccLead
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.PrimaryContactHash,
+			&i.DisplayName,
+			&i.Unread,
+			&i.LatestSessionID,
+			&i.LatestSessionOrgID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -547,7 +858,7 @@ func (q *Queries) ListExpiredAICCSessions(ctx context.Context, limit int32) ([]A
 }
 
 const listRequiredAICCLeadFieldsMissing = `-- name: ListRequiredAICCLeadFieldsMissing :many
-SELECT f.id, f.agent_id, f.field_key, f.label, f.field_type, f.required, f.prompt_text, f.sort_order, f.created_at, f.updated_at
+SELECT f.id, f.agent_id, f.field_key, f.label, f.field_type, f.required, f.prompt_text, f.sort_order, f.created_at, f.updated_at, f.deleted_at
 FROM aicc_lead_fields f
 JOIN aicc_sessions s ON s.agent_id = f.agent_id
 LEFT JOIN aicc_lead_values v ON v.session_id = s.id AND v.field_id = f.id
@@ -575,6 +886,7 @@ func (q *Queries) ListRequiredAICCLeadFieldsMissing(ctx context.Context, id stri
 			&i.SortOrder,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -587,6 +899,25 @@ func (q *Queries) ListRequiredAICCLeadFieldsMissing(ctx context.Context, id stri
 		return nil, err
 	}
 	return items, nil
+}
+
+const markAICCLeadRead = `-- name: MarkAICCLeadRead :execrows
+UPDATE aicc_leads
+SET unread = FALSE, updated_at = now()
+WHERE id = ? AND org_id = ?
+`
+
+type MarkAICCLeadReadParams struct {
+	ID    string `db:"id" json:"id"`
+	OrgID string `db:"org_id" json:"org_id"`
+}
+
+func (q *Queries) MarkAICCLeadRead(ctx context.Context, arg MarkAICCLeadReadParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markAICCLeadRead, arg.ID, arg.OrgID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const markAICCSessionConsented = `-- name: MarkAICCSessionConsented :execrows
@@ -719,6 +1050,75 @@ func (q *Queries) UpsertAICCFeedback(ctx context.Context, arg UpsertAICCFeedback
 		arg.SessionID,
 		arg.MessageID,
 		arg.Helpful,
+	)
+	return err
+}
+
+const upsertAICCLead = `-- name: UpsertAICCLead :exec
+INSERT INTO aicc_leads (
+    id, org_id, primary_contact_hash, display_name, latest_session_id
+) VALUES (?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+    display_name = VALUES(display_name),
+    latest_session_id = VALUES(latest_session_id),
+    unread = TRUE,
+    updated_at = now()
+`
+
+type UpsertAICCLeadParams struct {
+	ID                 string      `db:"id" json:"id"`
+	OrgID              string      `db:"org_id" json:"org_id"`
+	PrimaryContactHash string      `db:"primary_contact_hash" json:"primary_contact_hash"`
+	DisplayName        null.String `db:"display_name" json:"display_name"`
+	LatestSessionID    null.String `db:"latest_session_id" json:"latest_session_id"`
+}
+
+func (q *Queries) UpsertAICCLead(ctx context.Context, arg UpsertAICCLeadParams) error {
+	_, err := q.db.ExecContext(ctx, upsertAICCLead,
+		arg.ID,
+		arg.OrgID,
+		arg.PrimaryContactHash,
+		arg.DisplayName,
+		arg.LatestSessionID,
+	)
+	return err
+}
+
+const upsertAICCLeadField = `-- name: UpsertAICCLeadField :exec
+INSERT INTO aicc_lead_fields (
+    id, agent_id, field_key, label, field_type, required, prompt_text, sort_order
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+    label = VALUES(label),
+    field_type = VALUES(field_type),
+    required = VALUES(required),
+    prompt_text = VALUES(prompt_text),
+    sort_order = VALUES(sort_order),
+    deleted_at = NULL,
+    updated_at = now()
+`
+
+type UpsertAICCLeadFieldParams struct {
+	ID         string      `db:"id" json:"id"`
+	AgentID    string      `db:"agent_id" json:"agent_id"`
+	FieldKey   string      `db:"field_key" json:"field_key"`
+	Label      string      `db:"label" json:"label"`
+	FieldType  string      `db:"field_type" json:"field_type"`
+	Required   bool        `db:"required" json:"required"`
+	PromptText null.String `db:"prompt_text" json:"prompt_text"`
+	SortOrder  int32       `db:"sort_order" json:"sort_order"`
+}
+
+func (q *Queries) UpsertAICCLeadField(ctx context.Context, arg UpsertAICCLeadFieldParams) error {
+	_, err := q.db.ExecContext(ctx, upsertAICCLeadField,
+		arg.ID,
+		arg.AgentID,
+		arg.FieldKey,
+		arg.Label,
+		arg.FieldType,
+		arg.Required,
+		arg.PromptText,
+		arg.SortOrder,
 	)
 	return err
 }

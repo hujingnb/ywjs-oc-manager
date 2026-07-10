@@ -234,6 +234,11 @@ function datePickerStub() {
   })
 }
 
+async function openFirstBaseFiles(wrapper: ReturnType<typeof mountPage>) {
+  await wrapper.findAll('button').find(button => button.text().includes('文件'))!.trigger('click')
+  await nextTick()
+}
+
 describe('IndustryKnowledgePage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -247,10 +252,11 @@ describe('IndustryKnowledgePage', () => {
     i18n.global.locale.value = 'zh'
   })
 
-  // 展示行业库列表、选中行业库文件和同名覆盖提示。
+  // 展示行业库列表，并在用户打开文件面板后展示库内文件和同名覆盖提示。
   it('展示行业库和文件列表', async () => {
     const wrapper = mountPage()
     await nextTick()
+    await openFirstBaseFiles(wrapper)
 
     expect(wrapper.text()).toContain('保险')
     expect(wrapper.text()).toContain('policy.pdf')
@@ -294,6 +300,7 @@ describe('IndustryKnowledgePage', () => {
     clearFiles.mockResolvedValue(undefined)
     const wrapper = mountPage()
     await nextTick()
+    await openFirstBaseFiles(wrapper)
 
     await wrapper.findAll('button').find(button => button.text().includes('清空文件'))!.trigger('click')
 
@@ -310,6 +317,7 @@ describe('IndustryKnowledgePage', () => {
   // 覆盖行业库文件列表查询条件：文件名、创建日期和远程分页必须通过响应式参数传给 hook。
   it('行业库文件列表支持按文件名、创建日期搜索和远程分页', async () => {
     const wrapper = mountPage()
+    await openFirstBaseFiles(wrapper)
     const queryCall = fileQueryCalls[0]
 
     expect(wrapper.find('input[placeholder="搜索文件名称"]').exists()).toBe(true)

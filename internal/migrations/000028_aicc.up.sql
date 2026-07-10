@@ -203,16 +203,14 @@ CREATE TABLE aicc_leads (
     display_name VARCHAR(255) NULL,
     unread BOOLEAN NOT NULL DEFAULT TRUE,
     latest_session_id CHAR(36) NULL,
-    latest_session_org_id CHAR(36) NULL,
+    latest_session_org_id CHAR(36) GENERATED ALWAYS AS (
+        CASE WHEN latest_session_id IS NULL THEN NULL ELSE org_id END
+    ) STORED,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT aicc_leads_latest_session_org_check CHECK (
-        (latest_session_id IS NULL AND latest_session_org_id IS NULL)
-        OR (latest_session_id IS NOT NULL AND latest_session_org_id = org_id)
-    ),
     CONSTRAINT fk_aicc_leads_org FOREIGN KEY (org_id) REFERENCES organizations(id),
     CONSTRAINT fk_aicc_leads_latest_session FOREIGN KEY (latest_session_id, latest_session_org_id)
-        REFERENCES aicc_sessions(id, org_id) ON DELETE SET NULL,
+        REFERENCES aicc_sessions(id, org_id),
     UNIQUE KEY uk_aicc_leads_contact (org_id, primary_contact_hash),
     UNIQUE KEY uk_aicc_leads_identity (id, org_id),
     KEY idx_aicc_leads_org (org_id),
@@ -231,16 +229,12 @@ CREATE TABLE aicc_lead_values (
     value_text TEXT NOT NULL,
     value_hash VARCHAR(128) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT aicc_lead_values_lead_org_check CHECK (
-        (lead_id IS NULL AND lead_org_id IS NULL)
-        OR (lead_id IS NOT NULL AND lead_org_id = org_id)
-    ),
     CONSTRAINT fk_aicc_lead_values_session_org FOREIGN KEY (session_id, org_id)
         REFERENCES aicc_sessions(id, org_id) ON DELETE CASCADE,
     CONSTRAINT fk_aicc_lead_values_session_agent FOREIGN KEY (session_id, agent_id)
         REFERENCES aicc_sessions(id, agent_id) ON DELETE CASCADE,
     CONSTRAINT fk_aicc_lead_values_lead_org FOREIGN KEY (lead_id, lead_org_id)
-        REFERENCES aicc_leads(id, org_id) ON DELETE SET NULL,
+        REFERENCES aicc_leads(id, org_id),
     CONSTRAINT fk_aicc_lead_values_field_agent FOREIGN KEY (field_id, agent_id)
         REFERENCES aicc_lead_fields(id, agent_id),
     UNIQUE KEY uk_aicc_lead_values_session_field (session_id, field_id),

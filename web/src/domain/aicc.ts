@@ -58,6 +58,27 @@ export interface AICCAgentPayload {
   retention_days?: number
 }
 
+// AICCLeadField 是公开页留资字段配置，管理端编辑和访客端渲染共用。
+export interface AICCLeadField {
+  // 字段 ID；公开页仅用于稳定渲染。
+  id?: string
+  // 字段稳定 key，提交留资值时使用。
+  field_key: string
+  // 公开页展示名称。
+  label: string
+  // 输入类型。
+  field_type: 'text' | 'phone' | 'email' | 'number'
+  // 是否必填。
+  required: boolean
+  // 输入提示。
+  prompt_text?: string
+  // 展示顺序。
+  sort_order?: number
+}
+
+// AICCLeadFieldPayload 是管理端保存留资字段时提交的载荷。
+export type AICCLeadFieldPayload = Omit<AICCLeadField, 'id'>
+
 // AICCPublicConfig 是访客打开公开链接后可读取的非敏感展示配置。
 export interface AICCPublicConfig {
   // 智能体公开展示名。
@@ -70,6 +91,8 @@ export interface AICCPublicConfig {
   privacy_text?: string
   // 数据保留天数。
   retention_days?: number
+  // 公开页留资字段配置。
+  lead_fields?: AICCLeadField[]
 }
 
 // AICCPublicSession 是公开访客会话的临时凭证和隐私状态。
@@ -100,6 +123,94 @@ export interface AICCPublicImageResult {
   mime?: string
   // 图片大小，单位字节。
   size?: number
+}
+
+// AICCPublicLeadValuesResult 是访客提交留资后的状态响应。
+export interface AICCPublicLeadValuesResult {
+  // 当前会话留资状态。
+  lead_status: 'pending' | 'complete' | 'skipped' | string
+  // 仍缺失的必填字段 key。
+  missing_required_keys?: string[]
+}
+
+// AICCSession 是企业管理员查看访客会话列表时的摘要信息。
+export interface AICCSession {
+  // 会话主键。
+  id: string
+  // 所属智能体 ID。
+  agent_id: string
+  // 当前会话接待渠道。
+  channel?: string
+  // 访客来源页面。
+  source_url?: string
+  // 当前会话解决状态。
+  resolution_status?: string
+  // 当前会话留资状态。
+  lead_status?: string
+  // 最近活跃时间。
+  last_active_at?: string
+  // 会话创建时间。
+  created_at?: string
+  // 最近更新时间。
+  updated_at?: string
+}
+
+// AICCMessage 是单个会话中的访客或助手消息。
+export interface AICCMessage {
+  // 消息主键。
+  id: string
+  // 消息方向。
+  direction?: 'visitor' | 'assistant' | 'system' | string
+  // 内容类型。
+  content_type?: string
+  // 文本内容。
+  text?: string
+  // 图片对象 key；存在时说明消息带图片。
+  image_object_key?: string
+  // 图片 MIME。
+  image_mime?: string
+  // 图片大小。
+  image_size_bytes?: number
+  // 是否为兜底回答。
+  is_fallback?: boolean
+  // 是否为拒答。
+  is_refusal?: boolean
+  // 运行时错误摘要。
+  error_summary?: string
+  // 消息创建时间。
+  created_at?: string
+}
+
+// AICCSessionDetail 是会话详情与消息明细的组合视图。
+export interface AICCSessionDetail {
+  // 会话摘要。
+  session: AICCSession
+  // 会话消息列表。
+  messages: AICCMessage[]
+}
+
+// AICCLead 是从会话中沉淀出的访客线索。
+export interface AICCLead {
+  // 线索主键。
+  id: string
+  // 最近关联会话 ID。
+  latest_session_id?: string
+  // 访客展示名或联系方式摘要。
+  display_name?: string
+  // 是否未读。
+  unread: boolean
+  // 创建时间。
+  created_at?: string
+  // 最近更新时间。
+  updated_at?: string
+}
+
+// AICCAnalytics 是 AICC 运营看板的轻量统计。
+export interface AICCAnalytics {
+  // 今日新增会话数。
+  today_sessions: number
+  // 未读线索数。
+  unread_leads: number
 }
 
 // isAICCAgentRunning 判断智能体是否处于可对外接待状态。

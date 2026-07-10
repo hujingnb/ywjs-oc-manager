@@ -69,106 +69,152 @@
           {{ feedback }}
         </n-alert>
 
-        <div class="status-grid">
-          <div class="status-tile">
-            <span>运行状态</span>
-            <strong>{{ selectedAgent ? statusMeta(selectedAgent.status).label : '草稿' }}</strong>
-          </div>
-          <div class="status-tile">
-            <span>保留天数</span>
-            <strong>{{ form.retention_days || 0 }} 天</strong>
-          </div>
-          <div class="status-tile">
-            <span>公开入口</span>
-            <strong>{{ selectedAgent?.public_token ? '已生成' : '保存后生成' }}</strong>
-          </div>
-        </div>
+        <n-tabs type="segment" animated class="aicc-tabs">
+          <n-tab-pane name="config" tab="智能体配置">
+            <div class="status-grid">
+              <div class="status-tile">
+                <span>运行状态</span>
+                <strong>{{ selectedAgent ? statusMeta(selectedAgent.status).label : '草稿' }}</strong>
+              </div>
+              <div class="status-tile">
+                <span>保留天数</span>
+                <strong>{{ form.retention_days || 0 }} 天</strong>
+              </div>
+              <div class="status-tile">
+                <span>公开入口</span>
+                <strong>{{ selectedAgent?.public_token ? '已生成' : '保存后生成' }}</strong>
+              </div>
+            </div>
 
-        <n-form class="agent-form" :model="form" label-placement="top" @submit.prevent="submitForm">
-          <div class="agent-fields">
-            <div>
-              <n-form-item label="智能体名称" required>
-                <n-input v-model:value="form.name" maxlength="80" placeholder="例如：售前咨询接待员" />
-              </n-form-item>
-            </div>
-            <div>
-              <n-form-item label="数据保留天数">
-                <n-input-number v-model:value="form.retention_days" :min="1" :max="3650" style="width: 100%" />
-              </n-form-item>
-            </div>
-            <div>
-              <n-form-item label="隐私模式">
-                <n-select v-model:value="form.privacy_mode" :options="privacyOptions" />
-              </n-form-item>
-            </div>
-            <div>
-              <n-form-item label="欢迎语">
-                <n-input v-model:value="form.greeting" maxlength="240" placeholder="访客打开聊天时看到的第一句话" />
-              </n-form-item>
-            </div>
-            <div class="field-full">
-              <n-form-item label="业务场景">
-                <n-input
-                  v-model:value="form.scenario"
-                  type="textarea"
-                  :autosize="{ minRows: 3, maxRows: 5 }"
-                  placeholder="说明这个智能体服务的客群、问题类型和转人工边界"
-                />
-              </n-form-item>
-            </div>
-            <div class="field-full">
-              <n-form-item label="回答边界">
-                <n-input
-                  v-model:value="form.answer_boundary"
-                  type="textarea"
-                  :autosize="{ minRows: 3, maxRows: 5 }"
-                  placeholder="例如：不承诺价格、不处理退款审批、遇到投诉需建议人工介入"
-                />
-              </n-form-item>
-            </div>
-            <div class="field-full">
-              <n-form-item label="隐私说明">
-                <n-input
-                  v-model:value="form.privacy_text"
-                  type="textarea"
-                  :autosize="{ minRows: 3, maxRows: 5 }"
-                  placeholder="说明会收集哪些信息、保存多久、用于什么目的"
-                />
-              </n-form-item>
-            </div>
-          </div>
-          <n-space justify="end">
-            <n-button attr-type="button" @click="resetForm">重置</n-button>
-            <n-button type="primary" attr-type="submit" :loading="submitBusy">
-              <template #icon><Save :size="16" /></template>
-              保存配置
-            </n-button>
-          </n-space>
-        </n-form>
+            <n-form class="agent-form" :model="form" label-placement="top" @submit.prevent="submitForm">
+              <div class="agent-fields">
+                <div>
+                  <n-form-item label="智能体名称" required>
+                    <n-input v-model:value="form.name" maxlength="80" placeholder="例如：售前咨询接待员" />
+                  </n-form-item>
+                </div>
+                <div>
+                  <n-form-item label="数据保留天数">
+                    <n-input-number v-model:value="form.retention_days" :min="1" :max="3650" style="width: 100%" />
+                  </n-form-item>
+                </div>
+                <div>
+                  <n-form-item label="隐私模式">
+                    <n-select v-model:value="form.privacy_mode" :options="privacyOptions" />
+                  </n-form-item>
+                </div>
+                <div>
+                  <n-form-item label="欢迎语">
+                    <n-input v-model:value="form.greeting" maxlength="240" placeholder="访客打开聊天时看到的第一句话" />
+                  </n-form-item>
+                </div>
+                <div class="field-full">
+                  <n-form-item label="业务场景">
+                    <n-input
+                      v-model:value="form.scenario"
+                      type="textarea"
+                      :autosize="{ minRows: 3, maxRows: 5 }"
+                      placeholder="说明这个智能体服务的客群、问题类型和转人工边界"
+                    />
+                  </n-form-item>
+                </div>
+                <div class="field-full">
+                  <n-form-item label="回答边界">
+                    <n-input
+                      v-model:value="form.answer_boundary"
+                      type="textarea"
+                      :autosize="{ minRows: 3, maxRows: 5 }"
+                      placeholder="例如：不承诺价格、不处理退款审批、遇到投诉需建议人工介入"
+                    />
+                  </n-form-item>
+                </div>
+                <div class="field-full">
+                  <n-form-item label="隐私说明">
+                    <n-input
+                      v-model:value="form.privacy_text"
+                      type="textarea"
+                      :autosize="{ minRows: 3, maxRows: 5 }"
+                      placeholder="说明会收集哪些信息、保存多久、用于什么目的"
+                    />
+                  </n-form-item>
+                </div>
+              </div>
+              <n-space justify="end">
+                <n-button attr-type="button" @click="resetForm">重置</n-button>
+                <n-button type="primary" attr-type="submit" :loading="submitBusy">
+                  <template #icon><Save :size="16" /></template>
+                  保存配置
+                </n-button>
+              </n-space>
+            </n-form>
 
-        <div class="publish-panel">
-          <div>
-            <p class="eyebrow">公开链接</p>
-            <strong>{{ publicLink || '保存智能体后生成' }}</strong>
-          </div>
-          <n-space>
-            <n-button :disabled="!publicLink" @click="copyText(publicLink)">
-              <template #icon><Copy :size="16" /></template>
-              复制链接
-            </n-button>
-            <n-button :disabled="!publicLink" @click="openPublicLink">
-              <template #icon><ExternalLink :size="16" /></template>
-              预览
-            </n-button>
-          </n-space>
-        </div>
-        <div class="snippet-panel">
-          <span>嵌入占位</span>
-          <code>{{ widgetSnippet }}</code>
-          <n-button size="small" :disabled="!selectedAgent?.widget_token" @click="copyText(widgetSnippet)">
-            <template #icon><Copy :size="14" /></template>
-          </n-button>
-        </div>
+            <div class="lead-field-panel">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">访客留资</p>
+                  <strong>公开页联系信息</strong>
+                </div>
+                <n-button size="small" :disabled="!selectedAgent" @click="addLeadField">
+                  <template #icon><Plus :size="14" /></template>
+                  添加字段
+                </n-button>
+              </div>
+              <div v-if="!selectedAgent" class="state-text">保存智能体后可配置公开页留资字段。</div>
+              <div v-else-if="leadFieldRows.length === 0" class="empty-inline">未配置留资字段，访客可直接发起咨询。</div>
+              <div v-else class="lead-field-list">
+                <div v-for="(field, index) in leadFieldRows" :key="field.local_id" class="lead-field-row">
+                  <n-input v-model:value="field.label" placeholder="字段名称" maxlength="128" />
+                  <n-input v-model:value="field.field_key" placeholder="字段 key" maxlength="64" />
+                  <n-select v-model:value="field.field_type" :options="leadFieldTypeOptions" />
+                  <n-checkbox v-model:checked="field.required">必填</n-checkbox>
+                  <n-input v-model:value="field.prompt_text" placeholder="输入提示" maxlength="160" />
+                  <n-button quaternary circle type="error" @click="removeLeadField(index)">
+                    <template #icon><Trash2 :size="15" /></template>
+                  </n-button>
+                </div>
+              </div>
+              <n-space justify="end">
+                <n-button :disabled="!selectedAgent" :loading="leadFieldBusy" @click="saveLeadFields">
+                  <template #icon><Save :size="16" /></template>
+                  保存留资字段
+                </n-button>
+              </n-space>
+            </div>
+
+            <div class="publish-panel">
+              <div>
+                <p class="eyebrow">公开链接</p>
+                <strong>{{ publicLink || '保存智能体后生成' }}</strong>
+              </div>
+              <n-space>
+                <n-button :disabled="!publicLink" @click="copyText(publicLink)">
+                  <template #icon><Copy :size="16" /></template>
+                  复制链接
+                </n-button>
+                <n-button :disabled="!publicLink" @click="openPublicLink">
+                  <template #icon><ExternalLink :size="16" /></template>
+                  预览
+                </n-button>
+              </n-space>
+            </div>
+            <div class="snippet-panel">
+              <span>嵌入占位</span>
+              <code>{{ widgetSnippet }}</code>
+              <n-button size="small" :disabled="!selectedAgent?.widget_token" @click="copyText(widgetSnippet)">
+                <template #icon><Copy :size="14" /></template>
+              </n-button>
+            </div>
+          </n-tab-pane>
+          <n-tab-pane name="sessions" tab="会话">
+            <AICCSessionsPage :agent-id="selectedAgentId" />
+          </n-tab-pane>
+          <n-tab-pane name="leads" tab="线索">
+            <AICCLeadsPage />
+          </n-tab-pane>
+          <n-tab-pane name="analytics" tab="统计">
+            <AICCAnalyticsPage :agent-count="agents.length" :active-agent-count="activeAgentCount" />
+          </n-tab-pane>
+        </n-tabs>
       </section>
     </section>
 
@@ -188,55 +234,75 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import {
-  NAlert, NButton, NForm, NFormItem, NInput, NInputNumber, NSelect, NSpace, NTag,
-  type SelectOption,
+  NAlert, NButton, NCheckbox, NForm, NFormItem, NInput, NInputNumber, NSelect, NSpace, NTag,
+  NTabPane, NTabs, type SelectOption,
 } from 'naive-ui'
 import {
   Copy, ExternalLink, MessageSquareText, PauseCircle, PlayCircle, Plus, Save, Trash2,
 } from 'lucide-vue-next'
 
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
+import AICCAnalyticsPage from '@/pages/aicc/AICCAnalyticsPage.vue'
+import AICCLeadsPage from '@/pages/aicc/AICCLeadsPage.vue'
+import AICCSessionsPage from '@/pages/aicc/AICCSessionsPage.vue'
 import {
   useAICCAgentsQuery,
+  useAICCLeadFieldsQuery,
   useCreateAICCAgent,
   useDeleteAICCAgent,
+  useReplaceAICCLeadFields,
   useSetAICCAgentStatus,
   useUpdateAICCAgent,
 } from '@/api/hooks/useAICC'
-import type { AICCAgent, AICCAgentPayload, AICCAgentStatus, AICCPrivacyMode } from '@/domain/aicc'
+import type { AICCAgent, AICCAgentPayload, AICCAgentStatus, AICCLeadField, AICCLeadFieldPayload, AICCPrivacyMode } from '@/domain/aicc'
 import { isAICCAgentRunning } from '@/domain/aicc'
 
-// AICCManagerPage 是企业管理员维护 AI Contact Center 在线客服智能体的入口。
-// 当前后端已提供智能体配置和公开会话能力；会话列表、线索字段配置等后续接口到位后再接入。
+// AICCManagerPage 是企业管理员维护 AI Contact Center 在线客服智能体和运营数据的入口。
 interface AgentForm extends AICCAgentPayload {
   id?: string
   privacy_mode: AICCPrivacyMode
   retention_days: number
 }
 
-const agentsQuery = useAICCAgentsQuery()
-const createMutation = useCreateAICCAgent()
-const updateMutation = useUpdateAICCAgent()
-const statusMutation = useSetAICCAgentStatus()
-const deleteMutation = useDeleteAICCAgent()
+interface LeadFieldRow extends AICCLeadFieldPayload {
+  local_id: string
+}
 
 const selectedAgentId = ref<string | undefined>()
 const deleteModalOpen = ref(false)
 const feedback = ref('')
 const feedbackDanger = ref(false)
 
+const agentsQuery = useAICCAgentsQuery()
+const leadFieldsQuery = useAICCLeadFieldsQuery(selectedAgentId)
+const createMutation = useCreateAICCAgent()
+const updateMutation = useUpdateAICCAgent()
+const leadFieldMutation = useReplaceAICCLeadFields()
+const statusMutation = useSetAICCAgentStatus()
+const deleteMutation = useDeleteAICCAgent()
+
 const agents = computed(() => agentsQuery.data.value ?? [])
 const selectedAgent = computed(() => agents.value.find(agent => agent.id === selectedAgentId.value))
 const isSelectedRunning = computed(() => selectedAgent.value ? isAICCAgentRunning(selectedAgent.value) : false)
+const activeAgentCount = computed(() => agents.value.filter(agent => isAICCAgentRunning(agent)).length)
 const submitBusy = computed(() => createMutation.isPending.value || updateMutation.isPending.value)
 const statusBusy = computed(() => statusMutation.isPending.value)
 const deleteBusy = computed(() => deleteMutation.isPending.value)
+const leadFieldBusy = computed(() => leadFieldMutation.isPending.value || leadFieldsQuery.isFetching.value)
 
 const form = reactive<AgentForm>(emptyForm())
+const leadFieldRows = ref<LeadFieldRow[]>([])
 
 const privacyOptions: SelectOption[] = [
   { label: '展示隐私提示', value: 'notice' },
   { label: '必须同意后接待', value: 'consent_required' },
+]
+
+const leadFieldTypeOptions: SelectOption[] = [
+  { label: '文本', value: 'text' },
+  { label: '手机号', value: 'phone' },
+  { label: '邮箱', value: 'email' },
+  { label: '数字', value: 'number' },
 ]
 
 const publicLink = computed(() => {
@@ -262,6 +328,14 @@ watch(
 watch(selectedAgent, (agent) => {
   if (agent) fillForm(agent)
 }, { immediate: true })
+
+watch(
+  () => leadFieldsQuery.data.value,
+  (fields) => {
+    leadFieldRows.value = (fields ?? []).map(toLeadFieldRow)
+  },
+  { immediate: true },
+)
 
 function emptyForm(): AgentForm {
   return {
@@ -322,6 +396,57 @@ function resetForm() {
   }
   delete form.id
   Object.assign(form, emptyForm())
+}
+
+function toLeadFieldRow(field: AICCLeadField): LeadFieldRow {
+  return {
+    local_id: field.id || crypto.randomUUID(),
+    field_key: field.field_key,
+    label: field.label,
+    field_type: field.field_type,
+    required: field.required,
+    prompt_text: field.prompt_text ?? '',
+    sort_order: field.sort_order ?? 0,
+  }
+}
+
+function addLeadField() {
+  const next = leadFieldRows.value.length + 1
+  leadFieldRows.value.push({
+    local_id: crypto.randomUUID(),
+    field_key: next === 1 ? 'phone' : `field_${next}`,
+    label: next === 1 ? '联系电话' : `字段 ${next}`,
+    field_type: next === 1 ? 'phone' : 'text',
+    required: next === 1,
+    prompt_text: '',
+    sort_order: next,
+  })
+}
+
+function removeLeadField(index: number) {
+  leadFieldRows.value.splice(index, 1)
+}
+
+async function saveLeadFields() {
+  if (!selectedAgent.value) return
+  const fields: AICCLeadFieldPayload[] = leadFieldRows.value.map((field, index) => ({
+    field_key: field.field_key.trim(),
+    label: field.label.trim(),
+    field_type: field.field_type,
+    required: field.required,
+    prompt_text: field.prompt_text?.trim() || undefined,
+    sort_order: index + 1,
+  }))
+  if (fields.some(field => !field.field_key || !field.label)) {
+    setFeedback('请补全留资字段名称和 key', true)
+    return
+  }
+  try {
+    await leadFieldMutation.mutateAsync({ agentId: selectedAgent.value.id, fields })
+    setFeedback('留资字段已保存')
+  } catch (err) {
+    setFeedback(err instanceof Error ? err.message : '留资字段保存失败', true)
+  }
 }
 
 function statusMeta(status?: AICCAgentStatus): { label: string; type: 'success' | 'warning' | 'default' | 'error' } {
@@ -448,6 +573,7 @@ function openPublicLink() {
 .rail-heading,
 .agent-topline,
 .editor-toolbar,
+.section-heading,
 .publish-panel,
 .snippet-panel {
   display: flex;
@@ -505,6 +631,12 @@ function openPublicLink() {
   margin: 0;
 }
 
+.aicc-tabs :deep(.n-tab-pane) {
+  display: grid;
+  gap: 16px;
+  padding-top: 14px;
+}
+
 .status-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -539,6 +671,38 @@ function openPublicLink() {
   grid-column: 1 / -1;
 }
 
+.lead-field-panel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--color-divider);
+  border-radius: 8px;
+  background: var(--color-surface-muted);
+}
+
+.section-heading strong {
+  display: block;
+  margin-top: 2px;
+}
+
+.empty-inline {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.lead-field-list {
+  display: grid;
+  gap: 10px;
+}
+
+.lead-field-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(120px, 1fr) 110px 72px minmax(140px, 1fr) 36px;
+  gap: 8px;
+  align-items: center;
+}
+
 .publish-panel,
 .snippet-panel {
   min-width: 0;
@@ -563,6 +727,7 @@ function openPublicLink() {
 @media (max-width: 900px) {
   .aicc-hero,
   .editor-toolbar,
+  .section-heading,
   .publish-panel {
     align-items: stretch;
     flex-direction: column;
@@ -573,7 +738,8 @@ function openPublicLink() {
   }
 
   .status-grid,
-  .agent-fields {
+  .agent-fields,
+  .lead-field-row {
     grid-template-columns: 1fr;
   }
 

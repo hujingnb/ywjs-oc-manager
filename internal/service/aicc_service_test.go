@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -21,9 +22,17 @@ type fakeAICCStore struct {
 	org          sqlc.Organization
 	count        int64
 	agents       map[string]sqlc.AiccAgent
+	sessions     map[string]sqlc.AiccSession
+	messages     map[string][]sqlc.AiccMessage
+	leads        map[string]sqlc.AiccLead
+	leadFields   map[string][]sqlc.AiccLeadField
+	todayCount   int64
+	unreadCount  int64
 	createArg    sqlc.CreateAICCAgentParams
 	updateArg    sqlc.UpdateAICCAgentProfileParams
 	statusArg    sqlc.SetAICCAgentStatusParams
+	readLeadArg  sqlc.MarkAICCLeadReadParams
+	createField  sqlc.UpsertAICCLeadFieldParams
 	deletedID    string
 	createErr    error
 	getErr       error
@@ -31,6 +40,8 @@ type fakeAICCStore struct {
 	updateErr    error
 	statusErr    error
 	deleteErr    error
+	sessionsErr  error
+	leadsErr     error
 	organization error
 }
 
@@ -164,6 +175,138 @@ func (f *fakeAICCStore) SoftDeleteAICCAgent(_ context.Context, id string) error 
 	return nil
 }
 
+// ListAICCSessionsByAgent 返回指定智能体的会话列表，用于管理端运营查看。
+func (f *fakeAICCStore) ListAICCSessionsByAgent(_ context.Context, arg sqlc.ListAICCSessionsByAgentParams) ([]sqlc.AiccSession, error) {
+	if f.sessionsErr != nil {
+		return nil, f.sessionsErr
+	}
+	rows := make([]sqlc.AiccSession, 0, len(f.sessions))
+	for _, row := range f.sessions {
+		if row.AgentID == arg.AgentID {
+			rows = append(rows, row)
+		}
+	}
+	return rows, nil
+}
+
+// GetAICCSession 按会话 ID 读取详情。
+func (f *fakeAICCStore) GetAICCSession(_ context.Context, id string) (sqlc.AiccSession, error) {
+	row, ok := f.sessions[id]
+	if !ok {
+		return sqlc.AiccSession{}, sql.ErrNoRows
+	}
+	return row, nil
+}
+
+// ListAICCMessagesBySession 返回会话内消息镜像。
+func (f *fakeAICCStore) ListAICCMessagesBySession(_ context.Context, sessionID string) ([]sqlc.AiccMessage, error) {
+	return f.messages[sessionID], nil
+}
+
+// ListAICCLeadsByOrg 返回企业线索列表，默认由 SQL 按未读和更新时间排序。
+func (f *fakeAICCStore) ListAICCLeadsByOrg(_ context.Context, arg sqlc.ListAICCLeadsByOrgParams) ([]sqlc.AiccLead, error) {
+	if f.leadsErr != nil {
+		return nil, f.leadsErr
+	}
+	rows := make([]sqlc.AiccLead, 0, len(f.leads))
+	for _, row := range f.leads {
+		if row.OrgID == arg.OrgID {
+			rows = append(rows, row)
+		}
+	}
+	return rows, nil
+}
+
+// ListAllAICCLeadsByOrg 返回企业全部线索，覆盖 CSV 导出不受交互分页上限影响的路径。
+func (f *fakeAICCStore) ListAllAICCLeadsByOrg(_ context.Context, arg sqlc.ListAllAICCLeadsByOrgParams) ([]sqlc.AiccLead, error) {
+	if f.leadsErr != nil {
+		return nil, f.leadsErr
+	}
+	rows := make([]sqlc.AiccLead, 0, len(f.leads))
+	for _, row := range f.leads {
+		if row.OrgID == arg.OrgID {
+			rows = append(rows, row)
+		}
+	}
+	if arg.Limit > 0 && len(rows) > int(arg.Limit) {
+		rows = rows[:arg.Limit]
+	}
+	return rows, nil
+}
+
+// MarkAICCLeadRead 记录线索已读参数，并同步内存行。
+func (f *fakeAICCStore) MarkAICCLeadRead(_ context.Context, arg sqlc.MarkAICCLeadReadParams) (int64, error) {
+	f.readLeadArg = arg
+	row, ok := f.leads[arg.ID]
+	if !ok || row.OrgID != arg.OrgID {
+		return 0, nil
+	}
+	row.Unread = false
+	f.leads[arg.ID] = row
+	return 1, nil
+}
+
+// ListAICCLeadFieldsByAgent 返回智能体留资字段配置。
+func (f *fakeAICCStore) ListAICCLeadFieldsByAgent(_ context.Context, agentID string) ([]sqlc.AiccLeadField, error) {
+	rows := make([]sqlc.AiccLeadField, 0, len(f.leadFields[agentID]))
+	for _, field := range f.leadFields[agentID] {
+		if !field.DeletedAt.Valid {
+			rows = append(rows, field)
+		}
+	}
+	return rows, nil
+}
+
+// DeactivateAICCLeadFieldsByAgent 停用智能体全部留资字段，历史值仍保留字段锚点。
+func (f *fakeAICCStore) DeactivateAICCLeadFieldsByAgent(_ context.Context, agentID string) error {
+	for i, field := range f.leadFields[agentID] {
+		field.DeletedAt = null.TimeFrom(time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC))
+		f.leadFields[agentID][i] = field
+	}
+	return nil
+}
+
+// UpsertAICCLeadField 记录并写入或恢复单个留资字段。
+func (f *fakeAICCStore) UpsertAICCLeadField(_ context.Context, arg sqlc.UpsertAICCLeadFieldParams) error {
+	f.createField = arg
+	if f.leadFields == nil {
+		f.leadFields = map[string][]sqlc.AiccLeadField{}
+	}
+	for i, field := range f.leadFields[arg.AgentID] {
+		if field.FieldKey == arg.FieldKey {
+			field.Label = arg.Label
+			field.FieldType = arg.FieldType
+			field.Required = arg.Required
+			field.PromptText = arg.PromptText
+			field.SortOrder = arg.SortOrder
+			field.DeletedAt = null.Time{}
+			f.leadFields[arg.AgentID][i] = field
+			return nil
+		}
+	}
+	f.leadFields[arg.AgentID] = append(f.leadFields[arg.AgentID], sqlc.AiccLeadField{
+		ID:         arg.ID,
+		AgentID:    arg.AgentID,
+		FieldKey:   arg.FieldKey,
+		Label:      arg.Label,
+		FieldType:  arg.FieldType,
+		Required:   arg.Required,
+		PromptText: arg.PromptText,
+		SortOrder:  arg.SortOrder,
+	})
+	return nil
+}
+
+// CountAICCTodaySessions 返回测试预置的今日会话数。
+func (f *fakeAICCStore) CountAICCTodaySessions(_ context.Context, orgID string) (int64, error) {
+	return f.todayCount, nil
+}
+
+// CountAICCUnreadLeads 返回测试预置的未读线索数。
+func (f *fakeAICCStore) CountAICCUnreadLeads(_ context.Context, orgID string) (int64, error) {
+	return f.unreadCount, nil
+}
+
 func (f *fakeAICCStore) ensureAgents() {
 	if f.agents == nil {
 		f.agents = map[string]sqlc.AiccAgent{}
@@ -217,6 +360,40 @@ func seededAICCStore() *fakeAICCStore {
 				UpdatedAt:     time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC),
 			},
 		},
+		sessions: map[string]sqlc.AiccSession{
+			"session-1": {
+				ID:               "session-1",
+				AgentID:          "agent-1",
+				OrgID:            "org-1",
+				SessionToken:     "session-token",
+				Channel:          domain.AICCChannelWebLink,
+				ResolutionStatus: domain.AICCResolutionUnknown,
+				LeadStatus:       "pending",
+				CreatedAt:        time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC),
+				UpdatedAt:        time.Date(2026, 7, 9, 12, 5, 0, 0, time.UTC),
+			},
+		},
+		messages: map[string][]sqlc.AiccMessage{
+			"session-1": {
+				{ID: "msg-1", SessionID: "session-1", AgentID: "agent-1", Direction: "visitor", ContentType: "text", TextContent: null.StringFrom("你好"), CreatedAt: time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)},
+				{ID: "msg-2", SessionID: "session-1", AgentID: "agent-1", Direction: "assistant", ContentType: "text", TextContent: null.StringFrom("您好"), CreatedAt: time.Date(2026, 7, 9, 12, 0, 2, 0, time.UTC)},
+			},
+		},
+		leads: map[string]sqlc.AiccLead{
+			"lead-1": {
+				ID:                 "lead-1",
+				OrgID:              "org-1",
+				PrimaryContactHash: "hash-1",
+				DisplayName:        null.StringFrom("张三"),
+				Unread:             true,
+				LatestSessionID:    null.StringFrom("session-1"),
+				LatestSessionOrgID: null.StringFrom("org-1"),
+				CreatedAt:          time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC),
+				UpdatedAt:          time.Date(2026, 7, 9, 12, 6, 0, 0, time.UTC),
+			},
+		},
+		todayCount:  3,
+		unreadCount: 1,
 	}
 }
 
@@ -407,4 +584,107 @@ func TestAICCServiceRollsBackHiddenAppWhenAgentCreateFails(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Equal(t, "app-hidden-rollback", apps.rollbackID)
+}
+
+// TestAICCServiceListSessionsRequiresAgentViewPermission 覆盖会话列表：
+// 先读取智能体归属做权限校验，再返回该智能体下的会话运营视图。
+func TestAICCServiceListSessionsRequiresAgentViewPermission(t *testing.T) {
+	svc := NewAICCService(seededAICCStore(), &fakeAICCHiddenAppCreator{})
+
+	results, err := svc.ListSessions(context.Background(), aiccOrgAdmin(), "agent-1", 0, -1)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "session-1", results[0].ID)
+	assert.Equal(t, domain.AICCChannelWebLink, results[0].Channel)
+}
+
+// TestAICCServiceGetSessionReturnsMessages 覆盖会话详情：企业管理员只能查看本企业会话，
+// 响应应同时包含会话摘要和按时间排序的消息镜像。
+func TestAICCServiceGetSessionReturnsMessages(t *testing.T) {
+	svc := NewAICCService(seededAICCStore(), &fakeAICCHiddenAppCreator{})
+
+	result, err := svc.GetSession(context.Background(), aiccOrgAdmin(), "session-1")
+
+	require.NoError(t, err)
+	assert.Equal(t, "session-1", result.Session.ID)
+	require.Len(t, result.Messages, 2)
+	assert.Equal(t, "msg-1", result.Messages[0].ID)
+	assert.Equal(t, "你好", result.Messages[0].Text)
+}
+
+// TestAICCServiceListLeadsAndMarkRead 覆盖线索运营列表和已读标记：
+// 企业管理员只能操作本企业线索，平台管理员可传 orgID 做只读排障。
+func TestAICCServiceListLeadsAndMarkRead(t *testing.T) {
+	store := seededAICCStore()
+	svc := NewAICCService(store, &fakeAICCHiddenAppCreator{})
+
+	leads, err := svc.ListLeads(context.Background(), aiccOrgAdmin(), "", 50, 0)
+	require.NoError(t, err)
+	require.Len(t, leads, 1)
+	assert.Equal(t, "张三", leads[0].DisplayName)
+	assert.True(t, leads[0].Unread)
+
+	err = svc.MarkLeadRead(context.Background(), aiccOrgAdmin(), "lead-1")
+
+	require.NoError(t, err)
+	assert.Equal(t, "lead-1", store.readLeadArg.ID)
+	assert.Equal(t, "org-1", store.readLeadArg.OrgID)
+	assert.False(t, store.leads["lead-1"].Unread)
+
+	err = svc.MarkLeadRead(context.Background(), aiccOrgAdmin(), "missing-lead")
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
+// TestAICCServiceExportLeadsBypassesInteractivePaging 覆盖 CSV 导出依赖的全量线索查询：
+// 即使企业线索超过管理列表单页上限，也必须全部返回给导出层。
+func TestAICCServiceExportLeadsBypassesInteractivePaging(t *testing.T) {
+	store := seededAICCStore()
+	store.leads = map[string]sqlc.AiccLead{}
+	for i := 0; i < 201; i++ {
+		// 第 201 条线索用于证明导出不受 normalizeAICCPaging 的 200 条上限截断。
+		id := fmt.Sprintf("lead-%03d", i)
+		store.leads[id] = sqlc.AiccLead{ID: id, OrgID: "org-1", DisplayName: null.StringFrom(id), Unread: true}
+	}
+	svc := NewAICCService(store, &fakeAICCHiddenAppCreator{})
+
+	leads, err := svc.ExportLeads(context.Background(), aiccOrgAdmin(), "")
+
+	require.NoError(t, err)
+	assert.Len(t, leads, 201)
+}
+
+// TestAICCServiceReplaceLeadFields 覆盖管理端整组保存留资字段：
+// 旧字段会被清空，新字段按归一化后的 key、类型和顺序写回。
+func TestAICCServiceReplaceLeadFields(t *testing.T) {
+	store := seededAICCStore()
+	store.leadFields = map[string][]sqlc.AiccLeadField{
+		"agent-1": {
+			{ID: "old-field", AgentID: "agent-1", FieldKey: "old", Label: "旧字段", FieldType: domain.AICCLeadFieldTypeText},
+		},
+	}
+	svc := NewAICCService(store, &fakeAICCHiddenAppCreator{})
+
+	fields, err := svc.ReplaceLeadFields(context.Background(), aiccOrgAdmin(), "agent-1", []AICCLeadFieldInput{
+		// 手机号字段是公开页发送消息前的必填联系方式。
+		{FieldKey: " phone ", Label: " 联系电话 ", FieldType: domain.AICCLeadFieldTypePhone, Required: true},
+	})
+
+	require.NoError(t, err)
+	require.Len(t, fields, 1)
+	assert.Equal(t, "phone", fields[0].FieldKey)
+	assert.Equal(t, "联系电话", fields[0].Label)
+	assert.Equal(t, domain.AICCLeadFieldTypePhone, fields[0].FieldType)
+	assert.True(t, fields[0].Required)
+}
+
+// TestAICCServiceAnalyticsUsesViewPermission 覆盖统计卡片：只返回当前企业今日会话和未读线索数量。
+func TestAICCServiceAnalyticsUsesViewPermission(t *testing.T) {
+	svc := NewAICCService(seededAICCStore(), &fakeAICCHiddenAppCreator{})
+
+	result, err := svc.Analytics(context.Background(), aiccOrgAdmin(), "")
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), result.TodaySessions)
+	assert.Equal(t, int64(1), result.UnreadLeads)
 }

@@ -47,6 +47,24 @@
         </div>
         <n-button type="primary" :loading="consentBusy" @click="acceptConsent">同意并开始</n-button>
       </section>
+      <form v-else-if="showLeadForm" class="lead-gate" @submit.prevent="submitLeadForm">
+        <div class="lead-gate-heading">
+          <ShieldCheck :size="18" />
+          <strong>请先留下联系信息</strong>
+        </div>
+        <div class="lead-fields">
+          <label v-for="field in leadFields" :key="field.field_key">
+            <span>{{ field.label }}{{ field.required ? ' *' : '' }}</span>
+            <n-input
+              v-model:value="leadValues[field.field_key]"
+              :type="field.field_type === 'number' ? 'text' : 'text'"
+              :placeholder="field.prompt_text || field.label"
+              :input-props="{ inputmode: field.field_type === 'number' ? 'numeric' : field.field_type === 'phone' ? 'tel' : field.field_type === 'email' ? 'email' : 'text' }"
+            />
+          </label>
+        </div>
+        <n-button type="primary" attr-type="submit" :loading="leadBusy">提交联系信息</n-button>
+      </form>
       <section v-else-if="privacyText" class="privacy-note">
         <ShieldCheck :size="16" />
         <span>{{ privacyText }}</span>
@@ -98,10 +116,11 @@ import {
   fetchAICCPublicConfig,
   sendAICCPublicMessage,
   submitAICCPublicFeedback,
+  submitAICCPublicLeadValues,
   uploadAICCPublicImage,
 } from '@/api/hooks/useAICC'
 import type { ApiError } from '@/api/client'
-import type { AICCPublicConfig } from '@/domain/aicc'
+import type { AICCLeadField, AICCPublicConfig } from '@/domain/aicc'
 
 // PublicAICCChatPage 是访客公开客服页，不依赖后台登录态。
 // 会话 token 只保存在页面内存，刷新页面会重新创建会话，避免把访客凭证持久化到本地存储。
@@ -128,14 +147,20 @@ const messages = ref<ChatMessage[]>([])
 const errorMessage = ref('')
 const isSending = ref(false)
 const consentBusy = ref(false)
+const leadBusy = ref(false)
+const leadComplete = ref(false)
 const hasConsent = ref(false)
+const leadValues = ref<Record<string, string>>({})
 const pendingImage = ref<PendingImage | null>(null)
 const messageListEl = ref<HTMLElement | null>(null)
 const fileInputEl = ref<HTMLInputElement | null>(null)
 
 const privacyText = computed(() => config.value?.privacy_text || '我们会使用本次对话内容来回答您的问题。')
 const needsConsent = computed(() => config.value?.privacy_mode === 'consent_required' && !hasConsent.value)
-const canSend = computed(() => Boolean(sessionToken.value) && !needsConsent.value && !isSending.value)
+const leadFields = computed<AICCLeadField[]>(() => config.value?.lead_fields ?? [])
+const needsLead = computed(() => leadFields.value.some(field => field.required) && !leadComplete.value)
+const showLeadForm = computed(() => leadFields.value.length > 0 && !leadComplete.value && !needsConsent.value)
+const canSend = computed(() => Boolean(sessionToken.value) && !needsConsent.value && !needsLead.value && !isSending.value)
 const canSubmit = computed(() => canSend.value && (draft.value.trim().length > 0 || Boolean(pendingImage.value)))
 
 onMounted(() => {
@@ -153,6 +178,8 @@ async function boot() {
     const session = await createAICCPublicSession(publicToken.value)
     sessionToken.value = session.session_token ?? ''
     hasConsent.value = config.value.privacy_mode !== 'consent_required'
+    leadValues.value = Object.fromEntries((config.value.lead_fields ?? []).map(field => [field.field_key, '']))
+    leadComplete.value = !(config.value.lead_fields ?? []).some(field => field.required)
     messages.value = [{
       id: crypto.randomUUID(),
       role: 'assistant',
@@ -160,6 +187,37 @@ async function boot() {
     }]
   } catch (err) {
     errorMessage.value = err instanceof Error ? err.message : '客服入口暂时不可用'
+  }
+}
+
+async function submitLeadForm() {
+  if (!sessionToken.value) return
+  const values: Record<string, string> = {}
+  for (const field of leadFields.value) {
+    const value = (leadValues.value[field.field_key] ?? '').trim()
+    if (field.required && !value) {
+      errorMessage.value = `请填写${field.label}`
+      return
+    }
+    if (value) values[field.field_key] = value
+  }
+  if (Object.keys(values).length === 0) {
+    leadComplete.value = true
+    return
+  }
+  leadBusy.value = true
+  errorMessage.value = ''
+  try {
+    const result = await submitAICCPublicLeadValues(sessionToken.value, values)
+    if (result.lead_status === 'complete') {
+      leadComplete.value = true
+    } else {
+      errorMessage.value = '请补全必填联系信息'
+    }
+  } catch (err) {
+    errorMessage.value = err instanceof Error ? err.message : '联系信息提交失败'
+  } finally {
+    leadBusy.value = false
   }
 }
 
@@ -215,7 +273,7 @@ async function submitMessage() {
 
 function publicMessageErrorText(err: unknown): string {
   if (isApiErrorCode(err, 'AICC_LEAD_REQUIRED')) {
-    return '当前客服要求先提交联系信息；此公开页暂未收到可展示的留资字段配置，请联系企业管理员。'
+    return '请先提交联系信息后继续咨询。'
   }
   return err instanceof Error ? err.message : '消息发送失败'
 }
@@ -408,7 +466,8 @@ async function scrollToBottom() {
 }
 
 .privacy-gate,
-.privacy-note {
+.privacy-note,
+.lead-gate {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -423,6 +482,34 @@ async function scrollToBottom() {
 .privacy-gate > div {
   flex: 1;
   min-width: 0;
+}
+
+.lead-gate {
+  display: grid;
+  align-items: stretch;
+  border-color: var(--color-brand);
+  color: var(--color-text-primary);
+  background: #ffffff;
+}
+
+.lead-gate-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lead-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.lead-fields label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
 }
 
 .privacy-note {
@@ -487,6 +574,10 @@ async function scrollToBottom() {
   .composer {
     align-items: stretch;
     flex-wrap: wrap;
+  }
+
+  .lead-fields {
+    grid-template-columns: 1fr;
   }
 
   .composer :deep(.n-input) {

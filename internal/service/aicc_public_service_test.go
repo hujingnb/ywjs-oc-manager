@@ -50,13 +50,14 @@ func TestAICCPublicChatRequiresLeadFields(t *testing.T) {
 	require.ErrorIs(t, err, ErrAICCLeadRequired)
 }
 
-// TestAICCPublicSubmitLeadValuesCompletesRequiredFields 覆盖留资提交闭环：必填字段写入后 session 标记完成。
+// TestAICCPublicSubmitLeadValuesCompletesRequiredFields 覆盖留资提交闭环：
+// 必填字段写入后 session 标记完成，同时生成企业线索主记录供管理端列表和导出使用。
 func TestAICCPublicSubmitLeadValuesCompletesRequiredFields(t *testing.T) {
 	store := &fakeAICCPublicStore{
 		org:        sqlc.Organization{ID: "org-1", AiccEnabled: true},
 		agent:      sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		session:    sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
-		leadFields: []sqlc.AiccLeadField{{ID: "field-phone", AgentID: "agent-1", Required: true, FieldKey: "phone", Label: "手机号"}},
+		leadFields: []sqlc.AiccLeadField{{ID: "field-phone", AgentID: "agent-1", Required: true, FieldKey: "phone", Label: "手机号", FieldType: "phone"}},
 	}
 	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
 	svc.now = func() time.Time { return aiccPublicTestNow }
@@ -71,6 +72,12 @@ func TestAICCPublicSubmitLeadValuesCompletesRequiredFields(t *testing.T) {
 	require.Len(t, store.leadValues, 1)
 	assert.Equal(t, "13800000000", store.leadValues[0].ValueText)
 	assert.Equal(t, domain.AICCLeadStatusComplete, store.session.LeadStatus)
+	require.Len(t, store.leads, 1)
+	assert.Equal(t, "org-1", store.leads[0].OrgID)
+	assert.Equal(t, "13800000000", store.leads[0].DisplayName.String)
+	assert.Equal(t, "session-1", store.leads[0].LatestSessionID.String)
+	assert.Equal(t, store.leads[0].ID, store.attachedLeadID)
+	assert.Equal(t, "org-1", store.attachedLeadOrgID)
 }
 
 // TestAICCPublicSubmitLeadValuesRejectsUnknownField 覆盖留资字段配置边界：未配置的 field_key 不能写入。
@@ -392,7 +399,10 @@ type fakeAICCPublicStore struct {
 	requiredLeadFields []sqlc.AiccLeadField
 	createdSession     sqlc.CreateAICCSessionParams
 	createdMessages    []sqlc.CreateAICCMessageParams
+	leads              []sqlc.AiccLead
 	leadValues         []sqlc.UpsertAICCLeadValueParams
+	attachedLeadID     string
+	attachedLeadOrgID  string
 	feedback           sqlc.UpsertAICCFeedbackParams
 	resolutionStatus   string
 }
@@ -493,6 +503,41 @@ func (f *fakeAICCPublicStore) UpsertAICCLeadValue(_ context.Context, arg sqlc.Up
 		}
 	}
 	f.leadValues = append(f.leadValues, arg)
+	return nil
+}
+
+func (f *fakeAICCPublicStore) UpsertAICCLead(_ context.Context, arg sqlc.UpsertAICCLeadParams) error {
+	for i, existing := range f.leads {
+		if existing.OrgID == arg.OrgID && existing.PrimaryContactHash == arg.PrimaryContactHash {
+			f.leads[i].DisplayName = arg.DisplayName
+			f.leads[i].LatestSessionID = arg.LatestSessionID
+			f.leads[i].Unread = true
+			return nil
+		}
+	}
+	f.leads = append(f.leads, sqlc.AiccLead{
+		ID:                 arg.ID,
+		OrgID:              arg.OrgID,
+		PrimaryContactHash: arg.PrimaryContactHash,
+		DisplayName:        arg.DisplayName,
+		Unread:             true,
+		LatestSessionID:    arg.LatestSessionID,
+	})
+	return nil
+}
+
+func (f *fakeAICCPublicStore) GetAICCLeadByContact(_ context.Context, arg sqlc.GetAICCLeadByContactParams) (sqlc.AiccLead, error) {
+	for _, lead := range f.leads {
+		if lead.OrgID == arg.OrgID && lead.PrimaryContactHash == arg.PrimaryContactHash {
+			return lead, nil
+		}
+	}
+	return sqlc.AiccLead{}, sql.ErrNoRows
+}
+
+func (f *fakeAICCPublicStore) AttachAICCLeadValuesToLead(_ context.Context, arg sqlc.AttachAICCLeadValuesToLeadParams) error {
+	f.attachedLeadID = arg.LeadID.String
+	f.attachedLeadOrgID = arg.LeadOrgID.String
 	return nil
 }
 

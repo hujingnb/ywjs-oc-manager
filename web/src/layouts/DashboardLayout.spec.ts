@@ -31,6 +31,17 @@ const adminPerspectiveState = vi.hoisted(() => ({
   setPerspective,
   resetPerspective,
 }))
+const organizationState = vi.hoisted(() => ({
+  data: {
+    value: {
+      id: 'org-1',
+      name: '测试企业',
+      status: 'enabled',
+      code: 'test-org',
+      aicc_enabled: true,
+    } as Record<string, unknown> | null,
+  },
+}))
 
 vi.mock('vue-router', () => ({
   RouterView: { template: '<section class="route-page">页面内容</section>' },
@@ -53,6 +64,16 @@ vi.mock('@/composables/useAdminPerspective', () => ({
 // 角标 query 桩：返回固定 ref，避免在测试环境实例化真实 useQuery（需 QueryClient 注入）。
 vi.mock('@/api/hooks/useSkillTickets', () => ({
   useSkillTicketBadgeQuery: () => ({ data: { value: 0 } }),
+}))
+
+// 企业 web-publish 配置 query 桩：布局测试只关心菜单结构，不需要真实 Vue Query client。
+vi.mock('@/api/hooks/useWebPublish', () => ({
+  useWebPublishConfigQuery: () => ({ data: { value: null } }),
+}))
+
+// 当前企业详情 query 桩：org_admin 菜单需要读取 aicc_enabled 决定是否展示 AICC 入口。
+vi.mock('@/api/hooks/useOrganizations', () => ({
+  useOrganizationQuery: () => organizationState,
 }))
 
 // HelpDrawerStub 暴露 show/role 到 DOM，便于测试父布局点击入口后是否正确打开手册抽屉。
@@ -215,6 +236,13 @@ describe('DashboardLayout', () => {
     memberAppState.hasApp.value = false
     memberAppState.isLoading.value = false
     adminPerspectiveState.perspective.value = 'manage'
+    organizationState.data.value = {
+      id: 'org-1',
+      name: '测试企业',
+      status: 'enabled',
+      code: 'test-org',
+      aicc_enabled: true,
+    }
     setPerspective.mockReset()
     resetPerspective.mockReset()
     // setPerspective 桩实现:更新视角 ref,使菜单在切换后重新计算
@@ -340,8 +368,28 @@ describe('DashboardLayout', () => {
 
     const wrapper = mountLayout()
 
-    expect(menuLabels(wrapper)).toEqual(['总览', '成员', '实例', '企业知识库', '账户余额', '审计', '用量'])
+    expect(menuLabels(wrapper)).toEqual(['总览', '成员', 'AICC 客服', '已发布站点', '实例', '企业知识库', '账户余额', '审计', '用量'])
     expect(menuLabels(wrapper)).not.toContain('技能')
+  })
+
+  // 覆盖企业未开通 AICC 的菜单裁剪：org_admin 不应看到不可用的 AICC 客服入口。
+  it('hides AICC menu for org_admin when organization has not enabled AICC', () => {
+    routeState.path = '/'
+    authState.user = { id: 'org-admin-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' }
+    authState.isPlatformAdmin = false
+    authState.isOrgAdmin = true
+    authState.isOrgMember = false
+    organizationState.data.value = {
+      id: 'org-1',
+      name: '测试企业',
+      status: 'enabled',
+      code: 'test-org',
+      aicc_enabled: false,
+    }
+
+    const wrapper = mountLayout()
+
+    expect(menuLabels(wrapper)).not.toContain('AICC 客服')
   })
 
   // 覆盖 org_admin 我的实例视角菜单:与组织成员同款(含「技能」),由自有实例 appId 驱动。

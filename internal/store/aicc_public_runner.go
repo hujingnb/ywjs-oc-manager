@@ -14,6 +14,26 @@ type aiccPublicRunner struct {
 	store *Store
 }
 
+// aiccRunner 把 Store.WithTx 适配成 service.AICCTxRunner，
+// 使管理端整组保存留资字段时停用和 upsert 字段处于同一个事务。
+type aiccRunner struct {
+	// store 持有真实事务入口，runner 只负责暴露事务查询对象。
+	store *Store
+}
+
+// NewAICCRunner 创建 AICC 管理 service 使用的事务 runner。
+func NewAICCRunner(store *Store) *aiccRunner {
+	return &aiccRunner{store: store}
+}
+
+// WithAICCTx 在数据库事务中执行 AICC 管理写操作。
+func (r *aiccRunner) WithAICCTx(ctx context.Context, fn func(service.AICCStore) error) error {
+	return r.store.WithTx(ctx, func(q *sqlc.Queries) error {
+		// sqlc.Queries 已实现 service.AICCStore，service 层无需感知事务实现细节。
+		return fn(q)
+	})
+}
+
 // NewAICCPublicRunner 创建 AICC 公开 service 使用的事务 runner。
 func NewAICCPublicRunner(store *Store) *aiccPublicRunner {
 	return &aiccPublicRunner{store: store}

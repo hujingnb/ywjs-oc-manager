@@ -19,11 +19,15 @@ type Querier interface {
 	// 版本触发镜像重建后、容器重启前渠道凭证依旧落在 bind mount 目录、无需用户
 	// 重新扫码），则直接把 status 推到 running，避免概览页长期卡在「待绑定」。
 	AppHasBoundChannelBinding(ctx context.Context, appID string) (bool, error)
+	AttachAICCLeadValuesToLead(ctx context.Context, arg AttachAICCLeadValuesToLeadParams) error
 	// 抢占 failed 或超时 creating 的 dataset 创建租约；只有成功更新行的调用方允许访问 RAGFlow 创建远端 dataset。
 	ClaimRAGFlowDatasetCreation(ctx context.Context, arg ClaimRAGFlowDatasetCreationParams) error
+	ClearAICCLeadLatestSession(ctx context.Context, latestSessionID null.String) error
 	// transitionTo / RequestInitialize 强制清空进度字段。
 	ClearAppProgress(ctx context.Context, id string) error
 	CountAICCAgentsByOrg(ctx context.Context, orgID string) (int64, error)
+	CountAICCTodaySessions(ctx context.Context, orgID string) (int64, error)
+	CountAICCUnreadLeads(ctx context.Context, orgID string) (int64, error)
 	// 统计企业当前未删除普通实例数；AICC 隐藏 app 使用独立 aicc_agent_limit，不占用普通实例上限。
 	CountActiveAppsByOrg(ctx context.Context, orgID string) (int64, error)
 	// 平台总览组织计数：剔除 soft-deleted；status='active' 与 'disabled' 都算入册组织。
@@ -89,6 +93,7 @@ type Querier interface {
 	CreateSkillTicket(ctx context.Context, arg CreateSkillTicketParams) error
 	CreateSkillTicketMessage(ctx context.Context, arg CreateSkillTicketMessageParams) error
 	CreateUser(ctx context.Context, arg CreateUserParams) error
+	DeactivateAICCLeadFieldsByAgent(ctx context.Context, agentID string) error
 	DeleteAICCSession(ctx context.Context, id string) error
 	DeleteAppSkillByAppAndName(ctx context.Context, arg DeleteAppSkillByAppAndNameParams) error
 	DeleteCustomSkillTargetsByName(ctx context.Context, customSkillName string) error
@@ -102,6 +107,8 @@ type Querier interface {
 	GetAICCAgentByPublicToken(ctx context.Context, publicToken string) (AiccAgent, error)
 	GetAICCAssistantMessageForFeedback(ctx context.Context, arg GetAICCAssistantMessageForFeedbackParams) (AiccMessage, error)
 	GetAICCImageBySession(ctx context.Context, arg GetAICCImageBySessionParams) (AiccImage, error)
+	GetAICCLeadByContact(ctx context.Context, arg GetAICCLeadByContactParams) (AiccLead, error)
+	GetAICCSession(ctx context.Context, id string) (AiccSession, error)
 	GetAICCSessionByToken(ctx context.Context, sessionToken string) (AiccSession, error)
 	GetActiveAppByOwner(ctx context.Context, ownerUserID string) (App, error)
 	GetApp(ctx context.Context, id string) (App, error)
@@ -168,9 +175,13 @@ type Querier interface {
 	// 正常生命周期不可见此查询；普通"删除"必须走 SoftDeleteOrganization。
 	HardDeleteOrganization(ctx context.Context, id string) error
 	ListAICCAgentsByOrg(ctx context.Context, arg ListAICCAgentsByOrgParams) ([]AiccAgent, error)
+	ListAICCImageObjectKeysBySession(ctx context.Context, sessionID string) ([]string, error)
 	ListAICCLeadFieldsByAgent(ctx context.Context, agentID string) ([]AiccLeadField, error)
+	ListAICCLeadsByOrg(ctx context.Context, arg ListAICCLeadsByOrgParams) ([]AiccLead, error)
 	ListAICCMessagesBySession(ctx context.Context, sessionID string) ([]AiccMessage, error)
+	ListAICCSessionsByAgent(ctx context.Context, arg ListAICCSessionsByAgentParams) ([]AiccSession, error)
 	ListActiveSites(ctx context.Context) ([]ListActiveSitesRow, error)
+	ListAllAICCLeadsByOrg(ctx context.Context, arg ListAllAICCLeadsByOrgParams) ([]AiccLead, error)
 	// 全量返回活跃组织（deleted_at IS NULL），不分页；
 	// 仅供平台内部聚合使用（如 GetOrgUsageBreakdown），请勿用于用户可见的列表接口。
 	ListAllActiveOrganizations(ctx context.Context) ([]Organization, error)
@@ -259,6 +270,7 @@ type Querier interface {
 	// 平台管理员全局视图：列出所有企业的发布能力配置。
 	ListWebPublishConfigs(ctx context.Context) ([]OrgWebPublishConfig, error)
 	LockJobForUpdate(ctx context.Context, id string) (Job, error)
+	MarkAICCLeadRead(ctx context.Context, arg MarkAICCLeadReadParams) (int64, error)
 	MarkAICCSessionConsented(ctx context.Context, sessionToken string) (int64, error)
 	// AICC 隐藏 app 不出现在普通实例列表中；创建时已写入 true，此查询用于幂等补标记。
 	MarkAppAICCHidden(ctx context.Context, id string) error
@@ -388,6 +400,8 @@ type Querier interface {
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) error
 	UpsertAICCFeedback(ctx context.Context, arg UpsertAICCFeedbackParams) error
+	UpsertAICCLead(ctx context.Context, arg UpsertAICCLeadParams) error
+	UpsertAICCLeadField(ctx context.Context, arg UpsertAICCLeadFieldParams) error
 	UpsertAICCLeadValue(ctx context.Context, arg UpsertAICCLeadValueParams) error
 	// 飞书无预建绑定行，BeginAuth 时 create-on-demand（已存在则忽略）。
 	// app_active_key 是 VIRTUAL 生成列（非 deleted 行 = app_id），不能显式赋值，
