@@ -262,14 +262,34 @@ func TestAICCSettingsMigrationContainsOperationalTables(t *testing.T) {
 	assert.Contains(t, up, "agent_id CHAR(36) NOT NULL")
 	assert.Contains(t, up, "message_limit_per_session INT NOT NULL DEFAULT 100")
 	assert.Contains(t, up, "sensitive_words_json JSON NULL")
+	assert.Contains(t, up, "blocked_visitor_enabled BOOLEAN NOT NULL DEFAULT TRUE")
+	assert.Contains(t, up, "blocked_visitor_threshold_json JSON NULL")
 	assert.Contains(t, up, "session_resume_ttl_minutes INT NOT NULL DEFAULT 30")
+	assert.Contains(t, up, "analytics_config_json JSON NULL")
+	assert.Contains(t, up, "CONSTRAINT aicc_agent_settings_message_limit_check CHECK (message_limit_per_session BETWEEN 1 AND 1000)")
+	assert.Contains(t, up, "CONSTRAINT aicc_agent_settings_resume_ttl_check CHECK (session_resume_ttl_minutes BETWEEN 1 AND 1440)")
+	assert.Contains(t, up, "CONSTRAINT fk_aicc_agent_settings_agent FOREIGN KEY (agent_id) REFERENCES aicc_agents(id) ON DELETE CASCADE")
 	assert.Contains(t, up, "UNIQUE KEY uk_aicc_agent_settings_agent (agent_id)")
 	assert.Contains(t, up, "CREATE TABLE aicc_blocked_visitors")
 	assert.Contains(t, up, "visitor_hash VARCHAR(128) NOT NULL")
 	assert.Contains(t, up, "expires_at DATETIME NOT NULL")
+	assert.Contains(t, up, "CONSTRAINT fk_aicc_blocked_visitors_agent_org FOREIGN KEY (agent_id, org_id) REFERENCES aicc_agents(id, org_id) ON DELETE CASCADE")
+	assert.Contains(t, up, "CONSTRAINT fk_aicc_blocked_visitors_org FOREIGN KEY (org_id) REFERENCES organizations(id)")
 	assert.Contains(t, up, "UNIQUE KEY uk_aicc_blocked_visitors_agent_visitor (agent_id, visitor_hash)")
 	assert.Contains(t, up, "KEY idx_aicc_blocked_visitors_lookup (agent_id, visitor_hash, expires_at)")
+	assert.Contains(t, up, "KEY idx_aicc_blocked_visitors_agent_created (agent_id, created_at DESC, id DESC)")
 	assert.NotContains(t, up, "remote_ip")
+
+	downBytes, err := FS.ReadFile("000030_aicc_settings.down.sql")
+	require.NoError(t, err)
+	down := string(downBytes)
+
+	// 000030 回滚必须先删除依赖 agent 的封禁表，再删除 agent settings 表。
+	dropBlockedVisitorsIndex := strings.Index(down, "DROP TABLE IF EXISTS aicc_blocked_visitors;")
+	dropAgentSettingsIndex := strings.Index(down, "DROP TABLE IF EXISTS aicc_agent_settings;")
+	require.NotEqual(t, -1, dropBlockedVisitorsIndex)
+	require.NotEqual(t, -1, dropAgentSettingsIndex)
+	assert.Less(t, dropBlockedVisitorsIndex, dropAgentSettingsIndex)
 }
 
 // TestAICCMigrationExecutesOnMySQL 验证 AICC 迁移在真实 MySQL 8 上能建立约束、拒绝跨作用域脏数据并成功回滚。
@@ -309,7 +329,8 @@ func TestAICCMigrationExecutesOnMySQL(t *testing.T) {
 		require.NoError(t, databaseErr)
 	}()
 
-	err = migrator.Up()
+	// 该测试只验证截至 000030 的 AICC 表与回滚语义，固定目标版本可避免后续新增 migration 改变 rollback 覆盖范围。
+	err = migrator.Migrate(30)
 	require.NoError(t, err)
 
 	// 准备两个组织、两个 owner 与两个 app，构造跨组织/跨 app 文档作用域场景。
@@ -488,8 +509,8 @@ func TestAICCMigrationExecutesOnMySQL(t *testing.T) {
 	assert.False(t, leadOrgID.Valid)
 	mustExecMigrationSQL(t, testDB, "DELETE FROM aicc_leads WHERE id = ? AND org_id = ?", "lead-a", "org-a")
 
-	// down 迁移必须能在真实 MySQL 上成功回滚 000028，避免 parent 索引因 FK 依赖删除失败。
-	require.NoError(t, migrator.Steps(-1))
+	// 从 000030 连续回滚到 000027，既验证新增 settings 表 down，也保留原 000028 down 的 parent 索引/FK 依赖覆盖。
+	require.NoError(t, migrator.Steps(-3))
 }
 
 // parseMigrationTestDSN 把 mysql:// URL 规整为 go-sql-driver/mysql 可直接使用的 DSN。
