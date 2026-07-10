@@ -75,6 +75,14 @@ WHERE session_token = ? AND expires_at > now();
 SELECT *
 FROM aicc_sessions
 WHERE agent_id = ?
+  AND (sqlc.narg(resolution_status) IS NULL OR resolution_status = sqlc.narg(resolution_status))
+  AND (sqlc.narg(lead_status) IS NULL OR lead_status = sqlc.narg(lead_status))
+  AND (sqlc.narg(channel) IS NULL OR channel = sqlc.narg(channel))
+  AND (
+      sqlc.narg(keyword) IS NULL
+      OR source_url LIKE CONCAT('%', sqlc.narg(keyword), '%')
+      OR referrer LIKE CONCAT('%', sqlc.narg(keyword), '%')
+  )
 ORDER BY created_at DESC, id DESC
 LIMIT ? OFFSET ?;
 
@@ -221,6 +229,40 @@ WHERE org_id = ? AND created_at >= CURRENT_DATE();
 SELECT COUNT(*)
 FROM aicc_leads
 WHERE org_id = ? AND unread = TRUE;
+
+-- name: CountAICCSessionsByResolution :one
+SELECT COUNT(*)
+FROM aicc_sessions
+WHERE org_id = ? AND resolution_status = ?;
+
+-- name: CountAICCCompletedLeadSessions :one
+SELECT COUNT(*)
+FROM aicc_sessions
+WHERE org_id = ? AND lead_status = 'complete';
+
+-- name: ListAICCTopVisitorQuestionsByOrg :many
+SELECT TRIM(m.text_content) AS question,
+       CAST(COUNT(*) AS SIGNED) AS count
+FROM aicc_messages m
+JOIN aicc_sessions s ON s.id = m.session_id
+WHERE s.org_id = ?
+  AND m.direction = 'visitor'
+  AND m.text_content IS NOT NULL
+  AND TRIM(m.text_content) <> ''
+GROUP BY TRIM(m.text_content)
+ORDER BY count DESC, question ASC
+LIMIT ?;
+
+-- name: ListAICCTopSourceURLsByOrg :many
+SELECT source_url,
+       CAST(COUNT(*) AS SIGNED) AS count
+FROM aicc_sessions
+WHERE org_id = ?
+  AND source_url IS NOT NULL
+  AND TRIM(source_url) <> ''
+GROUP BY source_url
+ORDER BY count DESC, source_url ASC
+LIMIT ?;
 
 -- name: ListExpiredAICCSessions :many
 SELECT *

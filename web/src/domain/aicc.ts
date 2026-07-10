@@ -175,6 +175,18 @@ export interface AICCSession {
   updated_at?: string
 }
 
+// AICCSessionFilters 是会话列表的轻量筛选条件。
+export interface AICCSessionFilters {
+  // 解决状态。
+  resolution_status?: string
+  // 留资状态。
+  lead_status?: string
+  // 入口渠道。
+  channel?: string
+  // 来源关键词。
+  keyword?: string
+}
+
 // AICCMessage 是单个会话中的访客或助手消息。
 export interface AICCMessage {
   // 消息主键。
@@ -231,6 +243,24 @@ export interface AICCAnalytics {
   today_sessions: number
   // 未读线索数。
   unread_leads: number
+  // 已解决会话数。
+  resolved_sessions?: number
+  // 未解决会话数。
+  unresolved_sessions?: number
+  // 已完成留资的会话数。
+  completed_lead_sessions?: number
+  // 访客热门问题。
+  top_questions?: AICCTopItem[]
+  // 访客来源页面分布。
+  top_sources?: AICCTopItem[]
+}
+
+// AICCTopItem 是统计页中带次数的排行项。
+export interface AICCTopItem {
+  // 展示文本。
+  label: string
+  // 出现次数。
+  count: number
 }
 
 // isAICCAgentRunning 判断智能体是否处于可对外接待状态。

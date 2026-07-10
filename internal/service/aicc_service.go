@@ -60,6 +60,14 @@ type AICCStore interface {
 	CountAICCTodaySessions(ctx context.Context, orgID string) (int64, error)
 	// CountAICCUnreadLeads 统计企业未读线索数。
 	CountAICCUnreadLeads(ctx context.Context, orgID string) (int64, error)
+	// CountAICCSessionsByResolution 统计企业内指定解决状态的会话数。
+	CountAICCSessionsByResolution(ctx context.Context, arg sqlc.CountAICCSessionsByResolutionParams) (int64, error)
+	// CountAICCCompletedLeadSessions 统计已完成留资的会话数。
+	CountAICCCompletedLeadSessions(ctx context.Context, orgID string) (int64, error)
+	// ListAICCTopVisitorQuestionsByOrg 统计访客高频问题。
+	ListAICCTopVisitorQuestionsByOrg(ctx context.Context, arg sqlc.ListAICCTopVisitorQuestionsByOrgParams) ([]sqlc.ListAICCTopVisitorQuestionsByOrgRow, error)
+	// ListAICCTopSourceURLsByOrg 统计访客来源页面分布。
+	ListAICCTopSourceURLsByOrg(ctx context.Context, arg sqlc.ListAICCTopSourceURLsByOrgParams) ([]sqlc.ListAICCTopSourceURLsByOrgRow, error)
 }
 
 // AICCTxRunner 为管理侧整组保存留资字段提供事务边界。
@@ -393,7 +401,7 @@ func (s *AICCService) ReplaceAgentKnowledge(ctx context.Context, principal auth.
 }
 
 // ListSessions 列出指定智能体的会话摘要；权限先通过智能体归属收敛到企业维度。
-func (s *AICCService) ListSessions(ctx context.Context, principal auth.Principal, agentID string, limit, offset int32) ([]AICCSessionResult, error) {
+func (s *AICCService) ListSessions(ctx context.Context, principal auth.Principal, agentID string, options AICCSessionListOptions) ([]AICCSessionResult, error) {
 	agent, err := s.getAgentRow(ctx, agentID)
 	if err != nil {
 		return nil, err
@@ -401,8 +409,19 @@ func (s *AICCService) ListSessions(ctx context.Context, principal auth.Principal
 	if !auth.CanViewAICC(principal, agent.OrgID) {
 		return nil, ErrForbidden
 	}
-	limit, offset = normalizeAICCPaging(limit, offset)
-	rows, err := s.store.ListAICCSessionsByAgent(ctx, sqlc.ListAICCSessionsByAgentParams{AgentID: agentID, Limit: limit, Offset: offset})
+	filter, err := normalizeAICCSessionListOptions(options)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.store.ListAICCSessionsByAgent(ctx, sqlc.ListAICCSessionsByAgentParams{
+		AgentID:          agentID,
+		ResolutionStatus: nullStr(filter.ResolutionStatus),
+		LeadStatus:       nullStr(filter.LeadStatus),
+		Channel:          nullStr(filter.Channel),
+		Keyword:          nullStr(filter.Keyword),
+		Limit:            filter.Limit,
+		Offset:           filter.Offset,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("查询 AICC 会话列表失败: %w", err)
 	}
@@ -569,7 +588,35 @@ func (s *AICCService) Analytics(ctx context.Context, principal auth.Principal, o
 	if err != nil {
 		return AICCAnalyticsResult{}, fmt.Errorf("统计 AICC 未读线索失败: %w", err)
 	}
-	return AICCAnalyticsResult{TodaySessions: today, UnreadLeads: unread}, nil
+	resolved, err := s.store.CountAICCSessionsByResolution(ctx, sqlc.CountAICCSessionsByResolutionParams{OrgID: orgID, ResolutionStatus: domain.AICCResolutionResolved})
+	if err != nil {
+		return AICCAnalyticsResult{}, fmt.Errorf("统计 AICC 已解决会话失败: %w", err)
+	}
+	unresolved, err := s.store.CountAICCSessionsByResolution(ctx, sqlc.CountAICCSessionsByResolutionParams{OrgID: orgID, ResolutionStatus: domain.AICCResolutionUnresolved})
+	if err != nil {
+		return AICCAnalyticsResult{}, fmt.Errorf("统计 AICC 未解决会话失败: %w", err)
+	}
+	completedLeads, err := s.store.CountAICCCompletedLeadSessions(ctx, orgID)
+	if err != nil {
+		return AICCAnalyticsResult{}, fmt.Errorf("统计 AICC 已留资会话失败: %w", err)
+	}
+	questions, err := s.store.ListAICCTopVisitorQuestionsByOrg(ctx, sqlc.ListAICCTopVisitorQuestionsByOrgParams{OrgID: orgID, Limit: 5})
+	if err != nil {
+		return AICCAnalyticsResult{}, fmt.Errorf("统计 AICC 热门问题失败: %w", err)
+	}
+	sources, err := s.store.ListAICCTopSourceURLsByOrg(ctx, sqlc.ListAICCTopSourceURLsByOrgParams{OrgID: orgID, Limit: 5})
+	if err != nil {
+		return AICCAnalyticsResult{}, fmt.Errorf("统计 AICC 来源页面失败: %w", err)
+	}
+	return AICCAnalyticsResult{
+		TodaySessions:         today,
+		UnreadLeads:           unread,
+		ResolvedSessions:      resolved,
+		UnresolvedSessions:    unresolved,
+		CompletedLeadSessions: completedLeads,
+		TopQuestions:          toAICCTopQuestionResults(questions),
+		TopSources:            toAICCTopSourceResults(sources),
+	}, nil
 }
 
 func normalizeAICCLeadFields(inputs []AICCLeadFieldInput) ([]AICCLeadFieldInput, error) {
@@ -613,6 +660,43 @@ func normalizeAICCLeadFields(inputs []AICCLeadFieldInput) ([]AICCLeadFieldInput,
 		results = append(results, field)
 	}
 	return results, nil
+}
+
+func normalizeAICCSessionListOptions(options AICCSessionListOptions) (AICCSessionListOptions, error) {
+	limit, offset := normalizeAICCPaging(options.Limit, options.Offset)
+	normalized := AICCSessionListOptions{
+		ResolutionStatus: strings.TrimSpace(options.ResolutionStatus),
+		LeadStatus:       strings.TrimSpace(options.LeadStatus),
+		Channel:          strings.TrimSpace(options.Channel),
+		Keyword:          strings.TrimSpace(options.Keyword),
+		Limit:            limit,
+		Offset:           offset,
+	}
+	if normalized.ResolutionStatus != "" {
+		switch normalized.ResolutionStatus {
+		case domain.AICCResolutionResolved, domain.AICCResolutionUnresolved, domain.AICCResolutionUnknown:
+		default:
+			return AICCSessionListOptions{}, fmt.Errorf("%w: AICC 会话解决状态非法", ErrInvalidArgument)
+		}
+	}
+	if normalized.LeadStatus != "" {
+		switch normalized.LeadStatus {
+		case "pending", "complete", "skipped":
+		default:
+			return AICCSessionListOptions{}, fmt.Errorf("%w: AICC 会话留资状态非法", ErrInvalidArgument)
+		}
+	}
+	if normalized.Channel != "" {
+		switch normalized.Channel {
+		case domain.AICCChannelWebLink, domain.AICCChannelWebWidget, domain.AICCChannelVoice:
+		default:
+			return AICCSessionListOptions{}, fmt.Errorf("%w: AICC 会话渠道非法", ErrInvalidArgument)
+		}
+	}
+	if len(normalized.Keyword) > 200 {
+		return AICCSessionListOptions{}, fmt.Errorf("%w: AICC 会话搜索关键词过长", ErrInvalidArgument)
+	}
+	return normalized, nil
 }
 
 func normalizeAICCKnowledgeInput(input AICCKnowledgeInput) (AICCKnowledgeInput, error) {
@@ -830,6 +914,22 @@ func toAICCLeadFieldResults(rows []sqlc.AiccLeadField) []AICCLeadFieldResult {
 			PromptText: strOrEmpty(row.PromptText),
 			SortOrder:  row.SortOrder,
 		})
+	}
+	return results
+}
+
+func toAICCTopQuestionResults(rows []sqlc.ListAICCTopVisitorQuestionsByOrgRow) []AICCTopItemResult {
+	results := make([]AICCTopItemResult, 0, len(rows))
+	for _, row := range rows {
+		results = append(results, AICCTopItemResult{Label: row.Question, Count: row.Count})
+	}
+	return results
+}
+
+func toAICCTopSourceResults(rows []sqlc.ListAICCTopSourceURLsByOrgRow) []AICCTopItemResult {
+	results := make([]AICCTopItemResult, 0, len(rows))
+	for _, row := range rows {
+		results = append(results, AICCTopItemResult{Label: strOrEmpty(row.SourceUrl), Count: row.Count})
 	}
 	return results
 }

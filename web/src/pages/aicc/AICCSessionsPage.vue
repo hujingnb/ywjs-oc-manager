@@ -14,6 +14,12 @@
           </div>
           <n-tag size="small" :bordered="false">{{ sessions.length }}</n-tag>
         </div>
+        <div class="session-filters">
+          <n-select v-model:value="resolutionFilter" clearable :options="resolutionOptions" placeholder="解决状态" />
+          <n-select v-model:value="leadFilter" clearable :options="leadOptions" placeholder="留资状态" />
+          <n-select v-model:value="channelFilter" clearable :options="channelOptions" placeholder="渠道" />
+          <n-input v-model:value="keywordFilter" clearable placeholder="来源关键词" />
+        </div>
         <n-spin :show="sessionsQuery.isLoading.value">
           <n-alert v-if="sessionsQuery.error.value" type="error" :bordered="false">
             {{ sessionsQuery.error.value.message }}
@@ -82,22 +88,51 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { NAlert, NSpin, NTag } from 'naive-ui'
+import { NAlert, NInput, NSelect, NSpin, NTag, type SelectOption } from 'naive-ui'
 import { MessageSquareText } from 'lucide-vue-next'
 
 import { useAICCSessionsQuery, useAICCSessionQuery } from '@/api/hooks/useAICC'
+import type { AICCSessionFilters } from '@/domain/aicc'
 
 const props = defineProps<{
   agentId?: string
 }>()
 
 const selectedSessionId = ref<string | undefined>()
+const resolutionFilter = ref<string | null>(null)
+const leadFilter = ref<string | null>(null)
+const channelFilter = ref<string | null>(null)
+const keywordFilter = ref('')
 const currentAgentId = computed(() => props.agentId)
-const sessionsQuery = useAICCSessionsQuery(currentAgentId)
+const sessionFilters = computed<AICCSessionFilters>(() => ({
+  resolution_status: resolutionFilter.value || undefined,
+  lead_status: leadFilter.value || undefined,
+  channel: channelFilter.value || undefined,
+  keyword: keywordFilter.value.trim() || undefined,
+}))
+const sessionsQuery = useAICCSessionsQuery(currentAgentId, sessionFilters)
 const detailQuery = useAICCSessionQuery(selectedSessionId)
 
 const sessions = computed(() => sessionsQuery.data.value ?? [])
 const messages = computed(() => detailQuery.data.value?.messages ?? [])
+
+const resolutionOptions: SelectOption[] = [
+  { label: '已解决', value: 'resolved' },
+  { label: '未解决', value: 'unresolved' },
+  { label: '未知', value: 'unknown' },
+]
+
+const leadOptions: SelectOption[] = [
+  { label: '待留资', value: 'pending' },
+  { label: '已留资', value: 'complete' },
+  { label: '已跳过', value: 'skipped' },
+]
+
+const channelOptions: SelectOption[] = [
+  { label: '公开链接', value: 'web_link' },
+  { label: '网页挂件', value: 'web_widget' },
+  { label: '语音客服', value: 'voice' },
+]
 
 watch(sessions, (items) => {
   if (!items.some(item => item.id === selectedSessionId.value)) {
@@ -147,6 +182,16 @@ function roleLabel(role?: string) {
   display: grid;
   align-content: start;
   gap: 10px;
+}
+
+.session-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.session-filters :deep(.n-input) {
+  grid-column: 1 / -1;
 }
 
 .panel-heading,
@@ -246,6 +291,14 @@ function roleLabel(role?: string) {
 @media (max-width: 980px) {
   .sessions-view {
     grid-template-columns: 1fr;
+  }
+
+  .session-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .session-filters :deep(.n-input) {
+    grid-column: auto;
   }
 }
 </style>

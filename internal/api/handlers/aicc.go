@@ -26,7 +26,7 @@ type aiccService interface {
 	UpdateAgent(ctx context.Context, principal auth.Principal, agentID string, input service.AICCAgentInput) (service.AICCAgentResult, error)
 	SetAgentStatus(ctx context.Context, principal auth.Principal, agentID, action string) (service.AICCAgentResult, error)
 	DeleteAgent(ctx context.Context, principal auth.Principal, agentID string) error
-	ListSessions(ctx context.Context, principal auth.Principal, agentID string, limit, offset int32) ([]service.AICCSessionResult, error)
+	ListSessions(ctx context.Context, principal auth.Principal, agentID string, options service.AICCSessionListOptions) ([]service.AICCSessionResult, error)
 	GetSession(ctx context.Context, principal auth.Principal, sessionID string) (service.AICCSessionDetailResult, error)
 	ListLeads(ctx context.Context, principal auth.Principal, orgID string, limit, offset int32) ([]service.AICCLeadResult, error)
 	ExportLeads(ctx context.Context, principal auth.Principal, orgID string) ([]service.AICCLeadResult, error)
@@ -306,6 +306,10 @@ func (h *AICCHandler) ReplaceAgentKnowledge(c *gin.Context) {
 // @Produce      json
 // @Security     BearerAuth
 // @Param        agentId  path      string  true   "智能体 ID"
+// @Param        resolution_status  query  string  false  "解决状态：resolved / unresolved / unknown"
+// @Param        lead_status        query  string  false  "留资状态：pending / complete / skipped"
+// @Param        channel            query  string  false  "渠道：web_link / web_widget / voice"
+// @Param        keyword            query  string  false  "来源 URL 或 referrer 关键词"
 // @Param        limit    query     int     false  "每页条数（默认 50）"
 // @Param        offset   query     int     false  "分页偏移（默认 0）"
 // @Success      200      {object}  map[string][]service.AICCSessionResult
@@ -315,7 +319,14 @@ func (h *AICCHandler) ReplaceAgentKnowledge(c *gin.Context) {
 // @Failure      500      {object}  ErrorResponse
 // @Router       /aicc/agents/{agentId}/sessions [get]
 func (h *AICCHandler) ListSessions(c *gin.Context) {
-	results, err := h.service.ListSessions(c.Request.Context(), principalFromCtx(c), c.Param("agentId"), queryInt32(c, "limit", 50), queryInt32(c, "offset", 0))
+	results, err := h.service.ListSessions(c.Request.Context(), principalFromCtx(c), c.Param("agentId"), service.AICCSessionListOptions{
+		ResolutionStatus: c.Query("resolution_status"),
+		LeadStatus:       c.Query("lead_status"),
+		Channel:          c.Query("channel"),
+		Keyword:          c.Query("keyword"),
+		Limit:            queryInt32(c, "limit", 50),
+		Offset:           queryInt32(c, "offset", 0),
+	})
 	if err != nil {
 		writeServiceError(c, err)
 		return

@@ -27,6 +27,8 @@ type Querier interface {
 	// transitionTo / RequestInitialize 强制清空进度字段。
 	ClearAppProgress(ctx context.Context, id string) error
 	CountAICCAgentsByOrg(ctx context.Context, orgID string) (int64, error)
+	CountAICCCompletedLeadSessions(ctx context.Context, orgID string) (int64, error)
+	CountAICCSessionsByResolution(ctx context.Context, arg CountAICCSessionsByResolutionParams) (int64, error)
 	CountAICCTodaySessions(ctx context.Context, orgID string) (int64, error)
 	CountAICCUnreadLeads(ctx context.Context, orgID string) (int64, error)
 	// 统计企业当前未删除普通实例数；AICC 隐藏 app 使用独立 aicc_agent_limit，不占用普通实例上限。
@@ -183,6 +185,8 @@ type Querier interface {
 	ListAICCLeadsByOrg(ctx context.Context, arg ListAICCLeadsByOrgParams) ([]AiccLead, error)
 	ListAICCMessagesBySession(ctx context.Context, sessionID string) ([]AiccMessage, error)
 	ListAICCSessionsByAgent(ctx context.Context, arg ListAICCSessionsByAgentParams) ([]AiccSession, error)
+	ListAICCTopSourceURLsByOrg(ctx context.Context, arg ListAICCTopSourceURLsByOrgParams) ([]ListAICCTopSourceURLsByOrgRow, error)
+	ListAICCTopVisitorQuestionsByOrg(ctx context.Context, arg ListAICCTopVisitorQuestionsByOrgParams) ([]ListAICCTopVisitorQuestionsByOrgRow, error)
 	ListActiveSites(ctx context.Context) ([]ListActiveSitesRow, error)
 	ListAllAICCLeadsByOrg(ctx context.Context, arg ListAllAICCLeadsByOrgParams) ([]AiccLead, error)
 	// 全量返回活跃组织（deleted_at IS NULL），不分页；

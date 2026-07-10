@@ -1468,11 +1468,32 @@ components:
       type: object
     service.AICCAnalyticsResult:
       properties:
+        completed_lead_sessions:
+          description: CompletedLeadSessions 是已完成留资的会话数。
+          type: integer
+        resolved_sessions:
+          description: ResolvedSessions 是当前企业已标记解决的会话数。
+          type: integer
         today_sessions:
           description: TodaySessions 是当前企业今日会话数。
           type: integer
+        top_questions:
+          description: TopQuestions 是访客高频问题列表。
+          items:
+            $ref: '#/components/schemas/service.AICCTopItemResult'
+          type: array
+          uniqueItems: false
+        top_sources:
+          description: TopSources 是访客来源页面分布。
+          items:
+            $ref: '#/components/schemas/service.AICCTopItemResult'
+          type: array
+          uniqueItems: false
         unread_leads:
           description: UnreadLeads 是当前企业未读线索数。
+          type: integer
+        unresolved_sessions:
+          description: UnresolvedSessions 是当前企业已标记未解决的会话数。
           type: integer
       type: object
     service.AICCKnowledgeResult:
@@ -1689,6 +1710,15 @@ components:
           type: string
         updated_at:
           description: UpdatedAt 是最近更新时间。
+          type: string
+      type: object
+    service.AICCTopItemResult:
+      properties:
+        count:
+          description: Count 是该项出现次数。
+          type: integer
+        label:
+          description: Label 是问题文本或来源页面。
           type: string
       type: object
     service.AppResult:
@@ -3276,6 +3306,26 @@ paths:
         in: path
         name: agentId
         required: true
+        schema:
+          type: string
+      - description: 解决状态：resolved / unresolved / unknown
+        in: query
+        name: resolution_status
+        schema:
+          type: string
+      - description: 留资状态：pending / complete / skipped
+        in: query
+        name: lead_status
+        schema:
+          type: string
+      - description: 渠道：web_link / web_widget / voice
+        in: query
+        name: channel
+        schema:
+          type: string
+      - description: 来源 URL 或 referrer 关键词
+        in: query
+        name: keyword
         schema:
           type: string
       - description: 每页条数（默认 50）

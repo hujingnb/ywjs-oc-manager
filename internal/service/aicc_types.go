@@ -127,6 +127,22 @@ type AICCSessionDetailResult struct {
 	Messages []AICCMessageResult `json:"messages"`
 }
 
+// AICCSessionListOptions 是管理端会话列表筛选条件。
+type AICCSessionListOptions struct {
+	// ResolutionStatus 按解决状态过滤，空值表示不限。
+	ResolutionStatus string
+	// LeadStatus 按留资状态过滤，空值表示不限。
+	LeadStatus string
+	// Channel 按访客入口渠道过滤，空值表示不限。
+	Channel string
+	// Keyword 在来源 URL 和 referrer 中做模糊搜索。
+	Keyword string
+	// Limit 是分页条数。
+	Limit int32
+	// Offset 是分页偏移。
+	Offset int32
+}
+
 // AICCLeadResult 是管理端线索列表视图。
 type AICCLeadResult struct {
 	// ID 是线索主键。
@@ -209,4 +225,22 @@ type AICCAnalyticsResult struct {
 	TodaySessions int64 `json:"today_sessions"`
 	// UnreadLeads 是当前企业未读线索数。
 	UnreadLeads int64 `json:"unread_leads"`
+	// ResolvedSessions 是当前企业已标记解决的会话数。
+	ResolvedSessions int64 `json:"resolved_sessions"`
+	// UnresolvedSessions 是当前企业已标记未解决的会话数。
+	UnresolvedSessions int64 `json:"unresolved_sessions"`
+	// CompletedLeadSessions 是已完成留资的会话数。
+	CompletedLeadSessions int64 `json:"completed_lead_sessions"`
+	// TopQuestions 是访客高频问题列表。
+	TopQuestions []AICCTopItemResult `json:"top_questions"`
+	// TopSources 是访客来源页面分布。
+	TopSources []AICCTopItemResult `json:"top_sources"`
+}
+
+// AICCTopItemResult 是统计页展示的名称和次数组合。
+type AICCTopItemResult struct {
+	// Label 是问题文本或来源页面。
+	Label string `json:"label"`
+	// Count 是该项出现次数。
+	Count int64 `json:"count"`
 }

@@ -48,6 +48,7 @@ type aiccServiceStub struct {
 	lastAction    string
 	lastFields    []service.AICCLeadFieldInput
 	lastKnowledge service.AICCKnowledgeInput
+	lastSessions  service.AICCSessionListOptions
 }
 
 // CreateAgent 记录创建请求并返回预设结果。
@@ -95,9 +96,10 @@ func (s *aiccServiceStub) DeleteAgent(_ context.Context, principal auth.Principa
 }
 
 // ListSessions 记录智能体 ID 并返回预设会话摘要。
-func (s *aiccServiceStub) ListSessions(_ context.Context, principal auth.Principal, agentID string, _, _ int32) ([]service.AICCSessionResult, error) {
+func (s *aiccServiceStub) ListSessions(_ context.Context, principal auth.Principal, agentID string, options service.AICCSessionListOptions) ([]service.AICCSessionResult, error) {
 	s.lastPrincipal = principal
 	s.lastAgentID = agentID
+	s.lastSessions = options
 	return s.sessionsResult, nil
 }
 
@@ -368,8 +370,12 @@ func TestAICCHandlerOperationsRoutes(t *testing.T) {
 		wantStatus int
 		assertion  func(t *testing.T, svc *aiccServiceStub, recorder *httptest.ResponseRecorder)
 	}{
-		{name: "会话列表路由返回 sessions", method: http.MethodGet, path: "/api/v1/aicc/agents/agent-1/sessions", wantStatus: http.StatusOK, assertion: func(t *testing.T, svc *aiccServiceStub, recorder *httptest.ResponseRecorder) {
+		{name: "会话列表路由返回 sessions", method: http.MethodGet, path: "/api/v1/aicc/agents/agent-1/sessions?resolution_status=unresolved&lead_status=complete&channel=web_widget&keyword=pricing", wantStatus: http.StatusOK, assertion: func(t *testing.T, svc *aiccServiceStub, recorder *httptest.ResponseRecorder) {
 			assert.Equal(t, "agent-1", svc.lastAgentID)
+			assert.Equal(t, "unresolved", svc.lastSessions.ResolutionStatus)
+			assert.Equal(t, "complete", svc.lastSessions.LeadStatus)
+			assert.Equal(t, "web_widget", svc.lastSessions.Channel)
+			assert.Equal(t, "pricing", svc.lastSessions.Keyword)
 			assert.Contains(t, recorder.Body.String(), "sessions")
 		}}, // 场景：企业管理员查看某智能体会话列表。
 		{name: "会话详情路由返回 session 和 messages", method: http.MethodGet, path: "/api/v1/aicc/sessions/session-1", wantStatus: http.StatusOK, assertion: func(t *testing.T, svc *aiccServiceStub, recorder *httptest.ResponseRecorder) {

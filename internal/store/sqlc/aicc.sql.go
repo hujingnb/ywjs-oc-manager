@@ -91,6 +91,37 @@ func (q *Queries) CountAICCAgentsByOrg(ctx context.Context, orgID string) (int64
 	return count, err
 }
 
+const countAICCCompletedLeadSessions = `-- name: CountAICCCompletedLeadSessions :one
+SELECT COUNT(*)
+FROM aicc_sessions
+WHERE org_id = ? AND lead_status = 'complete'
+`
+
+func (q *Queries) CountAICCCompletedLeadSessions(ctx context.Context, orgID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countAICCCompletedLeadSessions, orgID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countAICCSessionsByResolution = `-- name: CountAICCSessionsByResolution :one
+SELECT COUNT(*)
+FROM aicc_sessions
+WHERE org_id = ? AND resolution_status = ?
+`
+
+type CountAICCSessionsByResolutionParams struct {
+	OrgID            string `db:"org_id" json:"org_id"`
+	ResolutionStatus string `db:"resolution_status" json:"resolution_status"`
+}
+
+func (q *Queries) CountAICCSessionsByResolution(ctx context.Context, arg CountAICCSessionsByResolutionParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countAICCSessionsByResolution, arg.OrgID, arg.ResolutionStatus)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countAICCTodaySessions = `-- name: CountAICCTodaySessions :one
 SELECT COUNT(*)
 FROM aicc_sessions
@@ -798,18 +829,43 @@ const listAICCSessionsByAgent = `-- name: ListAICCSessionsByAgent :many
 SELECT id, agent_id, org_id, session_token, channel, source_url, referrer, region, ip_hash, user_agent_hash, privacy_notice_shown, privacy_consented_at, resolution_status, lead_status, last_active_at, expires_at, created_at, updated_at
 FROM aicc_sessions
 WHERE agent_id = ?
+  AND (? IS NULL OR resolution_status = ?)
+  AND (? IS NULL OR lead_status = ?)
+  AND (? IS NULL OR channel = ?)
+  AND (
+      ? IS NULL
+      OR source_url LIKE CONCAT('%', ?, '%')
+      OR referrer LIKE CONCAT('%', ?, '%')
+  )
 ORDER BY created_at DESC, id DESC
 LIMIT ? OFFSET ?
 `
 
 type ListAICCSessionsByAgentParams struct {
-	AgentID string `db:"agent_id" json:"agent_id"`
-	Limit   int32  `db:"limit" json:"limit"`
-	Offset  int32  `db:"offset" json:"offset"`
+	AgentID          string      `db:"agent_id" json:"agent_id"`
+	ResolutionStatus null.String `db:"resolution_status" json:"resolution_status"`
+	LeadStatus       null.String `db:"lead_status" json:"lead_status"`
+	Channel          null.String `db:"channel" json:"channel"`
+	Keyword          interface{} `db:"keyword" json:"keyword"`
+	Limit            int32       `db:"limit" json:"limit"`
+	Offset           int32       `db:"offset" json:"offset"`
 }
 
 func (q *Queries) ListAICCSessionsByAgent(ctx context.Context, arg ListAICCSessionsByAgentParams) ([]AiccSession, error) {
-	rows, err := q.db.QueryContext(ctx, listAICCSessionsByAgent, arg.AgentID, arg.Limit, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, listAICCSessionsByAgent,
+		arg.AgentID,
+		arg.ResolutionStatus,
+		arg.ResolutionStatus,
+		arg.LeadStatus,
+		arg.LeadStatus,
+		arg.Channel,
+		arg.Channel,
+		arg.Keyword,
+		arg.Keyword,
+		arg.Keyword,
+		arg.Limit,
+		arg.Offset,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -837,6 +893,98 @@ func (q *Queries) ListAICCSessionsByAgent(ctx context.Context, arg ListAICCSessi
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAICCTopSourceURLsByOrg = `-- name: ListAICCTopSourceURLsByOrg :many
+SELECT source_url,
+       CAST(COUNT(*) AS SIGNED) AS count
+FROM aicc_sessions
+WHERE org_id = ?
+  AND source_url IS NOT NULL
+  AND TRIM(source_url) <> ''
+GROUP BY source_url
+ORDER BY count DESC, source_url ASC
+LIMIT ?
+`
+
+type ListAICCTopSourceURLsByOrgParams struct {
+	OrgID string `db:"org_id" json:"org_id"`
+	Limit int32  `db:"limit" json:"limit"`
+}
+
+type ListAICCTopSourceURLsByOrgRow struct {
+	SourceUrl null.String `db:"source_url" json:"source_url"`
+	Count     int64       `db:"count" json:"count"`
+}
+
+func (q *Queries) ListAICCTopSourceURLsByOrg(ctx context.Context, arg ListAICCTopSourceURLsByOrgParams) ([]ListAICCTopSourceURLsByOrgRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAICCTopSourceURLsByOrg, arg.OrgID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAICCTopSourceURLsByOrgRow{}
+	for rows.Next() {
+		var i ListAICCTopSourceURLsByOrgRow
+		if err := rows.Scan(&i.SourceUrl, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAICCTopVisitorQuestionsByOrg = `-- name: ListAICCTopVisitorQuestionsByOrg :many
+SELECT TRIM(m.text_content) AS question,
+       CAST(COUNT(*) AS SIGNED) AS count
+FROM aicc_messages m
+JOIN aicc_sessions s ON s.id = m.session_id
+WHERE s.org_id = ?
+  AND m.direction = 'visitor'
+  AND m.text_content IS NOT NULL
+  AND TRIM(m.text_content) <> ''
+GROUP BY TRIM(m.text_content)
+ORDER BY count DESC, question ASC
+LIMIT ?
+`
+
+type ListAICCTopVisitorQuestionsByOrgParams struct {
+	OrgID string `db:"org_id" json:"org_id"`
+	Limit int32  `db:"limit" json:"limit"`
+}
+
+type ListAICCTopVisitorQuestionsByOrgRow struct {
+	Question string `db:"question" json:"question"`
+	Count    int64  `db:"count" json:"count"`
+}
+
+func (q *Queries) ListAICCTopVisitorQuestionsByOrg(ctx context.Context, arg ListAICCTopVisitorQuestionsByOrgParams) ([]ListAICCTopVisitorQuestionsByOrgRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAICCTopVisitorQuestionsByOrg, arg.OrgID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAICCTopVisitorQuestionsByOrgRow{}
+	for rows.Next() {
+		var i ListAICCTopVisitorQuestionsByOrgRow
+		if err := rows.Scan(&i.Question, &i.Count); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

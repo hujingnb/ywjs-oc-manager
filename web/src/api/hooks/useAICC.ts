@@ -20,6 +20,7 @@ import type {
   AICCPublicMessageResult,
   AICCPublicSession,
   AICCSession,
+  AICCSessionFilters,
   AICCSessionDetail,
 } from '@/domain/aicc'
 
@@ -28,7 +29,7 @@ const aiccAgentsKey = (orgId?: string) => [...AICC_AGENTS_KEY, orgId ?? 'current
 const aiccAgentKey = (agentId?: string) => ['aicc', 'agent', agentId] as const
 const aiccLeadFieldsKey = (agentId?: string) => ['aicc', 'lead-fields', agentId] as const
 const aiccKnowledgeKey = (agentId?: string) => ['aicc', 'knowledge', agentId] as const
-const aiccSessionsKey = (agentId?: string) => ['aicc', 'sessions', agentId] as const
+const aiccSessionsKey = (agentId?: string, filters?: AICCSessionFilters) => ['aicc', 'sessions', agentId, filters ?? {}] as const
 const aiccSessionKey = (sessionId?: string) => ['aicc', 'session', sessionId] as const
 const AICC_LEADS_KEY = ['aicc', 'leads'] as const
 const AICC_ANALYTICS_KEY = ['aicc', 'analytics'] as const
@@ -187,14 +188,20 @@ export function useReplaceAICCKnowledge() {
 }
 
 // useAICCSessionsQuery 查询选中智能体的会话摘要列表；无智能体时保持禁用。
-export function useAICCSessionsQuery(agentId: Ref<string | undefined>) {
+export function useAICCSessionsQuery(agentId: Ref<string | undefined>, filters?: Ref<AICCSessionFilters | undefined>) {
   return useQuery<AICCSession[]>({
-    queryKey: computed(() => aiccSessionsKey(agentId.value)),
+    queryKey: computed(() => aiccSessionsKey(agentId.value, filters?.value)),
     enabled: () => Boolean(agentId.value),
     queryFn: async () => {
       if (!agentId.value) return []
       const response = await apiRequest<{ sessions: AICCSession[] }>(`/api/v1/aicc/agents/${agentId.value}/sessions`, {
-        query: { limit: 100 },
+        query: {
+          limit: 100,
+          resolution_status: filters?.value?.resolution_status || undefined,
+          lead_status: filters?.value?.lead_status || undefined,
+          channel: filters?.value?.channel || undefined,
+          keyword: filters?.value?.keyword?.trim() || undefined,
+        },
       })
       return response.sessions
     },

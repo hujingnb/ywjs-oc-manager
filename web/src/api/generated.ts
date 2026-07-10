@@ -778,6 +778,14 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
+                    /** @description 解决状态：resolved / unresolved / unknown */
+                    resolution_status?: string;
+                    /** @description 留资状态：pending / complete / skipped */
+                    lead_status?: string;
+                    /** @description 渠道：web_link / web_widget / voice */
+                    channel?: string;
+                    /** @description 来源 URL 或 referrer 关键词 */
+                    keyword?: string;
                     /** @description 每页条数（默认 50） */
                     limit?: number;
                     /** @description 分页偏移（默认 0） */
@@ -15792,10 +15800,20 @@ export interface components {
             widget_token?: string;
         };
         "service.AICCAnalyticsResult": {
+            /** @description CompletedLeadSessions 是已完成留资的会话数。 */
+            completed_lead_sessions?: number;
+            /** @description ResolvedSessions 是当前企业已标记解决的会话数。 */
+            resolved_sessions?: number;
             /** @description TodaySessions 是当前企业今日会话数。 */
             today_sessions?: number;
+            /** @description TopQuestions 是访客高频问题列表。 */
+            top_questions?: components["schemas"]["service.AICCTopItemResult"][];
+            /** @description TopSources 是访客来源页面分布。 */
+            top_sources?: components["schemas"]["service.AICCTopItemResult"][];
             /** @description UnreadLeads 是当前企业未读线索数。 */
             unread_leads?: number;
+            /** @description UnresolvedSessions 是当前企业已标记未解决的会话数。 */
+            unresolved_sessions?: number;
         };
         "service.AICCKnowledgeResult": {
             /** @description AgentID 是智能体主键。 */
@@ -15924,6 +15942,12 @@ export interface components {
             source_url?: string;
             /** @description UpdatedAt 是最近更新时间。 */
             updated_at?: string;
+        };
+        "service.AICCTopItemResult": {
+            /** @description Count 是该项出现次数。 */
+            count?: number;
+            /** @description Label 是问题文本或来源页面。 */
+            label?: string;
         };
         "service.AppResult": {
             api_key_status?: string;
