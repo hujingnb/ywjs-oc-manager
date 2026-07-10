@@ -1963,7 +1963,8 @@ func (q *Queries) SoftDeleteAICCAgent(ctx context.Context, id string) error {
 
 const touchAICCSessionLastActive = `-- name: TouchAICCSessionLastActive :execrows
 UPDATE aicc_sessions
-SET last_active_at = now(), updated_at = now()
+SET last_active_at = IF(last_active_at >= now(), DATE_ADD(last_active_at, INTERVAL 1 SECOND), now()),
+    updated_at = now()
 WHERE id = ? AND expires_at > now()
 `
 
