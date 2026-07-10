@@ -184,6 +184,8 @@ type Querier interface {
 	ListAICCAgentsByOrg(ctx context.Context, arg ListAICCAgentsByOrgParams) ([]AiccAgent, error)
 	ListAICCImageObjectKeysBySession(ctx context.Context, sessionID string) ([]string, error)
 	ListAICCLeadFieldsByAgent(ctx context.Context, agentID string) ([]AiccLeadField, error)
+	ListAICCLeadValuesByLead(ctx context.Context, arg ListAICCLeadValuesByLeadParams) ([]ListAICCLeadValuesByLeadRow, error)
+	ListAICCLeadValuesBySession(ctx context.Context, sessionID string) ([]ListAICCLeadValuesBySessionRow, error)
 	ListAICCLeadsByOrg(ctx context.Context, arg ListAICCLeadsByOrgParams) ([]AiccLead, error)
 	ListAICCMessagesBySession(ctx context.Context, sessionID string) ([]AiccMessage, error)
 	ListAICCSessionsByAgent(ctx context.Context, arg ListAICCSessionsByAgentParams) ([]AiccSession, error)

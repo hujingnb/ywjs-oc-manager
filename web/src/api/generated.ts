@@ -15867,6 +15867,22 @@ export interface components {
             unread?: boolean;
             /** @description UpdatedAt 是线索最近更新时间。 */
             updated_at?: string;
+            /** @description Values 是该线索已沉淀的自定义留资字段值。 */
+            values?: components["schemas"]["service.AICCLeadValueResult"][];
+        };
+        "service.AICCLeadValueResult": {
+            /** @description CreatedAt 是该字段值首次创建时间。 */
+            created_at?: string;
+            /** @description FieldID 是留资字段主键，用于历史字段被重命名时仍可追踪来源。 */
+            field_id?: string;
+            /** @description FieldKey 是字段稳定 key，CSV 导出使用它避免同名 label 冲突。 */
+            field_key?: string;
+            /** @description FieldType 是字段类型，前端可据此做轻量展示。 */
+            field_type?: string;
+            /** @description Label 是运营侧可读字段名。 */
+            label?: string;
+            /** @description Value 是访客提交的字段值。 */
+            value?: string;
         };
         "service.AICCMessageResult": {
             /** @description ContentType 描述文本、图片或混合消息。 */
@@ -15923,6 +15939,8 @@ export interface components {
             session_token?: string;
         };
         "service.AICCSessionDetailResult": {
+            /** @description LeadValues 是本会话已提交的留资字段值，便于运营结合对话上下文回看。 */
+            lead_values?: components["schemas"]["service.AICCLeadValueResult"][];
             /** @description Messages 是会话消息镜像。 */
             messages?: components["schemas"]["service.AICCMessageResult"][];
             session?: components["schemas"]["service.AICCSessionResult"];

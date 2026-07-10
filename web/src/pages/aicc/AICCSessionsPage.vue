@@ -62,12 +62,18 @@
           <n-alert v-if="detailQuery.error.value" type="error" :bordered="false">
             {{ detailQuery.error.value.message }}
           </n-alert>
-          <div v-else-if="messages.length === 0" class="empty-state">
+          <div v-else-if="messages.length === 0 && leadValues.length === 0" class="empty-state">
             <MessageSquareText :size="28" />
             <strong>暂无消息</strong>
             <span>选择左侧会话后查看访客与助手对话。</span>
           </div>
           <div v-else class="message-stack">
+            <div v-if="leadValues.length" class="lead-summary">
+              <span v-for="value in leadValues" :key="value.field_key">
+                <strong>{{ value.label }}</strong>
+                <small>{{ value.value }}</small>
+              </span>
+            </div>
             <article v-for="message in messages" :key="message.id" class="message-item" :class="message.direction">
               <div class="message-meta">
                 <span>{{ roleLabel(message.direction) }}</span>
@@ -115,6 +121,7 @@ const detailQuery = useAICCSessionQuery(selectedSessionId)
 
 const sessions = computed(() => sessionsQuery.data.value ?? [])
 const messages = computed(() => detailQuery.data.value?.messages ?? [])
+const leadValues = computed(() => detailQuery.data.value?.lead_values ?? [])
 
 const resolutionOptions: SelectOption[] = [
   { label: '已解决', value: 'resolved' },
@@ -263,6 +270,32 @@ function roleLabel(role?: string) {
 .message-stack {
   display: grid;
   gap: 10px;
+}
+
+.lead-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
+.lead-summary span {
+  display: grid;
+  min-width: 120px;
+  gap: 2px;
+}
+
+.lead-summary strong {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.lead-summary small {
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
 }
 
 .message-item {

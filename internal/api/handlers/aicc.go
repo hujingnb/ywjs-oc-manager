@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/csv"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -468,17 +469,27 @@ func (h *AICCHandler) ExportLeads(c *gin.Context) {
 	}
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
-	if err := writer.Write([]string{"lead_id", "display_name", "unread", "updated_at"}); err != nil {
+	valueColumns := aiccLeadValueColumns(results)
+	header := append([]string{"lead_id", "display_name", "unread", "updated_at"}, valueColumns.headers...)
+	if err := writer.Write(header); err != nil {
 		writeServiceError(c, err)
 		return
 	}
 	for _, lead := range results {
-		if err := writer.Write([]string{
+		row := []string{
 			safeCSVCell(lead.ID),
 			safeCSVCell(lead.DisplayName),
 			boolCSV(lead.Unread),
 			lead.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		}); err != nil {
+		}
+		valuesByKey := map[string]string{}
+		for _, value := range lead.Values {
+			valuesByKey[value.FieldKey] = value.Value
+		}
+		for _, key := range valueColumns.keys {
+			row = append(row, safeCSVCell(valuesByKey[key]))
+		}
+		if err := writer.Write(row); err != nil {
 			writeServiceError(c, err)
 			return
 		}
@@ -549,6 +560,51 @@ func boolCSV(v bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+type aiccLeadCSVColumns struct {
+	keys    []string
+	headers []string
+}
+
+func aiccLeadValueColumns(leads []service.AICCLeadResult) aiccLeadCSVColumns {
+	labelsByKey := map[string]string{}
+	seenKeys := map[string]bool{}
+	for _, lead := range leads {
+		for _, value := range lead.Values {
+			key := strings.TrimSpace(value.FieldKey)
+			if key == "" || seenKeys[key] {
+				continue
+			}
+			seenKeys[key] = true
+			labelsByKey[key] = strings.TrimSpace(value.Label)
+		}
+	}
+	keys := make([]string, 0, len(labelsByKey))
+	for key := range labelsByKey {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	labelCounts := map[string]int{}
+	for _, key := range keys {
+		label := labelsByKey[key]
+		if label == "" {
+			label = key
+		}
+		labelCounts[label]++
+	}
+	headers := make([]string, 0, len(keys))
+	for _, key := range keys {
+		label := labelsByKey[key]
+		if label == "" {
+			label = key
+		}
+		if labelCounts[label] > 1 {
+			label = label + " (" + key + ")"
+		}
+		headers = append(headers, safeCSVCell(label))
+	}
+	return aiccLeadCSVColumns{keys: keys, headers: headers}
 }
 
 func safeCSVCell(value string) string {

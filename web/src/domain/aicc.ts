@@ -221,8 +221,26 @@ export interface AICCMessage {
 export interface AICCSessionDetail {
   // 会话摘要。
   session: AICCSession
+  // 本会话已提交的留资字段值。
+  lead_values?: AICCLeadValue[]
   // 会话消息列表。
   messages: AICCMessage[]
+}
+
+// AICCLeadValue 是访客提交的单个自定义留资字段值。
+export interface AICCLeadValue {
+  // 字段主键。
+  field_id?: string
+  // 字段稳定 key。
+  field_key: string
+  // 字段展示名称。
+  label: string
+  // 字段类型。
+  field_type?: string
+  // 字段值。
+  value: string
+  // 创建时间。
+  created_at?: string
 }
 
 // AICCLead 是从会话中沉淀出的访客线索。
@@ -235,6 +253,8 @@ export interface AICCLead {
   display_name?: string
   // 是否未读。
   unread: boolean
+  // 自定义留资字段值。
+  values?: AICCLeadValue[]
   // 创建时间。
   created_at?: string
   // 最近更新时间。

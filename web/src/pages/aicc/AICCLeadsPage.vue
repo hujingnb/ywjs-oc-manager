@@ -27,6 +27,11 @@
           <div class="lead-main">
             <strong>{{ lead.display_name || '未命名访客' }}</strong>
             <small>会话 {{ formatShortId(lead.latest_session_id) }} · {{ formatDate(lead.updated_at || lead.created_at) }}</small>
+            <div v-if="lead.values?.length" class="lead-values">
+              <span v-for="value in lead.values" :key="`${lead.id}-${value.field_key}`">
+                {{ value.label }}：{{ value.value }}
+              </span>
+            </div>
           </div>
           <n-tag size="small" :type="lead.unread ? 'warning' : 'default'" :bordered="false">
             {{ lead.unread ? '未读' : '已读' }}
@@ -141,6 +146,24 @@ function formatDate(value?: string) {
   display: grid;
   gap: 4px;
   min-width: 0;
+}
+
+.lead-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lead-values span {
+  max-width: 220px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .lead-main small,

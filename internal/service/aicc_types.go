@@ -127,6 +127,8 @@ type AICCMessageResult struct {
 type AICCSessionDetailResult struct {
 	// Session 是会话摘要。
 	Session AICCSessionResult `json:"session"`
+	// LeadValues 是本会话已提交的留资字段值，便于运营结合对话上下文回看。
+	LeadValues []AICCLeadValueResult `json:"lead_values"`
 	// Messages 是会话消息镜像。
 	Messages []AICCMessageResult `json:"messages"`
 }
@@ -159,10 +161,28 @@ type AICCLeadResult struct {
 	Unread bool `json:"unread"`
 	// LatestSessionID 是最近关联会话。
 	LatestSessionID string `json:"latest_session_id,omitempty"`
+	// Values 是该线索已沉淀的自定义留资字段值。
+	Values []AICCLeadValueResult `json:"values"`
 	// CreatedAt 是线索首次创建时间。
 	CreatedAt time.Time `json:"created_at"`
 	// UpdatedAt 是线索最近更新时间。
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// AICCLeadValueResult 是管理端展示和导出自定义留资字段值的视图。
+type AICCLeadValueResult struct {
+	// FieldID 是留资字段主键，用于历史字段被重命名时仍可追踪来源。
+	FieldID string `json:"field_id"`
+	// FieldKey 是字段稳定 key，CSV 导出使用它避免同名 label 冲突。
+	FieldKey string `json:"field_key"`
+	// Label 是运营侧可读字段名。
+	Label string `json:"label"`
+	// FieldType 是字段类型，前端可据此做轻量展示。
+	FieldType string `json:"field_type"`
+	// Value 是访客提交的字段值。
+	Value string `json:"value"`
+	// CreatedAt 是该字段值首次创建时间。
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // AICCLeadFieldInput 是企业管理员配置公开页留资字段的入参。

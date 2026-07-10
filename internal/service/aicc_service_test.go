@@ -20,39 +20,41 @@ import (
 
 // fakeAICCStore 是 AICC service 单测使用的最小 store，记录创建入参与返回组织配置。
 type fakeAICCStore struct {
-	org          sqlc.Organization
-	count        int64
-	agents       map[string]sqlc.AiccAgent
-	knowledge    map[string][]sqlc.AiccAgentKnowledge
-	sessions     map[string]sqlc.AiccSession
-	messages     map[string][]sqlc.AiccMessage
-	leads        map[string]sqlc.AiccLead
-	leadFields   map[string][]sqlc.AiccLeadField
-	todayCount   int64
-	unreadCount  int64
-	resolved     int64
-	unresolved   int64
-	completeLead int64
-	topQuestions []sqlc.ListAICCTopVisitorQuestionsByOrgRow
-	topSources   []sqlc.ListAICCTopSourceURLsByOrgRow
-	audits       []sqlc.CreateAuditLogParams
-	createArg    sqlc.CreateAICCAgentParams
-	addKnowledge []sqlc.AddAICCAgentKnowledgeParams
-	updateArg    sqlc.UpdateAICCAgentProfileParams
-	statusArg    sqlc.SetAICCAgentStatusParams
-	sessionArg   sqlc.ListAICCSessionsByAgentParams
-	readLeadArg  sqlc.MarkAICCLeadReadParams
-	createField  sqlc.UpsertAICCLeadFieldParams
-	deletedID    string
-	createErr    error
-	getErr       error
-	listErr      error
-	updateErr    error
-	statusErr    error
-	deleteErr    error
-	sessionsErr  error
-	leadsErr     error
-	organization error
+	org           sqlc.Organization
+	count         int64
+	agents        map[string]sqlc.AiccAgent
+	knowledge     map[string][]sqlc.AiccAgentKnowledge
+	sessions      map[string]sqlc.AiccSession
+	messages      map[string][]sqlc.AiccMessage
+	leads         map[string]sqlc.AiccLead
+	leadValues    map[string][]sqlc.ListAICCLeadValuesByLeadRow
+	sessionValues map[string][]sqlc.ListAICCLeadValuesBySessionRow
+	leadFields    map[string][]sqlc.AiccLeadField
+	todayCount    int64
+	unreadCount   int64
+	resolved      int64
+	unresolved    int64
+	completeLead  int64
+	topQuestions  []sqlc.ListAICCTopVisitorQuestionsByOrgRow
+	topSources    []sqlc.ListAICCTopSourceURLsByOrgRow
+	audits        []sqlc.CreateAuditLogParams
+	createArg     sqlc.CreateAICCAgentParams
+	addKnowledge  []sqlc.AddAICCAgentKnowledgeParams
+	updateArg     sqlc.UpdateAICCAgentProfileParams
+	statusArg     sqlc.SetAICCAgentStatusParams
+	sessionArg    sqlc.ListAICCSessionsByAgentParams
+	readLeadArg   sqlc.MarkAICCLeadReadParams
+	createField   sqlc.UpsertAICCLeadFieldParams
+	deletedID     string
+	createErr     error
+	getErr        error
+	listErr       error
+	updateErr     error
+	statusErr     error
+	deleteErr     error
+	sessionsErr   error
+	leadsErr      error
+	organization  error
 }
 
 // GetOrganization 返回测试预置的企业开通配置。
@@ -264,6 +266,11 @@ func (f *fakeAICCStore) ListAICCMessagesBySession(_ context.Context, sessionID s
 	return f.messages[sessionID], nil
 }
 
+// ListAICCLeadValuesBySession 返回会话已提交的留资字段值，用于会话详情回显。
+func (f *fakeAICCStore) ListAICCLeadValuesBySession(_ context.Context, sessionID string) ([]sqlc.ListAICCLeadValuesBySessionRow, error) {
+	return append([]sqlc.ListAICCLeadValuesBySessionRow(nil), f.sessionValues[sessionID]...), nil
+}
+
 // ListAICCLeadsByOrg 返回企业线索列表，默认由 SQL 按未读和更新时间排序。
 func (f *fakeAICCStore) ListAICCLeadsByOrg(_ context.Context, arg sqlc.ListAICCLeadsByOrgParams) ([]sqlc.AiccLead, error) {
 	if f.leadsErr != nil {
@@ -293,6 +300,14 @@ func (f *fakeAICCStore) ListAllAICCLeadsByOrg(_ context.Context, arg sqlc.ListAl
 		rows = rows[:arg.Limit]
 	}
 	return rows, nil
+}
+
+// ListAICCLeadValuesByLead 返回线索已沉淀的自定义留资字段值，用于列表展示和 CSV 导出。
+func (f *fakeAICCStore) ListAICCLeadValuesByLead(_ context.Context, arg sqlc.ListAICCLeadValuesByLeadParams) ([]sqlc.ListAICCLeadValuesByLeadRow, error) {
+	if !arg.LeadID.Valid || !arg.LeadOrgID.Valid {
+		return nil, nil
+	}
+	return append([]sqlc.ListAICCLeadValuesByLeadRow(nil), f.leadValues[arg.LeadID.String]...), nil
 }
 
 // MarkAICCLeadRead 记录线索已读参数，并同步内存行。
@@ -484,6 +499,34 @@ func seededAICCStore() *fakeAICCStore {
 				LatestSessionOrgID: null.StringFrom("org-1"),
 				CreatedAt:          time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC),
 				UpdatedAt:          time.Date(2026, 7, 9, 12, 6, 0, 0, time.UTC),
+			},
+		},
+		leadValues: map[string][]sqlc.ListAICCLeadValuesByLeadRow{
+			"lead-1": {
+				{
+					LeadID:    null.StringFrom("lead-1"),
+					SessionID: "session-1",
+					FieldID:   "field-phone",
+					FieldKey:  "phone",
+					Label:     "联系电话",
+					FieldType: "phone",
+					ValueText: "13800138000",
+					CreatedAt: time.Date(2026, 7, 9, 12, 1, 0, 0, time.UTC),
+				},
+			},
+		},
+		sessionValues: map[string][]sqlc.ListAICCLeadValuesBySessionRow{
+			"session-1": {
+				{
+					LeadID:    null.StringFrom("lead-1"),
+					SessionID: "session-1",
+					FieldID:   "field-phone",
+					FieldKey:  "phone",
+					Label:     "联系电话",
+					FieldType: "phone",
+					ValueText: "13800138000",
+					CreatedAt: time.Date(2026, 7, 9, 12, 1, 0, 0, time.UTC),
+				},
 			},
 		},
 		todayCount:   3,
@@ -845,6 +888,9 @@ func TestAICCServiceGetSessionReturnsMessages(t *testing.T) {
 	require.Len(t, result.Messages, 2)
 	assert.Equal(t, "msg-1", result.Messages[0].ID)
 	assert.Equal(t, "你好", result.Messages[0].Text)
+	require.Len(t, result.LeadValues, 1)
+	assert.Equal(t, "phone", result.LeadValues[0].FieldKey)
+	assert.Equal(t, "13800138000", result.LeadValues[0].Value)
 }
 
 // TestAICCServiceListLeadsAndMarkRead 覆盖线索运营列表和已读标记：
@@ -858,6 +904,9 @@ func TestAICCServiceListLeadsAndMarkRead(t *testing.T) {
 	require.Len(t, leads, 1)
 	assert.Equal(t, "张三", leads[0].DisplayName)
 	assert.True(t, leads[0].Unread)
+	require.Len(t, leads[0].Values, 1)
+	assert.Equal(t, "联系电话", leads[0].Values[0].Label)
+	assert.Equal(t, "13800138000", leads[0].Values[0].Value)
 
 	err = svc.MarkLeadRead(context.Background(), aiccOrgAdmin(), "lead-1")
 
@@ -886,6 +935,9 @@ func TestAICCServiceExportLeadsBypassesInteractivePaging(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Len(t, leads, 201)
+	for _, lead := range leads {
+		assert.Empty(t, lead.Values)
+	}
 }
 
 // TestAICCServiceReplaceLeadFields 覆盖管理端整组保存留资字段：

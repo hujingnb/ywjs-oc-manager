@@ -1585,6 +1585,33 @@ components:
         updated_at:
           description: UpdatedAt 是线索最近更新时间。
           type: string
+        values:
+          description: Values 是该线索已沉淀的自定义留资字段值。
+          items:
+            $ref: '#/components/schemas/service.AICCLeadValueResult'
+          type: array
+          uniqueItems: false
+      type: object
+    service.AICCLeadValueResult:
+      properties:
+        created_at:
+          description: CreatedAt 是该字段值首次创建时间。
+          type: string
+        field_id:
+          description: FieldID 是留资字段主键，用于历史字段被重命名时仍可追踪来源。
+          type: string
+        field_key:
+          description: FieldKey 是字段稳定 key，CSV 导出使用它避免同名 label 冲突。
+          type: string
+        field_type:
+          description: FieldType 是字段类型，前端可据此做轻量展示。
+          type: string
+        label:
+          description: Label 是运营侧可读字段名。
+          type: string
+        value:
+          description: Value 是访客提交的字段值。
+          type: string
       type: object
     service.AICCMessageResult:
       properties:
@@ -1684,6 +1711,12 @@ components:
       type: object
     service.AICCSessionDetailResult:
       properties:
+        lead_values:
+          description: LeadValues 是本会话已提交的留资字段值，便于运营结合对话上下文回看。
+          items:
+            $ref: '#/components/schemas/service.AICCLeadValueResult'
+          type: array
+          uniqueItems: false
         messages:
           description: Messages 是会话消息镜像。
           items:

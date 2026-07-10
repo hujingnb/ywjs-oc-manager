@@ -397,8 +397,9 @@ func TestAICCHandlerOperationsRoutes(t *testing.T) {
 		{name: "线索导出路由返回 CSV", method: http.MethodGet, path: "/api/v1/aicc/leads/export", wantStatus: http.StatusOK, assertion: func(t *testing.T, svc *aiccServiceStub, recorder *httptest.ResponseRecorder) {
 			assert.Contains(t, recorder.Header().Get("Content-Type"), "text/csv")
 			assert.Contains(t, recorder.Header().Get("Content-Disposition"), "aicc-leads.csv")
-			assert.Contains(t, recorder.Body.String(), "lead_id,display_name,unread,updated_at")
+			assert.Contains(t, recorder.Body.String(), "lead_id,display_name,unread,updated_at,联系电话")
 			assert.Contains(t, recorder.Body.String(), "'=HYPERLINK")
+			assert.Contains(t, recorder.Body.String(), "'=13800138000")
 		}}, // 场景：企业管理员导出线索 CSV。
 	}
 	for _, tc := range cases {
@@ -409,7 +410,7 @@ func TestAICCHandlerOperationsRoutes(t *testing.T) {
 					Session:  service.AICCSessionResult{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", Channel: domain.AICCChannelWebLink, CreatedAt: now, UpdatedAt: now},
 					Messages: []service.AICCMessageResult{{ID: "msg-1", Direction: domain.AICCMessageDirectionVisitor, ContentType: domain.AICCMessageContentTypeText, Text: "你好", CreatedAt: now}},
 				},
-				leadsResult:     []service.AICCLeadResult{{ID: "lead-1", OrgID: "org-1", DisplayName: "=HYPERLINK(\"https://example.com\")", Unread: true, UpdatedAt: now}},
+				leadsResult:     []service.AICCLeadResult{{ID: "lead-1", OrgID: "org-1", DisplayName: "=HYPERLINK(\"https://example.com\")", Unread: true, Values: []service.AICCLeadValueResult{{FieldKey: "phone", Label: "联系电话", Value: "=13800138000"}}, UpdatedAt: now}},
 				analyticsResult: service.AICCAnalyticsResult{TodaySessions: 3, UnreadLeads: 1},
 			}
 			router := newAICCTestRouter(t, svc)

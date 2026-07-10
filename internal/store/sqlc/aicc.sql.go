@@ -777,6 +777,129 @@ func (q *Queries) ListAICCLeadFieldsByAgent(ctx context.Context, agentID string)
 	return items, nil
 }
 
+const listAICCLeadValuesByLead = `-- name: ListAICCLeadValuesByLead :many
+SELECT
+    v.lead_id,
+    v.session_id,
+    v.field_id,
+    f.field_key,
+    f.label,
+    f.field_type,
+    v.value_text,
+    v.created_at
+FROM aicc_lead_values v
+JOIN aicc_lead_fields f ON f.id = v.field_id AND f.agent_id = v.agent_id
+WHERE v.lead_id = ? AND v.lead_org_id = ?
+ORDER BY f.sort_order ASC, f.id ASC
+`
+
+type ListAICCLeadValuesByLeadParams struct {
+	LeadID    null.String `db:"lead_id" json:"lead_id"`
+	LeadOrgID null.String `db:"lead_org_id" json:"lead_org_id"`
+}
+
+type ListAICCLeadValuesByLeadRow struct {
+	LeadID    null.String `db:"lead_id" json:"lead_id"`
+	SessionID string      `db:"session_id" json:"session_id"`
+	FieldID   string      `db:"field_id" json:"field_id"`
+	FieldKey  string      `db:"field_key" json:"field_key"`
+	Label     string      `db:"label" json:"label"`
+	FieldType string      `db:"field_type" json:"field_type"`
+	ValueText string      `db:"value_text" json:"value_text"`
+	CreatedAt time.Time   `db:"created_at" json:"created_at"`
+}
+
+func (q *Queries) ListAICCLeadValuesByLead(ctx context.Context, arg ListAICCLeadValuesByLeadParams) ([]ListAICCLeadValuesByLeadRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAICCLeadValuesByLead, arg.LeadID, arg.LeadOrgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAICCLeadValuesByLeadRow{}
+	for rows.Next() {
+		var i ListAICCLeadValuesByLeadRow
+		if err := rows.Scan(
+			&i.LeadID,
+			&i.SessionID,
+			&i.FieldID,
+			&i.FieldKey,
+			&i.Label,
+			&i.FieldType,
+			&i.ValueText,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAICCLeadValuesBySession = `-- name: ListAICCLeadValuesBySession :many
+SELECT
+    v.lead_id,
+    v.session_id,
+    v.field_id,
+    f.field_key,
+    f.label,
+    f.field_type,
+    v.value_text,
+    v.created_at
+FROM aicc_lead_values v
+JOIN aicc_lead_fields f ON f.id = v.field_id AND f.agent_id = v.agent_id
+WHERE v.session_id = ?
+ORDER BY f.sort_order ASC, f.id ASC
+`
+
+type ListAICCLeadValuesBySessionRow struct {
+	LeadID    null.String `db:"lead_id" json:"lead_id"`
+	SessionID string      `db:"session_id" json:"session_id"`
+	FieldID   string      `db:"field_id" json:"field_id"`
+	FieldKey  string      `db:"field_key" json:"field_key"`
+	Label     string      `db:"label" json:"label"`
+	FieldType string      `db:"field_type" json:"field_type"`
+	ValueText string      `db:"value_text" json:"value_text"`
+	CreatedAt time.Time   `db:"created_at" json:"created_at"`
+}
+
+func (q *Queries) ListAICCLeadValuesBySession(ctx context.Context, sessionID string) ([]ListAICCLeadValuesBySessionRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAICCLeadValuesBySession, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAICCLeadValuesBySessionRow{}
+	for rows.Next() {
+		var i ListAICCLeadValuesBySessionRow
+		if err := rows.Scan(
+			&i.LeadID,
+			&i.SessionID,
+			&i.FieldID,
+			&i.FieldKey,
+			&i.Label,
+			&i.FieldType,
+			&i.ValueText,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAICCLeadsByOrg = `-- name: ListAICCLeadsByOrg :many
 SELECT id, org_id, primary_contact_hash, display_name, unread, latest_session_id, latest_session_org_id, created_at, updated_at
 FROM aicc_leads

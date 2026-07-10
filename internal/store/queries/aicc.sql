@@ -184,6 +184,36 @@ LEFT JOIN aicc_lead_values v ON v.session_id = s.id AND v.field_id = f.id
 WHERE s.id = ? AND f.required = TRUE AND v.id IS NULL
 ORDER BY f.sort_order ASC, f.id ASC;
 
+-- name: ListAICCLeadValuesBySession :many
+SELECT
+    v.lead_id,
+    v.session_id,
+    v.field_id,
+    f.field_key,
+    f.label,
+    f.field_type,
+    v.value_text,
+    v.created_at
+FROM aicc_lead_values v
+JOIN aicc_lead_fields f ON f.id = v.field_id AND f.agent_id = v.agent_id
+WHERE v.session_id = ?
+ORDER BY f.sort_order ASC, f.id ASC;
+
+-- name: ListAICCLeadValuesByLead :many
+SELECT
+    v.lead_id,
+    v.session_id,
+    v.field_id,
+    f.field_key,
+    f.label,
+    f.field_type,
+    v.value_text,
+    v.created_at
+FROM aicc_lead_values v
+JOIN aicc_lead_fields f ON f.id = v.field_id AND f.agent_id = v.agent_id
+WHERE v.lead_id = ? AND v.lead_org_id = ?
+ORDER BY f.sort_order ASC, f.id ASC;
+
 -- name: UpdateAICCSessionLeadStatus :exec
 UPDATE aicc_sessions
 SET lead_status = ?, updated_at = now()

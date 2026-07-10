@@ -47,10 +47,14 @@ type AICCStore interface {
 	GetAICCSession(ctx context.Context, id string) (sqlc.AiccSession, error)
 	// ListAICCMessagesBySession 列出会话消息镜像。
 	ListAICCMessagesBySession(ctx context.Context, sessionID string) ([]sqlc.AiccMessage, error)
+	// ListAICCLeadValuesBySession 列出会话已提交的留资字段值。
+	ListAICCLeadValuesBySession(ctx context.Context, sessionID string) ([]sqlc.ListAICCLeadValuesBySessionRow, error)
 	// ListAICCLeadsByOrg 列出企业线索。
 	ListAICCLeadsByOrg(ctx context.Context, arg sqlc.ListAICCLeadsByOrgParams) ([]sqlc.AiccLead, error)
 	// ListAllAICCLeadsByOrg 导出企业线索，不复用管理列表分页上限，但保留同步导出总量上限。
 	ListAllAICCLeadsByOrg(ctx context.Context, arg sqlc.ListAllAICCLeadsByOrgParams) ([]sqlc.AiccLead, error)
+	// ListAICCLeadValuesByLead 列出线索已沉淀的留资字段值。
+	ListAICCLeadValuesByLead(ctx context.Context, arg sqlc.ListAICCLeadValuesByLeadParams) ([]sqlc.ListAICCLeadValuesByLeadRow, error)
 	// MarkAICCLeadRead 标记企业线索已读。
 	MarkAICCLeadRead(ctx context.Context, arg sqlc.MarkAICCLeadReadParams) (int64, error)
 	// ListAICCLeadFieldsByAgent 列出智能体公开页留资字段。
@@ -481,7 +485,15 @@ func (s *AICCService) GetSession(ctx context.Context, principal auth.Principal, 
 	if err != nil {
 		return AICCSessionDetailResult{}, fmt.Errorf("查询 AICC 会话消息失败: %w", err)
 	}
-	result := AICCSessionDetailResult{Session: toAICCSessionResult(session), Messages: make([]AICCMessageResult, 0, len(messages))}
+	leadValues, err := s.store.ListAICCLeadValuesBySession(ctx, session.ID)
+	if err != nil {
+		return AICCSessionDetailResult{}, fmt.Errorf("查询 AICC 会话留资字段失败: %w", err)
+	}
+	result := AICCSessionDetailResult{
+		Session:    toAICCSessionResult(session),
+		LeadValues: toAICCLeadValueResults(leadValues),
+		Messages:   make([]AICCMessageResult, 0, len(messages)),
+	}
 	for _, row := range messages {
 		result.Messages = append(result.Messages, toAICCMessageResult(row))
 	}
@@ -503,7 +515,11 @@ func (s *AICCService) ListLeads(ctx context.Context, principal auth.Principal, o
 	}
 	results := make([]AICCLeadResult, 0, len(rows))
 	for _, row := range rows {
-		results = append(results, toAICCLeadResult(row))
+		result, err := s.toAICCLeadResultWithValues(ctx, row)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, result)
 	}
 	return results, nil
 }
@@ -522,7 +538,11 @@ func (s *AICCService) ExportLeads(ctx context.Context, principal auth.Principal,
 	}
 	results := make([]AICCLeadResult, 0, len(rows))
 	for _, row := range rows {
-		results = append(results, toAICCLeadResult(row))
+		result, err := s.toAICCLeadResultWithValues(ctx, row)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, result)
 	}
 	return results, nil
 }
@@ -981,6 +1001,48 @@ func toAICCLeadResult(row sqlc.AiccLead) AICCLeadResult {
 		CreatedAt:       row.CreatedAt,
 		UpdatedAt:       row.UpdatedAt,
 	}
+}
+
+func (s *AICCService) toAICCLeadResultWithValues(ctx context.Context, row sqlc.AiccLead) (AICCLeadResult, error) {
+	result := toAICCLeadResult(row)
+	values, err := s.store.ListAICCLeadValuesByLead(ctx, sqlc.ListAICCLeadValuesByLeadParams{
+		LeadID:    nullStr(row.ID),
+		LeadOrgID: nullStr(row.OrgID),
+	})
+	if err != nil {
+		return AICCLeadResult{}, fmt.Errorf("查询 AICC 线索留资字段失败: %w", err)
+	}
+	result.Values = toAICCLeadValueResults(values)
+	return result, nil
+}
+
+func toAICCLeadValueResults[T interface {
+	sqlc.ListAICCLeadValuesByLeadRow | sqlc.ListAICCLeadValuesBySessionRow
+}](rows []T) []AICCLeadValueResult {
+	results := make([]AICCLeadValueResult, 0, len(rows))
+	for _, row := range rows {
+		switch value := any(row).(type) {
+		case sqlc.ListAICCLeadValuesByLeadRow:
+			results = append(results, AICCLeadValueResult{
+				FieldID:   value.FieldID,
+				FieldKey:  value.FieldKey,
+				Label:     value.Label,
+				FieldType: value.FieldType,
+				Value:     value.ValueText,
+				CreatedAt: value.CreatedAt,
+			})
+		case sqlc.ListAICCLeadValuesBySessionRow:
+			results = append(results, AICCLeadValueResult{
+				FieldID:   value.FieldID,
+				FieldKey:  value.FieldKey,
+				Label:     value.Label,
+				FieldType: value.FieldType,
+				Value:     value.ValueText,
+				CreatedAt: value.CreatedAt,
+			})
+		}
+	}
+	return results
 }
 
 func toAICCLeadFieldResults(rows []sqlc.AiccLeadField) []AICCLeadFieldResult {
