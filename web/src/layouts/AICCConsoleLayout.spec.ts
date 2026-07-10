@@ -64,6 +64,18 @@ const ButtonStub = defineComponent({
   },
 })
 
+const LayoutSiderStub = defineComponent({
+  setup(_, { slots }) {
+    return () => h('aside', { 'data-test': 'legacy-layout-sider' }, slots.default?.())
+  },
+})
+
+const MenuStub = defineComponent({
+  setup(_, { slots }) {
+    return () => h('nav', { 'data-test': 'legacy-layout-menu' }, slots.default?.())
+  },
+})
+
 // mountLayout：使用中文 i18n 挂载工作台外壳，便于直接断言用户可见文案。
 function mountLayout() {
   i18n.global.locale.value = 'zh'
@@ -75,6 +87,12 @@ function mountLayout() {
         NButton: ButtonStub,
         Button: ButtonStub,
         'n-button': ButtonStub,
+        NLayoutSider: LayoutSiderStub,
+        LayoutSider: LayoutSiderStub,
+        'n-layout-sider': LayoutSiderStub,
+        NMenu: MenuStub,
+        Menu: MenuStub,
+        'n-menu': MenuStub,
       },
     },
   })
@@ -104,7 +122,8 @@ describe('AICCConsoleLayout', () => {
     expect(wrapper.find('[data-test="locale-switcher"]').exists()).toBe(true)
     expect(wrapper.findAll('button').some(button => button.text().includes('返回概览'))).toBe(true)
     expect(wrapper.find('[data-test="aicc-workspace"]').text()).toBe('AICC 工作区')
-    expect(wrapper.find('[data-test="aicc-nav"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="legacy-layout-sider"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="legacy-layout-menu"]').exists()).toBe(false)
   })
 
   // 覆盖返回入口行为：独立工作台的“返回概览”按钮必须回到企业概览页，而不是浏览器历史或旧 /aicc 路由。
@@ -126,10 +145,11 @@ describe('AICCConsoleLayout', () => {
       aicc_enabled: false,
     }
 
-    mountLayout()
+    const wrapper = mountLayout()
     await nextTick()
 
     expect(routerReplace).toHaveBeenCalledWith('/')
+    expect(wrapper.find('[data-test="aicc-workspace"]').exists()).toBe(false)
   })
 
   // 覆盖开通状态加载期间的访问保护：企业状态未知时不能提前挂载工作区，避免工作区抢先请求 AICC API。

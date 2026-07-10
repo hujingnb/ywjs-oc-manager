@@ -18,7 +18,7 @@
       </div>
     </n-layout-header>
 
-    <n-layout-content content-style="height: calc(100vh - 64px); display: flex; flex-direction: column; overflow: auto">
+    <n-layout-content content-style="flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: auto">
       <section class="aicc-console-content" :aria-label="t('aicc.console.title')">
         <div v-if="orgLoading" class="aicc-loading-state" role="status">
           {{ t('aicc.console.checkingAccess') }}
@@ -68,6 +68,8 @@ function returnToOverview() {
 <style scoped>
 .aicc-console-layout {
   height: 100vh;
+  display: flex;
+  flex-direction: column;
   background: var(--color-bg);
 }
 
@@ -75,6 +77,8 @@ function returnToOverview() {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
   min-height: 64px;
   padding: 0 24px;
   background: var(--color-surface);
@@ -127,6 +131,8 @@ function returnToOverview() {
   min-width: 0;
   min-height: 0;
   flex-direction: column;
+  box-sizing: border-box;
+  padding: 16px 20px;
 }
 
 .aicc-console-content :deep(> *) {
@@ -141,5 +147,15 @@ function returnToOverview() {
   place-items: center;
   color: var(--color-text-secondary);
   font-size: 14px;
+}
+
+@media (max-width: 640px) {
+  .aicc-console-header {
+    padding: 12px;
+  }
+
+  .aicc-console-content {
+    padding: 12px;
+  }
 }
 </style>
