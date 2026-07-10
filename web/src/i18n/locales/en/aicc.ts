@@ -41,6 +41,28 @@ export default {
       leads: 'Leads',
       analytics: 'Analytics',
     },
+    sections: {
+      config: {
+        eyebrow: 'RECEPTION',
+        title: 'Reception',
+        description: 'Maintain agent configuration, delivery entry points, knowledge scope, and operations policies.',
+      },
+      sessions: {
+        eyebrow: 'SESSIONS',
+        title: 'Sessions',
+        description: 'Review visitor sessions, message details, sources, and follow-up status.',
+      },
+      leads: {
+        eyebrow: 'LEADS',
+        title: 'Leads',
+        description: 'Review visitor lead details, unread leads, and conversion status.',
+      },
+      analytics: {
+        eyebrow: 'ANALYTICS',
+        title: 'Analytics',
+        description: 'Review session trends, active agents, and lead conversion.',
+      },
+    },
     status: {
       runtime: 'Runtime status',
       retention: 'Retention',

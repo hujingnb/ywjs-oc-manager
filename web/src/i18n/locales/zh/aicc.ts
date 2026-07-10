@@ -41,6 +41,28 @@ export default {
       leads: '线索',
       analytics: '统计',
     },
+    sections: {
+      config: {
+        eyebrow: 'RECEPTION',
+        title: '接待台',
+        description: '维护智能体配置、投放入口、知识范围和运营策略。',
+      },
+      sessions: {
+        eyebrow: 'SESSIONS',
+        title: '会话',
+        description: '查看访客会话、消息详情、来源和跟进状态。',
+      },
+      leads: {
+        eyebrow: 'LEADS',
+        title: '线索',
+        description: '查看访客留资、未读线索和转化情况。',
+      },
+      analytics: {
+        eyebrow: 'ANALYTICS',
+        title: '分析',
+        description: '查看会话趋势、活跃智能体和留资转化。',
+      },
+    },
     status: {
       runtime: '运行状态',
       retention: '保留天数',

@@ -1,10 +1,10 @@
 <template>
   <main class="aicc-page">
-    <section class="aicc-hero">
+    <section class="aicc-page-heading">
       <div>
-        <p class="eyebrow">AI Integrated Customer Care</p>
-        <h2>{{ t('aicc.manager.title') }}</h2>
-        <p>{{ t('aicc.manager.subtitle') }}</p>
+        <p class="eyebrow">{{ currentSectionEyebrow }}</p>
+        <h2>{{ currentSectionTitle }}</h2>
+        <p>{{ currentSectionDescription }}</p>
       </div>
       <n-button type="primary" @click="startCreate">
         <template #icon><Plus :size="16" /></template>
@@ -69,265 +69,262 @@
           {{ feedback }}
         </n-alert>
 
-        <n-tabs v-model:value="activeSection" type="segment" animated class="aicc-tabs">
-          <n-tab-pane name="config" :tab="t('aicc.manager.tabs.config')">
-            <div class="status-grid">
-              <div class="status-tile">
-                <span>{{ t('aicc.manager.status.runtime') }}</span>
-                <strong>{{ selectedAgent ? statusMeta(selectedAgent.status).label : t('aicc.manager.status.draft') }}</strong>
+        <div v-if="activeSection === 'config'" class="aicc-section-content">
+          <div class="status-grid">
+            <div class="status-tile">
+              <span>{{ t('aicc.manager.status.runtime') }}</span>
+              <strong>{{ selectedAgent ? statusMeta(selectedAgent.status).label : t('aicc.manager.status.draft') }}</strong>
+            </div>
+            <div class="status-tile">
+              <span>{{ t('aicc.manager.status.retention') }}</span>
+              <strong>{{ t('aicc.manager.status.days', { count: form.retention_days || 0 }) }}</strong>
+            </div>
+            <div class="status-tile">
+              <span>{{ t('aicc.manager.status.publicEntry') }}</span>
+              <strong>{{ selectedAgent?.public_token ? t('aicc.manager.status.generated') : t('aicc.manager.status.generatedAfterSave') }}</strong>
+            </div>
+          </div>
+
+          <n-form class="agent-form" :model="form" label-placement="top" @submit.prevent="submitForm">
+            <div class="agent-fields">
+              <div>
+                <n-form-item :label="t('aicc.manager.form.name')" required>
+                  <n-input v-model:value="form.name" maxlength="80" :placeholder="t('aicc.manager.form.namePlaceholder')" />
+                </n-form-item>
               </div>
-              <div class="status-tile">
-                <span>{{ t('aicc.manager.status.retention') }}</span>
-                <strong>{{ t('aicc.manager.status.days', { count: form.retention_days || 0 }) }}</strong>
+              <div>
+                <n-form-item :label="t('aicc.manager.form.retentionDays')">
+                  <n-input-number v-model:value="form.retention_days" :min="1" :max="3650" style="width: 100%" />
+                </n-form-item>
               </div>
-              <div class="status-tile">
-                <span>{{ t('aicc.manager.status.publicEntry') }}</span>
-                <strong>{{ selectedAgent?.public_token ? t('aicc.manager.status.generated') : t('aicc.manager.status.generatedAfterSave') }}</strong>
+              <div>
+                <n-form-item :label="t('aicc.manager.form.privacyMode')">
+                  <n-select v-model:value="form.privacy_mode" :options="privacyOptions" />
+                </n-form-item>
+              </div>
+              <div>
+                <n-form-item :label="t('aicc.manager.form.greeting')">
+                  <n-input v-model:value="form.greeting" maxlength="240" :placeholder="t('aicc.manager.form.greetingPlaceholder')" />
+                </n-form-item>
+              </div>
+              <div class="field-full">
+                <n-form-item :label="t('aicc.manager.form.scenario')">
+                  <n-input
+                    v-model:value="form.scenario"
+                    type="textarea"
+                    :autosize="{ minRows: 3, maxRows: 5 }"
+                    :placeholder="t('aicc.manager.form.scenarioPlaceholder')"
+                  />
+                </n-form-item>
+              </div>
+              <div class="field-full">
+                <n-form-item :label="t('aicc.manager.form.answerBoundary')">
+                  <n-input
+                    v-model:value="form.answer_boundary"
+                    type="textarea"
+                    :autosize="{ minRows: 3, maxRows: 5 }"
+                    :placeholder="t('aicc.manager.form.answerBoundaryPlaceholder')"
+                  />
+                </n-form-item>
+              </div>
+              <div class="field-full">
+                <n-form-item :label="t('aicc.manager.form.privacyText')">
+                  <n-input
+                    v-model:value="form.privacy_text"
+                    type="textarea"
+                    :autosize="{ minRows: 3, maxRows: 5 }"
+                    :placeholder="t('aicc.manager.form.privacyTextPlaceholder')"
+                  />
+                </n-form-item>
+              </div>
+              <div class="field-full">
+                <n-form-item :label="t('aicc.manager.form.allowedDomains')">
+                  <n-input
+                    v-model:value="form.allowed_domains_text"
+                    type="textarea"
+                    :autosize="{ minRows: 2, maxRows: 4 }"
+                    :placeholder="t('aicc.manager.form.allowedDomainsPlaceholder')"
+                  />
+                </n-form-item>
               </div>
             </div>
+            <n-space justify="end">
+              <n-button attr-type="button" @click="resetForm">{{ t('aicc.manager.form.reset') }}</n-button>
+              <n-button type="primary" attr-type="submit" :loading="submitBusy">
+                <template #icon><Save :size="16" /></template>
+                {{ t('aicc.manager.form.saveConfig') }}
+              </n-button>
+            </n-space>
+          </n-form>
 
-            <n-form class="agent-form" :model="form" label-placement="top" @submit.prevent="submitForm">
-              <div class="agent-fields">
-                <div>
-                  <n-form-item :label="t('aicc.manager.form.name')" required>
-                    <n-input v-model:value="form.name" maxlength="80" :placeholder="t('aicc.manager.form.namePlaceholder')" />
-                  </n-form-item>
-                </div>
-                <div>
-                  <n-form-item :label="t('aicc.manager.form.retentionDays')">
-                    <n-input-number v-model:value="form.retention_days" :min="1" :max="3650" style="width: 100%" />
-                  </n-form-item>
-                </div>
-                <div>
-                  <n-form-item :label="t('aicc.manager.form.privacyMode')">
-                    <n-select v-model:value="form.privacy_mode" :options="privacyOptions" />
-                  </n-form-item>
-                </div>
-                <div>
-                  <n-form-item :label="t('aicc.manager.form.greeting')">
-                    <n-input v-model:value="form.greeting" maxlength="240" :placeholder="t('aicc.manager.form.greetingPlaceholder')" />
-                  </n-form-item>
-                </div>
-                <div class="field-full">
-                  <n-form-item :label="t('aicc.manager.form.scenario')">
-                    <n-input
-                      v-model:value="form.scenario"
-                      type="textarea"
-                      :autosize="{ minRows: 3, maxRows: 5 }"
-                      :placeholder="t('aicc.manager.form.scenarioPlaceholder')"
-                    />
-                  </n-form-item>
-                </div>
-                <div class="field-full">
-                  <n-form-item :label="t('aicc.manager.form.answerBoundary')">
-                    <n-input
-                      v-model:value="form.answer_boundary"
-                      type="textarea"
-                      :autosize="{ minRows: 3, maxRows: 5 }"
-                      :placeholder="t('aicc.manager.form.answerBoundaryPlaceholder')"
-                    />
-                  </n-form-item>
-                </div>
-                <div class="field-full">
-                  <n-form-item :label="t('aicc.manager.form.privacyText')">
-                    <n-input
-                      v-model:value="form.privacy_text"
-                      type="textarea"
-                      :autosize="{ minRows: 3, maxRows: 5 }"
-                      :placeholder="t('aicc.manager.form.privacyTextPlaceholder')"
-                    />
-                  </n-form-item>
-                </div>
-                <div class="field-full">
-                  <n-form-item :label="t('aicc.manager.form.allowedDomains')">
-                    <n-input
-                      v-model:value="form.allowed_domains_text"
-                      type="textarea"
-                      :autosize="{ minRows: 2, maxRows: 4 }"
-                      :placeholder="t('aicc.manager.form.allowedDomainsPlaceholder')"
-                    />
-                  </n-form-item>
-                </div>
+          <div class="operations-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">{{ t('aicc.manager.delivery.eyebrow') }}</p>
+                <strong>{{ t('aicc.manager.delivery.title') }}</strong>
               </div>
-              <n-space justify="end">
-                <n-button attr-type="button" @click="resetForm">{{ t('aicc.manager.form.reset') }}</n-button>
-                <n-button type="primary" attr-type="submit" :loading="submitBusy">
-                  <template #icon><Save :size="16" /></template>
-                  {{ t('aicc.manager.form.saveConfig') }}
-                </n-button>
-              </n-space>
-            </n-form>
-
-            <div class="operations-panel">
-              <div class="section-heading">
-                <div>
-                  <p class="eyebrow">{{ t('aicc.manager.delivery.eyebrow') }}</p>
-                  <strong>{{ t('aicc.manager.delivery.title') }}</strong>
-                </div>
-                <n-tag v-if="settingsQuery.data.value?.blocked_visitor_count !== undefined" size="small" :bordered="false">
-                  {{ t('aicc.manager.delivery.blockedVisitors', { count: settingsQuery.data.value?.blocked_visitor_count }) }}
-                </n-tag>
-              </div>
-              <div v-if="!selectedAgent" class="state-text">{{ t('aicc.manager.delivery.noAgent') }}</div>
-              <template v-else>
-                <div class="delivery-grid">
-                  <div class="public-link-box">
-                    <span>{{ t('aicc.manager.delivery.publicLink') }}</span>
-                    <n-input :value="publicLink || t('aicc.manager.status.generatedAfterSave')" readonly :input-props="{ readonly: true }" />
-                    <n-space>
-                      <n-button size="small" :disabled="!publicLink" @click="copyText(publicLink)">
-                        <template #icon><Copy :size="14" /></template>
-                        {{ t('aicc.manager.delivery.copy') }}
-                      </n-button>
-                      <n-button size="small" :disabled="!publicLink" @click="openPublicLink">
-                        <template #icon><ExternalLink :size="14" /></template>
-                        {{ t('aicc.manager.delivery.preview') }}
-                      </n-button>
-                    </n-space>
-                  </div>
-                  <div class="qr-box">
-                    <div v-if="qrDataUrl" class="qr-preview">
-                      <img :src="qrDataUrl" :alt="t('aicc.manager.delivery.qrAlt')" />
-                    </div>
-                    <div v-else class="qr-placeholder">
-                      <QrCode :size="30" />
-                      <span>{{ t('aicc.manager.delivery.qrPending') }}</span>
-                    </div>
-                    <n-button size="small" :disabled="!qrDataUrl" @click="downloadQRCode">
-                      <template #icon><Download :size="14" /></template>
-                      {{ t('aicc.manager.delivery.downloadPng') }}
+              <n-tag v-if="settingsQuery.data.value?.blocked_visitor_count !== undefined" size="small" :bordered="false">
+                {{ t('aicc.manager.delivery.blockedVisitors', { count: settingsQuery.data.value?.blocked_visitor_count }) }}
+              </n-tag>
+            </div>
+            <div v-if="!selectedAgent" class="state-text">{{ t('aicc.manager.delivery.noAgent') }}</div>
+            <template v-else>
+              <div class="delivery-grid">
+                <div class="public-link-box">
+                  <span>{{ t('aicc.manager.delivery.publicLink') }}</span>
+                  <n-input :value="publicLink || t('aicc.manager.status.generatedAfterSave')" readonly :input-props="{ readonly: true }" />
+                  <n-space>
+                    <n-button size="small" :disabled="!publicLink" @click="copyText(publicLink)">
+                      <template #icon><Copy :size="14" /></template>
+                      {{ t('aicc.manager.delivery.copy') }}
                     </n-button>
+                    <n-button size="small" :disabled="!publicLink" @click="openPublicLink">
+                      <template #icon><ExternalLink :size="14" /></template>
+                      {{ t('aicc.manager.delivery.preview') }}
+                    </n-button>
+                  </n-space>
+                </div>
+                <div class="qr-box">
+                  <div v-if="qrDataUrl" class="qr-preview">
+                    <img :src="qrDataUrl" :alt="t('aicc.manager.delivery.qrAlt')" />
                   </div>
-                </div>
-
-                <n-form class="settings-form" :model="settingsForm" label-placement="top">
-                  <div class="settings-grid">
-                    <n-form-item :label="t('aicc.manager.delivery.messageLimit')">
-                      <n-input-number v-model:value="settingsForm.message_limit_per_session" :min="1" :max="1000" style="width: 100%" />
-                    </n-form-item>
-                    <n-form-item :label="t('aicc.manager.delivery.resumeTtl')">
-                      <n-input-number v-model:value="settingsForm.session_resume_ttl_minutes" :min="1" :max="1440" style="width: 100%" />
-                    </n-form-item>
-                    <n-form-item :label="t('aicc.manager.delivery.enableBlockedVisitors')">
-                      <n-switch v-model:value="settingsForm.blocked_visitor_enabled" />
-                    </n-form-item>
-                    <n-form-item class="field-full" :label="t('aicc.manager.delivery.sensitiveWords')">
-                      <n-input
-                        v-model:value="settingsForm.sensitive_words_text"
-                        type="textarea"
-                        :autosize="{ minRows: 3, maxRows: 6 }"
-                        :placeholder="t('aicc.manager.delivery.sensitiveWordsPlaceholder')"
-                      />
-                    </n-form-item>
+                  <div v-else class="qr-placeholder">
+                    <QrCode :size="30" />
+                    <span>{{ t('aicc.manager.delivery.qrPending') }}</span>
                   </div>
-                </n-form>
-                <n-space justify="end">
-                  <n-button :loading="settingsBusy" @click="saveSettings">
-                    <template #icon><Save :size="16" /></template>
-                    {{ t('aicc.manager.delivery.saveSettings') }}
+                  <n-button size="small" :disabled="!qrDataUrl" @click="downloadQRCode">
+                    <template #icon><Download :size="14" /></template>
+                    {{ t('aicc.manager.delivery.downloadPng') }}
                   </n-button>
-                </n-space>
-              </template>
-            </div>
+                </div>
+              </div>
 
-            <div ref="knowledgePanelEl" class="knowledge-panel">
-              <div class="section-heading">
-                <div>
-                  <p class="eyebrow">{{ t('aicc.manager.knowledge.eyebrow') }}</p>
-                  <strong>{{ t('aicc.manager.knowledge.title') }}</strong>
+              <n-form class="settings-form" :model="settingsForm" label-placement="top">
+                <div class="settings-grid">
+                  <n-form-item :label="t('aicc.manager.delivery.messageLimit')">
+                    <n-input-number v-model:value="settingsForm.message_limit_per_session" :min="1" :max="1000" style="width: 100%" />
+                  </n-form-item>
+                  <n-form-item :label="t('aicc.manager.delivery.resumeTtl')">
+                    <n-input-number v-model:value="settingsForm.session_resume_ttl_minutes" :min="1" :max="1440" style="width: 100%" />
+                  </n-form-item>
+                  <n-form-item :label="t('aicc.manager.delivery.enableBlockedVisitors')">
+                    <n-switch v-model:value="settingsForm.blocked_visitor_enabled" />
+                  </n-form-item>
+                  <n-form-item class="field-full" :label="t('aicc.manager.delivery.sensitiveWords')">
+                    <n-input
+                      v-model:value="settingsForm.sensitive_words_text"
+                      type="textarea"
+                      :autosize="{ minRows: 3, maxRows: 6 }"
+                      :placeholder="t('aicc.manager.delivery.sensitiveWordsPlaceholder')"
+                    />
+                  </n-form-item>
                 </div>
-                <n-button :disabled="!selectedAgent" @click="openDedicatedKnowledge">
-                  <template #icon><ExternalLink :size="16" /></template>
-                  {{ t('aicc.manager.knowledge.dedicatedDocs') }}
-                </n-button>
-              </div>
-              <div v-if="!selectedAgent" class="state-text">{{ t('aicc.manager.knowledge.noAgent') }}</div>
-              <template v-else>
-                <n-checkbox v-model:checked="knowledgeForm.use_org_knowledge">
-                  {{ t('aicc.manager.knowledge.useOrgKnowledge') }}
-                </n-checkbox>
-                <n-form-item :label="t('aicc.manager.knowledge.industryKnowledge')">
-                  <n-select
-                    v-model:value="knowledgeForm.industry_knowledge_base_ids"
-                    multiple
-                    clearable
-                    filterable
-                    :loading="knowledgeOptionsQuery.isFetching.value"
-                    :options="industryKnowledgeOptions"
-                    :placeholder="t('aicc.manager.knowledge.industryPlaceholder')"
-                  />
-                </n-form-item>
-                <n-form-item :label="t('aicc.manager.knowledge.dedicatedDocuments')">
-                  <n-select
-                    v-model:value="knowledgeForm.app_document_ids"
-                    multiple
-                    clearable
-                    filterable
-                    :loading="knowledgeOptionsQuery.isFetching.value"
-                    :options="appDocumentOptions"
-                    :placeholder="t('aicc.manager.knowledge.appDocsPlaceholder')"
-                  />
-                </n-form-item>
-                <n-space justify="end">
-                  <n-button :loading="knowledgeBusy" @click="saveKnowledge">
-                    <template #icon><Save :size="16" /></template>
-                    {{ t('aicc.manager.knowledge.save') }}
-                  </n-button>
-                </n-space>
-              </template>
-            </div>
-
-            <div class="lead-field-panel">
-              <div class="section-heading">
-                <div>
-                  <p class="eyebrow">{{ t('aicc.manager.leadFields.eyebrow') }}</p>
-                  <strong>{{ t('aicc.manager.leadFields.title') }}</strong>
-                </div>
-                <n-button size="small" :disabled="!selectedAgent" @click="addLeadField">
-                  <template #icon><Plus :size="14" /></template>
-                  {{ t('aicc.manager.leadFields.add') }}
-                </n-button>
-              </div>
-              <div v-if="!selectedAgent" class="state-text">{{ t('aicc.manager.leadFields.noAgent') }}</div>
-              <div v-else-if="leadFieldRows.length === 0" class="empty-inline">{{ t('aicc.manager.leadFields.empty') }}</div>
-              <div v-else class="lead-field-list">
-                <div v-for="(field, index) in leadFieldRows" :key="field.local_id" class="lead-field-row">
-                  <n-input v-model:value="field.label" :placeholder="t('aicc.manager.leadFields.labelPlaceholder')" maxlength="128" />
-                  <n-input v-model:value="field.field_key" :placeholder="t('aicc.manager.leadFields.keyPlaceholder')" maxlength="64" />
-                  <n-select v-model:value="field.field_type" :options="leadFieldTypeOptions" />
-                  <n-checkbox v-model:checked="field.required">{{ t('aicc.manager.leadFields.required') }}</n-checkbox>
-                  <n-input v-model:value="field.prompt_text" :placeholder="t('aicc.manager.leadFields.promptPlaceholder')" maxlength="160" />
-                  <n-button quaternary circle type="error" @click="removeLeadField(index)">
-                    <template #icon><Trash2 :size="15" /></template>
-                  </n-button>
-                </div>
-              </div>
+              </n-form>
               <n-space justify="end">
-                <n-button :disabled="!selectedAgent" :loading="leadFieldBusy" @click="saveLeadFields">
+                <n-button :loading="settingsBusy" @click="saveSettings">
                   <template #icon><Save :size="16" /></template>
-                  {{ t('aicc.manager.leadFields.save') }}
+                  {{ t('aicc.manager.delivery.saveSettings') }}
                 </n-button>
               </n-space>
-            </div>
+            </template>
+          </div>
 
-            <div class="snippet-panel">
-              <span>{{ t('aicc.manager.snippet.placeholder') }}</span>
-              <code>{{ widgetSnippet }}</code>
-              <n-button size="small" :disabled="!selectedAgent?.widget_token" @click="copyText(widgetSnippet)">
-                <template #icon><Copy :size="14" /></template>
+          <div ref="knowledgePanelEl" class="knowledge-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">{{ t('aicc.manager.knowledge.eyebrow') }}</p>
+                <strong>{{ t('aicc.manager.knowledge.title') }}</strong>
+              </div>
+              <n-button :disabled="!selectedAgent" @click="openDedicatedKnowledge">
+                <template #icon><ExternalLink :size="16" /></template>
+                {{ t('aicc.manager.knowledge.dedicatedDocs') }}
               </n-button>
             </div>
-          </n-tab-pane>
-          <n-tab-pane name="sessions" :tab="t('aicc.manager.tabs.sessions')">
-            <AICCSessionsPage :agent-id="selectedAgentId" />
-          </n-tab-pane>
-          <n-tab-pane name="leads" :tab="t('aicc.manager.tabs.leads')">
-            <AICCLeadsPage />
-          </n-tab-pane>
-          <n-tab-pane name="analytics" :tab="t('aicc.manager.tabs.analytics')">
-            <AICCAnalyticsPage :agent-id="selectedAgentId" :agent-count="agents.length" :active-agent-count="activeAgentCount" />
-          </n-tab-pane>
-        </n-tabs>
+            <div v-if="!selectedAgent" class="state-text">{{ t('aicc.manager.knowledge.noAgent') }}</div>
+            <template v-else>
+              <n-checkbox v-model:checked="knowledgeForm.use_org_knowledge">
+                {{ t('aicc.manager.knowledge.useOrgKnowledge') }}
+              </n-checkbox>
+              <n-form-item :label="t('aicc.manager.knowledge.industryKnowledge')">
+                <n-select
+                  v-model:value="knowledgeForm.industry_knowledge_base_ids"
+                  multiple
+                  clearable
+                  filterable
+                  :loading="knowledgeOptionsQuery.isFetching.value"
+                  :options="industryKnowledgeOptions"
+                  :placeholder="t('aicc.manager.knowledge.industryPlaceholder')"
+                />
+              </n-form-item>
+              <n-form-item :label="t('aicc.manager.knowledge.dedicatedDocuments')">
+                <n-select
+                  v-model:value="knowledgeForm.app_document_ids"
+                  multiple
+                  clearable
+                  filterable
+                  :loading="knowledgeOptionsQuery.isFetching.value"
+                  :options="appDocumentOptions"
+                  :placeholder="t('aicc.manager.knowledge.appDocsPlaceholder')"
+                />
+              </n-form-item>
+              <n-space justify="end">
+                <n-button :loading="knowledgeBusy" @click="saveKnowledge">
+                  <template #icon><Save :size="16" /></template>
+                  {{ t('aicc.manager.knowledge.save') }}
+                </n-button>
+              </n-space>
+            </template>
+          </div>
+
+          <div class="lead-field-panel">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">{{ t('aicc.manager.leadFields.eyebrow') }}</p>
+                <strong>{{ t('aicc.manager.leadFields.title') }}</strong>
+              </div>
+              <n-button size="small" :disabled="!selectedAgent" @click="addLeadField">
+                <template #icon><Plus :size="14" /></template>
+                {{ t('aicc.manager.leadFields.add') }}
+              </n-button>
+            </div>
+            <div v-if="!selectedAgent" class="state-text">{{ t('aicc.manager.leadFields.noAgent') }}</div>
+            <div v-else-if="leadFieldRows.length === 0" class="empty-inline">{{ t('aicc.manager.leadFields.empty') }}</div>
+            <div v-else class="lead-field-list">
+              <div v-for="(field, index) in leadFieldRows" :key="field.local_id" class="lead-field-row">
+                <n-input v-model:value="field.label" :placeholder="t('aicc.manager.leadFields.labelPlaceholder')" maxlength="128" />
+                <n-input v-model:value="field.field_key" :placeholder="t('aicc.manager.leadFields.keyPlaceholder')" maxlength="64" />
+                <n-select v-model:value="field.field_type" :options="leadFieldTypeOptions" />
+                <n-checkbox v-model:checked="field.required">{{ t('aicc.manager.leadFields.required') }}</n-checkbox>
+                <n-input v-model:value="field.prompt_text" :placeholder="t('aicc.manager.leadFields.promptPlaceholder')" maxlength="160" />
+                <n-button quaternary circle type="error" @click="removeLeadField(index)">
+                  <template #icon><Trash2 :size="15" /></template>
+                </n-button>
+              </div>
+            </div>
+            <n-space justify="end">
+              <n-button :disabled="!selectedAgent" :loading="leadFieldBusy" @click="saveLeadFields">
+                <template #icon><Save :size="16" /></template>
+                {{ t('aicc.manager.leadFields.save') }}
+              </n-button>
+            </n-space>
+          </div>
+
+          <div class="snippet-panel">
+            <span>{{ t('aicc.manager.snippet.placeholder') }}</span>
+            <code>{{ widgetSnippet }}</code>
+            <n-button size="small" :disabled="!selectedAgent?.widget_token" @click="copyText(widgetSnippet)">
+              <template #icon><Copy :size="14" /></template>
+            </n-button>
+          </div>
+        </div>
+        <AICCSessionsPage v-else-if="activeSection === 'sessions'" :agent-id="selectedAgentId" />
+        <AICCLeadsPage v-else-if="activeSection === 'leads'" />
+        <AICCAnalyticsPage
+          v-else-if="activeSection === 'analytics'"
+          :agent-id="selectedAgentId"
+          :agent-count="agents.length"
+          :active-agent-count="activeAgentCount"
+        />
       </section>
     </section>
 
@@ -349,7 +346,7 @@ import { computed, nextTick, reactive, ref, watch } from 'vue'
 import QRCode from 'qrcode'
 import {
   NAlert, NButton, NCheckbox, NForm, NFormItem, NInput, NInputNumber, NSelect, NSpace, NTag,
-  NSwitch, NTabPane, NTabs, type SelectOption,
+  NSwitch, type SelectOption,
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
@@ -452,6 +449,9 @@ const deleteBusy = computed(() => deleteMutation.isPending.value)
 const settingsBusy = computed(() => settingsMutation.isPending.value || settingsQuery.isFetching.value)
 const leadFieldBusy = computed(() => leadFieldMutation.isPending.value || leadFieldsQuery.isFetching.value)
 const knowledgeBusy = computed(() => knowledgeMutation.isPending.value || knowledgeQuery.isFetching.value)
+const currentSectionEyebrow = computed(() => t(`aicc.manager.sections.${activeSection.value}.eyebrow`))
+const currentSectionTitle = computed(() => t(`aicc.manager.sections.${activeSection.value}.title`))
+const currentSectionDescription = computed(() => t(`aicc.manager.sections.${activeSection.value}.description`))
 
 const form = reactive<AgentForm>(emptyForm())
 const settingsForm = reactive<SettingsForm>(emptySettingsForm())
@@ -849,30 +849,29 @@ function openDedicatedKnowledge() {
   min-height: 0;
 }
 
-.aicc-hero {
+.aicc-page-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 18px 20px;
-  border: 1px solid #1f2937;
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
   border-radius: 8px;
-  color: #f8fafc;
-  background: linear-gradient(135deg, #111827 0%, #1f2937 58%, #ff6a00 160%);
+  background: var(--color-surface);
 }
 
-.aicc-hero h2,
-.aicc-hero p {
+.aicc-page-heading h2,
+.aicc-page-heading p {
   margin: 0;
 }
 
-.aicc-hero h2 {
-  font-size: 22px;
+.aicc-page-heading h2 {
+  font-size: 20px;
 }
 
-.aicc-hero p:last-child {
+.aicc-page-heading p:last-child {
   margin-top: 6px;
-  color: #d1d5db;
+  color: var(--color-text-secondary);
   font-size: 13px;
 }
 
@@ -958,10 +957,9 @@ function openDedicatedKnowledge() {
   margin: 0;
 }
 
-.aicc-tabs :deep(.n-tab-pane) {
+.aicc-section-content {
   display: grid;
   gap: 16px;
-  padding-top: 14px;
 }
 
 .status-grid {
@@ -1111,7 +1109,7 @@ function openDedicatedKnowledge() {
 }
 
 @media (max-width: 900px) {
-  .aicc-hero,
+  .aicc-page-heading,
   .editor-toolbar,
   .section-heading,
   .snippet-panel {
