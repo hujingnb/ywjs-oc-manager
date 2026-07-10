@@ -218,6 +218,7 @@ describe('AICCManagerPage', () => {
     const wrapper = mountManager(context)
 
     expect(wrapper.find('.agent-rail').exists()).toBe(false)
+    expect(wrapper.findAll('button').filter(button => button.text() === '新建智能体')).toHaveLength(0)
     expect(wrapper.text()).toContain('售前接待')
   })
 

@@ -6,10 +6,6 @@
         <h2>{{ currentSectionTitle }}</h2>
         <p>{{ currentSectionDescription }}</p>
       </div>
-      <n-button type="primary" @click="startCreate">
-        <template #icon><Plus :size="16" /></template>
-        {{ t('aicc.manager.createAgent') }}
-      </n-button>
     </section>
 
     <section class="aicc-shell">
