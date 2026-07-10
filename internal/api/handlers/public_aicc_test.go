@@ -31,6 +31,7 @@ type publicAICCServiceStub struct {
 
 	lastPublicToken   string
 	lastSessionToken  string
+	lastSessionInput  service.AICCPublicSessionInput
 	lastImageInput    service.AICCPublicImageInput
 	lastMessageInput  service.AICCPublicMessageInput
 	lastLeadInput     service.AICCPublicLeadValuesInput
@@ -44,6 +45,7 @@ func (s *publicAICCServiceStub) PublicConfig(_ context.Context, publicToken stri
 
 func (s *publicAICCServiceStub) CreateSession(_ context.Context, publicToken string, input service.AICCPublicSessionInput) (service.AICCPublicSessionResult, error) {
 	s.lastPublicToken = publicToken
+	s.lastSessionInput = input
 	return s.sessionResult, s.sessionErr
 }
 
@@ -221,4 +223,50 @@ func TestPublicAICCHandlerCreateSession(t *testing.T) {
 	require.Equal(t, http.StatusCreated, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), "sess-token")
 	assert.Equal(t, "pub", svc.lastPublicToken)
+}
+
+// TestPublicAICCHandlerCreateSessionPassesRequestMetadata 覆盖公开会话安全元数据：
+// handler 必须把 Origin、客户端地址和 User-Agent 交给 service 做域名白名单与 hash 存储。
+func TestPublicAICCHandlerCreateSessionPassesRequestMetadata(t *testing.T) {
+	svc := &publicAICCServiceStub{sessionResult: service.AICCPublicSessionResult{SessionToken: "sess-token", PrivacyMode: "notice"}}
+	router := newPublicAICCTestRouter(t, svc)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/agents/pub/sessions", bytes.NewBufferString(`{"channel":"web_widget"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Origin", "https://shop.example.com")
+	request.Header.Set("User-Agent", "AICC Browser")
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusCreated, recorder.Code)
+	assert.Equal(t, "web_widget", svc.lastSessionInput.Channel)
+	assert.Equal(t, "https://shop.example.com", svc.lastSessionInput.Origin)
+	assert.Equal(t, "AICC Browser", svc.lastSessionInput.UserAgent)
+	assert.NotEmpty(t, svc.lastSessionInput.RemoteIP)
+}
+
+// TestPublicAICCHandlerMapsDomainForbidden 覆盖挂件域名白名单拒绝：返回 403 和稳定错误码。
+func TestPublicAICCHandlerMapsDomainForbidden(t *testing.T) {
+	router := newPublicAICCTestRouter(t, &publicAICCServiceStub{sessionErr: service.ErrAICCDomainForbidden})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/agents/pub/sessions", bytes.NewBufferString(`{"channel":"web_widget"}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusForbidden, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "AICC_DOMAIN_FORBIDDEN")
+}
+
+// TestPublicAICCHandlerMapsRateLimited 覆盖匿名入口限流：超限时返回 429 和稳定错误码。
+func TestPublicAICCHandlerMapsRateLimited(t *testing.T) {
+	router := newPublicAICCTestRouter(t, &publicAICCServiceStub{sessionErr: service.ErrRateLimited})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/agents/pub/sessions", bytes.NewBufferString(`{"channel":"web_link"}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusTooManyRequests, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "RATE_LIMITED")
 }

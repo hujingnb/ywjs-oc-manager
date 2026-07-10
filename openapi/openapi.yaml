@@ -11349,12 +11349,24 @@ paths:
               schema:
                 $ref: '#/components/schemas/handlers.ErrorResponse'
           description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
         "404":
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/handlers.ErrorResponse'
           description: Not Found
+        "429":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Too Many Requests
         "500":
           content:
             application/json:
@@ -11447,6 +11459,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/handlers.ErrorResponse'
           description: Request Entity Too Large
+        "429":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Too Many Requests
         "500":
           content:
             application/json:
@@ -11567,6 +11585,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/handlers.ErrorResponse'
           description: Conflict
+        "429":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Too Many Requests
         "500":
           content:
             application/json:

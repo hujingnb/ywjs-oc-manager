@@ -15,6 +15,10 @@ const (
 	MsgAICCInvalidMessage MsgKey = "err.aicc.invalid_message"
 	// MsgAICCImageUnavailable 表示图片上传依赖暂不可用。
 	MsgAICCImageUnavailable MsgKey = "err.aicc.image_unavailable"
+	// MsgAICCDomainForbidden 表示网页挂件来源域名不在允许列表内。
+	MsgAICCDomainForbidden MsgKey = "err.aicc.domain_forbidden"
+	// MsgAICCRateLimited 表示公开入口请求过于频繁。
+	MsgAICCRateLimited MsgKey = "err.aicc.rate_limited"
 )
 
 // init 把 AICC 公开接口错误译文并入中心 catalog。
@@ -26,5 +30,7 @@ func init() {
 		MsgAICCInvalidSession:   {"zh": "会话已失效", "en": "The session has expired"},
 		MsgAICCInvalidMessage:   {"zh": "消息不可反馈", "en": "This message cannot receive feedback"},
 		MsgAICCImageUnavailable: {"zh": "图片上传不可用", "en": "Image upload is unavailable"},
+		MsgAICCDomainForbidden:  {"zh": "当前网站未被允许使用该客服挂件", "en": "This site is not allowed to use this customer-service widget"},
+		MsgAICCRateLimited:      {"zh": "请求过于频繁，请稍后再试", "en": "Too many requests. Please try again later"},
 	})
 }

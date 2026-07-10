@@ -256,6 +256,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	appService.SetOcOps(ocopsClient, ocopsResolver)
 	aiccPublicService := service.NewAICCPublicService(dbStore.Queries, service.NewAICCPublicHermesChat(ocopsClient, aiccOcOpsResolver))
 	aiccPublicService.SetTxRunner(store.NewAICCPublicRunner(dbStore))
+	aiccPublicService.SetRateLimiter(service.NewRedisAICCRateLimiter(imagecoordRedis, cfg.Redis.KeyPrefix))
 
 	channelRegistry := channel.NewRegistry()
 	channelService := service.NewChannelService(dbStore.Queries, channelRegistry, redisQueue)

@@ -6,11 +6,13 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -24,6 +26,15 @@ import (
 )
 
 const aiccImageMaxBytes int64 = 10 * 1024 * 1024
+
+const (
+	// aiccCreateSessionRateLimit 限制单个来源对单个智能体创建会话频率，防止刷会话。
+	aiccCreateSessionRateLimit int64 = 30
+	// aiccSendMessageRateLimit 限制单个会话每分钟消息数，防止单会话刷模型消耗。
+	aiccSendMessageRateLimit int64 = 20
+	// aiccUploadImageRateLimit 限制单个会话每分钟图片上传数。
+	aiccUploadImageRateLimit int64 = 10
+)
 
 var aiccAllowedImageExts = map[string]bool{
 	".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true,
@@ -94,6 +105,12 @@ type AICCPublicSessionInput struct {
 	SourceURL string
 	// Referrer 是浏览器 referrer。
 	Referrer string
+	// Origin 是浏览器 Origin 头，网页挂件用它校验允许域名。
+	Origin string
+	// RemoteIP 是 handler 解析后的客户端 IP，仅做 hash 后保存。
+	RemoteIP string
+	// UserAgent 是访客浏览器 UA，仅做 hash 后保存。
+	UserAgent string
 }
 
 // AICCPublicSessionResult 是公开会话创建响应。
@@ -172,6 +189,7 @@ type AICCPublicService struct {
 	tx    AICCPublicTxRunner
 	blob  AICCPublicImageBlob
 	chat  AICCHermesChat
+	limit AICCRateLimiter
 	now   func() time.Time
 }
 
@@ -185,6 +203,9 @@ func (s *AICCPublicService) SetTxRunner(tx AICCPublicTxRunner) { s.tx = tx }
 
 // SetImageBlob 注入公开 AICC 图片对象存储；未启用 S3 时图片上传返回不可用。
 func (s *AICCPublicService) SetImageBlob(blob AICCPublicImageBlob) { s.blob = blob }
+
+// SetRateLimiter 注入公开匿名入口限流器；未注入时保持兼容，不启用限流。
+func (s *AICCPublicService) SetRateLimiter(limiter AICCRateLimiter) { s.limit = limiter }
 
 // PublicConfig 返回访客端可展示的公开智能体配置。
 func (s *AICCPublicService) PublicConfig(ctx context.Context, publicToken string) (AICCPublicConfigResult, error) {
@@ -213,6 +234,12 @@ func (s *AICCPublicService) CreateSession(ctx context.Context, publicToken strin
 		return AICCPublicSessionResult{}, err
 	}
 	channel := normalizeAICCChannel(input.Channel)
+	if err := ensureAICCWidgetOriginAllowed(agent, channel, input); err != nil {
+		return AICCPublicSessionResult{}, err
+	}
+	if err := s.ensureRateAllowed(ctx, "create_session:"+agent.ID+":"+hashAICCVisitorMarker(input.RemoteIP), aiccCreateSessionRateLimit, time.Minute); err != nil {
+		return AICCPublicSessionResult{}, err
+	}
 	sessionID := newUUID()
 	sessionToken, err := newAICCToken()
 	if err != nil {
@@ -231,6 +258,8 @@ func (s *AICCPublicService) CreateSession(ctx context.Context, publicToken strin
 		Channel:            channel,
 		SourceUrl:          null.StringFrom(strings.TrimSpace(input.SourceURL)),
 		Referrer:           null.StringFrom(strings.TrimSpace(input.Referrer)),
+		IpHash:             nullStr(hashAICCVisitorMarker(input.RemoteIP)),
+		UserAgentHash:      nullStr(hashAICCVisitorMarker(input.UserAgent)),
 		PrivacyNoticeShown: privacyNoticeShown,
 		ExpiresAt:          s.now().AddDate(0, 0, int(retentionDays)),
 	}); err != nil {
@@ -270,6 +299,9 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 	}
 	agent, err := s.activeAgentBySession(ctx, session)
 	if err != nil {
+		return AICCPublicMessageResult{}, err
+	}
+	if err := s.ensureRateAllowed(ctx, "send_message:"+session.ID, aiccSendMessageRateLimit, time.Minute); err != nil {
 		return AICCPublicMessageResult{}, err
 	}
 	if agent.PrivacyMode == domain.AICCPrivacyModeConsentRequired && !session.PrivacyConsentedAt.Valid {
@@ -350,6 +382,9 @@ func (s *AICCPublicService) UploadImage(ctx context.Context, input AICCPublicIma
 	}
 	agent, err := s.activeAgentBySession(ctx, session)
 	if err != nil {
+		return AICCPublicImageResult{}, err
+	}
+	if err := s.ensureRateAllowed(ctx, "upload_image:"+session.ID, aiccUploadImageRateLimit, time.Minute); err != nil {
 		return AICCPublicImageResult{}, err
 	}
 	if s.blob == nil {
@@ -654,6 +689,111 @@ func (s *AICCPublicService) ensureAICCOrgEnabled(ctx context.Context, orgID stri
 func hashAICCLeadValue(value string) string {
 	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(value))))
 	return hex.EncodeToString(sum[:])
+}
+
+func hashAICCVisitorMarker(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(trimmed))
+	return hex.EncodeToString(sum[:])
+}
+
+func (s *AICCPublicService) ensureRateAllowed(ctx context.Context, key string, limit int64, window time.Duration) error {
+	if s.limit == nil {
+		return nil
+	}
+	allowed, err := s.limit.Allow(ctx, key, limit, window)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return ErrRateLimited
+	}
+	return nil
+}
+
+func ensureAICCWidgetOriginAllowed(agent sqlc.AiccAgent, channel string, input AICCPublicSessionInput) error {
+	if channel != domain.AICCChannelWebWidget {
+		return nil
+	}
+	allowed, err := parseAICCAllowedDomains(agent.AllowedDomainsJson)
+	if err != nil {
+		return fmt.Errorf("%w: AICC 域名白名单配置不合法", ErrInvalidArgument)
+	}
+	if len(allowed) == 0 {
+		return nil
+	}
+	host := firstAICCRequestHost(input.Origin, input.Referrer, input.SourceURL)
+	if host == "" {
+		return ErrAICCDomainForbidden
+	}
+	for _, pattern := range allowed {
+		if aiccDomainMatches(pattern, host) {
+			return nil
+		}
+	}
+	return ErrAICCDomainForbidden
+}
+
+func parseAICCAllowedDomains(raw []byte) ([]string, error) {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil, nil
+	}
+	var values []string
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return nil, err
+	}
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		host := normalizeAICCDomainPattern(value)
+		if host != "" {
+			normalized = append(normalized, host)
+		}
+	}
+	return normalized, nil
+}
+
+func firstAICCRequestHost(values ...string) string {
+	for _, value := range values {
+		if host := normalizeAICCDomainPattern(value); host != "" {
+			return strings.TrimPrefix(host, "*.")
+		}
+	}
+	return ""
+}
+
+func normalizeAICCDomainPattern(value string) string {
+	trimmed := strings.ToLower(strings.TrimSpace(value))
+	if trimmed == "" {
+		return ""
+	}
+	if !strings.Contains(trimmed, "://") {
+		trimmed = "https://" + trimmed
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Hostname() == "" {
+		return ""
+	}
+	host := parsed.Hostname()
+	if strings.HasPrefix(strings.TrimSpace(value), "*.") {
+		return "*." + strings.TrimPrefix(host, "*.")
+	}
+	return host
+}
+
+func aiccDomainMatches(pattern, host string) bool {
+	pattern = strings.ToLower(strings.TrimSpace(pattern))
+	host = strings.ToLower(strings.TrimSpace(host))
+	if pattern == "" || host == "" {
+		return false
+	}
+	if strings.HasPrefix(pattern, "*.") {
+		suffix := strings.TrimPrefix(pattern, "*.")
+		return host != suffix && strings.HasSuffix(host, "."+suffix)
+	}
+	return host == pattern
 }
 
 func aiccLeadFieldKeys(fields []sqlc.AiccLeadField) []string {

@@ -75,6 +75,8 @@ func (h *PublicAICCHandler) Config(c *gin.Context) {
 // @Param        body         body      CreateAICCSessionRequest  true  "创建会话请求"
 // @Success      201          {object}  map[string]service.AICCPublicSessionResult
 // @Failure      400          {object}  ErrorResponse
+// @Failure      403          {object}  ErrorResponse
+// @Failure      429          {object}  ErrorResponse
 // @Failure      404          {object}  ErrorResponse
 // @Failure      500          {object}  ErrorResponse
 // @Router       /public/aicc/agents/{publicToken}/sessions [post]
@@ -88,6 +90,9 @@ func (h *PublicAICCHandler) CreateSession(c *gin.Context) {
 		Channel:   req.Channel,
 		SourceURL: req.SourceURL,
 		Referrer:  req.Referrer,
+		Origin:    c.GetHeader("Origin"),
+		RemoteIP:  c.ClientIP(),
+		UserAgent: c.GetHeader("User-Agent"),
 	})
 	if err != nil {
 		writePublicAICCError(c, err)
@@ -128,6 +133,7 @@ func (h *PublicAICCHandler) Consent(c *gin.Context) {
 // @Failure      400           {object}  ErrorResponse
 // @Failure      401           {object}  ErrorResponse
 // @Failure      409           {object}  ErrorResponse
+// @Failure      429           {object}  ErrorResponse
 // @Failure      500           {object}  ErrorResponse
 // @Router       /public/aicc/sessions/{sessionToken}/messages [post]
 func (h *PublicAICCHandler) SendMessage(c *gin.Context) {
@@ -162,6 +168,7 @@ func (h *PublicAICCHandler) SendMessage(c *gin.Context) {
 // @Failure      401           {object}  ErrorResponse
 // @Failure      404           {object}  ErrorResponse
 // @Failure      413           {object}  ErrorResponse
+// @Failure      429           {object}  ErrorResponse
 // @Failure      503           {object}  ErrorResponse
 // @Failure      500           {object}  ErrorResponse
 // @Router       /public/aicc/sessions/{sessionToken}/images [post]
@@ -263,6 +270,10 @@ func writePublicAICCError(c *gin.Context, err error) {
 		apierror.JSON(c, http.StatusNotFound, "AICC_INVALID_MESSAGE", apierror.MsgAICCInvalidMessage)
 	case errors.Is(err, service.ErrAICCImageUnavailable):
 		apierror.JSON(c, http.StatusServiceUnavailable, "AICC_IMAGE_UNAVAILABLE", apierror.MsgAICCImageUnavailable)
+	case errors.Is(err, service.ErrAICCDomainForbidden):
+		apierror.JSON(c, http.StatusForbidden, "AICC_DOMAIN_FORBIDDEN", apierror.MsgAICCDomainForbidden)
+	case errors.Is(err, service.ErrRateLimited):
+		apierror.JSON(c, http.StatusTooManyRequests, "RATE_LIMITED", apierror.MsgAICCRateLimited)
 	case errors.Is(err, service.ErrConversationFileTooLarge):
 		apierror.JSON(c, http.StatusRequestEntityTooLarge, "CONVERSATION_FILE_TOO_LARGE", apierror.MsgConversationFileTooLarge)
 	case errors.Is(err, service.ErrInvalidArgument):

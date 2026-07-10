@@ -308,6 +308,87 @@ func TestAICCPublicCreateSessionCreatesExpiringSession(t *testing.T) {
 	assert.Equal(t, time.Date(2026, 8, 8, 10, 0, 0, 0, time.UTC), store.createdSession.ExpiresAt)
 }
 
+// TestAICCPublicCreateWidgetSessionRejectsDisallowedOrigin 覆盖挂件域名白名单：
+// 智能体配置 allowed_domains 后，非白名单 Origin 不能创建 web_widget 会话。
+func TestAICCPublicCreateWidgetSessionRejectsDisallowedOrigin(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org: sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent: sqlc.AiccAgent{
+			ID:                 "agent-1",
+			OrgID:              "org-1",
+			Status:             domain.AICCAgentStatusActive,
+			PrivacyMode:        domain.AICCPrivacyModeNotice,
+			PublicToken:        "pub",
+			AllowedDomainsJson: []byte(`["www.example.com"]`),
+		},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+
+	_, err := svc.CreateSession(context.Background(), "pub", AICCPublicSessionInput{
+		Channel: domain.AICCChannelWebWidget,
+		Origin:  "https://evil.example.net",
+	})
+
+	require.ErrorIs(t, err, ErrAICCDomainForbidden)
+	assert.Empty(t, store.createdSession.ID)
+}
+
+// TestAICCPublicCreateWidgetSessionStoresRequestHashes 覆盖公开会话安全元数据：
+// 白名单命中后创建挂件会话，并落 IP/User-Agent hash，避免保存原始访客标识。
+func TestAICCPublicCreateWidgetSessionStoresRequestHashes(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org: sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent: sqlc.AiccAgent{
+			ID:                 "agent-1",
+			OrgID:              "org-1",
+			Status:             domain.AICCAgentStatusActive,
+			PrivacyMode:        domain.AICCPrivacyModeNotice,
+			PublicToken:        "pub",
+			AllowedDomainsJson: []byte(`["*.example.com"]`),
+		},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	_, err := svc.CreateSession(context.Background(), "pub", AICCPublicSessionInput{
+		Channel:   domain.AICCChannelWebWidget,
+		Origin:    "https://shop.example.com",
+		RemoteIP:  "203.0.113.9",
+		UserAgent: "Mozilla/5.0 AICC Test",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, domain.AICCChannelWebWidget, store.createdSession.Channel)
+	assert.NotEmpty(t, store.createdSession.IpHash.String)
+	assert.NotEqual(t, "203.0.113.9", store.createdSession.IpHash.String)
+	assert.NotEmpty(t, store.createdSession.UserAgentHash.String)
+	assert.NotEqual(t, "Mozilla/5.0 AICC Test", store.createdSession.UserAgentHash.String)
+}
+
+// TestAICCPublicCreateSessionHonorsRateLimiter 覆盖公开入口限流：
+// 限流器拒绝时不能继续创建会话，防止匿名访客刷会话消耗企业额度。
+func TestAICCPublicCreateSessionHonorsRateLimiter(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org: sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent: sqlc.AiccAgent{
+			ID:          "agent-1",
+			OrgID:       "org-1",
+			Status:      domain.AICCAgentStatusActive,
+			PrivacyMode: domain.AICCPrivacyModeNotice,
+			PublicToken: "pub",
+		},
+	}
+	limiter := &fakeAICCRateLimiter{allow: false}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.SetRateLimiter(limiter)
+
+	_, err := svc.CreateSession(context.Background(), "pub", AICCPublicSessionInput{RemoteIP: "203.0.113.9"})
+
+	require.ErrorIs(t, err, ErrRateLimited)
+	assert.Empty(t, store.createdSession.ID)
+	assert.Contains(t, limiter.key, "agent-1")
+}
+
 // TestAICCPublicConsentRejectsInvalidSession 覆盖隐私同意接口：无效 token 不能伪造成功响应。
 func TestAICCPublicConsentRejectsInvalidSession(t *testing.T) {
 	store := &fakeAICCPublicStore{
@@ -613,6 +694,16 @@ func (f *fakeAICCHermesChat) ChatAICC(_ context.Context, appID, _ string, text s
 	f.appID = appID
 	f.text = text
 	return f.reply, nil
+}
+
+type fakeAICCRateLimiter struct {
+	allow bool
+	key   string
+}
+
+func (f *fakeAICCRateLimiter) Allow(_ context.Context, key string, _ int64, _ time.Duration) (bool, error) {
+	f.key = key
+	return f.allow, nil
 }
 
 type fakeAICCImageBlob struct {
