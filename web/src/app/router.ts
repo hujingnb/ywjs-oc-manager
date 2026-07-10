@@ -66,6 +66,10 @@ export const router = createRouter({
       meta: { allowedRoles: ORG_ADMIN_ONLY },
       children: [
         { path: '', component: AICCManagerPage },
+        { path: 'sessions', component: AICCManagerPage },
+        { path: 'knowledge', component: AICCManagerPage },
+        { path: 'leads', component: AICCManagerPage },
+        { path: 'analytics', component: AICCManagerPage },
         { path: 'settings', component: AICCManagerPage },
       ],
     },

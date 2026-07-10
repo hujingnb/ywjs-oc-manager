@@ -103,4 +103,25 @@ describe('AICCConsoleLayout', () => {
 
     expect(routerPush).toHaveBeenCalledWith('/')
   })
+
+  // 覆盖阶段性导航完整性：Task 4 拆页前，所有已展示的工作台入口都必须跳到已约定的 /aicc-console 子路径。
+  it('pushes every visible console navigation item to its registered AICC console path', async () => {
+    const wrapper = mountLayout()
+    const expectedTargets = [
+      ['会话', '/aicc-console/sessions'],
+      ['知识库', '/aicc-console/knowledge'],
+      ['线索', '/aicc-console/leads'],
+      ['分析', '/aicc-console/analytics'],
+      ['设置', '/aicc-console/settings'],
+    ] as const
+
+    for (const [label, path] of expectedTargets) {
+      routerPush.mockClear()
+      const navItem = wrapper.findAll('[data-test="aicc-nav-item"]').find(item => item.text() === label)
+
+      expect(navItem?.attributes('data-key')).toBe(path)
+      await navItem!.trigger('click')
+      expect(routerPush).toHaveBeenCalledWith(path)
+    }
+  })
 })
