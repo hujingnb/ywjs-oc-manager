@@ -31,6 +31,7 @@
         <n-select
           v-model:value="selectedAgentIdModel"
           class="aicc-agent-select"
+          data-test="agent-switcher"
           size="small"
           :options="agentOptions"
           :loading="agentsLoading"
@@ -112,9 +113,9 @@ const agentOptions = computed<SelectOption[]>(() => agents.value.map(agent => ({
 })))
 
 // selectedAgentIdModel 是选择器的可写桥接层；注入给子页面的 selectedAgentId 保持 ComputedRef 只读。
-const selectedAgentIdModel = computed({
-  get: () => selectedAgentIdState.value,
-  set: (agentId?: string) => selectAgent(agentId),
+const selectedAgentIdModel = computed<string | null>({
+  get: () => selectedAgentIdState.value ?? null,
+  set: (agentId?: string | null) => selectAgent(agentId ?? undefined),
 })
 
 // activeKey 对根路径做精确匹配，避免 /aicc-console 吞掉所有子模块高亮。

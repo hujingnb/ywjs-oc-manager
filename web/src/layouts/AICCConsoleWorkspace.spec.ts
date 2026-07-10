@@ -58,11 +58,13 @@ const ButtonStub = defineComponent({
 })
 
 const SelectStub = defineComponent({
+  name: 'NSelect',
   props: ['value', 'options', 'placeholder', 'loading'],
   emits: ['update:value'],
   setup(props, { emit }) {
     return () => h('select', {
       'data-test': 'agent-switcher',
+      'data-value-kind': props.value === null ? 'null' : typeof props.value,
       value: props.value ?? '',
       onChange: (event: Event) => emit('update:value', (event.target as HTMLSelectElement).value || undefined),
     }, [
