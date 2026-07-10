@@ -69,7 +69,7 @@
           {{ feedback }}
         </n-alert>
 
-        <n-tabs type="segment" animated class="aicc-tabs">
+        <n-tabs v-model:value="activeSection" type="segment" animated class="aicc-tabs">
           <n-tab-pane name="config" :tab="t('aicc.manager.tabs.config')">
             <div class="status-grid">
               <div class="status-tile">
@@ -345,7 +345,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import QRCode from 'qrcode'
 import {
   NAlert, NButton, NCheckbox, NForm, NFormItem, NInput, NInputNumber, NSelect, NSpace, NTag,
@@ -388,6 +388,15 @@ import type {
 import { isAICCAgentRunning } from '@/domain/aicc'
 
 // AICCManagerPage 是企业管理员维护 AI Integrated Customer Care 在线客服智能体和运营数据的入口。
+type InitialSection = 'reception' | 'sessions' | 'knowledge' | 'leads' | 'analytics' | 'settings'
+type ManagerTab = 'config' | 'sessions' | 'leads' | 'analytics'
+
+const props = withDefaults(defineProps<{
+  initialSection?: InitialSection
+}>(), {
+  initialSection: 'reception',
+})
+
 interface AgentForm extends AICCAgentPayload {
   id?: string
   privacy_mode: AICCPrivacyMode
@@ -413,6 +422,7 @@ const selectedAgentId = ref<string | undefined>()
 const deleteModalOpen = ref(false)
 const feedback = ref('')
 const feedbackDanger = ref(false)
+const activeSection = ref<ManagerTab>(sectionToTab(props.initialSection))
 const { t } = useI18n()
 
 const agentsQuery = useAICCAgentsQuery()
@@ -538,6 +548,32 @@ watch(
   },
   { immediate: true },
 )
+
+watch(
+  () => props.initialSection,
+  (section) => {
+    activeSection.value = sectionToTab(section)
+    if (section === 'knowledge') {
+      void scrollKnowledgePanelIntoView()
+    }
+  },
+  { immediate: true },
+)
+
+// 路由级入口只负责打开现有工作台区域；知识库暂复用配置页并滚动到知识配置块。
+function sectionToTab(section: InitialSection): ManagerTab {
+  if (section === 'sessions' || section === 'leads' || section === 'analytics') return section
+  return 'config'
+}
+
+async function scrollKnowledgePanelIntoView() {
+  await nextTick()
+  if (typeof document === 'undefined') return
+  const knowledgePanel = document.querySelector('.knowledge-panel')
+  if (knowledgePanel instanceof HTMLElement && typeof knowledgePanel.scrollIntoView === 'function') {
+    knowledgePanel.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }
+}
 
 function emptyForm(): AgentForm {
   return {
