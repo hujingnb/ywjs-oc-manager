@@ -47,6 +47,11 @@ export default {
         title: '接待台',
         description: '维护智能体配置、投放入口、知识范围和运营策略。',
       },
+      knowledge: {
+        eyebrow: 'KNOWLEDGE',
+        title: '知识库',
+        description: '配置智能体可检索的行业知识库、企业知识库和专属文档。',
+      },
       sessions: {
         eyebrow: 'SESSIONS',
         title: '会话',
@@ -61,6 +66,11 @@ export default {
         eyebrow: 'ANALYTICS',
         title: '分析',
         description: '查看会话趋势、活跃智能体和留资转化。',
+      },
+      settings: {
+        eyebrow: 'SETTINGS',
+        title: '设置',
+        description: '维护公开入口、会话续接、敏感词和访客安全策略。',
       },
     },
     status: {

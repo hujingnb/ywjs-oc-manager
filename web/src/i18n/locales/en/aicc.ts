@@ -47,6 +47,11 @@ export default {
         title: 'Reception',
         description: 'Maintain agent configuration, delivery entry points, knowledge scope, and operations policies.',
       },
+      knowledge: {
+        eyebrow: 'KNOWLEDGE',
+        title: 'Knowledge',
+        description: 'Configure the industry, organization, and dedicated documents this agent can retrieve.',
+      },
       sessions: {
         eyebrow: 'SESSIONS',
         title: 'Sessions',
@@ -61,6 +66,11 @@ export default {
         eyebrow: 'ANALYTICS',
         title: 'Analytics',
         description: 'Review session trends, active agents, and lead conversion.',
+      },
+      settings: {
+        eyebrow: 'SETTINGS',
+        title: 'Settings',
+        description: 'Maintain public entry points, session resume, sensitive words, and visitor safety policies.',
       },
     },
     status: {

@@ -157,7 +157,7 @@
             </n-space>
           </n-form>
 
-          <div class="operations-panel">
+          <div ref="settingsPanelEl" class="operations-panel">
             <div class="section-heading">
               <div>
                 <p class="eyebrow">{{ t('aicc.manager.delivery.eyebrow') }}</p>
@@ -425,7 +425,9 @@ const deleteModalOpen = ref(false)
 const feedback = ref('')
 const feedbackDanger = ref(false)
 const activeSection = ref<ManagerTab>(sectionToTab(props.initialSection))
+const currentRouteSection = ref<InitialSection>(props.initialSection)
 const knowledgePanelEl = ref<HTMLElement>()
+const settingsPanelEl = ref<HTMLElement>()
 const { t } = useI18n()
 
 const settingsQuery = useAICCSettingsQuery(selectedAgentId)
@@ -449,9 +451,11 @@ const deleteBusy = computed(() => deleteMutation.isPending.value)
 const settingsBusy = computed(() => settingsMutation.isPending.value || settingsQuery.isFetching.value)
 const leadFieldBusy = computed(() => leadFieldMutation.isPending.value || leadFieldsQuery.isFetching.value)
 const knowledgeBusy = computed(() => knowledgeMutation.isPending.value || knowledgeQuery.isFetching.value)
-const currentSectionEyebrow = computed(() => t(`aicc.manager.sections.${activeSection.value}.eyebrow`))
-const currentSectionTitle = computed(() => t(`aicc.manager.sections.${activeSection.value}.title`))
-const currentSectionDescription = computed(() => t(`aicc.manager.sections.${activeSection.value}.description`))
+// 标题文案跟随顶部路由语义；默认接待台路由复用配置页内容与标题。
+const currentSectionKey = computed(() => currentRouteSection.value === 'reception' ? 'config' : currentRouteSection.value)
+const currentSectionEyebrow = computed(() => t(`aicc.manager.sections.${currentSectionKey.value}.eyebrow`))
+const currentSectionTitle = computed(() => t(`aicc.manager.sections.${currentSectionKey.value}.title`))
+const currentSectionDescription = computed(() => t(`aicc.manager.sections.${currentSectionKey.value}.description`))
 
 const form = reactive<AgentForm>(emptyForm())
 const settingsForm = reactive<SettingsForm>(emptySettingsForm())
@@ -551,9 +555,12 @@ watch(
 watch(
   () => props.initialSection,
   (section) => {
+    currentRouteSection.value = section
     activeSection.value = sectionToTab(section)
     if (section === 'knowledge') {
       void scrollKnowledgePanelIntoView()
+    } else if (section === 'settings') {
+      void scrollSettingsPanelIntoView()
     }
   },
   { immediate: true },
@@ -569,6 +576,13 @@ async function scrollKnowledgePanelIntoView() {
   await nextTick()
   if (typeof knowledgePanelEl.value?.scrollIntoView === 'function') {
     knowledgePanelEl.value.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }
+}
+
+async function scrollSettingsPanelIntoView() {
+  await nextTick()
+  if (typeof settingsPanelEl.value?.scrollIntoView === 'function') {
+    settingsPanelEl.value.scrollIntoView({ block: 'start', behavior: 'smooth' })
   }
 }
 
