@@ -1,22 +1,6 @@
 <template>
   <section class="aicc-console-workspace" :aria-label="t('aicc.console.navLabel')">
-    <nav class="aicc-workspace-nav" :aria-label="t('aicc.console.navLabel')">
-      <!-- 顶部模块导航只负责 AICC 工作区内分区切换，外层启用门禁仍由 AICCConsoleLayout 控制。 -->
-      <a
-        v-for="item in navItems"
-        :key="item.path"
-        class="aicc-workspace-nav-item"
-        :class="{ active: activeKey === item.path }"
-        :href="item.path"
-        data-test="workspace-nav-item"
-        @click.prevent="navigateTo(item.path)"
-      >
-        <component :is="item.icon" :size="16" />
-        <span>{{ t(item.labelKey) }}</span>
-      </a>
-    </nav>
-
-    <header class="aicc-agent-context">
+    <header class="aicc-agent-context" data-test="workspace-agent-bar">
       <div class="aicc-agent-identity">
         <span>{{ t('aicc.console.currentAgent') }}</span>
         <strong>{{ selectedAgent?.name || t('aicc.console.noAgentSelected') }}</strong>
@@ -59,9 +43,27 @@
       </div>
     </header>
 
-    <main class="aicc-workspace-content">
-      <RouterView />
-    </main>
+    <div class="aicc-workspace-shell">
+      <nav class="aicc-workspace-nav" data-test="workspace-module-menu" :aria-label="t('aicc.console.navLabel')">
+        <!-- 左侧模块菜单只负责 AICC 工作区内分区切换，外层启用门禁仍由 AICCConsoleLayout 控制。 -->
+        <a
+          v-for="item in navItems"
+          :key="item.path"
+          class="aicc-workspace-nav-item"
+          :class="{ active: activeKey === item.path }"
+          :href="item.path"
+          data-test="workspace-nav-item"
+          @click.prevent="navigateTo(item.path)"
+        >
+          <component :is="item.icon" :size="16" />
+          <span>{{ t(item.labelKey) }}</span>
+        </a>
+      </nav>
+
+      <main class="aicc-workspace-content">
+        <RouterView />
+      </main>
+    </div>
   </section>
 </template>
 
@@ -204,23 +206,36 @@ function navigateTo(path: string) {
   gap: 12px;
 }
 
+.aicc-workspace-shell {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: 212px minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
 .aicc-workspace-nav {
   display: flex;
-  min-height: 44px;
-  align-items: center;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
   gap: 4px;
-  overflow-x: auto;
-  border-bottom: 1px solid var(--color-divider);
+  padding: 12px;
+  border-right: 1px solid var(--color-divider);
+  background: var(--color-surface-muted);
 }
 
 .aicc-workspace-nav-item {
-  display: inline-flex;
-  flex: 0 0 auto;
+  display: flex;
   align-items: center;
-  gap: 6px;
-  min-height: 36px;
+  gap: 10px;
+  min-height: 40px;
   padding: 0 12px;
-  border-bottom: 2px solid transparent;
+  border-radius: 6px;
   color: var(--color-text-secondary);
   font-size: 14px;
   font-weight: 600;
@@ -230,8 +245,9 @@ function navigateTo(path: string) {
 
 .aicc-workspace-nav-item:hover,
 .aicc-workspace-nav-item.active {
-  border-bottom-color: #0f766e;
-  color: var(--color-text-primary);
+  background: var(--color-brand-soft);
+  box-shadow: inset 3px 0 0 var(--color-brand);
+  color: var(--color-brand-text);
 }
 
 .aicc-agent-context {
@@ -241,7 +257,7 @@ function navigateTo(path: string) {
   align-items: center;
   min-height: 58px;
   padding: 10px 14px;
-  border: 1px solid var(--color-divider);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   background: var(--color-surface);
 }
@@ -292,7 +308,7 @@ function navigateTo(path: string) {
 }
 
 .aicc-agent-select {
-  width: min(220px, 100%);
+  width: min(320px, 100%);
 }
 
 .aicc-workspace-content {
@@ -301,6 +317,8 @@ function navigateTo(path: string) {
   min-height: 0;
   flex: 1;
   flex-direction: column;
+  padding: 16px;
+  overflow: auto;
 }
 
 .aicc-workspace-content :deep(> *) {
@@ -319,6 +337,23 @@ function navigateTo(path: string) {
 
   .aicc-agent-select {
     flex: 1 1 180px;
+  }
+}
+
+@media (max-width: 760px) {
+  .aicc-workspace-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .aicc-workspace-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-divider);
+  }
+
+  .aicc-workspace-nav-item {
+    flex: 0 0 auto;
   }
 }
 </style>

@@ -136,10 +136,12 @@ describe('AICCConsoleWorkspace', () => {
     agentsState.error.value = null
   })
 
-  // 覆盖顶部模块导航：工作区外壳必须使用横向模块入口，不再引入左侧工作台菜单。
-  it('renders top module navigation and routed content in the required order', async () => {
+  // 覆盖最终工作台结构：顶部只做智能体选择，左侧菜单负责模块切换。
+  it('renders the module menu in the left rail and pushes all console routes', async () => {
     const wrapper = mountWorkspace()
 
+    expect(wrapper.find('[data-test="workspace-module-menu"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="workspace-agent-bar"]').exists()).toBe(true)
     expect(navItems(wrapper).map(item => item.text())).toEqual(['接待台', '会话', '线索', '知识库', '分析', '设置'])
     expect(navItems(wrapper).map(item => item.attributes('href'))).toEqual([
       '/aicc-console',
@@ -151,9 +153,18 @@ describe('AICCConsoleWorkspace', () => {
     ])
     expect(wrapper.find('[data-test="router-view"]').exists()).toBe(true)
 
-    await navItems(wrapper)[2].trigger('click')
+    for (const item of navItems(wrapper)) {
+      await item.trigger('click')
+    }
 
-    expect(routerPush).toHaveBeenCalledWith('/aicc-console/leads')
+    expect(routerPush.mock.calls.map(call => call[0])).toEqual([
+      '/aicc-console',
+      '/aicc-console/sessions',
+      '/aicc-console/leads',
+      '/aicc-console/knowledge',
+      '/aicc-console/analytics',
+      '/aicc-console/settings',
+    ])
   })
 
   // 覆盖当前智能体上下文条：默认选中首个智能体，并展示名称、运行状态、公开入口和保留天数。
