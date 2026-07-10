@@ -253,6 +253,24 @@ type AICCKnowledgeResult struct {
 	AppDocumentIDs []string `json:"app_document_ids"`
 }
 
+// AICCKnowledgeOption 描述 AICC 知识范围下拉框可选项。
+type AICCKnowledgeOption struct {
+	// ID 是行业库或文档主键，保存知识范围时原样提交。
+	ID string `json:"id"`
+	// Name 是管理端展示名。
+	Name string `json:"name"`
+	// DocumentCount 是行业库已缓存文档数；文档选项固定为 0。
+	DocumentCount int64 `json:"document_count"`
+}
+
+// AICCKnowledgeOptionsResult 是 AICC 管理页所需的只读知识选项集合。
+type AICCKnowledgeOptionsResult struct {
+	// IndustryKnowledgeBases 是平台行业库候选项，企业管理员只读选择。
+	IndustryKnowledgeBases []AICCKnowledgeOption `json:"industry_knowledge_bases"`
+	// AppDocuments 是该智能体隐藏 app 专属知识库中的文档候选项。
+	AppDocuments []AICCKnowledgeOption `json:"app_documents"`
+}
+
 // AICCAgentSettingsInput 是企业管理员保存 AICC 运营配置的入参。
 type AICCAgentSettingsInput struct {
 	// MessageLimitPerSession 限制单个公开会话最多发送多少条访客消息。

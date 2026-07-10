@@ -40,6 +40,7 @@ type aiccService interface {
 	ListLeadFields(ctx context.Context, principal auth.Principal, agentID string) ([]service.AICCLeadFieldResult, error)
 	ReplaceLeadFields(ctx context.Context, principal auth.Principal, agentID string, fields []service.AICCLeadFieldInput) ([]service.AICCLeadFieldResult, error)
 	GetAgentKnowledge(ctx context.Context, principal auth.Principal, agentID string) (service.AICCKnowledgeResult, error)
+	ListAgentKnowledgeOptions(ctx context.Context, principal auth.Principal, agentID string) (service.AICCKnowledgeOptionsResult, error)
 	ReplaceAgentKnowledge(ctx context.Context, principal auth.Principal, agentID string, input service.AICCKnowledgeInput) (service.AICCKnowledgeResult, error)
 	Analytics(ctx context.Context, principal auth.Principal, options service.AICCAnalyticsOptions) (service.AICCAnalyticsResult, error)
 }
@@ -64,6 +65,7 @@ func RegisterAICCRoutes(router gin.IRouter, handler *AICCHandler) {
 	group.GET("/agents/:agentId/lead-fields", handler.ListLeadFields)
 	group.PUT("/agents/:agentId/lead-fields", handler.ReplaceLeadFields)
 	group.GET("/agents/:agentId/knowledge", handler.GetAgentKnowledge)
+	group.GET("/agents/:agentId/knowledge-options", handler.ListAgentKnowledgeOptions)
 	group.PUT("/agents/:agentId/knowledge", handler.ReplaceAgentKnowledge)
 	group.GET("/agents/:agentId/sessions", handler.ListSessions)
 	group.GET("/sessions/:sessionId", handler.GetSession)
@@ -339,6 +341,29 @@ func (h *AICCHandler) GetAgentKnowledge(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"knowledge": result})
+}
+
+// ListAgentKnowledgeOptions 读取 AICC 知识范围候选项。
+//
+// @Summary      AICC 知识范围候选项
+// @Description  读取企业管理员可选择的行业知识库和当前智能体专属文档
+// @Tags         aicc
+// @Produce      json
+// @Security     BearerAuth
+// @Param        agentId  path      string  true  "智能体 ID"
+// @Success      200      {object}  map[string]service.AICCKnowledgeOptionsResult
+// @Failure      401      {object}  ErrorResponse
+// @Failure      403      {object}  ErrorResponse
+// @Failure      404      {object}  ErrorResponse
+// @Failure      500      {object}  ErrorResponse
+// @Router       /aicc/agents/{agentId}/knowledge-options [get]
+func (h *AICCHandler) ListAgentKnowledgeOptions(c *gin.Context) {
+	result, err := h.service.ListAgentKnowledgeOptions(c.Request.Context(), principalFromCtx(c), c.Param("agentId"))
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"options": result})
 }
 
 // ReplaceAgentKnowledge 整组保存 AICC 智能体知识范围。

@@ -606,6 +606,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aicc/agents/{agentId}/knowledge-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * AICC 知识范围候选项
+         * @description 读取企业管理员可选择的行业知识库和当前智能体专属文档
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 智能体 ID */
+                    agentId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.AICCKnowledgeOptionsResult"];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aicc/agents/{agentId}/lead-fields": {
         parameters: {
             query?: never;
@@ -16066,6 +16146,20 @@ export interface components {
             unresolved_rate?: number;
             /** @description UnresolvedSessions 是当前企业已标记未解决的会话数。 */
             unresolved_sessions?: number;
+        };
+        "service.AICCKnowledgeOption": {
+            /** @description DocumentCount 是行业库已缓存文档数；文档选项固定为 0。 */
+            document_count?: number;
+            /** @description ID 是行业库或文档主键，保存知识范围时原样提交。 */
+            id?: string;
+            /** @description Name 是管理端展示名。 */
+            name?: string;
+        };
+        "service.AICCKnowledgeOptionsResult": {
+            /** @description AppDocuments 是该智能体隐藏 app 专属知识库中的文档候选项。 */
+            app_documents?: components["schemas"]["service.AICCKnowledgeOption"][];
+            /** @description IndustryKnowledgeBases 是平台行业库候选项，企业管理员只读选择。 */
+            industry_knowledge_bases?: components["schemas"]["service.AICCKnowledgeOption"][];
         };
         "service.AICCKnowledgeResult": {
             /** @description AgentID 是智能体主键。 */

@@ -135,6 +135,24 @@ export interface AICCKnowledge {
 // AICCKnowledgePayload 是保存知识范围时提交的完整快照。
 export type AICCKnowledgePayload = Pick<AICCKnowledge, 'use_org_knowledge' | 'industry_knowledge_base_ids' | 'app_document_ids'>
 
+// AICCKnowledgeOption 是 AICC 知识范围下拉框候选项。
+export interface AICCKnowledgeOption {
+  // 候选项主键，保存时写入行业库 ID 或专属文档 ID。
+  id: string
+  // 用户可见名称。
+  name: string
+  // 行业库文档数；专属文档候选项为 0。
+  document_count: number
+}
+
+// AICCKnowledgeOptions 是 AICC 管理页只读候选项集合。
+export interface AICCKnowledgeOptions {
+  // 平台行业知识库候选项。
+  industry_knowledge_bases: AICCKnowledgeOption[]
+  // 当前智能体隐藏 app 下的专属文档候选项。
+  app_documents: AICCKnowledgeOption[]
+}
+
 // AICCPublicConfig 是访客打开公开链接后可读取的非敏感展示配置。
 export interface AICCPublicConfig {
   // 智能体公开展示名。

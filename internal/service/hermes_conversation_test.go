@@ -14,10 +14,12 @@ import (
 
 // fakeConversationOps 是 conversationOps 的假实现，记录入参并返回预设值。
 type fakeConversationOps struct {
-	sessions []ocops.ConversationSession
-	chatOut  ocops.ConversationChatResult
-	gotSID   string
-	lastReq  ocops.ConversationChatReq // 记录最后一次 SessionChat/SessionChatStream 的请求，供富化断言
+	sessions    []ocops.ConversationSession
+	chatOut     ocops.ConversationChatResult
+	gotSID      string
+	lastReq     ocops.ConversationChatReq // 记录最后一次 SessionChat/SessionChatStream 的请求，供富化断言
+	createCalls int
+	createReq   ocops.ConversationCreateReq
 }
 
 func (f *fakeConversationOps) ListSessions(_ context.Context, _ ocops.Endpoint, _ string, _, _ int) ([]ocops.ConversationSession, error) {
@@ -27,7 +29,9 @@ func (f *fakeConversationOps) SessionMessages(_ context.Context, _ ocops.Endpoin
 	f.gotSID = sid
 	return nil, nil
 }
-func (f *fakeConversationOps) CreateSession(_ context.Context, _ ocops.Endpoint, _ ocops.ConversationCreateReq) (ocops.ConversationSession, error) {
+func (f *fakeConversationOps) CreateSession(_ context.Context, _ ocops.Endpoint, req ocops.ConversationCreateReq) (ocops.ConversationSession, error) {
+	f.createCalls++
+	f.createReq = req
 	return ocops.ConversationSession{ID: "new"}, nil
 }
 func (f *fakeConversationOps) DeleteSession(_ context.Context, _ ocops.Endpoint, _ string) error {

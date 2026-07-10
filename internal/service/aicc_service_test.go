@@ -25,6 +25,8 @@ type fakeAICCStore struct {
 	agents              map[string]sqlc.AiccAgent
 	settings            map[string]sqlc.AiccAgentSetting
 	knowledge           map[string][]sqlc.AiccAgentKnowledge
+	industryBases       []sqlc.ListIndustryKnowledgeBasesRow
+	appDocuments        []sqlc.RagflowDocument
 	sessions            map[string]sqlc.AiccSession
 	messages            map[string][]sqlc.AiccMessage
 	leads               map[string]sqlc.AiccLead
@@ -197,6 +199,22 @@ func (f *fakeAICCStore) ListAICCAgentsByOrg(_ context.Context, arg sqlc.ListAICC
 // ListAICCAgentKnowledge 返回智能体已挂载知识范围，用于配置回显。
 func (f *fakeAICCStore) ListAICCAgentKnowledge(_ context.Context, agentID string) ([]sqlc.AiccAgentKnowledge, error) {
 	return append([]sqlc.AiccAgentKnowledge(nil), f.knowledge[agentID]...), nil
+}
+
+// ListIndustryKnowledgeBases 返回 AICC 管理页可选择的平台行业库候选项。
+func (f *fakeAICCStore) ListIndustryKnowledgeBases(_ context.Context, _ sqlc.ListIndustryKnowledgeBasesParams) ([]sqlc.ListIndustryKnowledgeBasesRow, error) {
+	return append([]sqlc.ListIndustryKnowledgeBasesRow(nil), f.industryBases...), nil
+}
+
+// ListRAGFlowDocumentsByScope 返回 AICC 隐藏 app 专属文档候选项。
+func (f *fakeAICCStore) ListRAGFlowDocumentsByScope(_ context.Context, arg sqlc.ListRAGFlowDocumentsByScopeParams) ([]sqlc.RagflowDocument, error) {
+	rows := make([]sqlc.RagflowDocument, 0, len(f.appDocuments))
+	for _, row := range f.appDocuments {
+		if row.ScopeType == arg.ScopeType && row.OrgID.String == arg.OrgID.String && row.AppID.String == arg.AppID.String {
+			rows = append(rows, row)
+		}
+	}
+	return rows, nil
 }
 
 // DeleteAICCAgentKnowledgeByAgent 清空智能体知识范围，模拟整组替换的第一步。
@@ -636,6 +654,12 @@ func seededAICCStore() *fakeAICCStore {
 				{ID: "knowledge-doc", AgentID: "agent-1", AgentOrgID: "org-1", ScopeType: domain.AICCKnowledgeScopeTypeAppDocument, OrgID: null.StringFrom("org-1"), AppID: null.StringFrom("app-hidden-1"), RagflowDocumentID: null.StringFrom("doc-1")},
 			},
 		},
+		industryBases: []sqlc.ListIndustryKnowledgeBasesRow{
+			{ID: "industry-1", Name: "售前行业库", DocumentCount: 2},
+		},
+		appDocuments: []sqlc.RagflowDocument{
+			{ID: "doc-1", ScopeType: "app", OrgID: null.StringFrom("org-1"), AppID: null.StringFrom("app-hidden-1"), Name: "专属话术.md", ParseStatus: "completed"},
+		},
 		sessions: map[string]sqlc.AiccSession{
 			"session-1": {
 				ID:               "session-1",
@@ -992,6 +1016,26 @@ func TestAICCServiceGetAgentKnowledge(t *testing.T) {
 	assert.True(t, result.UseOrgKnowledge)
 	assert.Equal(t, []string{"industry-1"}, result.IndustryKnowledgeBaseIDs)
 	assert.Equal(t, []string{"doc-1"}, result.AppDocumentIDs)
+}
+
+// TestAICCServiceListAgentKnowledgeOptions 覆盖 AICC 知识候选项：企业管理员可读取行业库和当前隐藏 app 文档。
+func TestAICCServiceListAgentKnowledgeOptions(t *testing.T) {
+	svc := NewAICCService(seededAICCStore(), &fakeAICCHiddenAppCreator{})
+
+	result, err := svc.ListAgentKnowledgeOptions(context.Background(), aiccOrgAdmin(), "agent-1")
+
+	require.NoError(t, err)
+	assert.Equal(t, []AICCKnowledgeOption{{ID: "industry-1", Name: "售前行业库", DocumentCount: 2}}, result.IndustryKnowledgeBases)
+	assert.Equal(t, []AICCKnowledgeOption{{ID: "doc-1", Name: "专属话术.md"}}, result.AppDocuments)
+}
+
+// TestAICCServiceListAgentKnowledgeOptionsRejectsCrossOrg 覆盖跨企业主体不能读取候选项。
+func TestAICCServiceListAgentKnowledgeOptionsRejectsCrossOrg(t *testing.T) {
+	svc := NewAICCService(seededAICCStore(), &fakeAICCHiddenAppCreator{})
+
+	_, err := svc.ListAgentKnowledgeOptions(context.Background(), auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: "org-2"}, "agent-1")
+
+	require.ErrorIs(t, err, ErrForbidden)
 }
 
 // TestAICCServiceReplaceAgentKnowledge 覆盖知识范围整组保存：输入会 trim、去重并按三类 scope 写回。

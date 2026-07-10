@@ -15,6 +15,7 @@ import type {
   AICCLeadField,
   AICCLeadFieldPayload,
   AICCKnowledge,
+  AICCKnowledgeOptions,
   AICCKnowledgePayload,
   AICCPublicConfig,
   AICCPublicChannel,
@@ -33,6 +34,7 @@ const aiccAgentKey = (agentId?: string) => ['aicc', 'agent', agentId] as const
 const aiccSettingsKey = (agentId?: string) => ['aicc', 'settings', agentId] as const
 const aiccLeadFieldsKey = (agentId?: string) => ['aicc', 'lead-fields', agentId] as const
 const aiccKnowledgeKey = (agentId?: string) => ['aicc', 'knowledge', agentId] as const
+const aiccKnowledgeOptionsKey = (agentId?: string) => ['aicc', 'knowledge-options', agentId] as const
 const aiccSessionsKey = (agentId?: string, filters?: AICCSessionFilters) => ['aicc', 'sessions', agentId, filters ?? {}] as const
 const aiccSessionKey = (sessionId?: string) => ['aicc', 'session', sessionId] as const
 const AICC_LEADS_KEY = ['aicc', 'leads'] as const
@@ -201,6 +203,19 @@ export function useAICCKnowledgeQuery(agentId: Ref<string | undefined>) {
       if (!agentId.value) return null
       const response = await apiRequest<{ knowledge: AICCKnowledge }>(`/api/v1/aicc/agents/${agentId.value}/knowledge`)
       return response.knowledge
+    },
+  })
+}
+
+// useAICCKnowledgeOptionsQuery 查询 AICC 知识范围配置页的行业库和专属文档候选项。
+export function useAICCKnowledgeOptionsQuery(agentId: Ref<string | undefined>) {
+  return useQuery<AICCKnowledgeOptions | null>({
+    queryKey: computed(() => aiccKnowledgeOptionsKey(agentId.value)),
+    enabled: () => Boolean(agentId.value),
+    queryFn: async () => {
+      if (!agentId.value) return null
+      const response = await apiRequest<{ options: AICCKnowledgeOptions }>(`/api/v1/aicc/agents/${agentId.value}/knowledge-options`)
+      return response.options
     },
   })
 }

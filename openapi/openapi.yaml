@@ -1596,6 +1596,33 @@ components:
           description: UnresolvedSessions 是当前企业已标记未解决的会话数。
           type: integer
       type: object
+    service.AICCKnowledgeOption:
+      properties:
+        document_count:
+          description: DocumentCount 是行业库已缓存文档数；文档选项固定为 0。
+          type: integer
+        id:
+          description: ID 是行业库或文档主键，保存知识范围时原样提交。
+          type: string
+        name:
+          description: Name 是管理端展示名。
+          type: string
+      type: object
+    service.AICCKnowledgeOptionsResult:
+      properties:
+        app_documents:
+          description: AppDocuments 是该智能体隐藏 app 专属知识库中的文档候选项。
+          items:
+            $ref: '#/components/schemas/service.AICCKnowledgeOption'
+          type: array
+          uniqueItems: false
+        industry_knowledge_bases:
+          description: IndustryKnowledgeBases 是平台行业库候选项，企业管理员只读选择。
+          items:
+            $ref: '#/components/schemas/service.AICCKnowledgeOption'
+          type: array
+          uniqueItems: false
+      type: object
     service.AICCKnowledgeResult:
       properties:
         agent_id:
@@ -3330,6 +3357,54 @@ paths:
       security:
       - BearerAuth: []
       summary: 保存 AICC 智能体知识范围
+      tags:
+      - aicc
+  /aicc/agents/{agentId}/knowledge-options:
+    get:
+      description: 读取企业管理员可选择的行业知识库和当前智能体专属文档
+      parameters:
+      - description: 智能体 ID
+        in: path
+        name: agentId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AICCKnowledgeOptionsResult'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: AICC 知识范围候选项
       tags:
       - aicc
   /aicc/agents/{agentId}/lead-fields:

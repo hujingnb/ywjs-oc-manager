@@ -32,11 +32,39 @@ func (c *AICCPublicHermesChat) ChatAICC(ctx context.Context, appID, sessionID, t
 	if !loc.Supported || strings.TrimSpace(loc.Endpoint.BaseURL) == "" {
 		return "", ErrConversationRuntimeUnavailable
 	}
-	out, err := c.ops.SessionChat(ctx, loc.Endpoint, sessionID, ocops.ConversationChatReq{Message: text})
+	hermesSessionID, err := c.ensureHermesSession(ctx, loc.Endpoint, sessionID)
+	if err != nil {
+		return "", err
+	}
+	out, err := c.ops.SessionChat(ctx, loc.Endpoint, hermesSessionID, ocops.ConversationChatReq{Message: text})
 	if err != nil {
 		return "", mapOcOpsConversationErr(err)
 	}
 	return conversationContentText(out.Message.Content), nil
+}
+
+func (c *AICCPublicHermesChat) ensureHermesSession(ctx context.Context, ep ocops.Endpoint, aiccSessionID string) (string, error) {
+	title := "AICC " + aiccSessionID
+	sessions, err := c.ops.ListSessions(ctx, ep, "aicc", 100, 0)
+	if err != nil {
+		return "", mapOcOpsConversationErr(err)
+	}
+	for _, session := range sessions {
+		if session.Title == title && strings.TrimSpace(session.ID) != "" {
+			return session.ID, nil
+		}
+	}
+	created, err := c.ops.CreateSession(ctx, ep, ocops.ConversationCreateReq{
+		Source: "aicc",
+		Title:  title,
+	})
+	if err != nil {
+		return "", mapOcOpsConversationErr(err)
+	}
+	if strings.TrimSpace(created.ID) == "" {
+		return "", ErrConversationRuntimeUnavailable
+	}
+	return created.ID, nil
 }
 
 func conversationContentText(content any) string {

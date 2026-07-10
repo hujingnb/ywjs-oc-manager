@@ -252,7 +252,7 @@
                     multiple
                     clearable
                     filterable
-                    :loading="industryBasesQuery.isFetching.value"
+                    :loading="knowledgeOptionsQuery.isFetching.value"
                     :options="industryKnowledgeOptions"
                     :placeholder="t('aicc.manager.knowledge.industryPlaceholder')"
                   />
@@ -263,7 +263,7 @@
                     multiple
                     clearable
                     filterable
-                    :loading="appKnowledgeQuery.isFetching.value"
+                    :loading="knowledgeOptionsQuery.isFetching.value"
                     :options="appDocumentOptions"
                     :placeholder="t('aicc.manager.knowledge.appDocsPlaceholder')"
                   />
@@ -363,6 +363,7 @@ import AICCSessionsPage from '@/pages/aicc/AICCSessionsPage.vue'
 import {
   useAICCAgentsQuery,
   useAICCKnowledgeQuery,
+  useAICCKnowledgeOptionsQuery,
   useAICCLeadFieldsQuery,
   useAICCSettingsQuery,
   useCreateAICCAgent,
@@ -373,8 +374,6 @@ import {
   useUpdateAICCAgent,
   useUpdateAICCSettings,
 } from '@/api/hooks/useAICC'
-import { useIndustryKnowledgeBasesQuery } from '@/api/hooks/useIndustryKnowledge'
-import { useAppKnowledgeQuery } from '@/api/hooks/useKnowledge'
 import type {
   AICCAgent,
   AICCAgentPayload,
@@ -420,6 +419,7 @@ const agentsQuery = useAICCAgentsQuery()
 const settingsQuery = useAICCSettingsQuery(selectedAgentId)
 const leadFieldsQuery = useAICCLeadFieldsQuery(selectedAgentId)
 const knowledgeQuery = useAICCKnowledgeQuery(selectedAgentId)
+const knowledgeOptionsQuery = useAICCKnowledgeOptionsQuery(selectedAgentId)
 const createMutation = useCreateAICCAgent()
 const updateMutation = useUpdateAICCAgent()
 const settingsMutation = useUpdateAICCSettings()
@@ -431,8 +431,6 @@ const deleteMutation = useDeleteAICCAgent()
 const agents = computed(() => agentsQuery.data.value ?? [])
 const selectedAgent = computed(() => agents.value.find(agent => agent.id === selectedAgentId.value))
 const selectedKnowledgeAppId = computed(() => knowledgeQuery.data.value?.app_id || selectedAgent.value?.app_id)
-const industryBasesQuery = useIndustryKnowledgeBasesQuery(() => Boolean(selectedAgentId.value))
-const appKnowledgeQuery = useAppKnowledgeQuery(selectedKnowledgeAppId, { pageSize: computed(() => 200) })
 const isSelectedRunning = computed(() => selectedAgent.value ? isAICCAgentRunning(selectedAgent.value) : false)
 const activeAgentCount = computed(() => agents.value.filter(agent => isAICCAgentRunning(agent)).length)
 const submitBusy = computed(() => createMutation.isPending.value || updateMutation.isPending.value)
@@ -449,14 +447,14 @@ const knowledgeForm = reactive<KnowledgeForm>(emptyKnowledgeForm())
 const qrDataUrl = ref('')
 
 const industryKnowledgeOptions = computed<SelectOption[]>(() =>
-  (industryBasesQuery.data.value?.items ?? []).map(item => ({
+  (knowledgeOptionsQuery.data.value?.industry_knowledge_bases ?? []).map(item => ({
     label: `${item.name} (${item.document_count})`,
     value: item.id,
   })),
 )
 
 const appDocumentOptions = computed<SelectOption[]>(() =>
-  (appKnowledgeQuery.data.value?.items ?? []).map(item => ({
+  (knowledgeOptionsQuery.data.value?.app_documents ?? []).map(item => ({
     label: item.name,
     value: item.id,
   })),
