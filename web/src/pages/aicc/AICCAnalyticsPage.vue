@@ -6,55 +6,55 @@
 
     <div class="analytics-toolbar">
       <n-button-group>
-        <n-button size="small" :type="rangePreset === 'today' ? 'primary' : 'default'" @click="setRangePreset('today')">今天</n-button>
-        <n-button size="small" :type="rangePreset === '7d' ? 'primary' : 'default'" @click="setRangePreset('7d')">近 7 天</n-button>
-        <n-button size="small" :type="rangePreset === '30d' ? 'primary' : 'default'" @click="setRangePreset('30d')">近 30 天</n-button>
+        <n-button size="small" :type="rangePreset === 'today' ? 'primary' : 'default'" @click="setRangePreset('today')">{{ t('aicc.analytics.rangeToday') }}</n-button>
+        <n-button size="small" :type="rangePreset === '7d' ? 'primary' : 'default'" @click="setRangePreset('7d')">{{ t('aicc.analytics.range7d') }}</n-button>
+        <n-button size="small" :type="rangePreset === '30d' ? 'primary' : 'default'" @click="setRangePreset('30d')">{{ t('aicc.analytics.range30d') }}</n-button>
       </n-button-group>
       <n-radio-group v-model:value="bucket" size="small">
-        <n-radio-button value="day">日</n-radio-button>
-        <n-radio-button value="week">周</n-radio-button>
+        <n-radio-button value="day">{{ t('aicc.analytics.day') }}</n-radio-button>
+        <n-radio-button value="week">{{ t('aicc.analytics.week') }}</n-radio-button>
       </n-radio-group>
     </div>
 
     <div class="metric-grid">
       <div class="metric-tile">
-        <span>今日会话</span>
+        <span>{{ t('aicc.analytics.metrics.todaySessions') }}</span>
         <strong>{{ analytics?.today_sessions ?? '-' }}</strong>
       </div>
       <div class="metric-tile">
-        <span>筛选会话</span>
+        <span>{{ t('aicc.analytics.metrics.filteredSessions') }}</span>
         <strong>{{ analytics?.total_sessions ?? '-' }}</strong>
       </div>
       <div class="metric-tile">
-        <span>未读线索</span>
+        <span>{{ t('aicc.analytics.metrics.unreadLeads') }}</span>
         <strong>{{ analytics?.unread_leads ?? '-' }}</strong>
       </div>
       <div class="metric-tile">
-        <span>已解决</span>
+        <span>{{ t('aicc.analytics.metrics.resolved') }}</span>
         <strong>{{ analytics?.resolved_sessions ?? '-' }}</strong>
       </div>
       <div class="metric-tile">
-        <span>未解决</span>
+        <span>{{ t('aicc.analytics.metrics.unresolved') }}</span>
         <strong>{{ analytics?.unresolved_sessions ?? '-' }}</strong>
       </div>
       <div class="metric-tile">
-        <span>未知状态</span>
+        <span>{{ t('aicc.analytics.metrics.unknown') }}</span>
         <strong>{{ analytics?.unknown_sessions ?? '-' }}</strong>
       </div>
       <div class="metric-tile">
-        <span>未解决率</span>
+        <span>{{ t('aicc.analytics.metrics.unresolvedRate') }}</span>
         <strong>{{ unresolvedRateText }}</strong>
       </div>
       <div class="metric-tile">
-        <span>已留资</span>
+        <span>{{ t('aicc.analytics.metrics.completedLeads') }}</span>
         <strong>{{ analytics?.completed_lead_sessions ?? '-' }}</strong>
       </div>
       <div class="metric-tile">
-        <span>智能体数量</span>
+        <span>{{ t('aicc.analytics.metrics.agentCount') }}</span>
         <strong>{{ agentCount }}</strong>
       </div>
       <div class="metric-tile">
-        <span>接待中</span>
+        <span>{{ t('aicc.analytics.metrics.activeAgents') }}</span>
         <strong>{{ activeAgentCount }}</strong>
       </div>
     </div>
@@ -64,11 +64,11 @@
         <div class="panel-heading">
           <div>
             <p class="eyebrow">Trend</p>
-            <h4>会话趋势</h4>
+            <h4>{{ t('aicc.analytics.trend') }}</h4>
           </div>
           <BarChart3 :size="18" />
         </div>
-        <div v-if="sessionTrend.length === 0" class="empty-list">暂无趋势数据</div>
+        <div v-if="sessionTrend.length === 0" class="empty-list">{{ t('aicc.analytics.noTrend') }}</div>
         <div v-else class="trend-list">
           <div v-for="item in sessionTrend" :key="item.bucket">
             <span>{{ item.bucket }}</span>
@@ -82,12 +82,12 @@
         <div class="panel-heading">
           <div>
             <p class="eyebrow">Follow-up</p>
-            <h4>线索状态</h4>
+            <h4>{{ t('aicc.analytics.leadStatus') }}</h4>
           </div>
           <ListChecks :size="18" />
         </div>
         <div class="lead-split">
-          <span>未读</span>
+          <span>{{ t('aicc.analytics.unread') }}</span>
           <div class="split-bar">
             <i :style="{ width: unreadPercent }" />
           </div>
@@ -95,12 +95,12 @@
         </div>
         <div class="resolution-bars">
           <div>
-            <span>未解决率</span>
+            <span>{{ t('aicc.analytics.metrics.unresolvedRate') }}</span>
             <i><b :style="{ width: unresolvedRateBar }" /></i>
             <strong>{{ unresolvedRateText }}</strong>
           </div>
           <div>
-            <span>未知状态</span>
+            <span>{{ t('aicc.analytics.metrics.unknown') }}</span>
             <i><b :style="{ width: unknownPercent }" /></i>
             <strong>{{ analytics?.unknown_sessions ?? 0 }}</strong>
           </div>
@@ -111,11 +111,11 @@
         <div class="panel-heading">
           <div>
             <p class="eyebrow">Regions</p>
-            <h4>访客地域</h4>
+            <h4>{{ t('aicc.analytics.regions') }}</h4>
           </div>
           <MapPin :size="18" />
         </div>
-        <div v-if="regions.length === 0" class="empty-list">暂无地域数据</div>
+        <div v-if="regions.length === 0" class="empty-list">{{ t('aicc.analytics.noRegions') }}</div>
         <ol v-else class="rank-list">
           <li v-for="item in regions" :key="item.label">
             <span>{{ item.label }}</span>
@@ -128,11 +128,11 @@
         <div class="panel-heading">
           <div>
             <p class="eyebrow">Questions</p>
-            <h4>热门问题</h4>
+            <h4>{{ t('aicc.analytics.questions') }}</h4>
           </div>
           <ListChecks :size="18" />
         </div>
-        <div v-if="topQuestions.length === 0" class="empty-list">暂无问题数据</div>
+        <div v-if="topQuestions.length === 0" class="empty-list">{{ t('aicc.analytics.noQuestions') }}</div>
         <ol v-else class="rank-list">
           <li v-for="item in topQuestions" :key="item.label">
             <span>{{ item.label }}</span>
@@ -145,11 +145,11 @@
         <div class="panel-heading">
           <div>
             <p class="eyebrow">Sources</p>
-            <h4>来源页面</h4>
+            <h4>{{ t('aicc.analytics.sources') }}</h4>
           </div>
           <BarChart3 :size="18" />
         </div>
-        <div v-if="topSources.length === 0" class="empty-list">暂无来源数据</div>
+        <div v-if="topSources.length === 0" class="empty-list">{{ t('aicc.analytics.noSources') }}</div>
         <ol v-else class="rank-list">
           <li v-for="item in topSources" :key="item.label">
             <span>{{ item.label }}</span>
@@ -165,6 +165,7 @@
 import { computed, ref } from 'vue'
 import { NAlert, NButton, NButtonGroup, NRadioButton, NRadioGroup } from 'naive-ui'
 import { BarChart3, ListChecks, MapPin } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
 
 import { useAICCAnalyticsQuery } from '@/api/hooks/useAICC'
 import type { AICCAnalyticsFilters } from '@/domain/aicc'
@@ -174,6 +175,7 @@ const props = defineProps<{
   agentCount: number
   activeAgentCount: number
 }>()
+const { t } = useI18n()
 
 type RangePreset = 'today' | '7d' | '30d'
 

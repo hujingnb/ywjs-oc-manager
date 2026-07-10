@@ -20,12 +20,14 @@ describe('aicc-widget.js', () => {
   afterEach(() => {
     document.body.innerHTML = ''
     document.head.innerHTML = ''
+    document.documentElement.lang = ''
     localStorage.clear()
     apiRequestMock.mockReset()
   })
 
   // 场景：客户官网贴入 script 后，页面右下角出现 AICC 入口，并且 iframe 使用 web_widget 渠道打开。
   it('mounts a floating launcher and opens chat iframe with widget channel', () => {
+    document.documentElement.lang = 'zh-CN'
     const script = document.createElement('script')
     script.src = 'https://ocm.localhost/aicc-widget.js'
     script.dataset.aiccWidgetToken = 'widget-token-1'

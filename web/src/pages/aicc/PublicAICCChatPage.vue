@@ -7,10 +7,10 @@
         </div>
         <div>
           <p>AI Integrated Customer Care</p>
-          <h1>{{ config?.name || '在线客服' }}</h1>
+          <h1>{{ config?.name || t('aicc.publicChat.defaultTitle') }}</h1>
         </div>
         <n-tag :type="sessionToken ? 'success' : 'default'" :bordered="false">
-          {{ sessionToken ? '在线' : '连接中' }}
+          {{ sessionToken ? t('aicc.publicChat.online') : t('aicc.publicChat.connecting') }}
         </n-tag>
       </header>
 
@@ -18,11 +18,11 @@
         {{ errorMessage }}
       </n-alert>
 
-      <section ref="messageListEl" class="message-list" aria-label="客服消息">
+      <section ref="messageListEl" class="message-list" :aria-label="t('aicc.publicChat.messageListLabel')">
         <article v-for="message in messages" :key="message.id" class="message-row" :class="message.role">
           <div class="bubble">
             <p v-if="message.text">{{ message.text }}</p>
-            <img v-if="message.imageUrl" :src="message.imageUrl" alt="访客上传的图片" />
+            <img v-if="message.imageUrl" :src="message.imageUrl" :alt="t('aicc.publicChat.uploadedImageAlt')" />
             <div v-if="message.role === 'assistant' && message.messageId" class="feedback-row">
               <button type="button" :disabled="message.feedbackSent" @click="sendFeedback(message, true)">
                 <ThumbsUp :size="14" />
@@ -30,27 +30,27 @@
               <button type="button" :disabled="message.feedbackSent" @click="sendFeedback(message, false)">
                 <ThumbsDown :size="14" />
               </button>
-              <span v-if="message.feedbackSent">已反馈</span>
+              <span v-if="message.feedbackSent">{{ t('aicc.publicChat.feedbackSent') }}</span>
             </div>
           </div>
         </article>
         <article v-if="isSending" class="message-row assistant">
-          <div class="bubble typing">正在回复...</div>
+          <div class="bubble typing">{{ t('aicc.publicChat.typing') }}</div>
         </article>
       </section>
 
       <section v-if="needsConsent" class="privacy-gate">
         <ShieldCheck :size="20" />
         <div>
-          <strong>继续前请确认隐私说明</strong>
+          <strong>{{ t('aicc.publicChat.consentTitle') }}</strong>
           <p>{{ privacyText }}</p>
         </div>
-        <n-button type="primary" :loading="consentBusy" @click="acceptConsent">同意并开始</n-button>
+        <n-button type="primary" :loading="consentBusy" @click="acceptConsent">{{ t('aicc.publicChat.consentButton') }}</n-button>
       </section>
       <form v-else-if="showLeadForm" class="lead-gate" @submit.prevent="submitLeadForm">
         <div class="lead-gate-heading">
           <ShieldCheck :size="18" />
-          <strong>请先留下联系信息</strong>
+          <strong>{{ t('aicc.publicChat.leadTitle') }}</strong>
         </div>
         <div class="lead-fields">
           <label v-for="field in leadFields" :key="field.field_key">
@@ -63,7 +63,7 @@
             />
           </label>
         </div>
-        <n-button type="primary" attr-type="submit" :loading="leadBusy">提交联系信息</n-button>
+        <n-button type="primary" attr-type="submit" :loading="leadBusy">{{ t('aicc.publicChat.submitLead') }}</n-button>
       </form>
       <section v-else-if="privacyText" class="privacy-note">
         <ShieldCheck :size="16" />
@@ -71,7 +71,7 @@
       </section>
 
       <form class="composer" @submit.prevent="submitMessage">
-        <button class="icon-control" type="button" :disabled="!canSend" title="选择图片" @click="fileInputEl?.click()">
+        <button class="icon-control" type="button" :disabled="!canSend" :title="t('aicc.publicChat.chooseImage')" @click="fileInputEl?.click()">
           <ImagePlus :size="18" />
         </button>
         <input
@@ -82,20 +82,20 @@
           @change="onFileChange"
         />
         <div v-if="pendingImage" class="pending-image">
-          <img :src="pendingImage.previewUrl" alt="待发送图片" />
-          <button type="button" title="移除图片" @click="clearPendingImage"><X :size="14" /></button>
+          <img :src="pendingImage.previewUrl" :alt="t('aicc.publicChat.pendingImageAlt')" />
+          <button type="button" :title="t('aicc.publicChat.removeImage')" @click="clearPendingImage"><X :size="14" /></button>
         </div>
         <n-input
           v-model:value="draft"
           type="textarea"
           :autosize="{ minRows: 1, maxRows: 4 }"
-          placeholder="输入您的问题"
+          :placeholder="t('aicc.publicChat.composerPlaceholder')"
           :disabled="!canSend"
           @keydown.enter.exact.prevent="submitMessage"
         />
         <n-button type="primary" attr-type="submit" :disabled="!canSubmit" :loading="isSending">
           <template #icon><Send :size="16" /></template>
-          发送
+          {{ t('aicc.publicChat.send') }}
         </n-button>
       </form>
     </section>
@@ -109,6 +109,7 @@ import { NAlert, NButton, NInput, NTag } from 'naive-ui'
 import {
   ImagePlus, MessageCircle, Send, ShieldCheck, ThumbsDown, ThumbsUp, X,
 } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
 
 import {
   consentAICCPublicSession,
@@ -140,6 +141,7 @@ interface PendingImage {
 }
 
 const route = useRoute()
+const { t } = useI18n()
 const publicToken = computed(() => String(route.params.publicToken ?? ''))
 const config = ref<AICCPublicConfig | null>(null)
 const sessionToken = ref('')
@@ -156,7 +158,7 @@ const pendingImage = ref<PendingImage | null>(null)
 const messageListEl = ref<HTMLElement | null>(null)
 const fileInputEl = ref<HTMLInputElement | null>(null)
 
-const privacyText = computed(() => config.value?.privacy_text || '我们会使用本次对话内容来回答您的问题。')
+const privacyText = computed(() => config.value?.privacy_text || t('aicc.publicChat.defaultPrivacyText'))
 const needsConsent = computed(() => config.value?.privacy_mode === 'consent_required' && !hasConsent.value)
 const leadFields = computed<AICCLeadField[]>(() => config.value?.lead_fields ?? [])
 const needsLead = computed(() => leadFields.value.some(field => field.required) && !leadComplete.value)
@@ -185,7 +187,7 @@ async function boot() {
     messages.value = [{
       id: crypto.randomUUID(),
       role: 'assistant',
-      text: config.value.greeting || '您好，我是在线客服，请问有什么可以帮您？',
+      text: config.value.greeting || t('aicc.publicChat.defaultGreeting'),
     }]
   } catch (err) {
     errorMessage.value = friendlyAICCError(err)
@@ -198,7 +200,7 @@ async function submitLeadForm() {
   for (const field of leadFields.value) {
     const value = (leadValues.value[field.field_key] ?? '').trim()
     if (field.required && !value) {
-      errorMessage.value = `请填写${field.label}`
+      errorMessage.value = t('aicc.publicChat.missingField', { label: field.label })
       return
     }
     if (value) values[field.field_key] = value
@@ -214,7 +216,7 @@ async function submitLeadForm() {
     if (result.lead_status === 'complete') {
       leadComplete.value = true
     } else {
-      errorMessage.value = '请补全必填联系信息'
+      errorMessage.value = t('aicc.publicChat.missingRequired')
     }
   } catch (err) {
     errorMessage.value = friendlyAICCError(err)
@@ -261,7 +263,7 @@ async function submitMessage() {
     messages.value.push({
       id: crypto.randomUUID(),
       role: 'assistant',
-      text: response.text || '我已收到，请继续补充您的问题。',
+      text: response.text || t('aicc.publicChat.defaultAssistantReply'),
       messageId: response.message_id,
     })
   } catch (err) {
@@ -275,17 +277,17 @@ async function submitMessage() {
 
 function publicMessageErrorText(err: unknown): string {
   if (isApiErrorCode(err, 'AICC_LEAD_REQUIRED')) {
-    return '请先提交联系信息后继续咨询。'
+    return t('aicc.publicChat.leadRequired')
   }
   return friendlyAICCError(err)
 }
 
 function friendlyAICCError(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error || '')
-  if (text.includes('AICC_SENSITIVE_WORD')) return '这条消息包含暂不支持发送的内容，请调整后再试。'
-  if (text.includes('AICC_MESSAGE_LIMIT_EXCEEDED')) return '本次会话消息数量已达上限，请稍后重新打开客服。'
-  if (text.includes('AICC_VISITOR_BLOCKED')) return '当前访客暂不能继续咨询。'
-  return text || '消息发送失败，请稍后重试。'
+  if (text.includes('AICC_SENSITIVE_WORD')) return t('aicc.publicChat.sensitiveWord')
+  if (text.includes('AICC_MESSAGE_LIMIT_EXCEEDED')) return t('aicc.publicChat.messageLimit')
+  if (text.includes('AICC_VISITOR_BLOCKED')) return t('aicc.publicChat.visitorBlocked')
+  return text || t('aicc.publicChat.sendFailed')
 }
 
 function isApiErrorCode(err: unknown, code: string): boolean {
@@ -311,7 +313,7 @@ function onFileChange(event: Event) {
   target.value = ''
   if (!file) return
   if (file.size > 10 * 1024 * 1024) {
-    errorMessage.value = '图片不能超过 10MiB'
+    errorMessage.value = t('aicc.publicChat.imageTooLarge')
     return
   }
   clearPendingImage()

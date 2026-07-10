@@ -2,25 +2,25 @@
   <section class="sessions-view">
     <div v-if="!agentId" class="empty-state">
       <MessageSquareText :size="30" />
-      <strong>选择智能体后查看会话</strong>
-      <span>会话按最近创建时间排序，便于运营快速回看访客问题。</span>
+      <strong>{{ t('aicc.sessions.selectAgentTitle') }}</strong>
+      <span>{{ t('aicc.sessions.selectAgentDesc') }}</span>
     </div>
     <template v-else>
       <div class="session-list">
         <div class="panel-heading">
           <div>
             <p class="eyebrow">Sessions</p>
-            <h4>最近会话</h4>
+            <h4>{{ t('aicc.sessions.recentSessions') }}</h4>
           </div>
           <n-tag size="small" :bordered="false">{{ sessions.length }}</n-tag>
         </div>
         <div class="session-filters">
-          <n-select v-model:value="resolutionFilter" clearable :options="resolutionOptions" placeholder="解决状态" />
-          <n-select v-model:value="leadFilter" clearable :options="leadOptions" placeholder="留资状态" />
-          <n-select v-model:value="channelFilter" clearable :options="channelOptions" placeholder="渠道" />
-          <n-input v-model:value="regionFilter" clearable placeholder="地域" />
-          <n-date-picker v-model:value="dateRange" type="datetimerange" clearable start-placeholder="开始时间" end-placeholder="结束时间" />
-          <n-input v-model:value="keywordFilter" clearable placeholder="来源关键词" />
+          <n-select v-model:value="resolutionFilter" clearable :options="resolutionOptions" :placeholder="t('aicc.sessions.filters.resolution')" />
+          <n-select v-model:value="leadFilter" clearable :options="leadOptions" :placeholder="t('aicc.sessions.filters.lead')" />
+          <n-select v-model:value="channelFilter" clearable :options="channelOptions" :placeholder="t('aicc.sessions.filters.channel')" />
+          <n-input v-model:value="regionFilter" clearable :placeholder="t('aicc.sessions.filters.region')" />
+          <n-date-picker v-model:value="dateRange" type="datetimerange" clearable :start-placeholder="t('aicc.sessions.filters.startTime')" :end-placeholder="t('aicc.sessions.filters.endTime')" />
+          <n-input v-model:value="keywordFilter" clearable :placeholder="t('aicc.sessions.filters.keyword')" />
         </div>
         <n-spin :show="sessionsQuery.isLoading.value">
           <n-alert v-if="sessionsQuery.error.value" type="error" :bordered="false">
@@ -28,8 +28,8 @@
           </n-alert>
           <div v-else-if="sessions.length === 0" class="empty-state compact">
             <MessageSquareText :size="24" />
-            <strong>暂无访客会话</strong>
-            <span>公开链接产生对话后会出现在这里。</span>
+            <strong>{{ t('aicc.sessions.emptyTitle') }}</strong>
+            <span>{{ t('aicc.sessions.emptyDesc') }}</span>
           </div>
           <template v-else>
             <button
@@ -42,12 +42,12 @@
             >
               <span>
                 <strong>{{ formatShortId(session.id) }}</strong>
-                <small>{{ session.channel || 'web_link' }} · {{ session.region || '未知地域' }}</small>
+                <small>{{ session.channel || 'web_link' }} · {{ session.region || t('aicc.sessions.unknownRegion') }}</small>
               </span>
               <n-tag size="small" :type="session.resolution_status === 'resolved' ? 'success' : 'warning'" :bordered="false">
-                {{ session.resolution_status === 'resolved' ? '已解决' : '跟进中' }}
+                {{ session.resolution_status === 'resolved' ? t('aicc.sessions.resolved') : t('aicc.sessions.followUp') }}
               </n-tag>
-              <small class="meta-text">{{ session.message_count ?? 0 }} 条消息</small>
+              <small class="meta-text">{{ t('aicc.sessions.messageCount', { count: session.message_count ?? 0 }) }}</small>
               <small class="time-text">{{ formatDate(session.last_active_at || session.created_at) }}</small>
             </button>
           </template>
@@ -58,7 +58,7 @@
         <div class="panel-heading">
           <div>
             <p class="eyebrow">Transcript</p>
-            <h4>{{ selectedSessionId ? formatShortId(selectedSessionId) : '未选择会话' }}</h4>
+            <h4>{{ selectedSessionId ? formatShortId(selectedSessionId) : t('aicc.sessions.unselected') }}</h4>
           </div>
         </div>
         <n-spin :show="detailQuery.isLoading.value">
@@ -67,25 +67,25 @@
           </n-alert>
           <div v-else-if="messages.length === 0 && leadValues.length === 0" class="empty-state">
             <MessageSquareText :size="28" />
-            <strong>暂无消息</strong>
-            <span>选择左侧会话后查看访客与助手对话。</span>
+            <strong>{{ t('aicc.sessions.noMessagesTitle') }}</strong>
+            <span>{{ t('aicc.sessions.noMessagesDesc') }}</span>
           </div>
           <div v-else class="message-stack">
             <div v-if="selectedSession" class="session-summary">
               <span>
-                <strong>地域</strong>
-                <small>{{ selectedSession.region || '未知地域' }}</small>
+                <strong>{{ t('aicc.sessions.summary.region') }}</strong>
+                <small>{{ selectedSession.region || t('aicc.sessions.unknownRegion') }}</small>
               </span>
               <span>
-                <strong>消息数</strong>
+                <strong>{{ t('aicc.sessions.summary.messageCount') }}</strong>
                 <small>{{ selectedSession.message_count ?? 0 }}</small>
               </span>
               <span>
-                <strong>渠道</strong>
+                <strong>{{ t('aicc.sessions.summary.channel') }}</strong>
                 <small>{{ selectedSession.channel || 'web_link' }}</small>
               </span>
               <span>
-                <strong>来源</strong>
+                <strong>{{ t('aicc.sessions.summary.source') }}</strong>
                 <small>{{ selectedSession.source_url || '-' }}</small>
               </span>
             </div>
@@ -100,10 +100,10 @@
                 <span>{{ roleLabel(message.direction) }}</span>
                 <small>{{ formatDate(message.created_at) }}</small>
               </div>
-              <p>{{ message.text || (message.image_object_key ? '图片消息' : '空消息') }}</p>
-              <n-tag v-if="message.image_object_key" size="small" :bordered="false">含图片</n-tag>
-              <n-tag v-if="message.is_fallback" size="small" type="warning" :bordered="false">兜底回答</n-tag>
-              <n-tag v-if="message.is_refusal" size="small" type="warning" :bordered="false">拒答</n-tag>
+              <p>{{ message.text || (message.image_object_key ? t('aicc.sessions.messageFallbackImage') : t('aicc.sessions.messageFallbackEmpty')) }}</p>
+              <n-tag v-if="message.image_object_key" size="small" :bordered="false">{{ t('aicc.sessions.imageTag') }}</n-tag>
+              <n-tag v-if="message.is_fallback" size="small" type="warning" :bordered="false">{{ t('aicc.sessions.fallbackTag') }}</n-tag>
+              <n-tag v-if="message.is_refusal" size="small" type="warning" :bordered="false">{{ t('aicc.sessions.refusalTag') }}</n-tag>
               <n-tag v-if="message.error_summary" size="small" type="error" :bordered="false">{{ message.error_summary }}</n-tag>
             </article>
           </div>
@@ -118,6 +118,7 @@ import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NAlert, NDatePicker, NInput, NSelect, NSpin, NTag, type SelectOption } from 'naive-ui'
 import { MessageSquareText } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
 
 import { useAICCSessionsQuery, useAICCSessionQuery } from '@/api/hooks/useAICC'
 import type { AICCSessionFilters } from '@/domain/aicc'
@@ -128,6 +129,7 @@ const props = defineProps<{
 
 const route = useRoute()
 const router = useRouter()
+const { t } = useI18n()
 const selectedSessionId = ref<string | undefined>()
 const resolutionFilter = ref<string | null>(null)
 const leadFilter = ref<string | null>(null)
@@ -154,23 +156,23 @@ const selectedSession = computed(() => detailQuery.data.value?.session)
 const messages = computed(() => detailQuery.data.value?.messages ?? [])
 const leadValues = computed(() => detailQuery.data.value?.lead_values ?? [])
 
-const resolutionOptions: SelectOption[] = [
-  { label: '已解决', value: 'resolved' },
-  { label: '未解决', value: 'unresolved' },
-  { label: '未知', value: 'unknown' },
-]
+const resolutionOptions = computed<SelectOption[]>(() => [
+  { label: t('aicc.sessions.resolutionOptions.resolved'), value: 'resolved' },
+  { label: t('aicc.sessions.resolutionOptions.unresolved'), value: 'unresolved' },
+  { label: t('aicc.sessions.resolutionOptions.unknown'), value: 'unknown' },
+])
 
-const leadOptions: SelectOption[] = [
-  { label: '待留资', value: 'pending' },
-  { label: '已留资', value: 'complete' },
-  { label: '已跳过', value: 'skipped' },
-]
+const leadOptions = computed<SelectOption[]>(() => [
+  { label: t('aicc.sessions.leadOptions.pending'), value: 'pending' },
+  { label: t('aicc.sessions.leadOptions.complete'), value: 'complete' },
+  { label: t('aicc.sessions.leadOptions.skipped'), value: 'skipped' },
+])
 
-const channelOptions: SelectOption[] = [
-  { label: '公开链接', value: 'web_link' },
-  { label: '网页挂件', value: 'web_widget' },
-  { label: '语音客服', value: 'voice' },
-]
+const channelOptions = computed<SelectOption[]>(() => [
+  { label: t('aicc.sessions.channelOptions.webLink'), value: 'web_link' },
+  { label: t('aicc.sessions.channelOptions.webWidget'), value: 'web_widget' },
+  { label: t('aicc.sessions.channelOptions.voice'), value: 'voice' },
+])
 
 watch(
   () => route.query,
@@ -226,9 +228,9 @@ function formatDate(value?: string) {
 }
 
 function roleLabel(role?: string) {
-  if (role === 'assistant') return '助手'
-  if (role === 'system') return '系统'
-  return '访客'
+  if (role === 'assistant') return t('aicc.sessions.roles.assistant')
+  if (role === 'system') return t('aicc.sessions.roles.system')
+  return t('aicc.sessions.roles.visitor')
 }
 
 function stringQuery(value: unknown): string | null {

@@ -3,12 +3,12 @@
     <div class="panel-heading">
       <div>
         <p class="eyebrow">Leads</p>
-        <h4>访客线索</h4>
+        <h4>{{ t('aicc.leads.title') }}</h4>
       </div>
       <n-space>
         <n-button :loading="isExporting" @click="exportLeads">
           <template #icon><Download :size="16" /></template>
-          导出 CSV
+          {{ t('aicc.leads.exportCsv') }}
         </n-button>
       </n-space>
     </div>
@@ -19,14 +19,14 @@
       </n-alert>
       <div v-else-if="leads.length === 0" class="empty-state">
         <Inbox :size="30" />
-        <strong>暂无访客线索</strong>
-        <span>后续从会话中识别到的访客信息会进入这里。</span>
+        <strong>{{ t('aicc.leads.emptyTitle') }}</strong>
+        <span>{{ t('aicc.leads.emptyDesc') }}</span>
       </div>
       <div v-else class="lead-list">
         <article v-for="lead in leads" :key="lead.id" class="lead-row">
           <div class="lead-main">
-            <strong>{{ lead.display_name || '未命名访客' }}</strong>
-            <small>会话 {{ formatShortId(lead.latest_session_id) }} · {{ formatDate(lead.updated_at || lead.created_at) }}</small>
+            <strong>{{ lead.display_name || t('aicc.leads.unnamedVisitor') }}</strong>
+            <small>{{ t('aicc.leads.sessionPrefix', { id: formatShortId(lead.latest_session_id) }) }} · {{ formatDate(lead.updated_at || lead.created_at) }}</small>
             <div v-if="lead.values?.length" class="lead-values">
               <span v-for="value in lead.values" :key="`${lead.id}-${value.field_key}`">
                 {{ value.label }}：{{ value.value }}
@@ -34,11 +34,11 @@
             </div>
           </div>
           <n-tag size="small" :type="lead.unread ? 'warning' : 'default'" :bordered="false">
-            {{ lead.unread ? '未读' : '已读' }}
+            {{ lead.unread ? t('aicc.leads.unread') : t('aicc.leads.read') }}
           </n-tag>
           <n-button size="small" :disabled="!lead.unread" :loading="markReadMutation.isPending.value && activeLeadId === lead.id" @click="markRead(lead.id)">
             <template #icon><Check :size="14" /></template>
-            标记已读
+            {{ t('aicc.leads.markRead') }}
           </n-button>
         </article>
       </div>
@@ -50,10 +50,12 @@
 import { computed, ref } from 'vue'
 import { NAlert, NButton, NSpace, NSpin, NTag, useMessage } from 'naive-ui'
 import { Check, Download, Inbox } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
 
 import { downloadAICCLeadsCSV, useAICCLeadsQuery, useMarkAICCLeadRead } from '@/api/hooks/useAICC'
 
 const message = useMessage()
+const { t } = useI18n()
 const leadsQuery = useAICCLeadsQuery()
 const markReadMutation = useMarkAICCLeadRead()
 
@@ -65,9 +67,9 @@ async function markRead(leadId: string) {
   activeLeadId.value = leadId
   try {
     await markReadMutation.mutateAsync(leadId)
-    message.success('已标记为已读')
+    message.success(t('aicc.leads.markedRead'))
   } catch (err) {
-    message.error(err instanceof Error ? err.message : '标记失败')
+    message.error(err instanceof Error ? err.message : t('aicc.leads.markFailed'))
   } finally {
     activeLeadId.value = undefined
   }
@@ -86,7 +88,7 @@ async function exportLeads() {
     link.remove()
     URL.revokeObjectURL(url)
   } catch (err) {
-    message.error(err instanceof Error ? err.message : '导出失败')
+    message.error(err instanceof Error ? err.message : t('aicc.leads.exportFailed'))
   } finally {
     isExporting.value = false
   }

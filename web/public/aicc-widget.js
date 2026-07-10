@@ -5,7 +5,12 @@
   if (!script) return
 
   var token = (script.getAttribute('data-aicc-widget-token') || '').trim()
-  if (!token || token === '保存后生成') return
+  var language = String(document.documentElement.lang || navigator.language || 'en').toLowerCase()
+  var isZh = language.indexOf('zh') === 0
+  var labels = isZh
+    ? { open: '在线客服', close: '收起客服', pendingToken: '保存后生成' }
+    : { open: 'Online support', close: 'Hide support', pendingToken: 'Generated after save' }
+  if (!token || token === labels.pendingToken || token === '保存后生成') return
 
   var existing = document.querySelector('[data-aicc-widget-root="' + token + '"]')
   if (existing) return
@@ -32,7 +37,7 @@
   launcher.type = 'button'
   launcher.setAttribute('data-aicc-widget-launcher', '')
   launcher.setAttribute('aria-expanded', 'false')
-  launcher.textContent = '在线客服'
+  launcher.textContent = labels.open
   launcher.style.minWidth = '116px'
   launcher.style.height = '44px'
   launcher.style.border = '0'
@@ -59,7 +64,7 @@
 
   var iframe = document.createElement('iframe')
   iframe.setAttribute('data-aicc-widget-frame', '')
-  iframe.title = '在线客服'
+  iframe.title = labels.open
   iframe.src = baseURL + '/aicc/' + encodeURIComponent(token) + '?aicc_channel=web_widget'
   iframe.allow = 'clipboard-write'
   iframe.style.width = '100%'
@@ -76,6 +81,6 @@
     var open = panel.style.display !== 'none'
     panel.style.display = open ? 'none' : 'block'
     launcher.setAttribute('aria-expanded', open ? 'false' : 'true')
-    launcher.textContent = open ? '在线客服' : '收起客服'
+    launcher.textContent = open ? labels.open : labels.close
   })
 })()

@@ -3,22 +3,22 @@
     <section class="aicc-hero">
       <div>
         <p class="eyebrow">AI Integrated Customer Care</p>
-        <h2>AICC 接待台</h2>
-        <p>统一维护在线客服智能体、公开链接和访客隐私口径。</p>
+        <h2>{{ t('aicc.manager.title') }}</h2>
+        <p>{{ t('aicc.manager.subtitle') }}</p>
       </div>
       <n-button type="primary" @click="startCreate">
         <template #icon><Plus :size="16" /></template>
-        新建智能体
+        {{ t('aicc.manager.createAgent') }}
       </n-button>
     </section>
 
     <section class="aicc-shell">
       <aside class="agent-rail">
         <div class="rail-heading">
-          <strong>智能体</strong>
+          <strong>{{ t('aicc.manager.agents') }}</strong>
           <n-tag size="small" :bordered="false">{{ agents.length }}</n-tag>
         </div>
-        <div v-if="agentsQuery.isLoading.value" class="state-text">正在加载</div>
+        <div v-if="agentsQuery.isLoading.value" class="state-text">{{ t('aicc.manager.loading') }}</div>
         <p v-else-if="agentsQuery.error.value" class="state-text danger">{{ agentsQuery.error.value.message }}</p>
         <template v-else>
           <button
@@ -35,32 +35,32 @@
                 {{ statusMeta(agent.status).label }}
               </n-tag>
             </span>
-            <small>{{ agent.scenario || '未填写业务场景' }}</small>
+            <small>{{ agent.scenario || t('aicc.manager.noScenario') }}</small>
           </button>
         </template>
         <div v-if="!agentsQuery.isLoading.value && agents.length === 0" class="empty-block">
           <MessageSquareText :size="28" />
-          <strong>还没有客服智能体</strong>
-          <span>创建后会自动绑定隐藏实例，并生成公开访问入口。</span>
+          <strong>{{ t('aicc.manager.emptyAgentsTitle') }}</strong>
+          <span>{{ t('aicc.manager.emptyAgentsDesc') }}</span>
         </div>
       </aside>
 
       <section class="editor-panel">
         <div class="editor-toolbar">
           <div>
-            <p class="eyebrow">{{ form.id ? '编辑智能体' : '新建智能体' }}</p>
-            <h3>{{ form.name || '未命名接待员' }}</h3>
+            <p class="eyebrow">{{ form.id ? t('aicc.manager.editAgent') : t('aicc.manager.newAgent') }}</p>
+            <h3>{{ form.name || t('aicc.manager.unnamedAgent') }}</h3>
           </div>
           <n-space>
             <n-button v-if="selectedAgent" :disabled="statusBusy" @click="toggleStatus">
               <template #icon>
                 <component :is="isSelectedRunning ? PauseCircle : PlayCircle" :size="16" />
               </template>
-              {{ isSelectedRunning ? '停止接待' : '启动接待' }}
+              {{ isSelectedRunning ? t('aicc.manager.stopReception') : t('aicc.manager.startReception') }}
             </n-button>
             <n-button v-if="selectedAgent" type="error" ghost :disabled="deleteBusy" @click="deleteModalOpen = true">
               <template #icon><Trash2 :size="16" /></template>
-              删除
+              {{ t('aicc.manager.delete') }}
             </n-button>
           </n-space>
         </div>
@@ -70,90 +70,90 @@
         </n-alert>
 
         <n-tabs type="segment" animated class="aicc-tabs">
-          <n-tab-pane name="config" tab="智能体配置">
+          <n-tab-pane name="config" :tab="t('aicc.manager.tabs.config')">
             <div class="status-grid">
               <div class="status-tile">
-                <span>运行状态</span>
-                <strong>{{ selectedAgent ? statusMeta(selectedAgent.status).label : '草稿' }}</strong>
+                <span>{{ t('aicc.manager.status.runtime') }}</span>
+                <strong>{{ selectedAgent ? statusMeta(selectedAgent.status).label : t('aicc.manager.status.draft') }}</strong>
               </div>
               <div class="status-tile">
-                <span>保留天数</span>
-                <strong>{{ form.retention_days || 0 }} 天</strong>
+                <span>{{ t('aicc.manager.status.retention') }}</span>
+                <strong>{{ t('aicc.manager.status.days', { count: form.retention_days || 0 }) }}</strong>
               </div>
               <div class="status-tile">
-                <span>公开入口</span>
-                <strong>{{ selectedAgent?.public_token ? '已生成' : '保存后生成' }}</strong>
+                <span>{{ t('aicc.manager.status.publicEntry') }}</span>
+                <strong>{{ selectedAgent?.public_token ? t('aicc.manager.status.generated') : t('aicc.manager.status.generatedAfterSave') }}</strong>
               </div>
             </div>
 
             <n-form class="agent-form" :model="form" label-placement="top" @submit.prevent="submitForm">
               <div class="agent-fields">
                 <div>
-                  <n-form-item label="智能体名称" required>
-                    <n-input v-model:value="form.name" maxlength="80" placeholder="例如：售前咨询接待员" />
+                  <n-form-item :label="t('aicc.manager.form.name')" required>
+                    <n-input v-model:value="form.name" maxlength="80" :placeholder="t('aicc.manager.form.namePlaceholder')" />
                   </n-form-item>
                 </div>
                 <div>
-                  <n-form-item label="数据保留天数">
+                  <n-form-item :label="t('aicc.manager.form.retentionDays')">
                     <n-input-number v-model:value="form.retention_days" :min="1" :max="3650" style="width: 100%" />
                   </n-form-item>
                 </div>
                 <div>
-                  <n-form-item label="隐私模式">
+                  <n-form-item :label="t('aicc.manager.form.privacyMode')">
                     <n-select v-model:value="form.privacy_mode" :options="privacyOptions" />
                   </n-form-item>
                 </div>
                 <div>
-                  <n-form-item label="欢迎语">
-                    <n-input v-model:value="form.greeting" maxlength="240" placeholder="访客打开聊天时看到的第一句话" />
+                  <n-form-item :label="t('aicc.manager.form.greeting')">
+                    <n-input v-model:value="form.greeting" maxlength="240" :placeholder="t('aicc.manager.form.greetingPlaceholder')" />
                   </n-form-item>
                 </div>
                 <div class="field-full">
-                  <n-form-item label="业务场景">
+                  <n-form-item :label="t('aicc.manager.form.scenario')">
                     <n-input
                       v-model:value="form.scenario"
                       type="textarea"
                       :autosize="{ minRows: 3, maxRows: 5 }"
-                      placeholder="说明这个智能体服务的客群、问题类型和转人工边界"
+                      :placeholder="t('aicc.manager.form.scenarioPlaceholder')"
                     />
                   </n-form-item>
                 </div>
                 <div class="field-full">
-                  <n-form-item label="回答边界">
+                  <n-form-item :label="t('aicc.manager.form.answerBoundary')">
                     <n-input
                       v-model:value="form.answer_boundary"
                       type="textarea"
                       :autosize="{ minRows: 3, maxRows: 5 }"
-                      placeholder="例如：不承诺价格、不处理退款审批、遇到投诉需建议人工介入"
+                      :placeholder="t('aicc.manager.form.answerBoundaryPlaceholder')"
                     />
                   </n-form-item>
                 </div>
                 <div class="field-full">
-                  <n-form-item label="隐私说明">
+                  <n-form-item :label="t('aicc.manager.form.privacyText')">
                     <n-input
                       v-model:value="form.privacy_text"
                       type="textarea"
                       :autosize="{ minRows: 3, maxRows: 5 }"
-                      placeholder="说明会收集哪些信息、保存多久、用于什么目的"
+                      :placeholder="t('aicc.manager.form.privacyTextPlaceholder')"
                     />
                   </n-form-item>
                 </div>
                 <div class="field-full">
-                  <n-form-item label="挂件允许域名">
+                  <n-form-item :label="t('aicc.manager.form.allowedDomains')">
                     <n-input
                       v-model:value="form.allowed_domains_text"
                       type="textarea"
                       :autosize="{ minRows: 2, maxRows: 4 }"
-                      placeholder="每行一个域名，例如：www.example.com 或 *.example.com；留空表示不限制"
+                      :placeholder="t('aicc.manager.form.allowedDomainsPlaceholder')"
                     />
                   </n-form-item>
                 </div>
               </div>
               <n-space justify="end">
-                <n-button attr-type="button" @click="resetForm">重置</n-button>
+                <n-button attr-type="button" @click="resetForm">{{ t('aicc.manager.form.reset') }}</n-button>
                 <n-button type="primary" attr-type="submit" :loading="submitBusy">
                   <template #icon><Save :size="16" /></template>
-                  保存配置
+                  {{ t('aicc.manager.form.saveConfig') }}
                 </n-button>
               </n-space>
             </n-form>
@@ -161,62 +161,62 @@
             <div class="operations-panel">
               <div class="section-heading">
                 <div>
-                  <p class="eyebrow">投放与安全策略</p>
-                  <strong>公开入口和会话续接</strong>
+                  <p class="eyebrow">{{ t('aicc.manager.delivery.eyebrow') }}</p>
+                  <strong>{{ t('aicc.manager.delivery.title') }}</strong>
                 </div>
                 <n-tag v-if="settingsQuery.data.value?.blocked_visitor_count !== undefined" size="small" :bordered="false">
-                  封禁访客 {{ settingsQuery.data.value?.blocked_visitor_count }}
+                  {{ t('aicc.manager.delivery.blockedVisitors', { count: settingsQuery.data.value?.blocked_visitor_count }) }}
                 </n-tag>
               </div>
-              <div v-if="!selectedAgent" class="state-text">保存智能体后可配置公开入口和运营安全策略。</div>
+              <div v-if="!selectedAgent" class="state-text">{{ t('aicc.manager.delivery.noAgent') }}</div>
               <template v-else>
                 <div class="delivery-grid">
                   <div class="public-link-box">
-                    <span>公开链接</span>
-                    <n-input :value="publicLink || '保存智能体后生成'" readonly :input-props="{ readonly: true }" />
+                    <span>{{ t('aicc.manager.delivery.publicLink') }}</span>
+                    <n-input :value="publicLink || t('aicc.manager.status.generatedAfterSave')" readonly :input-props="{ readonly: true }" />
                     <n-space>
                       <n-button size="small" :disabled="!publicLink" @click="copyText(publicLink)">
                         <template #icon><Copy :size="14" /></template>
-                        复制
+                        {{ t('aicc.manager.delivery.copy') }}
                       </n-button>
                       <n-button size="small" :disabled="!publicLink" @click="openPublicLink">
                         <template #icon><ExternalLink :size="14" /></template>
-                        预览
+                        {{ t('aicc.manager.delivery.preview') }}
                       </n-button>
                     </n-space>
                   </div>
                   <div class="qr-box">
                     <div v-if="qrDataUrl" class="qr-preview">
-                      <img :src="qrDataUrl" alt="AICC 公开链接二维码" />
+                      <img :src="qrDataUrl" :alt="t('aicc.manager.delivery.qrAlt')" />
                     </div>
                     <div v-else class="qr-placeholder">
                       <QrCode :size="30" />
-                      <span>保存后生成二维码</span>
+                      <span>{{ t('aicc.manager.delivery.qrPending') }}</span>
                     </div>
                     <n-button size="small" :disabled="!qrDataUrl" @click="downloadQRCode">
                       <template #icon><Download :size="14" /></template>
-                      下载 PNG
+                      {{ t('aicc.manager.delivery.downloadPng') }}
                     </n-button>
                   </div>
                 </div>
 
                 <n-form class="settings-form" :model="settingsForm" label-placement="top">
                   <div class="settings-grid">
-                    <n-form-item label="单会话消息上限">
+                    <n-form-item :label="t('aicc.manager.delivery.messageLimit')">
                       <n-input-number v-model:value="settingsForm.message_limit_per_session" :min="1" :max="1000" style="width: 100%" />
                     </n-form-item>
-                    <n-form-item label="会话续接有效期（分钟）">
+                    <n-form-item :label="t('aicc.manager.delivery.resumeTtl')">
                       <n-input-number v-model:value="settingsForm.session_resume_ttl_minutes" :min="1" :max="1440" style="width: 100%" />
                     </n-form-item>
-                    <n-form-item label="启用访客封禁">
+                    <n-form-item :label="t('aicc.manager.delivery.enableBlockedVisitors')">
                       <n-switch v-model:value="settingsForm.blocked_visitor_enabled" />
                     </n-form-item>
-                    <n-form-item class="field-full" label="敏感词（一行一个）">
+                    <n-form-item class="field-full" :label="t('aicc.manager.delivery.sensitiveWords')">
                       <n-input
                         v-model:value="settingsForm.sensitive_words_text"
                         type="textarea"
                         :autosize="{ minRows: 3, maxRows: 6 }"
-                        placeholder="命中后公开页会阻止发送并提示访客调整内容"
+                        :placeholder="t('aicc.manager.delivery.sensitiveWordsPlaceholder')"
                       />
                     </n-form-item>
                   </div>
@@ -224,7 +224,7 @@
                 <n-space justify="end">
                   <n-button :loading="settingsBusy" @click="saveSettings">
                     <template #icon><Save :size="16" /></template>
-                    保存运营配置
+                    {{ t('aicc.manager.delivery.saveSettings') }}
                   </n-button>
                 </n-space>
               </template>
@@ -233,20 +233,20 @@
             <div class="knowledge-panel">
               <div class="section-heading">
                 <div>
-                  <p class="eyebrow">知识库范围</p>
-                  <strong>智能体检索来源</strong>
+                  <p class="eyebrow">{{ t('aicc.manager.knowledge.eyebrow') }}</p>
+                  <strong>{{ t('aicc.manager.knowledge.title') }}</strong>
                 </div>
                 <n-button :disabled="!selectedAgent" @click="openDedicatedKnowledge">
                   <template #icon><ExternalLink :size="16" /></template>
-                  专属文档
+                  {{ t('aicc.manager.knowledge.dedicatedDocs') }}
                 </n-button>
               </div>
-              <div v-if="!selectedAgent" class="state-text">保存智能体后可配置知识库范围。</div>
+              <div v-if="!selectedAgent" class="state-text">{{ t('aicc.manager.knowledge.noAgent') }}</div>
               <template v-else>
                 <n-checkbox v-model:checked="knowledgeForm.use_org_knowledge">
-                  使用企业共享知识库
+                  {{ t('aicc.manager.knowledge.useOrgKnowledge') }}
                 </n-checkbox>
-                <n-form-item label="平台行业知识库">
+                <n-form-item :label="t('aicc.manager.knowledge.industryKnowledge')">
                   <n-select
                     v-model:value="knowledgeForm.industry_knowledge_base_ids"
                     multiple
@@ -254,10 +254,10 @@
                     filterable
                     :loading="industryBasesQuery.isFetching.value"
                     :options="industryKnowledgeOptions"
-                    placeholder="选择可供该智能体检索的行业知识库"
+                    :placeholder="t('aicc.manager.knowledge.industryPlaceholder')"
                   />
                 </n-form-item>
-                <n-form-item label="专属文档">
+                <n-form-item :label="t('aicc.manager.knowledge.dedicatedDocuments')">
                   <n-select
                     v-model:value="knowledgeForm.app_document_ids"
                     multiple
@@ -265,13 +265,13 @@
                     filterable
                     :loading="appKnowledgeQuery.isFetching.value"
                     :options="appDocumentOptions"
-                    placeholder="选择隐藏实例知识库中的文档"
+                    :placeholder="t('aicc.manager.knowledge.appDocsPlaceholder')"
                   />
                 </n-form-item>
                 <n-space justify="end">
                   <n-button :loading="knowledgeBusy" @click="saveKnowledge">
                     <template #icon><Save :size="16" /></template>
-                    保存知识范围
+                    {{ t('aicc.manager.knowledge.save') }}
                   </n-button>
                 </n-space>
               </template>
@@ -280,23 +280,23 @@
             <div class="lead-field-panel">
               <div class="section-heading">
                 <div>
-                  <p class="eyebrow">访客留资</p>
-                  <strong>公开页联系信息</strong>
+                  <p class="eyebrow">{{ t('aicc.manager.leadFields.eyebrow') }}</p>
+                  <strong>{{ t('aicc.manager.leadFields.title') }}</strong>
                 </div>
                 <n-button size="small" :disabled="!selectedAgent" @click="addLeadField">
                   <template #icon><Plus :size="14" /></template>
-                  添加字段
+                  {{ t('aicc.manager.leadFields.add') }}
                 </n-button>
               </div>
-              <div v-if="!selectedAgent" class="state-text">保存智能体后可配置公开页留资字段。</div>
-              <div v-else-if="leadFieldRows.length === 0" class="empty-inline">未配置留资字段，访客可直接发起咨询。</div>
+              <div v-if="!selectedAgent" class="state-text">{{ t('aicc.manager.leadFields.noAgent') }}</div>
+              <div v-else-if="leadFieldRows.length === 0" class="empty-inline">{{ t('aicc.manager.leadFields.empty') }}</div>
               <div v-else class="lead-field-list">
                 <div v-for="(field, index) in leadFieldRows" :key="field.local_id" class="lead-field-row">
-                  <n-input v-model:value="field.label" placeholder="字段名称" maxlength="128" />
-                  <n-input v-model:value="field.field_key" placeholder="字段 key" maxlength="64" />
+                  <n-input v-model:value="field.label" :placeholder="t('aicc.manager.leadFields.labelPlaceholder')" maxlength="128" />
+                  <n-input v-model:value="field.field_key" :placeholder="t('aicc.manager.leadFields.keyPlaceholder')" maxlength="64" />
                   <n-select v-model:value="field.field_type" :options="leadFieldTypeOptions" />
-                  <n-checkbox v-model:checked="field.required">必填</n-checkbox>
-                  <n-input v-model:value="field.prompt_text" placeholder="输入提示" maxlength="160" />
+                  <n-checkbox v-model:checked="field.required">{{ t('aicc.manager.leadFields.required') }}</n-checkbox>
+                  <n-input v-model:value="field.prompt_text" :placeholder="t('aicc.manager.leadFields.promptPlaceholder')" maxlength="160" />
                   <n-button quaternary circle type="error" @click="removeLeadField(index)">
                     <template #icon><Trash2 :size="15" /></template>
                   </n-button>
@@ -305,26 +305,26 @@
               <n-space justify="end">
                 <n-button :disabled="!selectedAgent" :loading="leadFieldBusy" @click="saveLeadFields">
                   <template #icon><Save :size="16" /></template>
-                  保存留资字段
+                  {{ t('aicc.manager.leadFields.save') }}
                 </n-button>
               </n-space>
             </div>
 
             <div class="snippet-panel">
-              <span>嵌入占位</span>
+              <span>{{ t('aicc.manager.snippet.placeholder') }}</span>
               <code>{{ widgetSnippet }}</code>
               <n-button size="small" :disabled="!selectedAgent?.widget_token" @click="copyText(widgetSnippet)">
                 <template #icon><Copy :size="14" /></template>
               </n-button>
             </div>
           </n-tab-pane>
-          <n-tab-pane name="sessions" tab="会话">
+          <n-tab-pane name="sessions" :tab="t('aicc.manager.tabs.sessions')">
             <AICCSessionsPage :agent-id="selectedAgentId" />
           </n-tab-pane>
-          <n-tab-pane name="leads" tab="线索">
+          <n-tab-pane name="leads" :tab="t('aicc.manager.tabs.leads')">
             <AICCLeadsPage />
           </n-tab-pane>
-          <n-tab-pane name="analytics" tab="统计">
+          <n-tab-pane name="analytics" :tab="t('aicc.manager.tabs.analytics')">
             <AICCAnalyticsPage :agent-id="selectedAgentId" :agent-count="agents.length" :active-agent-count="activeAgentCount" />
           </n-tab-pane>
         </n-tabs>
@@ -333,11 +333,11 @@
 
     <ConfirmActionModal
       :visible="deleteModalOpen"
-      title="删除 AICC 智能体"
-      :message="`删除后公开链接将不可用。请输入 ${selectedAgent?.name ?? ''} 确认。`"
+      :title="t('aicc.manager.deleteModal.title')"
+      :message="t('aicc.manager.deleteModal.message', { name: selectedAgent?.name ?? '' })"
       :verify-value="selectedAgent?.name"
       :busy="deleteBusy"
-      confirm-label="删除"
+      :confirm-label="t('aicc.manager.deleteModal.confirm')"
       @cancel="deleteModalOpen = false"
       @confirm="deleteAgent"
     />
@@ -351,6 +351,7 @@ import {
   NAlert, NButton, NCheckbox, NForm, NFormItem, NInput, NInputNumber, NSelect, NSpace, NTag,
   NSwitch, NTabPane, NTabs, type SelectOption,
 } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import {
   Copy, Download, ExternalLink, MessageSquareText, PauseCircle, PlayCircle, Plus, QrCode, Save, Trash2,
 } from 'lucide-vue-next'
@@ -413,6 +414,7 @@ const selectedAgentId = ref<string | undefined>()
 const deleteModalOpen = ref(false)
 const feedback = ref('')
 const feedbackDanger = ref(false)
+const { t } = useI18n()
 
 const agentsQuery = useAICCAgentsQuery()
 const settingsQuery = useAICCSettingsQuery(selectedAgentId)
@@ -460,17 +462,17 @@ const appDocumentOptions = computed<SelectOption[]>(() =>
   })),
 )
 
-const privacyOptions: SelectOption[] = [
-  { label: '展示隐私提示', value: 'notice' },
-  { label: '必须同意后接待', value: 'consent_required' },
-]
+const privacyOptions = computed<SelectOption[]>(() => [
+  { label: t('aicc.manager.options.privacyNotice'), value: 'notice' },
+  { label: t('aicc.manager.options.consentRequired'), value: 'consent_required' },
+])
 
-const leadFieldTypeOptions: SelectOption[] = [
-  { label: '文本', value: 'text' },
-  { label: '手机号', value: 'phone' },
-  { label: '邮箱', value: 'email' },
-  { label: '数字', value: 'number' },
-]
+const leadFieldTypeOptions = computed<SelectOption[]>(() => [
+  { label: t('aicc.manager.options.fieldText'), value: 'text' },
+  { label: t('aicc.manager.options.fieldPhone'), value: 'phone' },
+  { label: t('aicc.manager.options.fieldEmail'), value: 'email' },
+  { label: t('aicc.manager.options.fieldNumber'), value: 'number' },
+])
 
 const publicLink = computed(() => {
   if (!selectedAgent.value?.public_token || typeof window === 'undefined') return ''
@@ -478,7 +480,7 @@ const publicLink = computed(() => {
 })
 
 const widgetSnippet = computed(() => {
-  const token = selectedAgent.value?.widget_token ?? '保存后生成'
+  const token = selectedAgent.value?.widget_token ?? t('aicc.manager.status.generatedAfterSave')
   const base = typeof window === 'undefined' ? '' : window.location.origin
   return `<script src="${base}/aicc-widget.js" data-aicc-widget-token="${token}"></` + 'script>'
 })
@@ -544,10 +546,10 @@ function emptyForm(): AgentForm {
     id: undefined,
     name: '',
     scenario: '',
-    greeting: '您好，我是在线客服，请问有什么可以帮您？',
+    greeting: t('aicc.manager.defaults.greeting'),
     answer_boundary: '',
     privacy_mode: 'notice',
-    privacy_text: '我们会使用本次对话内容来回答您的问题，并按企业数据保留策略保存。',
+    privacy_text: t('aicc.manager.defaults.privacyText'),
     retention_days: 180,
     allowed_domains_text: '',
   }
@@ -662,7 +664,7 @@ function addLeadField() {
   leadFieldRows.value.push({
     local_id: crypto.randomUUID(),
     field_key: next === 1 ? 'phone' : `field_${next}`,
-    label: next === 1 ? '联系电话' : `字段 ${next}`,
+    label: next === 1 ? t('aicc.manager.leadFields.defaultPhone') : t('aicc.manager.leadFields.defaultField', { count: next }),
     field_type: next === 1 ? 'phone' : 'text',
     required: next === 1,
     prompt_text: '',
@@ -685,14 +687,14 @@ async function saveLeadFields() {
     sort_order: index + 1,
   }))
   if (fields.some(field => !field.field_key || !field.label)) {
-    setFeedback('请补全留资字段名称和 key', true)
+    setFeedback(t('aicc.manager.feedback.missingLeadField'), true)
     return
   }
   try {
     await leadFieldMutation.mutateAsync({ agentId: selectedAgent.value.id, fields })
-    setFeedback('留资字段已保存')
+    setFeedback(t('aicc.manager.feedback.leadFieldsSaved'))
   } catch (err) {
-    setFeedback(err instanceof Error ? err.message : '留资字段保存失败', true)
+    setFeedback(err instanceof Error ? err.message : t('aicc.manager.feedback.leadFieldsSaveFailed'), true)
   }
 }
 
@@ -707,9 +709,9 @@ async function saveKnowledge() {
         app_document_ids: [...knowledgeForm.app_document_ids],
       },
     })
-    setFeedback('知识范围已保存')
+    setFeedback(t('aicc.manager.feedback.knowledgeSaved'))
   } catch (err) {
-    setFeedback(err instanceof Error ? err.message : '知识范围保存失败', true)
+    setFeedback(err instanceof Error ? err.message : t('aicc.manager.feedback.knowledgeSaveFailed'), true)
   }
 }
 
@@ -725,22 +727,22 @@ async function saveSettings() {
   try {
     const settings = await settingsMutation.mutateAsync({ agentId: selectedAgent.value.id, payload })
     Object.assign(settingsForm, toSettingsForm(settings))
-    setFeedback('运营配置已保存')
+    setFeedback(t('aicc.manager.feedback.settingsSaved'))
   } catch (err) {
-    setFeedback(err instanceof Error ? err.message : '运营配置保存失败', true)
+    setFeedback(err instanceof Error ? err.message : t('aicc.manager.feedback.settingsSaveFailed'), true)
   }
 }
 
 function statusMeta(status?: AICCAgentStatus): { label: string; type: 'success' | 'warning' | 'default' | 'error' } {
-  if (status === 'active') return { label: '接待中', type: 'success' }
-  if (status === 'paused') return { label: '已暂停', type: 'warning' }
-  if (status === 'deleted') return { label: '已删除', type: 'error' }
-  return { label: '草稿', type: 'default' }
+  if (status === 'active') return { label: t('aicc.manager.status.active'), type: 'success' }
+  if (status === 'paused') return { label: t('aicc.manager.status.paused'), type: 'warning' }
+  if (status === 'deleted') return { label: t('aicc.manager.status.deleted'), type: 'error' }
+  return { label: t('aicc.manager.status.draft'), type: 'default' }
 }
 
 async function submitForm() {
   if (!form.name.trim()) {
-    setFeedback('请填写智能体名称', true)
+    setFeedback(t('aicc.manager.feedback.missingName'), true)
     return
   }
   try {
@@ -750,9 +752,9 @@ async function submitForm() {
       : await createMutation.mutateAsync(payload)
     selectedAgentId.value = agent.id
     fillForm(agent)
-    setFeedback('配置已保存')
+    setFeedback(t('aicc.manager.feedback.configSaved'))
   } catch (err) {
-    setFeedback(err instanceof Error ? err.message : '保存失败', true)
+    setFeedback(err instanceof Error ? err.message : t('aicc.manager.feedback.saveFailed'), true)
   }
 }
 
@@ -761,9 +763,9 @@ async function toggleStatus() {
   try {
     const action = isSelectedRunning.value ? 'stop' : 'start'
     await statusMutation.mutateAsync({ agentId: selectedAgent.value.id, action })
-    setFeedback(action === 'start' ? '已启动接待' : '已停止接待')
+    setFeedback(action === 'start' ? t('aicc.manager.feedback.started') : t('aicc.manager.feedback.stopped'))
   } catch (err) {
-    setFeedback(err instanceof Error ? err.message : '状态切换失败', true)
+    setFeedback(err instanceof Error ? err.message : t('aicc.manager.feedback.statusSwitchFailed'), true)
   }
 }
 
@@ -774,9 +776,9 @@ async function deleteAgent() {
     await deleteMutation.mutateAsync(deletedId)
     deleteModalOpen.value = false
     if (selectedAgentId.value === deletedId) startCreate()
-    setFeedback('智能体已删除')
+    setFeedback(t('aicc.manager.feedback.deleted'))
   } catch (err) {
-    setFeedback(err instanceof Error ? err.message : '删除失败', true)
+    setFeedback(err instanceof Error ? err.message : t('aicc.manager.feedback.deleteFailed'), true)
   }
 }
 
@@ -784,9 +786,9 @@ async function copyText(text: string) {
   if (!text) return
   try {
     await navigator.clipboard.writeText(text)
-    setFeedback('已复制')
+    setFeedback(t('aicc.manager.feedback.copied'))
   } catch {
-    setFeedback('复制失败，请手动选择文本复制', true)
+    setFeedback(t('aicc.manager.feedback.copyFailed'), true)
   }
 }
 

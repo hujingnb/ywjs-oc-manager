@@ -15,6 +15,7 @@ import skills from './skills'
 import tickets from './tickets'
 import components from './components'
 import domain from './domain'
+import aicc from './aicc'
 
 export default {
   common,
@@ -32,4 +33,5 @@ export default {
   tickets,
   components,
   domain,
+  aicc,
 }
