@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { computed, defineComponent, h, inject, nextTick, type Ref } from 'vue'
+import { defineComponent, h, inject, isReadonly, nextTick } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { i18n } from '@/i18n'
@@ -27,7 +27,7 @@ vi.mock('vue-router', () => ({
       return () => h('main', { 'data-test': 'router-view' }, [
         h('span', { 'data-test': 'context-selected-id' }, context?.selectedAgentId.value ?? 'none'),
         h('span', { 'data-test': 'context-selected-agent' }, context?.selectedAgent.value?.name ?? 'none'),
-        h('span', { 'data-test': 'context-id-readonly' }, String(context?.selectedAgentId.effect instanceof Object)),
+        h('span', { 'data-test': 'context-id-readonly' }, String(context ? isReadonly(context.selectedAgentId) : false)),
         h('button', {
           'data-test': 'select-support',
           onClick: () => context?.selectAgent('agent-support'),

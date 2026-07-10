@@ -51,7 +51,6 @@
           :options="agentOptions"
           :loading="agentsLoading"
           :placeholder="t('aicc.console.switchAgent')"
-          clearable
         />
         <n-button size="small" type="primary" secondary @click="startCreateAgent">
           <template #icon><Plus :size="15" /></template>
@@ -237,7 +236,7 @@ function navigateTo(path: string) {
 
 .aicc-agent-context {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(320px, 2fr) auto;
+  grid-template-columns: minmax(160px, 1fr) minmax(220px, 2fr) minmax(220px, auto);
   gap: 16px;
   align-items: center;
   min-height: 58px;
@@ -286,12 +285,14 @@ function navigateTo(path: string) {
 
 .aicc-agent-actions {
   display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
 
 .aicc-agent-select {
-  width: 196px;
+  width: min(220px, 100%);
 }
 
 .aicc-workspace-content {
@@ -314,6 +315,10 @@ function navigateTo(path: string) {
 
   .aicc-agent-actions {
     justify-content: flex-start;
+  }
+
+  .aicc-agent-select {
+    flex: 1 1 180px;
   }
 }
 </style>
