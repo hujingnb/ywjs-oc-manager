@@ -1,10 +1,10 @@
-import { inject, type ComputedRef, type InjectionKey, type Ref } from 'vue'
+import { inject, type ComputedRef, type InjectionKey } from 'vue'
 
 import type { AICCAgent } from '@/domain/aicc'
 
 export interface AICCConsoleContext {
   agents: ComputedRef<AICCAgent[]>
-  selectedAgentId: Ref<string | undefined>
+  selectedAgentId: ComputedRef<string | undefined>
   selectedAgent: ComputedRef<AICCAgent | undefined>
   agentsLoading: ComputedRef<boolean>
   agentsError: ComputedRef<Error | null>
