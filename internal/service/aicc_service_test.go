@@ -35,6 +35,7 @@ type fakeAICCStore struct {
 	completeLead int64
 	topQuestions []sqlc.ListAICCTopVisitorQuestionsByOrgRow
 	topSources   []sqlc.ListAICCTopSourceURLsByOrgRow
+	audits       []sqlc.CreateAuditLogParams
 	createArg    sqlc.CreateAICCAgentParams
 	addKnowledge []sqlc.AddAICCAgentKnowledgeParams
 	updateArg    sqlc.UpdateAICCAgentProfileParams
@@ -68,6 +69,12 @@ func (f *fakeAICCStore) GetOrganization(_ context.Context, id string) (sqlc.Orga
 // CountAICCAgentsByOrg 返回测试预置的智能体数量。
 func (f *fakeAICCStore) CountAICCAgentsByOrg(_ context.Context, _ string) (int64, error) {
 	return f.count, nil
+}
+
+// CreateAuditLog 记录 AICC 管理操作审计参数。
+func (f *fakeAICCStore) CreateAuditLog(_ context.Context, arg sqlc.CreateAuditLogParams) error {
+	f.audits = append(f.audits, arg)
+	return nil
 }
 
 // CreateAICCAgent 记录创建参数，并把行写入内存表供后续读取。
@@ -518,6 +525,10 @@ func TestAICCServiceCreateAgentCreatesHiddenApp(t *testing.T) {
 	assert.Equal(t, "官网售前", result.Name)
 	assert.NotEmpty(t, result.PublicToken)
 	assert.NotEmpty(t, result.WidgetToken)
+	require.Len(t, store.audits, 1)
+	assert.Equal(t, "aicc_agent", store.audits[0].TargetType)
+	assert.Equal(t, "create", store.audits[0].Action)
+	assert.Equal(t, result.ID, store.audits[0].TargetID)
 }
 
 // TestAICCServiceCreateAgentValidation 覆盖创建智能体的权限、开通状态、数量上限和参数边界。
@@ -600,6 +611,8 @@ func TestAICCServiceUpdateAgentRequiresManagePermission(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "官网售后", result.Name)
 		assert.Equal(t, domain.AICCPrivacyModeConsentRequired, store.updateArg.PrivacyMode)
+		require.Len(t, store.audits, 1)
+		assert.Equal(t, "update", store.audits[0].Action)
 	})
 
 	t.Run("平台管理员不可更新资料", func(t *testing.T) {
@@ -631,6 +644,8 @@ func TestAICCServiceStatusAndDelete(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantStatus, result.Status)
 			assert.Equal(t, tc.wantStatus, store.statusArg.Status)
+			require.Len(t, store.audits, 1)
+			assert.Equal(t, tc.action, store.audits[0].Action)
 		})
 	}
 
@@ -642,6 +657,8 @@ func TestAICCServiceStatusAndDelete(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Equal(t, "agent-1", store.deletedID)
+		require.Len(t, store.audits, 1)
+		assert.Equal(t, "delete", store.audits[0].Action)
 	})
 }
 
@@ -680,6 +697,8 @@ func TestAICCServiceReplaceAgentKnowledge(t *testing.T) {
 	assert.Equal(t, domain.AICCKnowledgeScopeTypeIndustry, store.addKnowledge[1].ScopeType)
 	assert.Equal(t, domain.AICCKnowledgeScopeTypeAppDocument, store.addKnowledge[2].ScopeType)
 	assert.Equal(t, null.StringFrom("app-hidden-1"), store.addKnowledge[2].AppID)
+	require.Len(t, store.audits, 1)
+	assert.Equal(t, "update_knowledge", store.audits[0].Action)
 }
 
 // TestAICCServiceReplaceAgentKnowledgeValidation 覆盖知识范围保存的权限和参数边界。
@@ -883,6 +902,8 @@ func TestAICCServiceReplaceLeadFields(t *testing.T) {
 	assert.Equal(t, "联系电话", fields[0].Label)
 	assert.Equal(t, domain.AICCLeadFieldTypePhone, fields[0].FieldType)
 	assert.True(t, fields[0].Required)
+	require.Len(t, store.audits, 1)
+	assert.Equal(t, "update_lead_fields", store.audits[0].Action)
 }
 
 // TestAICCServiceAnalyticsUsesViewPermission 覆盖统计卡片：只返回当前企业今日会话和未读线索数量。

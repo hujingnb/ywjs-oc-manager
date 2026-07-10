@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -20,6 +21,8 @@ type AICCStore interface {
 	GetOrganization(ctx context.Context, id string) (sqlc.Organization, error)
 	// CountAICCAgentsByOrg 统计企业当前未删除智能体数量，用于 aicc_agent_limit 校验。
 	CountAICCAgentsByOrg(ctx context.Context, orgID string) (int64, error)
+	// CreateAuditLog 写入 AICC 管理动作审计。
+	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) error
 	// CreateAICCAgent 写入智能体主记录；隐藏 app 由 AICCHiddenAppCreator 先创建。
 	CreateAICCAgent(ctx context.Context, arg sqlc.CreateAICCAgentParams) error
 	// GetAICCAgent 按 ID 读取未删除智能体。
@@ -188,6 +191,12 @@ func (s *AICCService) CreateAgent(ctx context.Context, principal auth.Principal,
 	if err != nil {
 		return AICCAgentResult{}, err
 	}
+	if err := s.recordAICCAudit(ctx, s.store, principal, row.OrgID, row.ID, "create", map[string]any{
+		"name":   row.Name,
+		"app_id": row.AppID,
+	}); err != nil {
+		return AICCAgentResult{}, err
+	}
 	return toAICCAgentResult(row), nil
 }
 
@@ -275,6 +284,13 @@ func (s *AICCService) UpdateAgent(ctx context.Context, principal auth.Principal,
 	if err != nil {
 		return AICCAgentResult{}, err
 	}
+	if err := s.recordAICCAudit(ctx, s.store, principal, row.OrgID, row.ID, "update", map[string]any{
+		"name":           row.Name,
+		"privacy_mode":   row.PrivacyMode,
+		"retention_days": row.RetentionDays,
+	}); err != nil {
+		return AICCAgentResult{}, err
+	}
 	return toAICCAgentResult(row), nil
 }
 
@@ -300,6 +316,11 @@ func (s *AICCService) SetAgentStatus(ctx context.Context, principal auth.Princip
 	if err != nil {
 		return AICCAgentResult{}, err
 	}
+	if err := s.recordAICCAudit(ctx, s.store, principal, row.OrgID, row.ID, action, map[string]any{
+		"status": row.Status,
+	}); err != nil {
+		return AICCAgentResult{}, err
+	}
 	return toAICCAgentResult(row), nil
 }
 
@@ -316,6 +337,11 @@ func (s *AICCService) DeleteAgent(ctx context.Context, principal auth.Principal,
 		return ErrNotFound
 	} else if err != nil {
 		return fmt.Errorf("删除 AICC 智能体失败: %w", err)
+	}
+	if err := s.recordAICCAudit(ctx, s.store, principal, row.OrgID, row.ID, "delete", map[string]any{
+		"name": row.Name,
+	}); err != nil {
+		return err
 	}
 	return nil
 }
@@ -387,6 +413,13 @@ func (s *AICCService) ReplaceAgentKnowledge(ctx context.Context, principal auth.
 			}); err != nil {
 				return fmt.Errorf("保存 AICC 专属文档范围失败: %w", err)
 			}
+		}
+		if err := s.recordAICCAudit(ctx, store, principal, agent.OrgID, agentID, "update_knowledge", map[string]any{
+			"use_org_knowledge":           normalized.UseOrgKnowledge,
+			"industry_knowledge_base_ids": normalized.IndustryKnowledgeBaseIDs,
+			"app_document_ids":            normalized.AppDocumentIDs,
+		}); err != nil {
+			return err
 		}
 		return nil
 	}
@@ -560,6 +593,11 @@ func (s *AICCService) ReplaceLeadFields(ctx context.Context, principal auth.Prin
 				return fmt.Errorf("保存 AICC 留资字段失败: %w", err)
 			}
 		}
+		if err := s.recordAICCAudit(ctx, store, principal, agent.OrgID, agentID, "update_lead_fields", map[string]any{
+			"field_count": len(normalized),
+		}); err != nil {
+			return err
+		}
 		return nil
 	}
 	if s.tx != nil {
@@ -697,6 +735,27 @@ func normalizeAICCSessionListOptions(options AICCSessionListOptions) (AICCSessio
 		return AICCSessionListOptions{}, fmt.Errorf("%w: AICC 会话搜索关键词过长", ErrInvalidArgument)
 	}
 	return normalized, nil
+}
+
+func (s *AICCService) recordAICCAudit(ctx context.Context, store AICCStore, principal auth.Principal, orgID, agentID, action string, metadata map[string]any) error {
+	payload, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("序列化 AICC 审计元数据失败: %w", err)
+	}
+	if err := store.CreateAuditLog(ctx, sqlc.CreateAuditLogParams{
+		ID:           newUUID(),
+		ActorID:      nullStr(principal.UserID),
+		ActorRole:    principal.Role,
+		OrgID:        nullStr(orgID),
+		TargetType:   "aicc_agent",
+		TargetID:     agentID,
+		Action:       action,
+		Result:       "succeeded",
+		MetadataJson: payload,
+	}); err != nil {
+		return fmt.Errorf("写入 AICC 审计日志失败: %w", err)
+	}
+	return nil
 }
 
 func normalizeAICCKnowledgeInput(input AICCKnowledgeInput) (AICCKnowledgeInput, error) {
