@@ -13,38 +13,6 @@
     </section>
 
     <section class="aicc-shell">
-      <aside class="agent-rail">
-        <div class="rail-heading">
-          <strong>{{ t('aicc.manager.agents') }}</strong>
-          <n-tag size="small" :bordered="false">{{ agents.length }}</n-tag>
-        </div>
-        <div v-if="agentsLoading" class="state-text">{{ t('aicc.manager.loading') }}</div>
-        <p v-else-if="agentsError" class="state-text danger">{{ agentsError.message }}</p>
-        <template v-else>
-          <button
-            v-for="agent in agents"
-            :key="agent.id"
-            class="agent-card"
-            :class="{ active: agent.id === selectedAgentId }"
-            type="button"
-            @click="selectAgent(agent.id)"
-          >
-            <span class="agent-topline">
-              <strong>{{ agent.name }}</strong>
-              <n-tag size="small" :type="statusMeta(agent.status).type" :bordered="false">
-                {{ statusMeta(agent.status).label }}
-              </n-tag>
-            </span>
-            <small>{{ agent.scenario || t('aicc.manager.noScenario') }}</small>
-          </button>
-        </template>
-        <div v-if="!agentsLoading && agents.length === 0" class="empty-block">
-          <MessageSquareText :size="28" />
-          <strong>{{ t('aicc.manager.emptyAgentsTitle') }}</strong>
-          <span>{{ t('aicc.manager.emptyAgentsDesc') }}</span>
-        </div>
-      </aside>
-
       <section class="editor-panel">
         <div class="editor-toolbar">
           <div>
@@ -350,7 +318,7 @@ import {
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
-  Copy, Download, ExternalLink, MessageSquareText, PauseCircle, PlayCircle, Plus, QrCode, Save, Trash2,
+  Copy, Download, ExternalLink, PauseCircle, PlayCircle, Plus, QrCode, Save, Trash2,
 } from 'lucide-vue-next'
 
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
@@ -419,8 +387,6 @@ const consoleContext = useRequiredAICCConsoleContext()
 const selectedAgentId = consoleContext.selectedAgentId
 const agents = consoleContext.agents
 const selectedAgent = consoleContext.selectedAgent
-const agentsLoading = consoleContext.agentsLoading
-const agentsError = consoleContext.agentsError
 const deleteModalOpen = ref(false)
 const feedback = ref('')
 const feedbackDanger = ref(false)
@@ -672,10 +638,6 @@ function setFeedback(message: string, danger = false) {
   feedbackDanger.value = danger
 }
 
-function selectAgent(agentId?: string) {
-  consoleContext.selectAgent(agentId)
-}
-
 function startCreate() {
   consoleContext.startCreateAgent()
   delete form.id
@@ -890,13 +852,10 @@ function openDedicatedKnowledge() {
 }
 
 .aicc-shell {
-  display: grid;
-  grid-template-columns: minmax(260px, 0.35fr) minmax(0, 1fr);
-  gap: 16px;
+  display: block;
   min-height: 0;
 }
 
-.agent-rail,
 .editor-panel {
   min-width: 0;
   border: 1px solid var(--color-border);
@@ -904,15 +863,6 @@ function openDedicatedKnowledge() {
   background: var(--color-surface);
 }
 
-.agent-rail {
-  display: grid;
-  align-content: start;
-  gap: 8px;
-  padding: 12px;
-}
-
-.rail-heading,
-.agent-topline,
 .editor-toolbar,
 .section-heading,
 .snippet-panel {
@@ -922,38 +872,8 @@ function openDedicatedKnowledge() {
   gap: 12px;
 }
 
-.agent-card {
-  display: grid;
-  gap: 8px;
-  width: 100%;
-  padding: 12px;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: var(--color-surface-muted);
-  color: var(--color-text-primary);
-  text-align: left;
-  cursor: pointer;
-}
-
-.agent-card.active {
-  border-color: var(--color-brand);
-  background: var(--color-brand-soft);
-  box-shadow: inset 3px 0 0 var(--color-brand);
-}
-
-.agent-card small,
-.empty-block,
 .status-tile span {
   color: var(--color-text-secondary);
-}
-
-.empty-block {
-  display: grid;
-  justify-items: center;
-  gap: 8px;
-  padding: 28px 12px;
-  text-align: center;
-  font-size: 13px;
 }
 
 .editor-panel {
