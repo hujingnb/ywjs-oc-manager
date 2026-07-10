@@ -308,7 +308,7 @@ function navigateTo(path: string) {
   min-height: 0;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   .aicc-agent-context {
     grid-template-columns: 1fr;
   }
