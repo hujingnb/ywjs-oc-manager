@@ -606,6 +606,10 @@ func (s *AICCService) ListSessions(ctx context.Context, principal auth.Principal
 	}
 	results := make([]AICCSessionResult, 0, len(rows))
 	for _, row := range rows {
+		// 历史版本可能因访客只打开公开页/挂件而产生 0 消息会话；这类记录没有运营查看价值。
+		if row.MessageCount == 0 {
+			continue
+		}
 		results = append(results, toAICCSessionListResult(row))
 	}
 	return results, nil

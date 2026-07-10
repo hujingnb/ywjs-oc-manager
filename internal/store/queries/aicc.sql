@@ -86,6 +86,7 @@ SELECT s.*,
        (SELECT COUNT(*) FROM aicc_messages m WHERE m.session_id = s.id) AS message_count
 FROM aicc_sessions s
 WHERE s.agent_id = ?
+  AND EXISTS (SELECT 1 FROM aicc_messages m WHERE m.session_id = s.id)
   AND (sqlc.narg(resolution_status) IS NULL OR s.resolution_status = sqlc.narg(resolution_status))
   AND (sqlc.narg(lead_status) IS NULL OR s.lead_status = sqlc.narg(lead_status))
   AND (sqlc.narg(channel) IS NULL OR s.channel = sqlc.narg(channel))

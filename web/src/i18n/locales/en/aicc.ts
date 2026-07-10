@@ -288,6 +288,7 @@ export default {
     defaultTitle: 'Online support',
     online: 'Online',
     connecting: 'Connecting',
+    ready: 'Ready',
     messageListLabel: 'Customer-care messages',
     uploadedImageAlt: 'Visitor uploaded image',
     feedbackSent: 'Feedback sent',

@@ -1405,6 +1405,7 @@ SELECT s.id, s.agent_id, s.org_id, s.session_token, s.channel, s.source_url, s.r
        (SELECT COUNT(*) FROM aicc_messages m WHERE m.session_id = s.id) AS message_count
 FROM aicc_sessions s
 WHERE s.agent_id = ?
+  AND EXISTS (SELECT 1 FROM aicc_messages m WHERE m.session_id = s.id)
   AND (? IS NULL OR s.resolution_status = ?)
   AND (? IS NULL OR s.lead_status = ?)
   AND (? IS NULL OR s.channel = ?)

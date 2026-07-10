@@ -10,7 +10,7 @@
           <h1>{{ config?.name || t('aicc.publicChat.defaultTitle') }}</h1>
         </div>
         <n-tag :type="sessionToken ? 'success' : 'default'" :bordered="false">
-          {{ sessionToken ? t('aicc.publicChat.online') : t('aicc.publicChat.connecting') }}
+          {{ sessionToken ? t('aicc.publicChat.online') : t('aicc.publicChat.ready') }}
         </n-tag>
       </header>
 
@@ -91,6 +91,7 @@
           :autosize="{ minRows: 1, maxRows: 4 }"
           :placeholder="t('aicc.publicChat.composerPlaceholder')"
           :disabled="!canSend"
+          :input-props="{ name: 'aicc-public-message' }"
           @keydown.enter.exact.prevent="submitMessage"
         />
         <n-button type="primary" attr-type="submit" :disabled="!canSubmit" :loading="isSending">
@@ -152,6 +153,7 @@ const isSending = ref(false)
 const consentBusy = ref(false)
 const leadBusy = ref(false)
 const leadComplete = ref(false)
+const deferredLeadValues = ref<Record<string, string> | null>(null)
 const hasConsent = ref(false)
 const leadValues = ref<Record<string, string>>({})
 const pendingImage = ref<PendingImage | null>(null)
@@ -163,7 +165,7 @@ const needsConsent = computed(() => config.value?.privacy_mode === 'consent_requ
 const leadFields = computed<AICCLeadField[]>(() => config.value?.lead_fields ?? [])
 const needsLead = computed(() => leadFields.value.some(field => field.required) && !leadComplete.value)
 const showLeadForm = computed(() => leadFields.value.length > 0 && !leadComplete.value && !needsConsent.value)
-const canSend = computed(() => Boolean(sessionToken.value) && !needsConsent.value && !needsLead.value && !isSending.value)
+const canSend = computed(() => Boolean(config.value) && !needsConsent.value && !needsLead.value && !isSending.value)
 const canSubmit = computed(() => canSend.value && (draft.value.trim().length > 0 || Boolean(pendingImage.value)))
 
 onMounted(() => {
@@ -179,8 +181,6 @@ async function boot() {
   try {
     const channel = normalizeAICCPublicChannel(route.query.aicc_channel)
     config.value = await fetchAICCPublicConfig(publicToken.value, channel)
-    const session = await createAICCPublicSession(publicToken.value, channel)
-    sessionToken.value = session.session_token ?? ''
     hasConsent.value = config.value.privacy_mode !== 'consent_required'
     leadValues.value = Object.fromEntries((config.value.lead_fields ?? []).map(field => [field.field_key, '']))
     leadComplete.value = !(config.value.lead_fields ?? []).some(field => field.required)
@@ -195,7 +195,6 @@ async function boot() {
 }
 
 async function submitLeadForm() {
-  if (!sessionToken.value) return
   const values: Record<string, string> = {}
   for (const field of leadFields.value) {
     const value = (leadValues.value[field.field_key] ?? '').trim()
@@ -207,17 +206,15 @@ async function submitLeadForm() {
   }
   if (Object.keys(values).length === 0) {
     leadComplete.value = true
+    deferredLeadValues.value = null
     return
   }
   leadBusy.value = true
   errorMessage.value = ''
   try {
-    const result = await submitAICCPublicLeadValues(sessionToken.value, values)
-    if (result.lead_status === 'complete') {
-      leadComplete.value = true
-    } else {
-      errorMessage.value = t('aicc.publicChat.missingRequired')
-    }
+    // 留资字段先保存在浏览器内存中，等首次发送消息创建 session 后再提交。
+    deferredLeadValues.value = values
+    leadComplete.value = true
   } catch (err) {
     errorMessage.value = friendlyAICCError(err)
   } finally {
@@ -226,11 +223,10 @@ async function submitLeadForm() {
 }
 
 async function acceptConsent() {
-  if (!sessionToken.value) return
   consentBusy.value = true
   errorMessage.value = ''
   try {
-    await consentAICCPublicSession(sessionToken.value)
+    // 仅记录访客已点击同意；服务端同意动作延迟到首次消息创建 session 后执行。
     hasConsent.value = true
   } catch (err) {
     errorMessage.value = friendlyAICCError(err)
@@ -240,7 +236,7 @@ async function acceptConsent() {
 }
 
 async function submitMessage() {
-  if (!canSubmit.value || !sessionToken.value) return
+  if (!canSubmit.value) return
   const text = draft.value.trim()
   const image = pendingImage.value
   draft.value = ''
@@ -255,8 +251,9 @@ async function submitMessage() {
   })
   await scrollToBottom()
   try {
-    const imageResult = image ? await uploadAICCPublicImage(sessionToken.value, image.file) : null
-    const response = await sendAICCPublicMessage(sessionToken.value, {
+    const token = await ensureSessionReadyForSend()
+    const imageResult = image ? await uploadAICCPublicImage(token, image.file) : null
+    const response = await sendAICCPublicMessage(token, {
       text: text || undefined,
       image_file_id: imageResult?.image_file_id,
     })
@@ -273,6 +270,28 @@ async function submitMessage() {
     isSending.value = false
     await scrollToBottom()
   }
+}
+
+async function ensureSessionReadyForSend(): Promise<string> {
+  if (!sessionToken.value) {
+    const channel = normalizeAICCPublicChannel(route.query.aicc_channel)
+    const session = await createAICCPublicSession(publicToken.value, channel)
+    sessionToken.value = session.session_token ?? ''
+  }
+  if (!sessionToken.value) {
+    throw new Error(t('aicc.publicChat.sendFailed'))
+  }
+  if (config.value?.privacy_mode === 'consent_required') {
+    await consentAICCPublicSession(sessionToken.value)
+  }
+  if (deferredLeadValues.value && Object.keys(deferredLeadValues.value).length > 0) {
+    const result = await submitAICCPublicLeadValues(sessionToken.value, deferredLeadValues.value)
+    if (result.lead_status !== 'complete') {
+      throw new Error(t('aicc.publicChat.missingRequired'))
+    }
+    deferredLeadValues.value = null
+  }
+  return sessionToken.value
 }
 
 function publicMessageErrorText(err: unknown): string {

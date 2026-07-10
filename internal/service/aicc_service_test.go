@@ -1137,6 +1137,30 @@ func TestAICCServiceListSessionsRequiresAgentViewPermission(t *testing.T) {
 	assert.Equal(t, domain.AICCChannelWebLink, results[0].Channel)
 }
 
+// TestAICCServiceListSessionsHidesEmptySessions 覆盖空会话过滤：
+// 公开页或挂件历史上可能留下 0 消息会话，管理端列表不能展示这类无运营价值的数据。
+func TestAICCServiceListSessionsHidesEmptySessions(t *testing.T) {
+	store := seededAICCStore()
+	store.sessions["empty-session"] = sqlc.AiccSession{
+		ID:               "empty-session",
+		AgentID:          "agent-1",
+		OrgID:            "org-1",
+		SessionToken:     "empty-token",
+		Channel:          domain.AICCChannelWebWidget,
+		ResolutionStatus: domain.AICCResolutionUnknown,
+		LeadStatus:       domain.AICCLeadStatusPending,
+		CreatedAt:        time.Date(2026, 7, 9, 13, 0, 0, 0, time.UTC),
+	}
+	svc := NewAICCService(store, &fakeAICCHiddenAppCreator{})
+
+	results, err := svc.ListSessions(context.Background(), aiccOrgAdmin(), "agent-1", AICCSessionListOptions{})
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "session-1", results[0].ID)
+	assert.Equal(t, int64(2), results[0].MessageCount)
+}
+
 // TestAICCServiceListSessionsAppliesFilters 覆盖会话列表筛选：解决状态、留资状态、渠道和来源关键词会传入查询层。
 func TestAICCServiceListSessionsAppliesFilters(t *testing.T) {
 	store := seededAICCStore()
