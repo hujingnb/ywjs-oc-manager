@@ -28,6 +28,7 @@ type Querier interface {
 	ClearAppProgress(ctx context.Context, id string) error
 	CountAICCAgentsByOrg(ctx context.Context, orgID string) (int64, error)
 	CountAICCCompletedLeadSessions(ctx context.Context, orgID string) (int64, error)
+	CountAICCCompletedLeadSessionsInRange(ctx context.Context, arg CountAICCCompletedLeadSessionsInRangeParams) (int64, error)
 	CountAICCSessionsByResolution(ctx context.Context, arg CountAICCSessionsByResolutionParams) (int64, error)
 	CountAICCSessionsByStatusInRange(ctx context.Context, arg CountAICCSessionsByStatusInRangeParams) (CountAICCSessionsByStatusInRangeRow, error)
 	CountAICCTodaySessions(ctx context.Context, orgID string) (int64, error)
@@ -201,7 +202,9 @@ type Querier interface {
 	ListAICCSessionTrendByWeek(ctx context.Context, arg ListAICCSessionTrendByWeekParams) ([]ListAICCSessionTrendByWeekRow, error)
 	ListAICCSessionsByAgent(ctx context.Context, arg ListAICCSessionsByAgentParams) ([]ListAICCSessionsByAgentRow, error)
 	ListAICCTopSourceURLsByOrg(ctx context.Context, arg ListAICCTopSourceURLsByOrgParams) ([]ListAICCTopSourceURLsByOrgRow, error)
+	ListAICCTopSourceURLsInRange(ctx context.Context, arg ListAICCTopSourceURLsInRangeParams) ([]ListAICCTopSourceURLsInRangeRow, error)
 	ListAICCTopVisitorQuestionsByOrg(ctx context.Context, arg ListAICCTopVisitorQuestionsByOrgParams) ([]ListAICCTopVisitorQuestionsByOrgRow, error)
+	ListAICCTopVisitorQuestionsInRange(ctx context.Context, arg ListAICCTopVisitorQuestionsInRangeParams) ([]ListAICCTopVisitorQuestionsInRangeRow, error)
 	ListActiveSites(ctx context.Context) ([]ListActiveSitesRow, error)
 	ListAllAICCLeadsByOrg(ctx context.Context, arg ListAllAICCLeadsByOrgParams) ([]AiccLead, error)
 	// 全量返回活跃组织（deleted_at IS NULL），不分页；

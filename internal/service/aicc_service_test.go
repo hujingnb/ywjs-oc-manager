@@ -51,6 +51,9 @@ type fakeAICCStore struct {
 	statusArg           sqlc.SetAICCAgentStatusParams
 	sessionArg          sqlc.ListAICCSessionsByAgentParams
 	analyticsArg        AICCAnalyticsOptions
+	completedLeadArg    sqlc.CountAICCCompletedLeadSessionsInRangeParams
+	topQuestionsArg     sqlc.ListAICCTopVisitorQuestionsInRangeParams
+	topSourcesArg       sqlc.ListAICCTopSourceURLsInRangeParams
 	countBlockedArg     string
 	readLeadArg         sqlc.MarkAICCLeadReadParams
 	createField         sqlc.UpsertAICCLeadFieldParams
@@ -487,6 +490,12 @@ func (f *fakeAICCStore) CountAICCCompletedLeadSessions(_ context.Context, orgID 
 	return f.completeLead, nil
 }
 
+// CountAICCCompletedLeadSessionsInRange 返回筛选窗口内已留资会话数量，并记录过滤条件。
+func (f *fakeAICCStore) CountAICCCompletedLeadSessionsInRange(_ context.Context, arg sqlc.CountAICCCompletedLeadSessionsInRangeParams) (int64, error) {
+	f.completedLeadArg = arg
+	return f.completeLead, nil
+}
+
 // CountAICCSessionsByStatusInRange 返回测试预置的时间范围内解决状态汇总。
 func (f *fakeAICCStore) CountAICCSessionsByStatusInRange(_ context.Context, arg sqlc.CountAICCSessionsByStatusInRangeParams) (sqlc.CountAICCSessionsByStatusInRangeRow, error) {
 	f.analyticsArg.OrgID = arg.OrgID
@@ -542,9 +551,29 @@ func (f *fakeAICCStore) ListAICCTopVisitorQuestionsByOrg(_ context.Context, arg 
 	return f.topQuestions, nil
 }
 
+// ListAICCTopVisitorQuestionsInRange 返回筛选窗口内热门问题，并记录过滤条件。
+func (f *fakeAICCStore) ListAICCTopVisitorQuestionsInRange(_ context.Context, arg sqlc.ListAICCTopVisitorQuestionsInRangeParams) ([]sqlc.ListAICCTopVisitorQuestionsInRangeRow, error) {
+	f.topQuestionsArg = arg
+	rows := make([]sqlc.ListAICCTopVisitorQuestionsInRangeRow, 0, len(f.topQuestions))
+	for _, item := range f.topQuestions {
+		rows = append(rows, sqlc.ListAICCTopVisitorQuestionsInRangeRow{Question: item.Question, Count: item.Count})
+	}
+	return rows, nil
+}
+
 // ListAICCTopSourceURLsByOrg 返回测试预置的来源页面分布。
 func (f *fakeAICCStore) ListAICCTopSourceURLsByOrg(_ context.Context, arg sqlc.ListAICCTopSourceURLsByOrgParams) ([]sqlc.ListAICCTopSourceURLsByOrgRow, error) {
 	return f.topSources, nil
+}
+
+// ListAICCTopSourceURLsInRange 返回筛选窗口内来源页面分布，并记录过滤条件。
+func (f *fakeAICCStore) ListAICCTopSourceURLsInRange(_ context.Context, arg sqlc.ListAICCTopSourceURLsInRangeParams) ([]sqlc.ListAICCTopSourceURLsInRangeRow, error) {
+	f.topSourcesArg = arg
+	rows := make([]sqlc.ListAICCTopSourceURLsInRangeRow, 0, len(f.topSources))
+	for _, item := range f.topSources {
+		rows = append(rows, sqlc.ListAICCTopSourceURLsInRangeRow{SourceUrl: item.SourceUrl, Count: item.Count})
+	}
+	return rows, nil
 }
 
 func (f *fakeAICCStore) ensureAgents() {
@@ -1230,18 +1259,33 @@ func TestAICCAnalyticsWithRangeAndBucket(t *testing.T) {
 	store.analyticsTrend = []AICCTrendBucket{{Bucket: "2026-07-01", Count: 3}}
 	store.analyticsRegions = []AICCTopItemResult{{Label: "上海", Count: 2}}
 	store.analyticsSummary = AICCAnalyticsSummary{Sessions: 5, Resolved: 2, Unresolved: 1, Unknown: 2}
+	store.completeLead = 4
 	svc := NewAICCService(store, nil)
 
 	result, err := svc.Analytics(context.Background(), aiccOrgAdmin(), AICCAnalyticsOptions{
-		OrgID: "org-1", StartAt: start, EndAt: end, Bucket: "day",
+		OrgID: "org-1", AgentID: "agent-1", StartAt: start, EndAt: end, Bucket: "day",
 	})
 
 	require.NoError(t, err)
 	assert.Equal(t, "org-1", store.analyticsArg.OrgID)
+	assert.Equal(t, "agent-1", store.analyticsArg.AgentID)
 	assert.Equal(t, start, store.analyticsArg.StartAt)
 	assert.Equal(t, end, store.analyticsArg.EndAt)
 	assert.Equal(t, "day", store.analyticsArg.Bucket)
+	assert.Equal(t, "org-1", store.completedLeadArg.OrgID)
+	assert.Equal(t, null.StringFrom("agent-1"), store.completedLeadArg.AgentID)
+	assert.Equal(t, start, store.completedLeadArg.CreatedAt)
+	assert.Equal(t, end, store.completedLeadArg.CreatedAt_2)
+	assert.Equal(t, "org-1", store.topQuestionsArg.OrgID)
+	assert.Equal(t, null.StringFrom("agent-1"), store.topQuestionsArg.AgentID)
+	assert.Equal(t, start, store.topQuestionsArg.CreatedAt)
+	assert.Equal(t, end, store.topQuestionsArg.CreatedAt_2)
+	assert.Equal(t, "org-1", store.topSourcesArg.OrgID)
+	assert.Equal(t, null.StringFrom("agent-1"), store.topSourcesArg.AgentID)
+	assert.Equal(t, start, store.topSourcesArg.CreatedAt)
+	assert.Equal(t, end, store.topSourcesArg.CreatedAt_2)
 	assert.Equal(t, int64(5), result.TotalSessions)
+	assert.Equal(t, int64(4), result.CompletedLeadSessions)
 	assert.Equal(t, int64(2), result.UnknownSessions)
 	assert.Equal(t, float64(1)/float64(3), result.UnresolvedRate)
 	assert.Equal(t, []AICCTrendBucket{{Bucket: "2026-07-01", Count: 3}}, result.SessionTrend)

@@ -3514,6 +3514,12 @@ paths:
                   type: array
                 type: object
           description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
         "401":
           content:
             application/json:
@@ -3801,6 +3807,12 @@ paths:
                   $ref: '#/components/schemas/service.AICCAnalyticsResult'
                 type: object
           description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
         "401":
           content:
             application/json:

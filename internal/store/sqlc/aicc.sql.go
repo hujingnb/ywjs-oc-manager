@@ -104,6 +104,36 @@ func (q *Queries) CountAICCCompletedLeadSessions(ctx context.Context, orgID stri
 	return count, err
 }
 
+const countAICCCompletedLeadSessionsInRange = `-- name: CountAICCCompletedLeadSessionsInRange :one
+SELECT COUNT(*)
+FROM aicc_sessions
+WHERE org_id = ?
+  AND (? IS NULL OR agent_id = ?)
+  AND created_at >= ?
+  AND created_at < ?
+  AND lead_status = 'complete'
+`
+
+type CountAICCCompletedLeadSessionsInRangeParams struct {
+	OrgID       string      `db:"org_id" json:"org_id"`
+	AgentID     null.String `db:"agent_id" json:"agent_id"`
+	CreatedAt   time.Time   `db:"created_at" json:"created_at"`
+	CreatedAt_2 time.Time   `db:"created_at_2" json:"created_at_2"`
+}
+
+func (q *Queries) CountAICCCompletedLeadSessionsInRange(ctx context.Context, arg CountAICCCompletedLeadSessionsInRangeParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countAICCCompletedLeadSessionsInRange,
+		arg.OrgID,
+		arg.AgentID,
+		arg.AgentID,
+		arg.CreatedAt,
+		arg.CreatedAt_2,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countAICCSessionsByResolution = `-- name: CountAICCSessionsByResolution :one
 SELECT COUNT(*)
 FROM aicc_sessions
@@ -1532,6 +1562,64 @@ func (q *Queries) ListAICCTopSourceURLsByOrg(ctx context.Context, arg ListAICCTo
 	return items, nil
 }
 
+const listAICCTopSourceURLsInRange = `-- name: ListAICCTopSourceURLsInRange :many
+SELECT source_url,
+       CAST(COUNT(*) AS SIGNED) AS count
+FROM aicc_sessions
+WHERE org_id = ?
+  AND (? IS NULL OR agent_id = ?)
+  AND created_at >= ?
+  AND created_at < ?
+  AND source_url IS NOT NULL
+  AND TRIM(source_url) <> ''
+GROUP BY source_url
+ORDER BY count DESC, source_url ASC
+LIMIT ?
+`
+
+type ListAICCTopSourceURLsInRangeParams struct {
+	OrgID       string      `db:"org_id" json:"org_id"`
+	AgentID     null.String `db:"agent_id" json:"agent_id"`
+	CreatedAt   time.Time   `db:"created_at" json:"created_at"`
+	CreatedAt_2 time.Time   `db:"created_at_2" json:"created_at_2"`
+	Limit       int32       `db:"limit" json:"limit"`
+}
+
+type ListAICCTopSourceURLsInRangeRow struct {
+	SourceUrl null.String `db:"source_url" json:"source_url"`
+	Count     int64       `db:"count" json:"count"`
+}
+
+func (q *Queries) ListAICCTopSourceURLsInRange(ctx context.Context, arg ListAICCTopSourceURLsInRangeParams) ([]ListAICCTopSourceURLsInRangeRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAICCTopSourceURLsInRange,
+		arg.OrgID,
+		arg.AgentID,
+		arg.AgentID,
+		arg.CreatedAt,
+		arg.CreatedAt_2,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAICCTopSourceURLsInRangeRow{}
+	for rows.Next() {
+		var i ListAICCTopSourceURLsInRangeRow
+		if err := rows.Scan(&i.SourceUrl, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAICCTopVisitorQuestionsByOrg = `-- name: ListAICCTopVisitorQuestionsByOrg :many
 SELECT TRIM(m.text_content) AS question,
        CAST(COUNT(*) AS SIGNED) AS count
@@ -1565,6 +1653,66 @@ func (q *Queries) ListAICCTopVisitorQuestionsByOrg(ctx context.Context, arg List
 	items := []ListAICCTopVisitorQuestionsByOrgRow{}
 	for rows.Next() {
 		var i ListAICCTopVisitorQuestionsByOrgRow
+		if err := rows.Scan(&i.Question, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAICCTopVisitorQuestionsInRange = `-- name: ListAICCTopVisitorQuestionsInRange :many
+SELECT TRIM(m.text_content) AS question,
+       CAST(COUNT(*) AS SIGNED) AS count
+FROM aicc_messages m
+JOIN aicc_sessions s ON s.id = m.session_id
+WHERE s.org_id = ?
+  AND (? IS NULL OR s.agent_id = ?)
+  AND s.created_at >= ?
+  AND s.created_at < ?
+  AND m.direction = 'visitor'
+  AND m.text_content IS NOT NULL
+  AND TRIM(m.text_content) <> ''
+GROUP BY TRIM(m.text_content)
+ORDER BY count DESC, question ASC
+LIMIT ?
+`
+
+type ListAICCTopVisitorQuestionsInRangeParams struct {
+	OrgID       string      `db:"org_id" json:"org_id"`
+	AgentID     null.String `db:"agent_id" json:"agent_id"`
+	CreatedAt   time.Time   `db:"created_at" json:"created_at"`
+	CreatedAt_2 time.Time   `db:"created_at_2" json:"created_at_2"`
+	Limit       int32       `db:"limit" json:"limit"`
+}
+
+type ListAICCTopVisitorQuestionsInRangeRow struct {
+	Question string `db:"question" json:"question"`
+	Count    int64  `db:"count" json:"count"`
+}
+
+func (q *Queries) ListAICCTopVisitorQuestionsInRange(ctx context.Context, arg ListAICCTopVisitorQuestionsInRangeParams) ([]ListAICCTopVisitorQuestionsInRangeRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAICCTopVisitorQuestionsInRange,
+		arg.OrgID,
+		arg.AgentID,
+		arg.AgentID,
+		arg.CreatedAt,
+		arg.CreatedAt_2,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAICCTopVisitorQuestionsInRangeRow{}
+	for rows.Next() {
+		var i ListAICCTopVisitorQuestionsInRangeRow
 		if err := rows.Scan(&i.Question, &i.Count); err != nil {
 			return nil, err
 		}

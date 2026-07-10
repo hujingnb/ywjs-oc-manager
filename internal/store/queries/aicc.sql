@@ -295,6 +295,15 @@ SELECT COUNT(*)
 FROM aicc_sessions
 WHERE org_id = ? AND lead_status = 'complete';
 
+-- name: CountAICCCompletedLeadSessionsInRange :one
+SELECT COUNT(*)
+FROM aicc_sessions
+WHERE org_id = ?
+  AND (sqlc.narg(agent_id) IS NULL OR agent_id = sqlc.narg(agent_id))
+  AND created_at >= ?
+  AND created_at < ?
+  AND lead_status = 'complete';
+
 -- name: ListAICCTopVisitorQuestionsByOrg :many
 SELECT TRIM(m.text_content) AS question,
        CAST(COUNT(*) AS SIGNED) AS count
@@ -308,11 +317,41 @@ GROUP BY TRIM(m.text_content)
 ORDER BY count DESC, question ASC
 LIMIT ?;
 
+-- name: ListAICCTopVisitorQuestionsInRange :many
+SELECT TRIM(m.text_content) AS question,
+       CAST(COUNT(*) AS SIGNED) AS count
+FROM aicc_messages m
+JOIN aicc_sessions s ON s.id = m.session_id
+WHERE s.org_id = ?
+  AND (sqlc.narg(agent_id) IS NULL OR s.agent_id = sqlc.narg(agent_id))
+  AND s.created_at >= ?
+  AND s.created_at < ?
+  AND m.direction = 'visitor'
+  AND m.text_content IS NOT NULL
+  AND TRIM(m.text_content) <> ''
+GROUP BY TRIM(m.text_content)
+ORDER BY count DESC, question ASC
+LIMIT ?;
+
 -- name: ListAICCTopSourceURLsByOrg :many
 SELECT source_url,
        CAST(COUNT(*) AS SIGNED) AS count
 FROM aicc_sessions
 WHERE org_id = ?
+  AND source_url IS NOT NULL
+  AND TRIM(source_url) <> ''
+GROUP BY source_url
+ORDER BY count DESC, source_url ASC
+LIMIT ?;
+
+-- name: ListAICCTopSourceURLsInRange :many
+SELECT source_url,
+       CAST(COUNT(*) AS SIGNED) AS count
+FROM aicc_sessions
+WHERE org_id = ?
+  AND (sqlc.narg(agent_id) IS NULL OR agent_id = sqlc.narg(agent_id))
+  AND created_at >= ?
+  AND created_at < ?
   AND source_url IS NOT NULL
   AND TRIM(source_url) <> ''
 GROUP BY source_url

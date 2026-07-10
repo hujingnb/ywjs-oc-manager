@@ -93,6 +93,8 @@ type AICCStore interface {
 	CountAICCSessionsByResolution(ctx context.Context, arg sqlc.CountAICCSessionsByResolutionParams) (int64, error)
 	// CountAICCCompletedLeadSessions 统计已完成留资的会话数。
 	CountAICCCompletedLeadSessions(ctx context.Context, orgID string) (int64, error)
+	// CountAICCCompletedLeadSessionsInRange 统计筛选窗口内已完成留资的会话数。
+	CountAICCCompletedLeadSessionsInRange(ctx context.Context, arg sqlc.CountAICCCompletedLeadSessionsInRangeParams) (int64, error)
 	// CountAICCSessionsByStatusInRange 统计指定时间范围内不同解决状态的会话数量。
 	CountAICCSessionsByStatusInRange(ctx context.Context, arg sqlc.CountAICCSessionsByStatusInRangeParams) (sqlc.CountAICCSessionsByStatusInRangeRow, error)
 	// ListAICCSessionTrendByDay 按日聚合指定时间范围内的会话趋势。
@@ -103,8 +105,12 @@ type AICCStore interface {
 	ListAICCRegionsInRange(ctx context.Context, arg sqlc.ListAICCRegionsInRangeParams) ([]sqlc.ListAICCRegionsInRangeRow, error)
 	// ListAICCTopVisitorQuestionsByOrg 统计访客高频问题。
 	ListAICCTopVisitorQuestionsByOrg(ctx context.Context, arg sqlc.ListAICCTopVisitorQuestionsByOrgParams) ([]sqlc.ListAICCTopVisitorQuestionsByOrgRow, error)
+	// ListAICCTopVisitorQuestionsInRange 统计筛选窗口内访客高频问题。
+	ListAICCTopVisitorQuestionsInRange(ctx context.Context, arg sqlc.ListAICCTopVisitorQuestionsInRangeParams) ([]sqlc.ListAICCTopVisitorQuestionsInRangeRow, error)
 	// ListAICCTopSourceURLsByOrg 统计访客来源页面分布。
 	ListAICCTopSourceURLsByOrg(ctx context.Context, arg sqlc.ListAICCTopSourceURLsByOrgParams) ([]sqlc.ListAICCTopSourceURLsByOrgRow, error)
+	// ListAICCTopSourceURLsInRange 统计筛选窗口内访客来源页面分布。
+	ListAICCTopSourceURLsInRange(ctx context.Context, arg sqlc.ListAICCTopSourceURLsInRangeParams) ([]sqlc.ListAICCTopSourceURLsInRangeRow, error)
 }
 
 // AICCTxRunner 为管理侧整组保存留资字段提供事务边界。
@@ -763,7 +769,12 @@ func (s *AICCService) Analytics(ctx context.Context, principal auth.Principal, o
 	if err != nil {
 		return AICCAnalyticsResult{}, fmt.Errorf("统计 AICC 时间范围会话状态失败: %w", err)
 	}
-	completedLeads, err := s.store.CountAICCCompletedLeadSessions(ctx, filter.OrgID)
+	completedLeads, err := s.store.CountAICCCompletedLeadSessionsInRange(ctx, sqlc.CountAICCCompletedLeadSessionsInRangeParams{
+		OrgID:       filter.OrgID,
+		AgentID:     nullStr(filter.AgentID),
+		CreatedAt:   filter.StartAt,
+		CreatedAt_2: filter.EndAt,
+	})
 	if err != nil {
 		return AICCAnalyticsResult{}, fmt.Errorf("统计 AICC 已留资会话失败: %w", err)
 	}
@@ -781,11 +792,23 @@ func (s *AICCService) Analytics(ctx context.Context, principal auth.Principal, o
 	if err != nil {
 		return AICCAnalyticsResult{}, fmt.Errorf("统计 AICC 地域分布失败: %w", err)
 	}
-	questions, err := s.store.ListAICCTopVisitorQuestionsByOrg(ctx, sqlc.ListAICCTopVisitorQuestionsByOrgParams{OrgID: filter.OrgID, Limit: 5})
+	questions, err := s.store.ListAICCTopVisitorQuestionsInRange(ctx, sqlc.ListAICCTopVisitorQuestionsInRangeParams{
+		OrgID:       filter.OrgID,
+		AgentID:     nullStr(filter.AgentID),
+		CreatedAt:   filter.StartAt,
+		CreatedAt_2: filter.EndAt,
+		Limit:       5,
+	})
 	if err != nil {
 		return AICCAnalyticsResult{}, fmt.Errorf("统计 AICC 热门问题失败: %w", err)
 	}
-	sources, err := s.store.ListAICCTopSourceURLsByOrg(ctx, sqlc.ListAICCTopSourceURLsByOrgParams{OrgID: filter.OrgID, Limit: 5})
+	sources, err := s.store.ListAICCTopSourceURLsInRange(ctx, sqlc.ListAICCTopSourceURLsInRangeParams{
+		OrgID:       filter.OrgID,
+		AgentID:     nullStr(filter.AgentID),
+		CreatedAt:   filter.StartAt,
+		CreatedAt_2: filter.EndAt,
+		Limit:       5,
+	})
 	if err != nil {
 		return AICCAnalyticsResult{}, fmt.Errorf("统计 AICC 来源页面失败: %w", err)
 	}
@@ -1356,18 +1379,32 @@ func toAICCLeadFieldResults(rows []sqlc.AiccLeadField) []AICCLeadFieldResult {
 	return results
 }
 
-func toAICCTopQuestionResults(rows []sqlc.ListAICCTopVisitorQuestionsByOrgRow) []AICCTopItemResult {
+func toAICCTopQuestionResults[T interface {
+	sqlc.ListAICCTopVisitorQuestionsByOrgRow | sqlc.ListAICCTopVisitorQuestionsInRangeRow
+}](rows []T) []AICCTopItemResult {
 	results := make([]AICCTopItemResult, 0, len(rows))
 	for _, row := range rows {
-		results = append(results, AICCTopItemResult{Label: row.Question, Count: row.Count})
+		switch value := any(row).(type) {
+		case sqlc.ListAICCTopVisitorQuestionsByOrgRow:
+			results = append(results, AICCTopItemResult{Label: value.Question, Count: value.Count})
+		case sqlc.ListAICCTopVisitorQuestionsInRangeRow:
+			results = append(results, AICCTopItemResult{Label: value.Question, Count: value.Count})
+		}
 	}
 	return results
 }
 
-func toAICCTopSourceResults(rows []sqlc.ListAICCTopSourceURLsByOrgRow) []AICCTopItemResult {
+func toAICCTopSourceResults[T interface {
+	sqlc.ListAICCTopSourceURLsByOrgRow | sqlc.ListAICCTopSourceURLsInRangeRow
+}](rows []T) []AICCTopItemResult {
 	results := make([]AICCTopItemResult, 0, len(rows))
 	for _, row := range rows {
-		results = append(results, AICCTopItemResult{Label: strOrEmpty(row.SourceUrl), Count: row.Count})
+		switch value := any(row).(type) {
+		case sqlc.ListAICCTopSourceURLsByOrgRow:
+			results = append(results, AICCTopItemResult{Label: strOrEmpty(value.SourceUrl), Count: value.Count})
+		case sqlc.ListAICCTopSourceURLsInRangeRow:
+			results = append(results, AICCTopItemResult{Label: strOrEmpty(value.SourceUrl), Count: value.Count})
+		}
 	}
 	return results
 }

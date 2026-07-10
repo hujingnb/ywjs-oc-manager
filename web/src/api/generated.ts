@@ -817,6 +817,15 @@ export interface paths {
                         };
                     };
                 };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
                 /** @description Unauthorized */
                 401: {
                     headers: {
@@ -1239,6 +1248,15 @@ export interface paths {
                         "application/json": {
                             [key: string]: components["schemas"]["service.AICCAnalyticsResult"];
                         };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
                     };
                 };
                 /** @description Unauthorized */

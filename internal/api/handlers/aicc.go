@@ -394,6 +394,7 @@ func (h *AICCHandler) ReplaceAgentKnowledge(c *gin.Context) {
 // @Param        limit    query     int     false  "每页条数（默认 50）"
 // @Param        offset   query     int     false  "分页偏移（默认 0）"
 // @Success      200      {object}  map[string][]service.AICCSessionResult
+// @Failure      400      {object}  ErrorResponse
 // @Failure      401      {object}  ErrorResponse
 // @Failure      403      {object}  ErrorResponse
 // @Failure      404      {object}  ErrorResponse
@@ -627,6 +628,7 @@ func (h *AICCHandler) MarkLeadRead(c *gin.Context) {
 // @Param        end_at    query     string  false  "统计结束时间（RFC3339）"
 // @Param        bucket    query     string  false  "趋势粒度：day / week"
 // @Success      200     {object}  map[string]service.AICCAnalyticsResult
+// @Failure      400     {object}  ErrorResponse
 // @Failure      401     {object}  ErrorResponse
 // @Failure      403     {object}  ErrorResponse
 // @Failure      500     {object}  ErrorResponse
