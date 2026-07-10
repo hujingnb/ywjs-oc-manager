@@ -25,6 +25,7 @@ CREATE TABLE aicc_blocked_visitors (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_aicc_blocked_visitors_agent_org FOREIGN KEY (agent_id, org_id) REFERENCES aicc_agents(id, org_id) ON DELETE CASCADE,
     CONSTRAINT fk_aicc_blocked_visitors_org FOREIGN KEY (org_id) REFERENCES organizations(id),
+    UNIQUE KEY uk_aicc_blocked_visitors_agent_visitor (agent_id, visitor_hash),
     KEY idx_aicc_blocked_visitors_lookup (agent_id, visitor_hash, expires_at),
     KEY idx_aicc_blocked_visitors_agent_created (agent_id, created_at DESC, id DESC)
 );

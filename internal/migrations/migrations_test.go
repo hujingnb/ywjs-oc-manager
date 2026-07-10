@@ -267,6 +267,7 @@ func TestAICCSettingsMigrationContainsOperationalTables(t *testing.T) {
 	assert.Contains(t, up, "CREATE TABLE aicc_blocked_visitors")
 	assert.Contains(t, up, "visitor_hash VARCHAR(128) NOT NULL")
 	assert.Contains(t, up, "expires_at DATETIME NOT NULL")
+	assert.Contains(t, up, "UNIQUE KEY uk_aicc_blocked_visitors_agent_visitor (agent_id, visitor_hash)")
 	assert.Contains(t, up, "KEY idx_aicc_blocked_visitors_lookup (agent_id, visitor_hash, expires_at)")
 	assert.NotContains(t, up, "remote_ip")
 }
