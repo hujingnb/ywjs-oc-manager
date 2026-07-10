@@ -157,6 +157,52 @@ func TestAICCPublicChatTouchesSessionLastActive(t *testing.T) {
 	assert.Equal(t, 0, store.createdSessionCount)
 }
 
+// TestAICCPublicChatReservesVisitorMessageBeforeHermes 覆盖并发上限保护：
+// Hermes 调用前必须先写入访客消息作为占位，后续并发请求才能看到已消耗的消息额度。
+func TestAICCPublicChatReservesVisitorMessageBeforeHermes(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:      sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:    sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		settings: sqlc.AiccAgentSetting{AgentID: "agent-1", MessageLimitPerSession: 2, BlockedVisitorEnabled: true, SessionResumeTtlMinutes: 30},
+		session:  sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+	}
+	chat := &fakeAICCHermesChat{reply: "您好"}
+	chat.onChat = func() {
+		// Hermes 调用时已经写入访客消息，证明额度在模型调用前被占用。
+		assert.Equal(t, int64(1), store.visitorMessageCount)
+		require.Len(t, store.createdMessages, 1)
+		assert.Equal(t, domain.AICCMessageDirectionVisitor, store.createdMessages[0].Direction)
+	}
+	svc := NewAICCPublicService(store, chat)
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	_, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "报价多少"})
+
+	require.NoError(t, err)
+	require.Len(t, store.createdMessages, 2)
+	assert.Equal(t, domain.AICCMessageDirectionAssistant, store.createdMessages[1].Direction)
+}
+
+// TestAICCPublicChatRejectsMissingSessionOnTouch 覆盖会话刷新受影响行校验：
+// 预约消息时发现 session 已不可更新，不能继续调用 Hermes 产生模型费用。
+func TestAICCPublicChatRejectsMissingSessionOnTouch(t *testing.T) {
+	chat := &fakeAICCHermesChat{reply: "不应调用"}
+	store := &fakeAICCPublicStore{
+		org:         sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:       sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		settings:    sqlc.AiccAgentSetting{AgentID: "agent-1", MessageLimitPerSession: 100, BlockedVisitorEnabled: true, SessionResumeTtlMinutes: 30},
+		session:     sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+		touchNoRows: true,
+	}
+	svc := NewAICCPublicService(store, chat)
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	_, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "报价多少"})
+
+	require.ErrorIs(t, err, ErrAICCInvalidSession)
+	assert.Empty(t, chat.text)
+}
+
 // TestAICCPublicChatStoresImageMessage 覆盖图片消息路径：已上传图片可作为访客消息镜像保存。
 func TestAICCPublicChatStoresImageMessage(t *testing.T) {
 	store := &fakeAICCPublicStore{
@@ -725,6 +771,7 @@ type fakeAICCPublicStore struct {
 	feedback            sqlc.UpsertAICCFeedbackParams
 	resolutionStatus    string
 	touchedSessionID    string
+	touchNoRows         bool
 }
 
 func (f *fakeAICCPublicStore) GetOrganization(_ context.Context, id string) (sqlc.Organization, error) {
@@ -757,6 +804,13 @@ func (f *fakeAICCPublicStore) GetAICCAgentByWidgetToken(_ context.Context, widge
 
 func (f *fakeAICCPublicStore) GetAICCSessionByToken(_ context.Context, token string) (sqlc.AiccSession, error) {
 	if f.session.SessionToken != token {
+		return sqlc.AiccSession{}, sql.ErrNoRows
+	}
+	return f.session, nil
+}
+
+func (f *fakeAICCPublicStore) LockAICCSessionForUpdate(_ context.Context, id string) (sqlc.AiccSession, error) {
+	if f.session.ID != id || !f.session.ExpiresAt.After(aiccPublicTestNow) {
 		return sqlc.AiccSession{}, sql.ErrNoRows
 	}
 	return f.session, nil
@@ -810,16 +864,19 @@ func (f *fakeAICCPublicStore) MarkAICCSessionConsented(_ context.Context, sessio
 
 func (f *fakeAICCPublicStore) CreateAICCMessage(_ context.Context, arg sqlc.CreateAICCMessageParams) error {
 	f.createdMessages = append(f.createdMessages, arg)
+	if arg.Direction == domain.AICCMessageDirectionVisitor {
+		f.visitorMessageCount++
+	}
 	return nil
 }
 
-func (f *fakeAICCPublicStore) TouchAICCSessionLastActive(_ context.Context, id string) error {
-	if f.session.ID != id {
-		return sql.ErrNoRows
+func (f *fakeAICCPublicStore) TouchAICCSessionLastActive(_ context.Context, id string) (int64, error) {
+	if f.session.ID != id || f.touchNoRows || !f.session.ExpiresAt.After(aiccPublicTestNow) {
+		return 0, nil
 	}
 	f.touchedSessionID = id
 	f.session.LastActiveAt = aiccPublicTestNow
-	return nil
+	return 1, nil
 }
 
 func (f *fakeAICCPublicStore) CreateAICCImage(_ context.Context, arg sqlc.CreateAICCImageParams) error {
@@ -939,14 +996,18 @@ func (f *fakeAICCPublicStore) UpdateAICCSessionResolutionStatus(_ context.Contex
 }
 
 type fakeAICCHermesChat struct {
-	reply string
-	appID string
-	text  string
+	reply  string
+	appID  string
+	text   string
+	onChat func()
 }
 
 func (f *fakeAICCHermesChat) ChatAICC(_ context.Context, appID, _ string, text string) (string, error) {
 	f.appID = appID
 	f.text = text
+	if f.onChat != nil {
+		f.onChat()
+	}
 	return f.reply, nil
 }
 

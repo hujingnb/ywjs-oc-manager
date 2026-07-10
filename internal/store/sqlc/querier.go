@@ -287,6 +287,7 @@ type Querier interface {
 	ListVisibleCustomSkills(ctx context.Context, arg ListVisibleCustomSkillsParams) ([]ListVisibleCustomSkillsRow, error)
 	// 平台管理员全局视图：列出所有企业的发布能力配置。
 	ListWebPublishConfigs(ctx context.Context) ([]OrgWebPublishConfig, error)
+	LockAICCSessionForUpdate(ctx context.Context, id string) (AiccSession, error)
 	LockJobForUpdate(ctx context.Context, id string) (Job, error)
 	MarkAICCLeadRead(ctx context.Context, arg MarkAICCLeadReadParams) (int64, error)
 	MarkAICCSessionConsented(ctx context.Context, sessionToken string) (int64, error)
@@ -388,7 +389,7 @@ type Querier interface {
 	// SumRechargeAmountByOrg 聚合指定组织所有成功充值记录的总额。
 	// 仅统计 status='succeeded' 的记录，failed 记录不计入累计金额。
 	SumRechargeAmountByOrg(ctx context.Context, orgID string) (int64, error)
-	TouchAICCSessionLastActive(ctx context.Context, id string) error
+	TouchAICCSessionLastActive(ctx context.Context, id string) (int64, error)
 	// 仅刷新 updated_at：worker 等待 pod Ready 期间的心跳。让 reaper 凭 updated_at 区分
 	// 「worker 仍在等待（拉镜像可能数十分钟）」与「worker 已死的孤儿」，避免误回收正在处理的 job。
 	// 不改 status 或其它字段。

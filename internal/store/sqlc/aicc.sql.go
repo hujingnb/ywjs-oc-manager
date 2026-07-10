@@ -1491,6 +1491,39 @@ func (q *Queries) ListRequiredAICCLeadFieldsMissing(ctx context.Context, id stri
 	return items, nil
 }
 
+const lockAICCSessionForUpdate = `-- name: LockAICCSessionForUpdate :one
+SELECT id, agent_id, org_id, session_token, channel, source_url, referrer, region, ip_hash, user_agent_hash, privacy_notice_shown, privacy_consented_at, resolution_status, lead_status, last_active_at, expires_at, created_at, updated_at
+FROM aicc_sessions
+WHERE id = ? AND expires_at > now()
+FOR UPDATE
+`
+
+func (q *Queries) LockAICCSessionForUpdate(ctx context.Context, id string) (AiccSession, error) {
+	row := q.db.QueryRowContext(ctx, lockAICCSessionForUpdate, id)
+	var i AiccSession
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.OrgID,
+		&i.SessionToken,
+		&i.Channel,
+		&i.SourceUrl,
+		&i.Referrer,
+		&i.Region,
+		&i.IpHash,
+		&i.UserAgentHash,
+		&i.PrivacyNoticeShown,
+		&i.PrivacyConsentedAt,
+		&i.ResolutionStatus,
+		&i.LeadStatus,
+		&i.LastActiveAt,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const markAICCLeadRead = `-- name: MarkAICCLeadRead :execrows
 UPDATE aicc_leads
 SET unread = FALSE, updated_at = now()
@@ -1551,15 +1584,18 @@ func (q *Queries) SoftDeleteAICCAgent(ctx context.Context, id string) error {
 	return err
 }
 
-const touchAICCSessionLastActive = `-- name: TouchAICCSessionLastActive :exec
+const touchAICCSessionLastActive = `-- name: TouchAICCSessionLastActive :execrows
 UPDATE aicc_sessions
 SET last_active_at = now(), updated_at = now()
 WHERE id = ? AND expires_at > now()
 `
 
-func (q *Queries) TouchAICCSessionLastActive(ctx context.Context, id string) error {
-	_, err := q.db.ExecContext(ctx, touchAICCSessionLastActive, id)
-	return err
+func (q *Queries) TouchAICCSessionLastActive(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, touchAICCSessionLastActive, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const updateAICCAgentProfile = `-- name: UpdateAICCAgentProfile :exec

@@ -52,6 +52,8 @@ type AICCPublicStore interface {
 	GetAICCAgentByWidgetToken(ctx context.Context, widgetToken string) (sqlc.AiccAgent, error)
 	// GetAICCSessionByToken 通过访客 session token 定位单个公开会话。
 	GetAICCSessionByToken(ctx context.Context, token string) (sqlc.AiccSession, error)
+	// LockAICCSessionForUpdate 在事务内锁定会话行，序列化公开消息额度预约。
+	LockAICCSessionForUpdate(ctx context.Context, id string) (sqlc.AiccSession, error)
 	// GetAICCAgentSettings 读取智能体运营配置；历史智能体可能没有配置行。
 	GetAICCAgentSettings(ctx context.Context, agentID string) (sqlc.AiccAgentSetting, error)
 	// CountAICCVisitorMessagesBySession 统计当前会话已写入的访客消息数量，用于发送前拦截。
@@ -63,7 +65,7 @@ type AICCPublicStore interface {
 	// MarkAICCSessionConsented 记录访客已同意隐私说明。
 	MarkAICCSessionConsented(ctx context.Context, sessionToken string) (int64, error)
 	// TouchAICCSessionLastActive 刷新会话活跃时间，公开端续接窗口依赖该时间。
-	TouchAICCSessionLastActive(ctx context.Context, id string) error
+	TouchAICCSessionLastActive(ctx context.Context, id string) (int64, error)
 	// CreateAICCMessage 写入访客消息或助手回复镜像。
 	CreateAICCMessage(ctx context.Context, arg sqlc.CreateAICCMessageParams) error
 	// CreateAICCImage 写入公开会话图片对象记录。
@@ -366,9 +368,6 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 			return AICCPublicMessageResult{}, err
 		}
 	}
-	if err := s.ensureMessageLimit(ctx, session.ID, settings.MessageLimitPerSession); err != nil {
-		return AICCPublicMessageResult{}, err
-	}
 	if containsAICCSensitiveWord(input.Text, settings.SensitiveWords) {
 		return AICCPublicMessageResult{}, ErrAICCSensitiveWord
 	}
@@ -393,16 +392,6 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 	} else if imageID != "" {
 		contentType = domain.AICCMessageContentTypeMixed
 	}
-	runtimeText := text
-	if runtimeText == "" && imageID != "" {
-		runtimeText = "[访客发送了一张图片]"
-	}
-	runtimeText = buildAICCRuntimePrompt(agent, runtimeText)
-	reply, err := s.chat.ChatAICC(ctx, agent.AppID, session.ID, runtimeText)
-	if err != nil {
-		return AICCPublicMessageResult{}, fmt.Errorf("转发 AICC 消息失败: %w", err)
-	}
-	replyID := newUUID()
 	visitorMessage := sqlc.CreateAICCMessageParams{
 		ID:             newUUID(),
 		SessionID:      session.ID,
@@ -414,6 +403,19 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 		ImageMime:      nullStr(image.Mime),
 		ImageSizeBytes: null.IntFromPtr(int64PtrIfValid(image.SizeBytes, imageID != "")),
 	}
+	if err := s.reserveAICCVisitorMessage(ctx, session, settings.MessageLimitPerSession, visitorMessage); err != nil {
+		return AICCPublicMessageResult{}, err
+	}
+	runtimeText := text
+	if runtimeText == "" && imageID != "" {
+		runtimeText = "[访客发送了一张图片]"
+	}
+	runtimeText = buildAICCRuntimePrompt(agent, runtimeText)
+	reply, err := s.chat.ChatAICC(ctx, agent.AppID, session.ID, runtimeText)
+	if err != nil {
+		return AICCPublicMessageResult{}, fmt.Errorf("转发 AICC 消息失败: %w", err)
+	}
+	replyID := newUUID()
 	assistantMessage := sqlc.CreateAICCMessageParams{
 		ID:          replyID,
 		SessionID:   session.ID,
@@ -422,27 +424,54 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 		ContentType: domain.AICCMessageContentTypeText,
 		TextContent: nullStr(reply),
 	}
-	// Hermes 调用已完成后再进入事务，避免外部模型请求长期占用数据库事务。
-	writeMessages := func(store AICCPublicStore) error {
-		if err := store.CreateAICCMessage(ctx, visitorMessage); err != nil {
-			return fmt.Errorf("保存 AICC 访客消息失败: %w", err)
-		}
-		if err := store.CreateAICCMessage(ctx, assistantMessage); err != nil {
-			return fmt.Errorf("保存 AICC 助手回复失败: %w", err)
-		}
-		if err := store.TouchAICCSessionLastActive(ctx, session.ID); err != nil {
-			return fmt.Errorf("刷新 AICC 会话活跃时间失败: %w", err)
-		}
-		return nil
-	}
-	if s.tx != nil {
-		if err := s.tx.WithAICCPublicTx(ctx, writeMessages); err != nil {
-			return AICCPublicMessageResult{}, err
-		}
-	} else if err := writeMessages(s.store); err != nil {
+	if err := s.storeAICCAssistantMessage(ctx, session.ID, assistantMessage); err != nil {
 		return AICCPublicMessageResult{}, err
 	}
 	return AICCPublicMessageResult{MessageID: replyID, Text: reply}, nil
+}
+
+func (s *AICCPublicService) reserveAICCVisitorMessage(ctx context.Context, session sqlc.AiccSession, limit int32, visitorMessage sqlc.CreateAICCMessageParams) error {
+	return s.withAICCPublicTx(ctx, func(store AICCPublicStore) error {
+		locked, err := store.LockAICCSessionForUpdate(ctx, session.ID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrAICCInvalidSession
+		}
+		if err != nil {
+			return fmt.Errorf("锁定 AICC 会话失败: %w", err)
+		}
+		if locked.AgentID != session.AgentID {
+			return ErrAICCInvalidSession
+		}
+		if err := ensureMessageLimit(ctx, store, session.ID, limit); err != nil {
+			return err
+		}
+		if err := store.CreateAICCMessage(ctx, visitorMessage); err != nil {
+			return fmt.Errorf("保存 AICC 访客消息失败: %w", err)
+		}
+		if err := touchAICCSessionLastActive(ctx, store, session.ID); err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+func (s *AICCPublicService) storeAICCAssistantMessage(ctx context.Context, sessionID string, assistantMessage sqlc.CreateAICCMessageParams) error {
+	return s.withAICCPublicTx(ctx, func(store AICCPublicStore) error {
+		if err := store.CreateAICCMessage(ctx, assistantMessage); err != nil {
+			return fmt.Errorf("保存 AICC 助手回复失败: %w", err)
+		}
+		if err := touchAICCSessionLastActive(ctx, store, sessionID); err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+func (s *AICCPublicService) withAICCPublicTx(ctx context.Context, fn func(AICCPublicStore) error) error {
+	if s.tx != nil {
+		return s.tx.WithAICCPublicTx(ctx, fn)
+	}
+	return fn(s.store)
 }
 
 func buildAICCRuntimePrompt(agent sqlc.AiccAgent, visitorText string) string {
@@ -520,13 +549,25 @@ func aiccSessionResumeAllowed(session sqlc.AiccSession, now time.Time, ttlMinute
 }
 
 // ensureMessageLimit 在写入新访客消息前检查单会话消息上限，避免超额请求继续进入 Hermes。
-func (s *AICCPublicService) ensureMessageLimit(ctx context.Context, sessionID string, limit int32) error {
-	count, err := s.store.CountAICCVisitorMessagesBySession(ctx, sessionID)
+func ensureMessageLimit(ctx context.Context, store AICCPublicStore, sessionID string, limit int32) error {
+	count, err := store.CountAICCVisitorMessagesBySession(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("统计 AICC 会话消息数失败: %w", err)
 	}
 	if count >= int64(limit) {
 		return ErrAICCMessageLimitExceeded
+	}
+	return nil
+}
+
+// touchAICCSessionLastActive 要求刷新命中当前会话；0 行通常表示会话在写入期间过期或被移除。
+func touchAICCSessionLastActive(ctx context.Context, store AICCPublicStore, sessionID string) error {
+	affected, err := store.TouchAICCSessionLastActive(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("刷新 AICC 会话活跃时间失败: %w", err)
+	}
+	if affected == 0 {
+		return ErrAICCInvalidSession
 	}
 	return nil
 }

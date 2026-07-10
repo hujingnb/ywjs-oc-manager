@@ -104,12 +104,18 @@ SELECT *
 FROM aicc_sessions
 WHERE id = ?;
 
+-- name: LockAICCSessionForUpdate :one
+SELECT *
+FROM aicc_sessions
+WHERE id = ? AND expires_at > now()
+FOR UPDATE;
+
 -- name: MarkAICCSessionConsented :execrows
 UPDATE aicc_sessions
 SET privacy_consented_at = now(), updated_at = now()
 WHERE session_token = ? AND expires_at > now();
 
--- name: TouchAICCSessionLastActive :exec
+-- name: TouchAICCSessionLastActive :execrows
 UPDATE aicc_sessions
 SET last_active_at = now(), updated_at = now()
 WHERE id = ? AND expires_at > now();
