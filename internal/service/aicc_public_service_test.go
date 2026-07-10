@@ -121,6 +121,42 @@ func TestAICCPublicChatStoresVisitorAndAssistantMessages(t *testing.T) {
 	assert.Contains(t, chat.text, "访客问题：\n报价多少")
 }
 
+// TestAICCPublicChatTouchesSessionLastActive 覆盖会话活跃时间刷新：
+// 成功保存访客和助手消息后必须刷新 last_active_at，刷新后的会话可在续接 TTL 内恢复。
+func TestAICCPublicChatTouchesSessionLastActive(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:      sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:    sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", PublicToken: "pub", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		settings: sqlc.AiccAgentSetting{AgentID: "agent-1", MessageLimitPerSession: 100, BlockedVisitorEnabled: true, SessionResumeTtlMinutes: 30},
+		session: sqlc.AiccSession{
+			ID:                 "session-1",
+			AgentID:            "agent-1",
+			OrgID:              "org-1",
+			SessionToken:       "tok",
+			PrivacyNoticeShown: true,
+			LastActiveAt:       aiccPublicTestNow.Add(-31 * time.Minute),
+			CreatedAt:          aiccPublicTestNow.Add(-2 * time.Hour),
+			ExpiresAt:          aiccPublicTestNow.Add(time.Hour),
+		},
+	}
+	chat := &fakeAICCHermesChat{reply: "您好"}
+	svc := NewAICCPublicService(store, chat)
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	_, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "报价多少"})
+	require.NoError(t, err)
+
+	assert.Equal(t, "session-1", store.touchedSessionID)
+	assert.Equal(t, aiccPublicTestNow, store.session.LastActiveAt)
+
+	result, err := svc.CreateSession(context.Background(), "pub", AICCPublicSessionInput{SessionToken: "tok"})
+
+	require.NoError(t, err)
+	assert.True(t, result.Restored)
+	assert.Equal(t, "tok", result.SessionToken)
+	assert.Equal(t, 0, store.createdSessionCount)
+}
+
 // TestAICCPublicChatStoresImageMessage 覆盖图片消息路径：已上传图片可作为访客消息镜像保存。
 func TestAICCPublicChatStoresImageMessage(t *testing.T) {
 	store := &fakeAICCPublicStore{
@@ -688,6 +724,7 @@ type fakeAICCPublicStore struct {
 	attachedLeadOrgID   string
 	feedback            sqlc.UpsertAICCFeedbackParams
 	resolutionStatus    string
+	touchedSessionID    string
 }
 
 func (f *fakeAICCPublicStore) GetOrganization(_ context.Context, id string) (sqlc.Organization, error) {
@@ -773,6 +810,15 @@ func (f *fakeAICCPublicStore) MarkAICCSessionConsented(_ context.Context, sessio
 
 func (f *fakeAICCPublicStore) CreateAICCMessage(_ context.Context, arg sqlc.CreateAICCMessageParams) error {
 	f.createdMessages = append(f.createdMessages, arg)
+	return nil
+}
+
+func (f *fakeAICCPublicStore) TouchAICCSessionLastActive(_ context.Context, id string) error {
+	if f.session.ID != id {
+		return sql.ErrNoRows
+	}
+	f.touchedSessionID = id
+	f.session.LastActiveAt = aiccPublicTestNow
 	return nil
 }
 

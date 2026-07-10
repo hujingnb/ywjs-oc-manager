@@ -62,6 +62,8 @@ type AICCPublicStore interface {
 	CreateAICCSession(ctx context.Context, arg sqlc.CreateAICCSessionParams) error
 	// MarkAICCSessionConsented 记录访客已同意隐私说明。
 	MarkAICCSessionConsented(ctx context.Context, sessionToken string) (int64, error)
+	// TouchAICCSessionLastActive 刷新会话活跃时间，公开端续接窗口依赖该时间。
+	TouchAICCSessionLastActive(ctx context.Context, id string) error
 	// CreateAICCMessage 写入访客消息或助手回复镜像。
 	CreateAICCMessage(ctx context.Context, arg sqlc.CreateAICCMessageParams) error
 	// CreateAICCImage 写入公开会话图片对象记录。
@@ -391,20 +393,6 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 	} else if imageID != "" {
 		contentType = domain.AICCMessageContentTypeMixed
 	}
-	visitorMessageID := newUUID()
-	if err := s.store.CreateAICCMessage(ctx, sqlc.CreateAICCMessageParams{
-		ID:             visitorMessageID,
-		SessionID:      session.ID,
-		AgentID:        session.AgentID,
-		Direction:      domain.AICCMessageDirectionVisitor,
-		ContentType:    contentType,
-		TextContent:    nullStr(text),
-		ImageObjectKey: nullStr(image.ObjectKey),
-		ImageMime:      nullStr(image.Mime),
-		ImageSizeBytes: null.IntFromPtr(int64PtrIfValid(image.SizeBytes, imageID != "")),
-	}); err != nil {
-		return AICCPublicMessageResult{}, fmt.Errorf("保存 AICC 访客消息失败: %w", err)
-	}
 	runtimeText := text
 	if runtimeText == "" && imageID != "" {
 		runtimeText = "[访客发送了一张图片]"
@@ -415,15 +403,44 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 		return AICCPublicMessageResult{}, fmt.Errorf("转发 AICC 消息失败: %w", err)
 	}
 	replyID := newUUID()
-	if err := s.store.CreateAICCMessage(ctx, sqlc.CreateAICCMessageParams{
+	visitorMessage := sqlc.CreateAICCMessageParams{
+		ID:             newUUID(),
+		SessionID:      session.ID,
+		AgentID:        session.AgentID,
+		Direction:      domain.AICCMessageDirectionVisitor,
+		ContentType:    contentType,
+		TextContent:    nullStr(text),
+		ImageObjectKey: nullStr(image.ObjectKey),
+		ImageMime:      nullStr(image.Mime),
+		ImageSizeBytes: null.IntFromPtr(int64PtrIfValid(image.SizeBytes, imageID != "")),
+	}
+	assistantMessage := sqlc.CreateAICCMessageParams{
 		ID:          replyID,
 		SessionID:   session.ID,
 		AgentID:     session.AgentID,
 		Direction:   domain.AICCMessageDirectionAssistant,
 		ContentType: domain.AICCMessageContentTypeText,
 		TextContent: nullStr(reply),
-	}); err != nil {
-		return AICCPublicMessageResult{}, fmt.Errorf("保存 AICC 助手回复失败: %w", err)
+	}
+	// Hermes 调用已完成后再进入事务，避免外部模型请求长期占用数据库事务。
+	writeMessages := func(store AICCPublicStore) error {
+		if err := store.CreateAICCMessage(ctx, visitorMessage); err != nil {
+			return fmt.Errorf("保存 AICC 访客消息失败: %w", err)
+		}
+		if err := store.CreateAICCMessage(ctx, assistantMessage); err != nil {
+			return fmt.Errorf("保存 AICC 助手回复失败: %w", err)
+		}
+		if err := store.TouchAICCSessionLastActive(ctx, session.ID); err != nil {
+			return fmt.Errorf("刷新 AICC 会话活跃时间失败: %w", err)
+		}
+		return nil
+	}
+	if s.tx != nil {
+		if err := s.tx.WithAICCPublicTx(ctx, writeMessages); err != nil {
+			return AICCPublicMessageResult{}, err
+		}
+	} else if err := writeMessages(s.store); err != nil {
+		return AICCPublicMessageResult{}, err
 	}
 	return AICCPublicMessageResult{MessageID: replyID, Text: reply}, nil
 }

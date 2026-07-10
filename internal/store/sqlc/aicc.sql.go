@@ -1551,6 +1551,17 @@ func (q *Queries) SoftDeleteAICCAgent(ctx context.Context, id string) error {
 	return err
 }
 
+const touchAICCSessionLastActive = `-- name: TouchAICCSessionLastActive :exec
+UPDATE aicc_sessions
+SET last_active_at = now(), updated_at = now()
+WHERE id = ? AND expires_at > now()
+`
+
+func (q *Queries) TouchAICCSessionLastActive(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, touchAICCSessionLastActive, id)
+	return err
+}
+
 const updateAICCAgentProfile = `-- name: UpdateAICCAgentProfile :exec
 UPDATE aicc_agents
 SET name = ?, scenario = ?, greeting = ?, answer_boundary = ?, privacy_mode = ?,

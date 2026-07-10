@@ -109,6 +109,11 @@ UPDATE aicc_sessions
 SET privacy_consented_at = now(), updated_at = now()
 WHERE session_token = ? AND expires_at > now();
 
+-- name: TouchAICCSessionLastActive :exec
+UPDATE aicc_sessions
+SET last_active_at = now(), updated_at = now()
+WHERE id = ? AND expires_at > now();
+
 -- name: CreateAICCMessage :exec
 INSERT INTO aicc_messages (
     id, session_id, agent_id, direction, content_type, text_content,
