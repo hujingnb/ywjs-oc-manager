@@ -37,6 +37,9 @@ type fakeAICCStore struct {
 	resolved          int64
 	unresolved        int64
 	completeLead      int64
+	analyticsSummary  AICCAnalyticsSummary
+	analyticsTrend    []AICCTrendBucket
+	analyticsRegions  []AICCTopItemResult
 	topQuestions      []sqlc.ListAICCTopVisitorQuestionsByOrgRow
 	topSources        []sqlc.ListAICCTopSourceURLsByOrgRow
 	audits            []sqlc.CreateAuditLogParams
@@ -46,6 +49,7 @@ type fakeAICCStore struct {
 	updateArg         sqlc.UpdateAICCAgentProfileParams
 	statusArg         sqlc.SetAICCAgentStatusParams
 	sessionArg        sqlc.ListAICCSessionsByAgentParams
+	analyticsArg      AICCAnalyticsOptions
 	countBlockedArg   string
 	readLeadArg       sqlc.MarkAICCLeadReadParams
 	createField       sqlc.UpsertAICCLeadFieldParams
@@ -274,12 +278,12 @@ func (f *fakeAICCStore) SoftDeleteAICCAgent(_ context.Context, id string) error 
 }
 
 // ListAICCSessionsByAgent 返回指定智能体的会话列表，用于管理端运营查看。
-func (f *fakeAICCStore) ListAICCSessionsByAgent(_ context.Context, arg sqlc.ListAICCSessionsByAgentParams) ([]sqlc.AiccSession, error) {
+func (f *fakeAICCStore) ListAICCSessionsByAgent(_ context.Context, arg sqlc.ListAICCSessionsByAgentParams) ([]sqlc.ListAICCSessionsByAgentRow, error) {
 	f.sessionArg = arg
 	if f.sessionsErr != nil {
 		return nil, f.sessionsErr
 	}
-	rows := make([]sqlc.AiccSession, 0, len(f.sessions))
+	rows := make([]sqlc.ListAICCSessionsByAgentRow, 0, len(f.sessions))
 	for _, row := range f.sessions {
 		if row.AgentID != arg.AgentID {
 			continue
@@ -293,13 +297,46 @@ func (f *fakeAICCStore) ListAICCSessionsByAgent(_ context.Context, arg sqlc.List
 		if arg.Channel.Valid && row.Channel != arg.Channel.String {
 			continue
 		}
+		if arg.Region.Valid && strOrEmpty(row.Region) != arg.Region.String {
+			continue
+		}
+		if arg.StartAt.Valid && row.CreatedAt.Before(arg.StartAt.Time) {
+			continue
+		}
+		if arg.EndAt.Valid && !row.CreatedAt.Before(arg.EndAt.Time) {
+			continue
+		}
 		keyword, _ := arg.Keyword.(null.String)
 		if keyword.Valid && !strings.Contains(strOrEmpty(row.SourceUrl), keyword.String) && !strings.Contains(strOrEmpty(row.Referrer), keyword.String) {
 			continue
 		}
-		rows = append(rows, row)
+		rows = append(rows, f.toAICCSessionListRow(row))
 	}
 	return rows, nil
+}
+
+func (f *fakeAICCStore) toAICCSessionListRow(row sqlc.AiccSession) sqlc.ListAICCSessionsByAgentRow {
+	return sqlc.ListAICCSessionsByAgentRow{
+		ID:                 row.ID,
+		AgentID:            row.AgentID,
+		OrgID:              row.OrgID,
+		SessionToken:       row.SessionToken,
+		Channel:            row.Channel,
+		SourceUrl:          row.SourceUrl,
+		Referrer:           row.Referrer,
+		Region:             row.Region,
+		IpHash:             row.IpHash,
+		UserAgentHash:      row.UserAgentHash,
+		PrivacyNoticeShown: row.PrivacyNoticeShown,
+		PrivacyConsentedAt: row.PrivacyConsentedAt,
+		ResolutionStatus:   row.ResolutionStatus,
+		LeadStatus:         row.LeadStatus,
+		LastActiveAt:       row.LastActiveAt,
+		ExpiresAt:          row.ExpiresAt,
+		CreatedAt:          row.CreatedAt,
+		UpdatedAt:          row.UpdatedAt,
+		MessageCount:       int64(len(f.messages[row.ID])),
+	}
 }
 
 // GetAICCSession 按会话 ID 读取详情。
@@ -449,6 +486,53 @@ func (f *fakeAICCStore) CountAICCCompletedLeadSessions(_ context.Context, orgID 
 	return f.completeLead, nil
 }
 
+// CountAICCSessionsByStatusInRange 返回测试预置的时间范围内解决状态汇总。
+func (f *fakeAICCStore) CountAICCSessionsByStatusInRange(_ context.Context, arg sqlc.CountAICCSessionsByStatusInRangeParams) (sqlc.CountAICCSessionsByStatusInRangeRow, error) {
+	f.analyticsArg.OrgID = arg.OrgID
+	f.analyticsArg.AgentID = strOrEmpty(arg.AgentID)
+	f.analyticsArg.StartAt = arg.CreatedAt
+	f.analyticsArg.EndAt = arg.CreatedAt_2
+	return sqlc.CountAICCSessionsByStatusInRangeRow{
+		TotalSessions:      f.analyticsSummary.Sessions,
+		ResolvedSessions:   f.analyticsSummary.Resolved,
+		UnresolvedSessions: f.analyticsSummary.Unresolved,
+		UnknownSessions:    f.analyticsSummary.Unknown,
+	}, nil
+}
+
+// ListAICCSessionTrendByDay 返回日粒度趋势，并记录 service 归一化后的统计粒度。
+func (f *fakeAICCStore) ListAICCSessionTrendByDay(_ context.Context, arg sqlc.ListAICCSessionTrendByDayParams) ([]sqlc.ListAICCSessionTrendByDayRow, error) {
+	f.analyticsArg.Bucket = "day"
+	rows := make([]sqlc.ListAICCSessionTrendByDayRow, 0, len(f.analyticsTrend))
+	for _, item := range f.analyticsTrend {
+		bucket, err := time.Parse("2006-01-02", item.Bucket)
+		if err != nil {
+			bucket = time.Time{}
+		}
+		rows = append(rows, sqlc.ListAICCSessionTrendByDayRow{Bucket: bucket, Count: item.Count})
+	}
+	return rows, nil
+}
+
+// ListAICCSessionTrendByWeek 返回周粒度趋势，并记录 service 归一化后的统计粒度。
+func (f *fakeAICCStore) ListAICCSessionTrendByWeek(_ context.Context, arg sqlc.ListAICCSessionTrendByWeekParams) ([]sqlc.ListAICCSessionTrendByWeekRow, error) {
+	f.analyticsArg.Bucket = "week"
+	rows := make([]sqlc.ListAICCSessionTrendByWeekRow, 0, len(f.analyticsTrend))
+	for _, item := range f.analyticsTrend {
+		rows = append(rows, sqlc.ListAICCSessionTrendByWeekRow{Bucket: item.Bucket, Count: item.Count})
+	}
+	return rows, nil
+}
+
+// ListAICCRegionsInRange 返回时间范围内地域分布。
+func (f *fakeAICCStore) ListAICCRegionsInRange(_ context.Context, arg sqlc.ListAICCRegionsInRangeParams) ([]sqlc.ListAICCRegionsInRangeRow, error) {
+	rows := make([]sqlc.ListAICCRegionsInRangeRow, 0, len(f.analyticsRegions))
+	for _, item := range f.analyticsRegions {
+		rows = append(rows, sqlc.ListAICCRegionsInRangeRow{Label: item.Label, Count: item.Count})
+	}
+	return rows, nil
+}
+
 // ListAICCTopVisitorQuestionsByOrg 返回测试预置的热门问题。
 func (f *fakeAICCStore) ListAICCTopVisitorQuestionsByOrg(_ context.Context, arg sqlc.ListAICCTopVisitorQuestionsByOrgParams) ([]sqlc.ListAICCTopVisitorQuestionsByOrgRow, error) {
 	return f.topQuestions, nil
@@ -584,6 +668,11 @@ func seededAICCStore() *fakeAICCStore {
 		resolved:     2,
 		unresolved:   1,
 		completeLead: 1,
+		analyticsSummary: AICCAnalyticsSummary{
+			Sessions:   3,
+			Resolved:   2,
+			Unresolved: 1,
+		},
 		topQuestions: []sqlc.ListAICCTopVisitorQuestionsByOrgRow{
 			{Question: "报价多少", Count: 4},
 			{Question: "如何开票", Count: 2},
@@ -1115,7 +1204,7 @@ func TestAICCServiceReplaceLeadFields(t *testing.T) {
 func TestAICCServiceAnalyticsUsesViewPermission(t *testing.T) {
 	svc := NewAICCService(seededAICCStore(), &fakeAICCHiddenAppCreator{})
 
-	result, err := svc.Analytics(context.Background(), aiccOrgAdmin(), "")
+	result, err := svc.Analytics(context.Background(), aiccOrgAdmin(), AICCAnalyticsOptions{})
 
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), result.TodaySessions)
@@ -1125,4 +1214,67 @@ func TestAICCServiceAnalyticsUsesViewPermission(t *testing.T) {
 	assert.Equal(t, int64(1), result.CompletedLeadSessions)
 	assert.Equal(t, []AICCTopItemResult{{Label: "报价多少", Count: 4}, {Label: "如何开票", Count: 2}}, result.TopQuestions)
 	assert.Equal(t, []AICCTopItemResult{{Label: "https://example.com/pricing", Count: 3}}, result.TopSources)
+}
+
+// TestAICCAnalyticsWithRangeAndBucket 覆盖统计看板：
+// service 必须把时间范围和 day/week 粒度传给 store，并返回趋势、地域和未解决率。
+func TestAICCAnalyticsWithRangeAndBucket(t *testing.T) {
+	start := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 8, 0, 0, 0, 0, time.UTC)
+	store := seededAICCStore()
+	store.analyticsTrend = []AICCTrendBucket{{Bucket: "2026-07-01", Count: 3}}
+	store.analyticsRegions = []AICCTopItemResult{{Label: "上海", Count: 2}}
+	store.analyticsSummary = AICCAnalyticsSummary{Sessions: 5, Resolved: 2, Unresolved: 1, Unknown: 2}
+	svc := NewAICCService(store, nil)
+
+	result, err := svc.Analytics(context.Background(), aiccOrgAdmin(), AICCAnalyticsOptions{
+		OrgID: "org-1", StartAt: start, EndAt: end, Bucket: "day",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "org-1", store.analyticsArg.OrgID)
+	assert.Equal(t, start, store.analyticsArg.StartAt)
+	assert.Equal(t, end, store.analyticsArg.EndAt)
+	assert.Equal(t, "day", store.analyticsArg.Bucket)
+	assert.Equal(t, int64(5), result.TotalSessions)
+	assert.Equal(t, int64(2), result.UnknownSessions)
+	assert.Equal(t, float64(1)/float64(3), result.UnresolvedRate)
+	assert.Equal(t, []AICCTrendBucket{{Bucket: "2026-07-01", Count: 3}}, result.SessionTrend)
+	require.Len(t, result.Regions, 1)
+	assert.Equal(t, "上海", result.Regions[0].Label)
+}
+
+// TestAICCAnalyticsRejectsInvalidBucket 覆盖统计粒度校验：
+// 只允许空值、day 或 week，避免未知粒度落入错误 SQL 分支。
+func TestAICCAnalyticsRejectsInvalidBucket(t *testing.T) {
+	svc := NewAICCService(seededAICCStore(), nil)
+
+	_, err := svc.Analytics(context.Background(), aiccOrgAdmin(), AICCAnalyticsOptions{Bucket: "month"})
+
+	require.ErrorIs(t, err, ErrInvalidArgument)
+}
+
+// TestAICCAnalyticsRejectsRangeOver180Days 覆盖统计时间窗口上限：
+// 后台统计最多查询 180 天，避免运营页面触发大范围聚合。
+func TestAICCAnalyticsRejectsRangeOver180Days(t *testing.T) {
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(181 * 24 * time.Hour)
+	svc := NewAICCService(seededAICCStore(), nil)
+
+	_, err := svc.Analytics(context.Background(), aiccOrgAdmin(), AICCAnalyticsOptions{StartAt: start, EndAt: end})
+
+	require.ErrorIs(t, err, ErrInvalidArgument)
+}
+
+// TestAICCAnalyticsZeroDenominatorRate 覆盖未解决率边界：
+// 当已解决与未解决会话都为 0 时，未解决率应返回 0 避免 NaN。
+func TestAICCAnalyticsZeroDenominatorRate(t *testing.T) {
+	store := seededAICCStore()
+	store.analyticsSummary = AICCAnalyticsSummary{Sessions: 2, Unknown: 2}
+	svc := NewAICCService(store, nil)
+
+	result, err := svc.Analytics(context.Background(), aiccOrgAdmin(), AICCAnalyticsOptions{})
+
+	require.NoError(t, err)
+	assert.Equal(t, float64(0), result.UnresolvedRate)
 }

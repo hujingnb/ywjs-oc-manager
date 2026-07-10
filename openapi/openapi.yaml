@@ -1550,9 +1550,21 @@ components:
         completed_lead_sessions:
           description: CompletedLeadSessions 是已完成留资的会话数。
           type: integer
+        regions:
+          description: Regions 是统计时间范围内的访客地域分布。
+          items:
+            $ref: '#/components/schemas/service.AICCTopItemResult'
+          type: array
+          uniqueItems: false
         resolved_sessions:
           description: ResolvedSessions 是当前企业已标记解决的会话数。
           type: integer
+        session_trend:
+          description: SessionTrend 是按日或周聚合的会话趋势。
+          items:
+            $ref: '#/components/schemas/service.AICCTrendBucket'
+          type: array
+          uniqueItems: false
         today_sessions:
           description: TodaySessions 是当前企业今日会话数。
           type: integer
@@ -1568,9 +1580,18 @@ components:
             $ref: '#/components/schemas/service.AICCTopItemResult'
           type: array
           uniqueItems: false
+        total_sessions:
+          description: TotalSessions 是统计时间范围内的会话总数。
+          type: integer
+        unknown_sessions:
+          description: UnknownSessions 是统计时间范围内尚未判定解决状态的会话数。
+          type: integer
         unread_leads:
           description: UnreadLeads 是当前企业未读线索数。
           type: integer
+        unresolved_rate:
+          description: UnresolvedRate 是未解决会话在已判定会话中的占比；没有已判定会话时为 0。
+          type: number
         unresolved_sessions:
           description: UnresolvedSessions 是当前企业已标记未解决的会话数。
           type: integer
@@ -1810,11 +1831,17 @@ components:
         lead_status:
           description: LeadStatus 是当前留资状态。
           type: string
+        message_count:
+          description: MessageCount 是当前会话下的消息数量，用于运营列表快速判断会话深度。
+          type: integer
         org_id:
           description: OrgID 是会话所属企业。
           type: string
         referrer:
           description: Referrer 是浏览器 referrer，可为空。
+          type: string
+        region:
+          description: Region 是访客地域，空值表示公开端未能解析地域。
           type: string
         resolution_status:
           description: ResolutionStatus 是当前解决状态。
@@ -1834,6 +1861,15 @@ components:
         label:
           description: Label 是问题文本或来源页面。
           type: string
+      type: object
+    service.AICCTrendBucket:
+      properties:
+        bucket:
+          description: Bucket 是日维度日期或 ISO 周维度标签。
+          type: string
+        count:
+          description: Count 是该时间桶内会话数量。
+          type: integer
       type: object
     service.AppResult:
       properties:
@@ -3437,6 +3473,21 @@ paths:
         name: channel
         schema:
           type: string
+      - description: 访客地域
+        in: query
+        name: region
+        schema:
+          type: string
+      - description: 创建时间下界（RFC3339）
+        in: query
+        name: start_at
+        schema:
+          type: string
+      - description: 创建时间上界（RFC3339）
+        in: query
+        name: end_at
+        schema:
+          type: string
       - description: 来源 URL 或 referrer 关键词
         in: query
         name: keyword
@@ -3714,11 +3765,31 @@ paths:
       - aicc
   /aicc/analytics:
     get:
-      description: 返回今日会话数和未读线索数
+      description: 返回会话、线索、趋势、地域、来源页和高频问题统计
       parameters:
       - description: 企业 ID（平台管理员排障使用）
         in: query
         name: org_id
+        schema:
+          type: string
+      - description: 智能体 ID
+        in: query
+        name: agent_id
+        schema:
+          type: string
+      - description: 统计开始时间（RFC3339）
+        in: query
+        name: start_at
+        schema:
+          type: string
+      - description: 统计结束时间（RFC3339）
+        in: query
+        name: end_at
+        schema:
+          type: string
+      - description: 趋势粒度：day / week
+        in: query
+        name: bucket
         schema:
           type: string
       responses:

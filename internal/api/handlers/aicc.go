@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -39,7 +41,7 @@ type aiccService interface {
 	ReplaceLeadFields(ctx context.Context, principal auth.Principal, agentID string, fields []service.AICCLeadFieldInput) ([]service.AICCLeadFieldResult, error)
 	GetAgentKnowledge(ctx context.Context, principal auth.Principal, agentID string) (service.AICCKnowledgeResult, error)
 	ReplaceAgentKnowledge(ctx context.Context, principal auth.Principal, agentID string, input service.AICCKnowledgeInput) (service.AICCKnowledgeResult, error)
-	Analytics(ctx context.Context, principal auth.Principal, orgID string) (service.AICCAnalyticsResult, error)
+	Analytics(ctx context.Context, principal auth.Principal, options service.AICCAnalyticsOptions) (service.AICCAnalyticsResult, error)
 }
 
 // NewAICCHandler 创建 AICC 管理 handler。
@@ -385,6 +387,9 @@ func (h *AICCHandler) ReplaceAgentKnowledge(c *gin.Context) {
 // @Param        resolution_status  query  string  false  "解决状态：resolved / unresolved / unknown"
 // @Param        lead_status        query  string  false  "留资状态：pending / complete / skipped"
 // @Param        channel            query  string  false  "渠道：web_link / web_widget / voice"
+// @Param        region             query  string  false  "访客地域"
+// @Param        start_at           query  string  false  "创建时间下界（RFC3339）"
+// @Param        end_at             query  string  false  "创建时间上界（RFC3339）"
 // @Param        keyword            query  string  false  "来源 URL 或 referrer 关键词"
 // @Param        limit    query     int     false  "每页条数（默认 50）"
 // @Param        offset   query     int     false  "分页偏移（默认 0）"
@@ -395,10 +400,21 @@ func (h *AICCHandler) ReplaceAgentKnowledge(c *gin.Context) {
 // @Failure      500      {object}  ErrorResponse
 // @Router       /aicc/agents/{agentId}/sessions [get]
 func (h *AICCHandler) ListSessions(c *gin.Context) {
+	startAt, ok := queryTime(c, "start_at")
+	if !ok {
+		return
+	}
+	endAt, ok := queryTime(c, "end_at")
+	if !ok {
+		return
+	}
 	results, err := h.service.ListSessions(c.Request.Context(), principalFromCtx(c), c.Param("agentId"), service.AICCSessionListOptions{
 		ResolutionStatus: c.Query("resolution_status"),
 		LeadStatus:       c.Query("lead_status"),
 		Channel:          c.Query("channel"),
+		Region:           c.Query("region"),
+		StartAt:          startAt,
+		EndAt:            endAt,
 		Keyword:          c.Query("keyword"),
 		Limit:            queryInt32(c, "limit", 50),
 		Offset:           queryInt32(c, "offset", 0),
@@ -601,18 +617,36 @@ func (h *AICCHandler) MarkLeadRead(c *gin.Context) {
 // Analytics 返回 AICC 运营统计。
 //
 // @Summary      AICC 运营统计
-// @Description  返回今日会话数和未读线索数
+// @Description  返回会话、线索、趋势、地域、来源页和高频问题统计
 // @Tags         aicc
 // @Produce      json
 // @Security     BearerAuth
-// @Param        org_id  query     string  false  "企业 ID（平台管理员排障使用）"
+// @Param        org_id    query     string  false  "企业 ID（平台管理员排障使用）"
+// @Param        agent_id  query     string  false  "智能体 ID"
+// @Param        start_at  query     string  false  "统计开始时间（RFC3339）"
+// @Param        end_at    query     string  false  "统计结束时间（RFC3339）"
+// @Param        bucket    query     string  false  "趋势粒度：day / week"
 // @Success      200     {object}  map[string]service.AICCAnalyticsResult
 // @Failure      401     {object}  ErrorResponse
 // @Failure      403     {object}  ErrorResponse
 // @Failure      500     {object}  ErrorResponse
 // @Router       /aicc/analytics [get]
 func (h *AICCHandler) Analytics(c *gin.Context) {
-	result, err := h.service.Analytics(c.Request.Context(), principalFromCtx(c), c.Query("org_id"))
+	startAt, ok := queryTime(c, "start_at")
+	if !ok {
+		return
+	}
+	endAt, ok := queryTime(c, "end_at")
+	if !ok {
+		return
+	}
+	result, err := h.service.Analytics(c.Request.Context(), principalFromCtx(c), service.AICCAnalyticsOptions{
+		OrgID:   c.Query("org_id"),
+		AgentID: c.Query("agent_id"),
+		StartAt: startAt,
+		EndAt:   endAt,
+		Bucket:  c.DefaultQuery("bucket", "day"),
+	})
 	if err != nil {
 		writeServiceError(c, err)
 		return
@@ -691,6 +725,19 @@ func safeCSVCell(value string) string {
 		return "'" + value
 	}
 	return value
+}
+
+func queryTime(c *gin.Context, key string) (time.Time, bool) {
+	value := strings.TrimSpace(c.Query(key))
+	if value == "" {
+		return time.Time{}, true
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		writeServiceError(c, fmt.Errorf("%w: %s 必须使用 RFC3339 时间格式", service.ErrInvalidArgument, key))
+		return time.Time{}, false
+	}
+	return parsed, true
 }
 
 func toAICCAgentInput(req CreateAICCAgentRequest) service.AICCAgentInput {

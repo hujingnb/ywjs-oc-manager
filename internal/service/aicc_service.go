@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
@@ -24,6 +25,10 @@ const (
 	aiccMaxMessageLimitPerSession int32 = 1000
 	// aiccMaxSessionResumeTTLMin 必须与 aicc_agent_settings CHECK 约束保持一致。
 	aiccMaxSessionResumeTTLMin int32 = 1440
+	// aiccAnalyticsDefaultRange 是统计页默认观察窗口，兼容旧 analytics 接口无筛选参数的调用。
+	aiccAnalyticsDefaultRange = 7 * 24 * time.Hour
+	// aiccAnalyticsMaxRange 限制运营聚合最长窗口，避免单次请求扫描过大的会话范围。
+	aiccAnalyticsMaxRange = 180 * 24 * time.Hour
 )
 
 // AICCStore 是 AICC 管理侧依赖的数据访问接口。
@@ -59,7 +64,7 @@ type AICCStore interface {
 	// SoftDeleteAICCAgent 软删除智能体，保留历史会话外键。
 	SoftDeleteAICCAgent(ctx context.Context, id string) error
 	// ListAICCSessionsByAgent 列出指定智能体的访客会话。
-	ListAICCSessionsByAgent(ctx context.Context, arg sqlc.ListAICCSessionsByAgentParams) ([]sqlc.AiccSession, error)
+	ListAICCSessionsByAgent(ctx context.Context, arg sqlc.ListAICCSessionsByAgentParams) ([]sqlc.ListAICCSessionsByAgentRow, error)
 	// GetAICCSession 按 ID 读取访客会话详情。
 	GetAICCSession(ctx context.Context, id string) (sqlc.AiccSession, error)
 	// ListAICCMessagesBySession 列出会话消息镜像。
@@ -88,6 +93,14 @@ type AICCStore interface {
 	CountAICCSessionsByResolution(ctx context.Context, arg sqlc.CountAICCSessionsByResolutionParams) (int64, error)
 	// CountAICCCompletedLeadSessions 统计已完成留资的会话数。
 	CountAICCCompletedLeadSessions(ctx context.Context, orgID string) (int64, error)
+	// CountAICCSessionsByStatusInRange 统计指定时间范围内不同解决状态的会话数量。
+	CountAICCSessionsByStatusInRange(ctx context.Context, arg sqlc.CountAICCSessionsByStatusInRangeParams) (sqlc.CountAICCSessionsByStatusInRangeRow, error)
+	// ListAICCSessionTrendByDay 按日聚合指定时间范围内的会话趋势。
+	ListAICCSessionTrendByDay(ctx context.Context, arg sqlc.ListAICCSessionTrendByDayParams) ([]sqlc.ListAICCSessionTrendByDayRow, error)
+	// ListAICCSessionTrendByWeek 按 ISO 周聚合指定时间范围内的会话趋势。
+	ListAICCSessionTrendByWeek(ctx context.Context, arg sqlc.ListAICCSessionTrendByWeekParams) ([]sqlc.ListAICCSessionTrendByWeekRow, error)
+	// ListAICCRegionsInRange 统计指定时间范围内的访客地域分布。
+	ListAICCRegionsInRange(ctx context.Context, arg sqlc.ListAICCRegionsInRangeParams) ([]sqlc.ListAICCRegionsInRangeRow, error)
 	// ListAICCTopVisitorQuestionsByOrg 统计访客高频问题。
 	ListAICCTopVisitorQuestionsByOrg(ctx context.Context, arg sqlc.ListAICCTopVisitorQuestionsByOrgParams) ([]sqlc.ListAICCTopVisitorQuestionsByOrgRow, error)
 	// ListAICCTopSourceURLsByOrg 统计访客来源页面分布。
@@ -542,6 +555,9 @@ func (s *AICCService) ListSessions(ctx context.Context, principal auth.Principal
 		ResolutionStatus: nullStr(filter.ResolutionStatus),
 		LeadStatus:       nullStr(filter.LeadStatus),
 		Channel:          nullStr(filter.Channel),
+		Region:           nullStr(filter.Region),
+		StartAt:          nullTime(filter.StartAt),
+		EndAt:            nullTime(filter.EndAt),
 		Keyword:          nullStr(filter.Keyword),
 		Limit:            filter.Limit,
 		Offset:           filter.Offset,
@@ -551,7 +567,7 @@ func (s *AICCService) ListSessions(ctx context.Context, principal auth.Principal
 	}
 	results := make([]AICCSessionResult, 0, len(rows))
 	for _, row := range rows {
-		results = append(results, toAICCSessionResult(row))
+		results = append(results, toAICCSessionListResult(row))
 	}
 	return results, nil
 }
@@ -717,48 +733,77 @@ func (s *AICCService) ReplaceLeadFields(ctx context.Context, principal auth.Prin
 	return s.ListLeadFields(ctx, principal, agentID)
 }
 
-// Analytics 返回 AICC 运营统计卡片数据。
-func (s *AICCService) Analytics(ctx context.Context, principal auth.Principal, orgID string) (AICCAnalyticsResult, error) {
-	if orgID == "" {
-		orgID = principal.OrgID
+// Analytics 返回 AICC 运营统计卡片和运营看板聚合数据。
+func (s *AICCService) Analytics(ctx context.Context, principal auth.Principal, options AICCAnalyticsOptions) (AICCAnalyticsResult, error) {
+	filter, err := normalizeAICCAnalyticsOptions(options, time.Now())
+	if err != nil {
+		return AICCAnalyticsResult{}, err
 	}
-	if !auth.CanViewAICC(principal, orgID) {
+	if filter.OrgID == "" {
+		filter.OrgID = principal.OrgID
+	}
+	if !auth.CanViewAICC(principal, filter.OrgID) {
 		return AICCAnalyticsResult{}, ErrForbidden
 	}
-	today, err := s.store.CountAICCTodaySessions(ctx, orgID)
+	today, err := s.store.CountAICCTodaySessions(ctx, filter.OrgID)
 	if err != nil {
 		return AICCAnalyticsResult{}, fmt.Errorf("统计 AICC 今日会话失败: %w", err)
 	}
-	unread, err := s.store.CountAICCUnreadLeads(ctx, orgID)
+	unread, err := s.store.CountAICCUnreadLeads(ctx, filter.OrgID)
 	if err != nil {
 		return AICCAnalyticsResult{}, fmt.Errorf("统计 AICC 未读线索失败: %w", err)
 	}
-	resolved, err := s.store.CountAICCSessionsByResolution(ctx, sqlc.CountAICCSessionsByResolutionParams{OrgID: orgID, ResolutionStatus: domain.AICCResolutionResolved})
+	summary, err := s.store.CountAICCSessionsByStatusInRange(ctx, sqlc.CountAICCSessionsByStatusInRangeParams{
+		OrgID:       filter.OrgID,
+		AgentID:     nullStr(filter.AgentID),
+		CreatedAt:   filter.StartAt,
+		CreatedAt_2: filter.EndAt,
+	})
 	if err != nil {
-		return AICCAnalyticsResult{}, fmt.Errorf("统计 AICC 已解决会话失败: %w", err)
+		return AICCAnalyticsResult{}, fmt.Errorf("统计 AICC 时间范围会话状态失败: %w", err)
 	}
-	unresolved, err := s.store.CountAICCSessionsByResolution(ctx, sqlc.CountAICCSessionsByResolutionParams{OrgID: orgID, ResolutionStatus: domain.AICCResolutionUnresolved})
-	if err != nil {
-		return AICCAnalyticsResult{}, fmt.Errorf("统计 AICC 未解决会话失败: %w", err)
-	}
-	completedLeads, err := s.store.CountAICCCompletedLeadSessions(ctx, orgID)
+	completedLeads, err := s.store.CountAICCCompletedLeadSessions(ctx, filter.OrgID)
 	if err != nil {
 		return AICCAnalyticsResult{}, fmt.Errorf("统计 AICC 已留资会话失败: %w", err)
 	}
-	questions, err := s.store.ListAICCTopVisitorQuestionsByOrg(ctx, sqlc.ListAICCTopVisitorQuestionsByOrgParams{OrgID: orgID, Limit: 5})
+	trend, err := s.listAICCSessionTrend(ctx, filter)
+	if err != nil {
+		return AICCAnalyticsResult{}, err
+	}
+	regions, err := s.store.ListAICCRegionsInRange(ctx, sqlc.ListAICCRegionsInRangeParams{
+		OrgID:       filter.OrgID,
+		AgentID:     nullStr(filter.AgentID),
+		CreatedAt:   filter.StartAt,
+		CreatedAt_2: filter.EndAt,
+		Limit:       10,
+	})
+	if err != nil {
+		return AICCAnalyticsResult{}, fmt.Errorf("统计 AICC 地域分布失败: %w", err)
+	}
+	questions, err := s.store.ListAICCTopVisitorQuestionsByOrg(ctx, sqlc.ListAICCTopVisitorQuestionsByOrgParams{OrgID: filter.OrgID, Limit: 5})
 	if err != nil {
 		return AICCAnalyticsResult{}, fmt.Errorf("统计 AICC 热门问题失败: %w", err)
 	}
-	sources, err := s.store.ListAICCTopSourceURLsByOrg(ctx, sqlc.ListAICCTopSourceURLsByOrgParams{OrgID: orgID, Limit: 5})
+	sources, err := s.store.ListAICCTopSourceURLsByOrg(ctx, sqlc.ListAICCTopSourceURLsByOrgParams{OrgID: filter.OrgID, Limit: 5})
 	if err != nil {
 		return AICCAnalyticsResult{}, fmt.Errorf("统计 AICC 来源页面失败: %w", err)
 	}
+	denominator := summary.ResolvedSessions + summary.UnresolvedSessions
+	var unresolvedRate float64
+	if denominator > 0 {
+		unresolvedRate = float64(summary.UnresolvedSessions) / float64(denominator)
+	}
 	return AICCAnalyticsResult{
 		TodaySessions:         today,
+		TotalSessions:         summary.TotalSessions,
 		UnreadLeads:           unread,
-		ResolvedSessions:      resolved,
-		UnresolvedSessions:    unresolved,
+		ResolvedSessions:      summary.ResolvedSessions,
+		UnresolvedSessions:    summary.UnresolvedSessions,
+		UnknownSessions:       summary.UnknownSessions,
+		UnresolvedRate:        unresolvedRate,
 		CompletedLeadSessions: completedLeads,
+		SessionTrend:          trend,
+		Regions:               toAICCRegionResults(regions),
 		TopQuestions:          toAICCTopQuestionResults(questions),
 		TopSources:            toAICCTopSourceResults(sources),
 	}, nil
@@ -848,6 +893,9 @@ func normalizeAICCSessionListOptions(options AICCSessionListOptions) (AICCSessio
 		ResolutionStatus: strings.TrimSpace(options.ResolutionStatus),
 		LeadStatus:       strings.TrimSpace(options.LeadStatus),
 		Channel:          strings.TrimSpace(options.Channel),
+		Region:           strings.TrimSpace(options.Region),
+		StartAt:          options.StartAt,
+		EndAt:            options.EndAt,
 		Keyword:          strings.TrimSpace(options.Keyword),
 		Limit:            limit,
 		Offset:           offset,
@@ -876,7 +924,70 @@ func normalizeAICCSessionListOptions(options AICCSessionListOptions) (AICCSessio
 	if len(normalized.Keyword) > 200 {
 		return AICCSessionListOptions{}, fmt.Errorf("%w: AICC 会话搜索关键词过长", ErrInvalidArgument)
 	}
+	if !normalized.StartAt.IsZero() && !normalized.EndAt.IsZero() && !normalized.StartAt.Before(normalized.EndAt) {
+		return AICCSessionListOptions{}, fmt.Errorf("%w: AICC 会话筛选开始时间必须早于结束时间", ErrInvalidArgument)
+	}
 	return normalized, nil
+}
+
+func normalizeAICCAnalyticsOptions(options AICCAnalyticsOptions, now time.Time) (AICCAnalyticsOptions, error) {
+	bucket := strings.TrimSpace(options.Bucket)
+	if bucket == "" {
+		bucket = "day"
+	}
+	switch bucket {
+	case "day", "week":
+	default:
+		return AICCAnalyticsOptions{}, fmt.Errorf("%w: AICC 统计粒度只能是 day 或 week", ErrInvalidArgument)
+	}
+	end := options.EndAt
+	if end.IsZero() {
+		end = now
+	}
+	start := options.StartAt
+	if start.IsZero() {
+		start = end.Add(-aiccAnalyticsDefaultRange)
+	}
+	if !start.Before(end) {
+		return AICCAnalyticsOptions{}, fmt.Errorf("%w: AICC 统计开始时间必须早于结束时间", ErrInvalidArgument)
+	}
+	if end.Sub(start) > aiccAnalyticsMaxRange {
+		return AICCAnalyticsOptions{}, fmt.Errorf("%w: AICC 统计时间范围不能超过 180 天", ErrInvalidArgument)
+	}
+	return AICCAnalyticsOptions{
+		OrgID:   strings.TrimSpace(options.OrgID),
+		AgentID: strings.TrimSpace(options.AgentID),
+		StartAt: start,
+		EndAt:   end,
+		Bucket:  bucket,
+	}, nil
+}
+
+func (s *AICCService) listAICCSessionTrend(ctx context.Context, filter AICCAnalyticsOptions) ([]AICCTrendBucket, error) {
+	switch filter.Bucket {
+	case "week":
+		rows, err := s.store.ListAICCSessionTrendByWeek(ctx, sqlc.ListAICCSessionTrendByWeekParams{
+			OrgID:       filter.OrgID,
+			AgentID:     nullStr(filter.AgentID),
+			CreatedAt:   filter.StartAt,
+			CreatedAt_2: filter.EndAt,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("统计 AICC 周趋势失败: %w", err)
+		}
+		return toAICCWeeklyTrend(rows), nil
+	default:
+		rows, err := s.store.ListAICCSessionTrendByDay(ctx, sqlc.ListAICCSessionTrendByDayParams{
+			OrgID:       filter.OrgID,
+			AgentID:     nullStr(filter.AgentID),
+			CreatedAt:   filter.StartAt,
+			CreatedAt_2: filter.EndAt,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("统计 AICC 日趋势失败: %w", err)
+		}
+		return toAICCDailyTrend(rows), nil
+	}
 }
 
 func (s *AICCService) recordAICCAudit(ctx context.Context, store AICCStore, principal auth.Principal, orgID, agentID, action string, metadata map[string]any) error {
@@ -1129,8 +1240,27 @@ func toAICCSessionResult(row sqlc.AiccSession) AICCSessionResult {
 		AgentID:          row.AgentID,
 		OrgID:            row.OrgID,
 		Channel:          row.Channel,
+		Region:           strOrEmpty(row.Region),
 		SourceURL:        strOrEmpty(row.SourceUrl),
 		Referrer:         strOrEmpty(row.Referrer),
+		ResolutionStatus: row.ResolutionStatus,
+		LeadStatus:       row.LeadStatus,
+		LastActiveAt:     row.LastActiveAt,
+		CreatedAt:        row.CreatedAt,
+		UpdatedAt:        row.UpdatedAt,
+	}
+}
+
+func toAICCSessionListResult(row sqlc.ListAICCSessionsByAgentRow) AICCSessionResult {
+	return AICCSessionResult{
+		ID:               row.ID,
+		AgentID:          row.AgentID,
+		OrgID:            row.OrgID,
+		Channel:          row.Channel,
+		Region:           strOrEmpty(row.Region),
+		SourceURL:        strOrEmpty(row.SourceUrl),
+		Referrer:         strOrEmpty(row.Referrer),
+		MessageCount:     row.MessageCount,
 		ResolutionStatus: row.ResolutionStatus,
 		LeadStatus:       row.LeadStatus,
 		LastActiveAt:     row.LastActiveAt,
@@ -1237,6 +1367,30 @@ func toAICCTopSourceResults(rows []sqlc.ListAICCTopSourceURLsByOrgRow) []AICCTop
 	results := make([]AICCTopItemResult, 0, len(rows))
 	for _, row := range rows {
 		results = append(results, AICCTopItemResult{Label: strOrEmpty(row.SourceUrl), Count: row.Count})
+	}
+	return results
+}
+
+func toAICCDailyTrend(rows []sqlc.ListAICCSessionTrendByDayRow) []AICCTrendBucket {
+	results := make([]AICCTrendBucket, 0, len(rows))
+	for _, row := range rows {
+		results = append(results, AICCTrendBucket{Bucket: row.Bucket.Format("2006-01-02"), Count: row.Count})
+	}
+	return results
+}
+
+func toAICCWeeklyTrend(rows []sqlc.ListAICCSessionTrendByWeekRow) []AICCTrendBucket {
+	results := make([]AICCTrendBucket, 0, len(rows))
+	for _, row := range rows {
+		results = append(results, AICCTrendBucket{Bucket: row.Bucket, Count: row.Count})
+	}
+	return results
+}
+
+func toAICCRegionResults(rows []sqlc.ListAICCRegionsInRangeRow) []AICCTopItemResult {
+	results := make([]AICCTopItemResult, 0, len(rows))
+	for _, row := range rows {
+		results = append(results, AICCTopItemResult{Label: fmt.Sprint(row.Label), Count: row.Count})
 	}
 	return results
 }

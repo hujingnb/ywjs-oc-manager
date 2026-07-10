@@ -784,6 +784,12 @@ export interface paths {
                     lead_status?: string;
                     /** @description 渠道：web_link / web_widget / voice */
                     channel?: string;
+                    /** @description 访客地域 */
+                    region?: string;
+                    /** @description 创建时间下界（RFC3339） */
+                    start_at?: string;
+                    /** @description 创建时间上界（RFC3339） */
+                    end_at?: string;
                     /** @description 来源 URL 或 referrer 关键词 */
                     keyword?: string;
                     /** @description 每页条数（默认 50） */
@@ -1202,13 +1208,21 @@ export interface paths {
         };
         /**
          * AICC 运营统计
-         * @description 返回今日会话数和未读线索数
+         * @description 返回会话、线索、趋势、地域、来源页和高频问题统计
          */
         get: {
             parameters: {
                 query?: {
                     /** @description 企业 ID（平台管理员排障使用） */
                     org_id?: string;
+                    /** @description 智能体 ID */
+                    agent_id?: string;
+                    /** @description 统计开始时间（RFC3339） */
+                    start_at?: string;
+                    /** @description 统计结束时间（RFC3339） */
+                    end_at?: string;
+                    /** @description 趋势粒度：day / week */
+                    bucket?: string;
                 };
                 header?: never;
                 path?: never;
@@ -16012,16 +16026,26 @@ export interface components {
         "service.AICCAnalyticsResult": {
             /** @description CompletedLeadSessions 是已完成留资的会话数。 */
             completed_lead_sessions?: number;
+            /** @description Regions 是统计时间范围内的访客地域分布。 */
+            regions?: components["schemas"]["service.AICCTopItemResult"][];
             /** @description ResolvedSessions 是当前企业已标记解决的会话数。 */
             resolved_sessions?: number;
+            /** @description SessionTrend 是按日或周聚合的会话趋势。 */
+            session_trend?: components["schemas"]["service.AICCTrendBucket"][];
             /** @description TodaySessions 是当前企业今日会话数。 */
             today_sessions?: number;
             /** @description TopQuestions 是访客高频问题列表。 */
             top_questions?: components["schemas"]["service.AICCTopItemResult"][];
             /** @description TopSources 是访客来源页面分布。 */
             top_sources?: components["schemas"]["service.AICCTopItemResult"][];
+            /** @description TotalSessions 是统计时间范围内的会话总数。 */
+            total_sessions?: number;
+            /** @description UnknownSessions 是统计时间范围内尚未判定解决状态的会话数。 */
+            unknown_sessions?: number;
             /** @description UnreadLeads 是当前企业未读线索数。 */
             unread_leads?: number;
+            /** @description UnresolvedRate 是未解决会话在已判定会话中的占比；没有已判定会话时为 0。 */
+            unresolved_rate?: number;
             /** @description UnresolvedSessions 是当前企业已标记未解决的会话数。 */
             unresolved_sessions?: number;
         };
@@ -16161,10 +16185,14 @@ export interface components {
             last_active_at?: string;
             /** @description LeadStatus 是当前留资状态。 */
             lead_status?: string;
+            /** @description MessageCount 是当前会话下的消息数量，用于运营列表快速判断会话深度。 */
+            message_count?: number;
             /** @description OrgID 是会话所属企业。 */
             org_id?: string;
             /** @description Referrer 是浏览器 referrer，可为空。 */
             referrer?: string;
+            /** @description Region 是访客地域，空值表示公开端未能解析地域。 */
+            region?: string;
             /** @description ResolutionStatus 是当前解决状态。 */
             resolution_status?: string;
             /** @description SourceURL 是访客进入会话时所在页面，可为空。 */
@@ -16177,6 +16205,12 @@ export interface components {
             count?: number;
             /** @description Label 是问题文本或来源页面。 */
             label?: string;
+        };
+        "service.AICCTrendBucket": {
+            /** @description Bucket 是日维度日期或 ISO 周维度标签。 */
+            bucket?: string;
+            /** @description Count 是该时间桶内会话数量。 */
+            count?: number;
         };
         "service.AppResult": {
             api_key_status?: string;

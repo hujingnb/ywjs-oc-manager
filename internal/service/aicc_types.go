@@ -81,10 +81,14 @@ type AICCSessionResult struct {
 	OrgID string `json:"org_id"`
 	// Channel 是访客入口渠道。
 	Channel string `json:"channel"`
+	// Region 是访客地域，空值表示公开端未能解析地域。
+	Region string `json:"region,omitempty"`
 	// SourceURL 是访客进入会话时所在页面，可为空。
 	SourceURL string `json:"source_url,omitempty"`
 	// Referrer 是浏览器 referrer，可为空。
 	Referrer string `json:"referrer,omitempty"`
+	// MessageCount 是当前会话下的消息数量，用于运营列表快速判断会话深度。
+	MessageCount int64 `json:"message_count"`
 	// ResolutionStatus 是当前解决状态。
 	ResolutionStatus string `json:"resolution_status"`
 	// LeadStatus 是当前留资状态。
@@ -141,6 +145,12 @@ type AICCSessionListOptions struct {
 	LeadStatus string
 	// Channel 按访客入口渠道过滤，空值表示不限。
 	Channel string
+	// Region 按公开端解析出的访客地域过滤，空值表示不限。
+	Region string
+	// StartAt 限制会话创建时间下界，零值表示不限。
+	StartAt time.Time
+	// EndAt 限制会话创建时间上界，零值表示不限。
+	EndAt time.Time
 	// Keyword 在来源 URL 和 referrer 中做模糊搜索。
 	Keyword string
 	// Limit 是分页条数。
@@ -279,18 +289,62 @@ type AICCAgentSettingsResult struct {
 type AICCAnalyticsResult struct {
 	// TodaySessions 是当前企业今日会话数。
 	TodaySessions int64 `json:"today_sessions"`
+	// TotalSessions 是统计时间范围内的会话总数。
+	TotalSessions int64 `json:"total_sessions"`
 	// UnreadLeads 是当前企业未读线索数。
 	UnreadLeads int64 `json:"unread_leads"`
 	// ResolvedSessions 是当前企业已标记解决的会话数。
 	ResolvedSessions int64 `json:"resolved_sessions"`
 	// UnresolvedSessions 是当前企业已标记未解决的会话数。
 	UnresolvedSessions int64 `json:"unresolved_sessions"`
+	// UnknownSessions 是统计时间范围内尚未判定解决状态的会话数。
+	UnknownSessions int64 `json:"unknown_sessions"`
+	// UnresolvedRate 是未解决会话在已判定会话中的占比；没有已判定会话时为 0。
+	UnresolvedRate float64 `json:"unresolved_rate"`
 	// CompletedLeadSessions 是已完成留资的会话数。
 	CompletedLeadSessions int64 `json:"completed_lead_sessions"`
+	// SessionTrend 是按日或周聚合的会话趋势。
+	SessionTrend []AICCTrendBucket `json:"session_trend"`
+	// Regions 是统计时间范围内的访客地域分布。
+	Regions []AICCTopItemResult `json:"regions"`
 	// TopQuestions 是访客高频问题列表。
 	TopQuestions []AICCTopItemResult `json:"top_questions"`
 	// TopSources 是访客来源页面分布。
 	TopSources []AICCTopItemResult `json:"top_sources"`
+}
+
+// AICCAnalyticsOptions 是管理端统计看板筛选条件。
+type AICCAnalyticsOptions struct {
+	// OrgID 是统计企业；企业管理员可省略并使用自身企业。
+	OrgID string
+	// AgentID 可选限制到单个智能体。
+	AgentID string
+	// StartAt 是统计窗口开始时间，零值时使用默认最近 7 天。
+	StartAt time.Time
+	// EndAt 是统计窗口结束时间，零值时使用当前时间。
+	EndAt time.Time
+	// Bucket 控制趋势粒度，允许 day 或 week。
+	Bucket string
+}
+
+// AICCAnalyticsSummary 是统计窗口内按解决状态汇总的会话数量。
+type AICCAnalyticsSummary struct {
+	// Sessions 是统计窗口内的总会话数。
+	Sessions int64
+	// Resolved 是已解决会话数。
+	Resolved int64
+	// Unresolved 是未解决会话数。
+	Unresolved int64
+	// Unknown 是未知解决状态会话数。
+	Unknown int64
+}
+
+// AICCTrendBucket 是统计趋势中的单个时间桶。
+type AICCTrendBucket struct {
+	// Bucket 是日维度日期或 ISO 周维度标签。
+	Bucket string `json:"bucket"`
+	// Count 是该时间桶内会话数量。
+	Count int64 `json:"count"`
 }
 
 // AICCTopItemResult 是统计页展示的名称和次数组合。

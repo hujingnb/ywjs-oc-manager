@@ -82,21 +82,22 @@ FROM aicc_sessions
 WHERE session_token = ? AND expires_at > now();
 
 -- name: ListAICCSessionsByAgent :many
-SELECT *
-FROM aicc_sessions
-WHERE agent_id = ?
-  AND (sqlc.narg(resolution_status) IS NULL OR resolution_status = sqlc.narg(resolution_status))
-  AND (sqlc.narg(lead_status) IS NULL OR lead_status = sqlc.narg(lead_status))
-  AND (sqlc.narg(channel) IS NULL OR channel = sqlc.narg(channel))
-  AND (sqlc.narg(region) IS NULL OR region = sqlc.narg(region))
-  AND (sqlc.narg(start_at) IS NULL OR created_at >= sqlc.narg(start_at))
-  AND (sqlc.narg(end_at) IS NULL OR created_at < sqlc.narg(end_at))
+SELECT s.*,
+       (SELECT COUNT(*) FROM aicc_messages m WHERE m.session_id = s.id) AS message_count
+FROM aicc_sessions s
+WHERE s.agent_id = ?
+  AND (sqlc.narg(resolution_status) IS NULL OR s.resolution_status = sqlc.narg(resolution_status))
+  AND (sqlc.narg(lead_status) IS NULL OR s.lead_status = sqlc.narg(lead_status))
+  AND (sqlc.narg(channel) IS NULL OR s.channel = sqlc.narg(channel))
+  AND (sqlc.narg(region) IS NULL OR s.region = sqlc.narg(region))
+  AND (sqlc.narg(start_at) IS NULL OR s.created_at >= sqlc.narg(start_at))
+  AND (sqlc.narg(end_at) IS NULL OR s.created_at < sqlc.narg(end_at))
   AND (
       sqlc.narg(keyword) IS NULL
-      OR source_url LIKE CONCAT('%', sqlc.narg(keyword), '%')
-      OR referrer LIKE CONCAT('%', sqlc.narg(keyword), '%')
+      OR s.source_url LIKE CONCAT('%', sqlc.narg(keyword), '%')
+      OR s.referrer LIKE CONCAT('%', sqlc.narg(keyword), '%')
   )
-ORDER BY created_at DESC, id DESC
+ORDER BY s.created_at DESC, s.id DESC
 LIMIT ? OFFSET ?;
 
 -- name: GetAICCSession :one
@@ -406,3 +407,46 @@ WHERE id = ? AND agent_id = ?;
 SELECT COUNT(*)
 FROM aicc_messages
 WHERE session_id = ? AND direction = 'visitor';
+
+-- name: CountAICCSessionsByStatusInRange :one
+SELECT
+    COUNT(*) AS total_sessions,
+    CAST(COALESCE(SUM(CASE WHEN resolution_status = 'resolved' THEN 1 ELSE 0 END), 0) AS SIGNED) AS resolved_sessions,
+    CAST(COALESCE(SUM(CASE WHEN resolution_status = 'unresolved' THEN 1 ELSE 0 END), 0) AS SIGNED) AS unresolved_sessions,
+    CAST(COALESCE(SUM(CASE WHEN resolution_status = 'unknown' THEN 1 ELSE 0 END), 0) AS SIGNED) AS unknown_sessions
+FROM aicc_sessions
+WHERE org_id = ?
+  AND (sqlc.narg(agent_id) IS NULL OR agent_id = sqlc.narg(agent_id))
+  AND created_at >= ?
+  AND created_at < ?;
+
+-- name: ListAICCSessionTrendByDay :many
+SELECT DATE(created_at) AS bucket, COUNT(*) AS count
+FROM aicc_sessions
+WHERE org_id = ?
+  AND (sqlc.narg(agent_id) IS NULL OR agent_id = sqlc.narg(agent_id))
+  AND created_at >= ?
+  AND created_at < ?
+GROUP BY DATE(created_at)
+ORDER BY bucket ASC;
+
+-- name: ListAICCSessionTrendByWeek :many
+SELECT DATE_FORMAT(created_at, '%x-W%v') AS bucket, COUNT(*) AS count
+FROM aicc_sessions
+WHERE org_id = ?
+  AND (sqlc.narg(agent_id) IS NULL OR agent_id = sqlc.narg(agent_id))
+  AND created_at >= ?
+  AND created_at < ?
+GROUP BY DATE_FORMAT(created_at, '%x-W%v')
+ORDER BY bucket ASC;
+
+-- name: ListAICCRegionsInRange :many
+SELECT CAST(COALESCE(NULLIF(region, ''), '未知') AS CHAR) AS label, COUNT(*) AS count
+FROM aicc_sessions
+WHERE org_id = ?
+  AND (sqlc.narg(agent_id) IS NULL OR agent_id = sqlc.narg(agent_id))
+  AND created_at >= ?
+  AND created_at < ?
+GROUP BY CAST(COALESCE(NULLIF(region, ''), '未知') AS CHAR)
+ORDER BY count DESC, label ASC
+LIMIT ?;

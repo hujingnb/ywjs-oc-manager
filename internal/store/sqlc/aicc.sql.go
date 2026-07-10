@@ -122,6 +122,51 @@ func (q *Queries) CountAICCSessionsByResolution(ctx context.Context, arg CountAI
 	return count, err
 }
 
+const countAICCSessionsByStatusInRange = `-- name: CountAICCSessionsByStatusInRange :one
+SELECT
+    COUNT(*) AS total_sessions,
+    CAST(COALESCE(SUM(CASE WHEN resolution_status = 'resolved' THEN 1 ELSE 0 END), 0) AS SIGNED) AS resolved_sessions,
+    CAST(COALESCE(SUM(CASE WHEN resolution_status = 'unresolved' THEN 1 ELSE 0 END), 0) AS SIGNED) AS unresolved_sessions,
+    CAST(COALESCE(SUM(CASE WHEN resolution_status = 'unknown' THEN 1 ELSE 0 END), 0) AS SIGNED) AS unknown_sessions
+FROM aicc_sessions
+WHERE org_id = ?
+  AND (? IS NULL OR agent_id = ?)
+  AND created_at >= ?
+  AND created_at < ?
+`
+
+type CountAICCSessionsByStatusInRangeParams struct {
+	OrgID       string      `db:"org_id" json:"org_id"`
+	AgentID     null.String `db:"agent_id" json:"agent_id"`
+	CreatedAt   time.Time   `db:"created_at" json:"created_at"`
+	CreatedAt_2 time.Time   `db:"created_at_2" json:"created_at_2"`
+}
+
+type CountAICCSessionsByStatusInRangeRow struct {
+	TotalSessions      int64 `db:"total_sessions" json:"total_sessions"`
+	ResolvedSessions   int64 `db:"resolved_sessions" json:"resolved_sessions"`
+	UnresolvedSessions int64 `db:"unresolved_sessions" json:"unresolved_sessions"`
+	UnknownSessions    int64 `db:"unknown_sessions" json:"unknown_sessions"`
+}
+
+func (q *Queries) CountAICCSessionsByStatusInRange(ctx context.Context, arg CountAICCSessionsByStatusInRangeParams) (CountAICCSessionsByStatusInRangeRow, error) {
+	row := q.db.QueryRowContext(ctx, countAICCSessionsByStatusInRange,
+		arg.OrgID,
+		arg.AgentID,
+		arg.AgentID,
+		arg.CreatedAt,
+		arg.CreatedAt_2,
+	)
+	var i CountAICCSessionsByStatusInRangeRow
+	err := row.Scan(
+		&i.TotalSessions,
+		&i.ResolvedSessions,
+		&i.UnresolvedSessions,
+		&i.UnknownSessions,
+	)
+	return i, err
+}
+
 const countAICCTodaySessions = `-- name: CountAICCTodaySessions :one
 SELECT COUNT(*)
 FROM aicc_sessions
@@ -1166,22 +1211,182 @@ func (q *Queries) ListAICCMessagesBySession(ctx context.Context, sessionID strin
 	return items, nil
 }
 
-const listAICCSessionsByAgent = `-- name: ListAICCSessionsByAgent :many
-SELECT id, agent_id, org_id, session_token, channel, source_url, referrer, region, ip_hash, user_agent_hash, privacy_notice_shown, privacy_consented_at, resolution_status, lead_status, last_active_at, expires_at, created_at, updated_at
+const listAICCRegionsInRange = `-- name: ListAICCRegionsInRange :many
+SELECT CAST(COALESCE(NULLIF(region, ''), '未知') AS CHAR) AS label, COUNT(*) AS count
 FROM aicc_sessions
-WHERE agent_id = ?
-  AND (? IS NULL OR resolution_status = ?)
-  AND (? IS NULL OR lead_status = ?)
-  AND (? IS NULL OR channel = ?)
-  AND (? IS NULL OR region = ?)
-  AND (? IS NULL OR created_at >= ?)
-  AND (? IS NULL OR created_at < ?)
+WHERE org_id = ?
+  AND (? IS NULL OR agent_id = ?)
+  AND created_at >= ?
+  AND created_at < ?
+GROUP BY CAST(COALESCE(NULLIF(region, ''), '未知') AS CHAR)
+ORDER BY count DESC, label ASC
+LIMIT ?
+`
+
+type ListAICCRegionsInRangeParams struct {
+	OrgID       string      `db:"org_id" json:"org_id"`
+	AgentID     null.String `db:"agent_id" json:"agent_id"`
+	CreatedAt   time.Time   `db:"created_at" json:"created_at"`
+	CreatedAt_2 time.Time   `db:"created_at_2" json:"created_at_2"`
+	Limit       int32       `db:"limit" json:"limit"`
+}
+
+type ListAICCRegionsInRangeRow struct {
+	Label interface{} `db:"label" json:"label"`
+	Count int64       `db:"count" json:"count"`
+}
+
+func (q *Queries) ListAICCRegionsInRange(ctx context.Context, arg ListAICCRegionsInRangeParams) ([]ListAICCRegionsInRangeRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAICCRegionsInRange,
+		arg.OrgID,
+		arg.AgentID,
+		arg.AgentID,
+		arg.CreatedAt,
+		arg.CreatedAt_2,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAICCRegionsInRangeRow{}
+	for rows.Next() {
+		var i ListAICCRegionsInRangeRow
+		if err := rows.Scan(&i.Label, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAICCSessionTrendByDay = `-- name: ListAICCSessionTrendByDay :many
+SELECT DATE(created_at) AS bucket, COUNT(*) AS count
+FROM aicc_sessions
+WHERE org_id = ?
+  AND (? IS NULL OR agent_id = ?)
+  AND created_at >= ?
+  AND created_at < ?
+GROUP BY DATE(created_at)
+ORDER BY bucket ASC
+`
+
+type ListAICCSessionTrendByDayParams struct {
+	OrgID       string      `db:"org_id" json:"org_id"`
+	AgentID     null.String `db:"agent_id" json:"agent_id"`
+	CreatedAt   time.Time   `db:"created_at" json:"created_at"`
+	CreatedAt_2 time.Time   `db:"created_at_2" json:"created_at_2"`
+}
+
+type ListAICCSessionTrendByDayRow struct {
+	Bucket time.Time `db:"bucket" json:"bucket"`
+	Count  int64     `db:"count" json:"count"`
+}
+
+func (q *Queries) ListAICCSessionTrendByDay(ctx context.Context, arg ListAICCSessionTrendByDayParams) ([]ListAICCSessionTrendByDayRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAICCSessionTrendByDay,
+		arg.OrgID,
+		arg.AgentID,
+		arg.AgentID,
+		arg.CreatedAt,
+		arg.CreatedAt_2,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAICCSessionTrendByDayRow{}
+	for rows.Next() {
+		var i ListAICCSessionTrendByDayRow
+		if err := rows.Scan(&i.Bucket, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAICCSessionTrendByWeek = `-- name: ListAICCSessionTrendByWeek :many
+SELECT DATE_FORMAT(created_at, '%x-W%v') AS bucket, COUNT(*) AS count
+FROM aicc_sessions
+WHERE org_id = ?
+  AND (? IS NULL OR agent_id = ?)
+  AND created_at >= ?
+  AND created_at < ?
+GROUP BY DATE_FORMAT(created_at, '%x-W%v')
+ORDER BY bucket ASC
+`
+
+type ListAICCSessionTrendByWeekParams struct {
+	OrgID       string      `db:"org_id" json:"org_id"`
+	AgentID     null.String `db:"agent_id" json:"agent_id"`
+	CreatedAt   time.Time   `db:"created_at" json:"created_at"`
+	CreatedAt_2 time.Time   `db:"created_at_2" json:"created_at_2"`
+}
+
+type ListAICCSessionTrendByWeekRow struct {
+	Bucket string `db:"bucket" json:"bucket"`
+	Count  int64  `db:"count" json:"count"`
+}
+
+func (q *Queries) ListAICCSessionTrendByWeek(ctx context.Context, arg ListAICCSessionTrendByWeekParams) ([]ListAICCSessionTrendByWeekRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAICCSessionTrendByWeek,
+		arg.OrgID,
+		arg.AgentID,
+		arg.AgentID,
+		arg.CreatedAt,
+		arg.CreatedAt_2,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAICCSessionTrendByWeekRow{}
+	for rows.Next() {
+		var i ListAICCSessionTrendByWeekRow
+		if err := rows.Scan(&i.Bucket, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAICCSessionsByAgent = `-- name: ListAICCSessionsByAgent :many
+SELECT s.id, s.agent_id, s.org_id, s.session_token, s.channel, s.source_url, s.referrer, s.region, s.ip_hash, s.user_agent_hash, s.privacy_notice_shown, s.privacy_consented_at, s.resolution_status, s.lead_status, s.last_active_at, s.expires_at, s.created_at, s.updated_at,
+       (SELECT COUNT(*) FROM aicc_messages m WHERE m.session_id = s.id) AS message_count
+FROM aicc_sessions s
+WHERE s.agent_id = ?
+  AND (? IS NULL OR s.resolution_status = ?)
+  AND (? IS NULL OR s.lead_status = ?)
+  AND (? IS NULL OR s.channel = ?)
+  AND (? IS NULL OR s.region = ?)
+  AND (? IS NULL OR s.created_at >= ?)
+  AND (? IS NULL OR s.created_at < ?)
   AND (
       ? IS NULL
-      OR source_url LIKE CONCAT('%', ?, '%')
-      OR referrer LIKE CONCAT('%', ?, '%')
+      OR s.source_url LIKE CONCAT('%', ?, '%')
+      OR s.referrer LIKE CONCAT('%', ?, '%')
   )
-ORDER BY created_at DESC, id DESC
+ORDER BY s.created_at DESC, s.id DESC
 LIMIT ? OFFSET ?
 `
 
@@ -1198,7 +1403,29 @@ type ListAICCSessionsByAgentParams struct {
 	Offset           int32       `db:"offset" json:"offset"`
 }
 
-func (q *Queries) ListAICCSessionsByAgent(ctx context.Context, arg ListAICCSessionsByAgentParams) ([]AiccSession, error) {
+type ListAICCSessionsByAgentRow struct {
+	ID                 string      `db:"id" json:"id"`
+	AgentID            string      `db:"agent_id" json:"agent_id"`
+	OrgID              string      `db:"org_id" json:"org_id"`
+	SessionToken       string      `db:"session_token" json:"session_token"`
+	Channel            string      `db:"channel" json:"channel"`
+	SourceUrl          null.String `db:"source_url" json:"source_url"`
+	Referrer           null.String `db:"referrer" json:"referrer"`
+	Region             null.String `db:"region" json:"region"`
+	IpHash             null.String `db:"ip_hash" json:"ip_hash"`
+	UserAgentHash      null.String `db:"user_agent_hash" json:"user_agent_hash"`
+	PrivacyNoticeShown bool        `db:"privacy_notice_shown" json:"privacy_notice_shown"`
+	PrivacyConsentedAt null.Time   `db:"privacy_consented_at" json:"privacy_consented_at"`
+	ResolutionStatus   string      `db:"resolution_status" json:"resolution_status"`
+	LeadStatus         string      `db:"lead_status" json:"lead_status"`
+	LastActiveAt       time.Time   `db:"last_active_at" json:"last_active_at"`
+	ExpiresAt          time.Time   `db:"expires_at" json:"expires_at"`
+	CreatedAt          time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt          time.Time   `db:"updated_at" json:"updated_at"`
+	MessageCount       int64       `db:"message_count" json:"message_count"`
+}
+
+func (q *Queries) ListAICCSessionsByAgent(ctx context.Context, arg ListAICCSessionsByAgentParams) ([]ListAICCSessionsByAgentRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAICCSessionsByAgent,
 		arg.AgentID,
 		arg.ResolutionStatus,
@@ -1223,9 +1450,9 @@ func (q *Queries) ListAICCSessionsByAgent(ctx context.Context, arg ListAICCSessi
 		return nil, err
 	}
 	defer rows.Close()
-	items := []AiccSession{}
+	items := []ListAICCSessionsByAgentRow{}
 	for rows.Next() {
-		var i AiccSession
+		var i ListAICCSessionsByAgentRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.AgentID,
@@ -1245,6 +1472,7 @@ func (q *Queries) ListAICCSessionsByAgent(ctx context.Context, arg ListAICCSessi
 			&i.ExpiresAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.MessageCount,
 		); err != nil {
 			return nil, err
 		}

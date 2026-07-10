@@ -52,6 +52,7 @@ type aiccServiceStub struct {
 	lastSettings  service.AICCAgentSettingsInput
 	lastKnowledge service.AICCKnowledgeInput
 	lastSessions  service.AICCSessionListOptions
+	lastAnalytics service.AICCAnalyticsOptions
 }
 
 // CreateAgent 记录创建请求并返回预设结果。
@@ -209,10 +210,11 @@ func (s *aiccServiceStub) ReplaceAgentKnowledge(_ context.Context, principal aut
 	}, nil
 }
 
-// Analytics 记录企业 ID 并返回预设统计。
-func (s *aiccServiceStub) Analytics(_ context.Context, principal auth.Principal, orgID string) (service.AICCAnalyticsResult, error) {
+// Analytics 记录统计筛选条件并返回预设统计。
+func (s *aiccServiceStub) Analytics(_ context.Context, principal auth.Principal, options service.AICCAnalyticsOptions) (service.AICCAnalyticsResult, error) {
 	s.lastPrincipal = principal
-	s.lastOrgID = orgID
+	s.lastOrgID = options.OrgID
+	s.lastAnalytics = options
 	return s.analyticsResult, nil
 }
 
@@ -428,6 +430,23 @@ func TestAICCHandlerSettingsRoutes(t *testing.T) {
 	assert.True(t, svc.lastSettings.BlockedVisitorEnabled)
 	assert.JSONEq(t, `{"message_count":3}`, string(svc.lastSettings.BlockedVisitorThresholdJSON))
 	assert.Equal(t, int32(45), svc.lastSettings.SessionResumeTTLMinutes)
+}
+
+// TestAICCHandlerSessionFiltersPassTimeAndRegion 覆盖会话列表筛选：
+// handler 必须透传时间范围、地域和解决状态，供后台运营筛选使用。
+func TestAICCHandlerSessionFiltersPassTimeAndRegion(t *testing.T) {
+	svc := &aiccServiceStub{sessionsResult: []service.AICCSessionResult{{ID: "session-1", AgentID: "agent-1"}}}
+	router := newAICCTestRouter(t, svc)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/aicc/agents/agent-1/sessions?start_at=2026-07-01T00:00:00Z&end_at=2026-07-08T00:00:00Z&region=上海&resolution_status=unresolved", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "上海", svc.lastSessions.Region)
+	assert.Equal(t, "unresolved", svc.lastSessions.ResolutionStatus)
+	assert.Equal(t, time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC), svc.lastSessions.StartAt)
+	assert.Equal(t, time.Date(2026, 7, 8, 0, 0, 0, 0, time.UTC), svc.lastSessions.EndAt)
 }
 
 // TestAICCHandlerOperationsRoutes 覆盖 AICC 会话、线索、统计和导出路由接线。
