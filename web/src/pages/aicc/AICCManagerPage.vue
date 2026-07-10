@@ -497,7 +497,13 @@ const widgetSnippet = computed(() => {
 })
 
 watch(selectedAgent, (agent) => {
-  if (agent) fillForm(agent)
+  if (agent) {
+    fillForm(agent)
+    return
+  }
+  delete form.id
+  Object.assign(form, emptyForm())
+  feedback.value = ''
 }, { immediate: true })
 
 watch(
