@@ -775,6 +775,31 @@ components:
       required:
       - name
       type: object
+    handlers.UpdateAICCAgentSettingsRequest:
+      properties:
+        blocked_visitor_enabled:
+          description: BlockedVisitorEnabled 控制是否启用访客封禁检查。
+          type: boolean
+        message_limit_per_session:
+          description: MessageLimitPerSession 限制单个公开会话最多发送多少条访客消息。
+          maximum: 1000
+          minimum: 1
+          type: integer
+        sensitive_words:
+          description: SensitiveWords 是公开端发送前拦截的敏感词列表。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
+        session_resume_ttl_minutes:
+          description: SessionResumeTTLMinutes 控制公开端刷新续接有效期。
+          maximum: 1440
+          minimum: 1
+          type: integer
+      required:
+      - message_limit_per_session
+      - session_resume_ttl_minutes
+      type: object
     handlers.UpdateAppLocaleRequest:
       properties:
         locale:
@@ -1483,6 +1508,30 @@ components:
         widget_token:
           description: WidgetToken 是嵌入组件 token；仅管理面返回。
           type: string
+      type: object
+    service.AICCAgentSettingsResult:
+      properties:
+        agent_id:
+          description: AgentID 是智能体主键。
+          type: string
+        blocked_visitor_count:
+          description: BlockedVisitorCount 是当前已封禁访客数量；没有统计查询时保持 0。
+          type: integer
+        blocked_visitor_enabled:
+          description: BlockedVisitorEnabled 表示是否启用访客封禁检查。
+          type: boolean
+        message_limit_per_session:
+          description: MessageLimitPerSession 限制单个公开会话最多发送多少条访客消息。
+          type: integer
+        sensitive_words:
+          description: SensitiveWords 是公开端发送前拦截的敏感词列表。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
+        session_resume_ttl_minutes:
+          description: SessionResumeTTLMinutes 控制公开端刷新续接有效期。
+          type: integer
       type: object
     service.AICCAnalyticsResult:
       properties:
@@ -3427,6 +3476,118 @@ paths:
       security:
       - BearerAuth: []
       summary: AICC 会话列表
+      tags:
+      - aicc
+  /aicc/agents/{agentId}/settings:
+    get:
+      description: 企业管理员读取消息上限、敏感词、访客封禁和会话续接配置
+      parameters:
+      - description: 智能体 ID
+        in: path
+        name: agentId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AICCAgentSettingsResult'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: AICC 智能体运营配置
+      tags:
+      - aicc
+    put:
+      description: 企业管理员保存消息上限、敏感词、访客封禁和会话续接配置
+      parameters:
+      - description: 智能体 ID
+        in: path
+        name: agentId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.UpdateAICCAgentSettingsRequest'
+                description: 运营配置
+                summary: body
+        description: 运营配置
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AICCAgentSettingsResult'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 保存 AICC 智能体运营配置
       tags:
       - aicc
   /aicc/agents/{agentId}/start:

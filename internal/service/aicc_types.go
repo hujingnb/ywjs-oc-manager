@@ -243,6 +243,36 @@ type AICCKnowledgeResult struct {
 	AppDocumentIDs []string `json:"app_document_ids"`
 }
 
+// AICCAgentSettingsInput 是企业管理员保存 AICC 运营配置的入参。
+type AICCAgentSettingsInput struct {
+	// MessageLimitPerSession 限制单个公开会话最多发送多少条访客消息。
+	MessageLimitPerSession int32 `json:"message_limit_per_session"`
+	// SensitiveWords 是公开端发送前拦截的敏感词列表，保存前会 trim、去空和去重。
+	SensitiveWords []string `json:"sensitive_words"`
+	// BlockedVisitorEnabled 控制是否启用访客封禁检查。
+	BlockedVisitorEnabled bool `json:"blocked_visitor_enabled"`
+	// BlockedVisitorThresholdJSON 保留异常访客自动封禁阈值配置。
+	BlockedVisitorThresholdJSON []byte `json:"blocked_visitor_threshold_json,omitempty"`
+	// SessionResumeTTLMinutes 控制公开端刷新续接有效期。
+	SessionResumeTTLMinutes int32 `json:"session_resume_ttl_minutes"`
+}
+
+// AICCAgentSettingsResult 是管理端回显的 AICC 运营配置。
+type AICCAgentSettingsResult struct {
+	// AgentID 是智能体主键。
+	AgentID string `json:"agent_id"`
+	// MessageLimitPerSession 限制单个公开会话最多发送多少条访客消息。
+	MessageLimitPerSession int32 `json:"message_limit_per_session"`
+	// SensitiveWords 是公开端发送前拦截的敏感词列表。
+	SensitiveWords []string `json:"sensitive_words"`
+	// BlockedVisitorEnabled 表示是否启用访客封禁检查。
+	BlockedVisitorEnabled bool `json:"blocked_visitor_enabled"`
+	// SessionResumeTTLMinutes 控制公开端刷新续接有效期。
+	SessionResumeTTLMinutes int32 `json:"session_resume_ttl_minutes"`
+	// BlockedVisitorCount 是当前已封禁访客数量；没有统计查询时保持 0。
+	BlockedVisitorCount int64 `json:"blocked_visitor_count"`
+}
+
 // AICCAnalyticsResult 是管理端 AICC 运营统计卡片视图。
 type AICCAnalyticsResult struct {
 	// TodaySessions 是当前企业今日会话数。

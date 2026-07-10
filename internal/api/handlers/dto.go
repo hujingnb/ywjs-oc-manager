@@ -151,6 +151,18 @@ type UpdateAICCAgentRequest struct {
 	AllowedDomains []string `json:"allowed_domains"`
 }
 
+// UpdateAICCAgentSettingsRequest 是 AICC 运营配置保存请求。
+type UpdateAICCAgentSettingsRequest struct {
+	// MessageLimitPerSession 限制单个公开会话最多发送多少条访客消息。
+	MessageLimitPerSession int32 `json:"message_limit_per_session" binding:"required,min=1,max=1000"`
+	// SensitiveWords 是公开端发送前拦截的敏感词列表。
+	SensitiveWords []string `json:"sensitive_words"`
+	// BlockedVisitorEnabled 控制是否启用访客封禁检查。
+	BlockedVisitorEnabled bool `json:"blocked_visitor_enabled"`
+	// SessionResumeTTLMinutes 控制公开端刷新续接有效期。
+	SessionResumeTTLMinutes int32 `json:"session_resume_ttl_minutes" binding:"required,min=1,max=1440"`
+}
+
 // AICCLeadFieldRequest 是企业管理员维护公开页留资字段的单条配置。
 type AICCLeadFieldRequest struct {
 	// FieldKey 是字段稳定 key，访客提交时使用。

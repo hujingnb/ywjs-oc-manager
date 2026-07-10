@@ -31,6 +31,8 @@ type aiccServiceStub struct {
 	statusResult    service.AICCAgentResult
 	statusErr       error
 	deleteErr       error
+	settingsResult  service.AICCAgentSettingsResult
+	settingsErr     error
 	sessionsResult  []service.AICCSessionResult
 	sessionResult   service.AICCSessionDetailResult
 	leadsResult     []service.AICCLeadResult
@@ -47,6 +49,7 @@ type aiccServiceStub struct {
 	lastLeadID    string
 	lastAction    string
 	lastFields    []service.AICCLeadFieldInput
+	lastSettings  service.AICCAgentSettingsInput
 	lastKnowledge service.AICCKnowledgeInput
 	lastSessions  service.AICCSessionListOptions
 }
@@ -93,6 +96,30 @@ func (s *aiccServiceStub) DeleteAgent(_ context.Context, principal auth.Principa
 	s.lastPrincipal = principal
 	s.lastAgentID = agentID
 	return s.deleteErr
+}
+
+// GetAgentSettings 记录智能体 ID 并返回预设运营配置。
+func (s *aiccServiceStub) GetAgentSettings(_ context.Context, principal auth.Principal, agentID string) (service.AICCAgentSettingsResult, error) {
+	s.lastPrincipal = principal
+	s.lastAgentID = agentID
+	return s.settingsResult, s.settingsErr
+}
+
+// UpdateAgentSettings 记录运营配置请求并返回预设结果。
+func (s *aiccServiceStub) UpdateAgentSettings(_ context.Context, principal auth.Principal, agentID string, input service.AICCAgentSettingsInput) (service.AICCAgentSettingsResult, error) {
+	s.lastPrincipal = principal
+	s.lastAgentID = agentID
+	s.lastSettings = input
+	if s.settingsResult.AgentID != "" {
+		return s.settingsResult, s.settingsErr
+	}
+	return service.AICCAgentSettingsResult{
+		AgentID:                 agentID,
+		MessageLimitPerSession:  input.MessageLimitPerSession,
+		SensitiveWords:          input.SensitiveWords,
+		BlockedVisitorEnabled:   input.BlockedVisitorEnabled,
+		SessionResumeTTLMinutes: input.SessionResumeTTLMinutes,
+	}, s.settingsErr
 }
 
 // ListSessions 记录智能体 ID 并返回预设会话摘要。
@@ -360,6 +387,44 @@ func TestAICCHandlerBasicRoutes(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestAICCHandlerSettingsRoutes 覆盖 AICC 运营配置路由：
+// handler 必须绑定 settings 请求体并把 agentId 透传给 service。
+func TestAICCHandlerSettingsRoutes(t *testing.T) {
+	svc := &aiccServiceStub{
+		settingsResult: service.AICCAgentSettingsResult{
+			AgentID:                 "agent-1",
+			MessageLimitPerSession:  80,
+			SensitiveWords:          []string{"违禁词"},
+			BlockedVisitorEnabled:   true,
+			SessionResumeTTLMinutes: 45,
+		},
+	}
+	router := newAICCTestRouter(t, svc)
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/aicc/agents/agent-1/settings", nil)
+	getReq = withPrincipal(getReq, auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: "org-1", UserID: "admin-1"})
+	getRec := httptest.NewRecorder()
+	router.ServeHTTP(getRec, getReq)
+
+	require.Equal(t, http.StatusOK, getRec.Code)
+	assert.Equal(t, "agent-1", svc.lastAgentID)
+	assert.Contains(t, getRec.Body.String(), `"settings"`)
+	assert.Contains(t, getRec.Body.String(), `"message_limit_per_session":80`)
+
+	putReq := httptest.NewRequest(http.MethodPut, "/api/v1/aicc/agents/agent-1/settings", bytes.NewBufferString(`{"message_limit_per_session":80,"sensitive_words":["违禁词"],"blocked_visitor_enabled":true,"session_resume_ttl_minutes":45}`))
+	putReq.Header.Set("Content-Type", "application/json")
+	putReq = withPrincipal(putReq, auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: "org-1", UserID: "admin-1"})
+	putRec := httptest.NewRecorder()
+	router.ServeHTTP(putRec, putReq)
+
+	require.Equal(t, http.StatusOK, putRec.Code)
+	assert.Equal(t, "agent-1", svc.lastAgentID)
+	assert.Equal(t, int32(80), svc.lastSettings.MessageLimitPerSession)
+	assert.Equal(t, []string{"违禁词"}, svc.lastSettings.SensitiveWords)
+	assert.True(t, svc.lastSettings.BlockedVisitorEnabled)
+	assert.Equal(t, int32(45), svc.lastSettings.SessionResumeTTLMinutes)
 }
 
 // TestAICCHandlerOperationsRoutes 覆盖 AICC 会话、线索、统计和导出路由接线。

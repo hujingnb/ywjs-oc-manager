@@ -20,41 +20,45 @@ import (
 
 // fakeAICCStore 是 AICC service 单测使用的最小 store，记录创建入参与返回组织配置。
 type fakeAICCStore struct {
-	org           sqlc.Organization
-	count         int64
-	agents        map[string]sqlc.AiccAgent
-	knowledge     map[string][]sqlc.AiccAgentKnowledge
-	sessions      map[string]sqlc.AiccSession
-	messages      map[string][]sqlc.AiccMessage
-	leads         map[string]sqlc.AiccLead
-	leadValues    map[string][]sqlc.ListAICCLeadValuesByLeadRow
-	sessionValues map[string][]sqlc.ListAICCLeadValuesBySessionRow
-	leadFields    map[string][]sqlc.AiccLeadField
-	todayCount    int64
-	unreadCount   int64
-	resolved      int64
-	unresolved    int64
-	completeLead  int64
-	topQuestions  []sqlc.ListAICCTopVisitorQuestionsByOrgRow
-	topSources    []sqlc.ListAICCTopSourceURLsByOrgRow
-	audits        []sqlc.CreateAuditLogParams
-	createArg     sqlc.CreateAICCAgentParams
-	addKnowledge  []sqlc.AddAICCAgentKnowledgeParams
-	updateArg     sqlc.UpdateAICCAgentProfileParams
-	statusArg     sqlc.SetAICCAgentStatusParams
-	sessionArg    sqlc.ListAICCSessionsByAgentParams
-	readLeadArg   sqlc.MarkAICCLeadReadParams
-	createField   sqlc.UpsertAICCLeadFieldParams
-	deletedID     string
-	createErr     error
-	getErr        error
-	listErr       error
-	updateErr     error
-	statusErr     error
-	deleteErr     error
-	sessionsErr   error
-	leadsErr      error
-	organization  error
+	org               sqlc.Organization
+	count             int64
+	agents            map[string]sqlc.AiccAgent
+	settings          map[string]sqlc.AiccAgentSetting
+	knowledge         map[string][]sqlc.AiccAgentKnowledge
+	sessions          map[string]sqlc.AiccSession
+	messages          map[string][]sqlc.AiccMessage
+	leads             map[string]sqlc.AiccLead
+	leadValues        map[string][]sqlc.ListAICCLeadValuesByLeadRow
+	sessionValues     map[string][]sqlc.ListAICCLeadValuesBySessionRow
+	leadFields        map[string][]sqlc.AiccLeadField
+	todayCount        int64
+	unreadCount       int64
+	resolved          int64
+	unresolved        int64
+	completeLead      int64
+	topQuestions      []sqlc.ListAICCTopVisitorQuestionsByOrgRow
+	topSources        []sqlc.ListAICCTopSourceURLsByOrgRow
+	audits            []sqlc.CreateAuditLogParams
+	createArg         sqlc.CreateAICCAgentParams
+	upsertSettings    *sqlc.UpsertAICCAgentSettingsParams
+	addKnowledge      []sqlc.AddAICCAgentKnowledgeParams
+	updateArg         sqlc.UpdateAICCAgentProfileParams
+	statusArg         sqlc.SetAICCAgentStatusParams
+	sessionArg        sqlc.ListAICCSessionsByAgentParams
+	readLeadArg       sqlc.MarkAICCLeadReadParams
+	createField       sqlc.UpsertAICCLeadFieldParams
+	deletedID         string
+	createErr         error
+	getErr            error
+	getSettingsErr    error
+	upsertSettingsErr error
+	listErr           error
+	updateErr         error
+	statusErr         error
+	deleteErr         error
+	sessionsErr       error
+	leadsErr          error
+	organization      error
 }
 
 // GetOrganization 返回测试预置的企业开通配置。
@@ -119,6 +123,39 @@ func (f *fakeAICCStore) GetAICCAgent(_ context.Context, id string) (sqlc.AiccAge
 		return sqlc.AiccAgent{}, sql.ErrNoRows
 	}
 	return row, nil
+}
+
+// GetAICCAgentSettings 返回智能体运营配置，覆盖历史智能体未生成配置行的兼容路径。
+func (f *fakeAICCStore) GetAICCAgentSettings(_ context.Context, agentID string) (sqlc.AiccAgentSetting, error) {
+	if f.getSettingsErr != nil {
+		return sqlc.AiccAgentSetting{}, f.getSettingsErr
+	}
+	row, ok := f.settings[agentID]
+	if !ok {
+		return sqlc.AiccAgentSetting{}, sql.ErrNoRows
+	}
+	return row, nil
+}
+
+// UpsertAICCAgentSettings 记录保存参数，并同步写入内存配置行供回读断言。
+func (f *fakeAICCStore) UpsertAICCAgentSettings(_ context.Context, arg sqlc.UpsertAICCAgentSettingsParams) error {
+	f.upsertSettings = &arg
+	if f.upsertSettingsErr != nil {
+		return f.upsertSettingsErr
+	}
+	if f.settings == nil {
+		f.settings = map[string]sqlc.AiccAgentSetting{}
+	}
+	f.settings[arg.AgentID] = sqlc.AiccAgentSetting{
+		AgentID:                     arg.AgentID,
+		MessageLimitPerSession:      arg.MessageLimitPerSession,
+		SensitiveWordsJson:          arg.SensitiveWordsJson,
+		BlockedVisitorEnabled:       arg.BlockedVisitorEnabled,
+		BlockedVisitorThresholdJson: arg.BlockedVisitorThresholdJson,
+		SessionResumeTtlMinutes:     arg.SessionResumeTtlMinutes,
+		AnalyticsConfigJson:         arg.AnalyticsConfigJson,
+	}
+	return nil
 }
 
 // ListAICCAgentsByOrg 返回同企业下的未删除智能体。
@@ -649,6 +686,52 @@ func TestAICCServiceListAgentsUsesViewPermission(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "agent-1", results[0].ID)
+}
+
+// TestAICCSettingsDefaults 覆盖旧机器人无 settings 行的兼容路径：
+// 后端必须返回默认运营配置，避免历史机器人打开设置页时报错。
+func TestAICCSettingsDefaults(t *testing.T) {
+	store := &fakeAICCStore{
+		agents: map[string]sqlc.AiccAgent{
+			"agent-1": {ID: "agent-1", OrgID: "org-1"},
+		},
+		getSettingsErr: sql.ErrNoRows,
+	}
+	svc := NewAICCService(store, nil)
+
+	result, err := svc.GetAgentSettings(context.Background(), aiccOrgAdmin(), "agent-1")
+
+	require.NoError(t, err)
+	assert.Equal(t, "agent-1", result.AgentID)
+	assert.Equal(t, int32(100), result.MessageLimitPerSession)
+	assert.Equal(t, int32(30), result.SessionResumeTTLMinutes)
+	assert.True(t, result.BlockedVisitorEnabled)
+	assert.Empty(t, result.SensitiveWords)
+}
+
+// TestAICCSettingsUpdateNormalizesInput 覆盖设置保存：
+// 敏感词需要去空白、去空项、去重，消息上限和续接时间必须落在业务允许范围内。
+func TestAICCSettingsUpdateNormalizesInput(t *testing.T) {
+	store := &fakeAICCStore{
+		agents: map[string]sqlc.AiccAgent{
+			"agent-1": {ID: "agent-1", OrgID: "org-1"},
+		},
+	}
+	svc := NewAICCService(store, nil)
+
+	result, err := svc.UpdateAgentSettings(context.Background(), aiccOrgAdmin(), "agent-1", AICCAgentSettingsInput{
+		MessageLimitPerSession:  50,
+		SensitiveWords:          []string{"  违禁词  ", "", "违禁词"},
+		BlockedVisitorEnabled:   true,
+		SessionResumeTTLMinutes: 60,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, int32(50), result.MessageLimitPerSession)
+	assert.Equal(t, []string{"违禁词"}, result.SensitiveWords)
+	assert.Equal(t, int32(60), result.SessionResumeTTLMinutes)
+	require.NotNil(t, store.upsertSettings)
+	assert.JSONEq(t, `["违禁词"]`, string(store.upsertSettings.SensitiveWordsJson))
 }
 
 // TestAICCServiceUpdateAgentRequiresManagePermission 覆盖更新路径：本企业管理员可更新，平台管理员只读不可写。

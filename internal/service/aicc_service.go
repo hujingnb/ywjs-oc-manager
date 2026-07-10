@@ -15,6 +15,17 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
+const (
+	// aiccDefaultMessageLimitPerSession 是旧智能体没有配置行时的会话消息上限默认值。
+	aiccDefaultMessageLimitPerSession int32 = 100
+	// aiccDefaultSessionResumeTTLMin 是旧智能体没有配置行时的刷新续接默认分钟数。
+	aiccDefaultSessionResumeTTLMin int32 = 30
+	// aiccMaxMessageLimitPerSession 必须与 aicc_agent_settings CHECK 约束保持一致。
+	aiccMaxMessageLimitPerSession int32 = 1000
+	// aiccMaxSessionResumeTTLMin 必须与 aicc_agent_settings CHECK 约束保持一致。
+	aiccMaxSessionResumeTTLMin int32 = 1440
+)
+
 // AICCStore 是 AICC 管理侧依赖的数据访问接口。
 type AICCStore interface {
 	// GetOrganization 读取企业开通状态、数量上限和版本 allowlist。
@@ -27,6 +38,10 @@ type AICCStore interface {
 	CreateAICCAgent(ctx context.Context, arg sqlc.CreateAICCAgentParams) error
 	// GetAICCAgent 按 ID 读取未删除智能体。
 	GetAICCAgent(ctx context.Context, id string) (sqlc.AiccAgent, error)
+	// GetAICCAgentSettings 读取智能体运营配置；历史智能体可能没有配置行。
+	GetAICCAgentSettings(ctx context.Context, agentID string) (sqlc.AiccAgentSetting, error)
+	// UpsertAICCAgentSettings 保存智能体运营配置快照。
+	UpsertAICCAgentSettings(ctx context.Context, arg sqlc.UpsertAICCAgentSettingsParams) error
 	// ListAICCAgentsByOrg 列出企业下未删除智能体。
 	ListAICCAgentsByOrg(ctx context.Context, arg sqlc.ListAICCAgentsByOrgParams) ([]sqlc.AiccAgent, error)
 	// ListAICCAgentKnowledge 列出智能体当前可检索知识范围。
@@ -253,6 +268,55 @@ func (s *AICCService) GetAgent(ctx context.Context, principal auth.Principal, ag
 		return AICCAgentResult{}, ErrForbidden
 	}
 	return toAICCAgentResult(row), nil
+}
+
+// GetAgentSettings 读取智能体运营配置；历史智能体没有配置行时返回默认值。
+func (s *AICCService) GetAgentSettings(ctx context.Context, principal auth.Principal, agentID string) (AICCAgentSettingsResult, error) {
+	agent, err := s.getAgentRow(ctx, agentID)
+	if err != nil {
+		return AICCAgentSettingsResult{}, err
+	}
+	if !auth.CanManageAICCAgent(principal, agent.OrgID) {
+		return AICCAgentSettingsResult{}, ErrForbidden
+	}
+	settings, err := s.store.GetAICCAgentSettings(ctx, agentID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return defaultAICCAgentSettingsResult(agentID), nil
+	}
+	if err != nil {
+		return AICCAgentSettingsResult{}, fmt.Errorf("查询 AICC 运营配置失败: %w", err)
+	}
+	return toAICCAgentSettingsResult(settings)
+}
+
+// UpdateAgentSettings 保存智能体运营配置，并按公开端运行约束归一化敏感词和数值边界。
+func (s *AICCService) UpdateAgentSettings(ctx context.Context, principal auth.Principal, agentID string, input AICCAgentSettingsInput) (AICCAgentSettingsResult, error) {
+	agent, err := s.getAgentRow(ctx, agentID)
+	if err != nil {
+		return AICCAgentSettingsResult{}, err
+	}
+	if !auth.CanManageAICCAgent(principal, agent.OrgID) {
+		return AICCAgentSettingsResult{}, ErrForbidden
+	}
+	normalized, err := normalizeAICCSettingsInput(input)
+	if err != nil {
+		return AICCAgentSettingsResult{}, err
+	}
+	wordsJSON, err := json.Marshal(normalized.SensitiveWords)
+	if err != nil {
+		return AICCAgentSettingsResult{}, fmt.Errorf("序列化 AICC 敏感词配置失败: %w", err)
+	}
+	if err := s.store.UpsertAICCAgentSettings(ctx, sqlc.UpsertAICCAgentSettingsParams{
+		AgentID:                     agentID,
+		MessageLimitPerSession:      normalized.MessageLimitPerSession,
+		SensitiveWordsJson:          wordsJSON,
+		BlockedVisitorEnabled:       normalized.BlockedVisitorEnabled,
+		BlockedVisitorThresholdJson: normalized.BlockedVisitorThresholdJSON,
+		SessionResumeTtlMinutes:     normalized.SessionResumeTTLMinutes,
+	}); err != nil {
+		return AICCAgentSettingsResult{}, fmt.Errorf("保存 AICC 运营配置失败: %w", err)
+	}
+	return s.GetAgentSettings(ctx, principal, agentID)
 }
 
 // UpdateAgent 更新智能体资料；平台管理员只有读权限，不能管理企业智能体。
@@ -677,6 +741,41 @@ func (s *AICCService) Analytics(ctx context.Context, principal auth.Principal, o
 	}, nil
 }
 
+// normalizeAICCSettingsInput 校验运营配置边界，并归一化敏感词列表，避免非法值进入数据库 CHECK 约束。
+func normalizeAICCSettingsInput(input AICCAgentSettingsInput) (AICCAgentSettingsInput, error) {
+	if input.MessageLimitPerSession < 1 || input.MessageLimitPerSession > aiccMaxMessageLimitPerSession {
+		return AICCAgentSettingsInput{}, fmt.Errorf("%w: AICC 单会话消息上限必须在 1 到 1000 之间", ErrInvalidArgument)
+	}
+	if input.SessionResumeTTLMinutes < 1 || input.SessionResumeTTLMinutes > aiccMaxSessionResumeTTLMin {
+		return AICCAgentSettingsInput{}, fmt.Errorf("%w: AICC 会话续接时间必须在 1 到 1440 分钟之间", ErrInvalidArgument)
+	}
+	return AICCAgentSettingsInput{
+		MessageLimitPerSession:      input.MessageLimitPerSession,
+		SensitiveWords:              normalizeAICCSensitiveWords(input.SensitiveWords),
+		BlockedVisitorEnabled:       input.BlockedVisitorEnabled,
+		BlockedVisitorThresholdJSON: input.BlockedVisitorThresholdJSON,
+		SessionResumeTTLMinutes:     input.SessionResumeTTLMinutes,
+	}, nil
+}
+
+// normalizeAICCSensitiveWords 按提交顺序 trim、去空和去重，保留运营配置中的首个有效写法。
+func normalizeAICCSensitiveWords(words []string) []string {
+	seen := make(map[string]struct{}, len(words))
+	results := make([]string, 0, len(words))
+	for _, raw := range words {
+		word := strings.TrimSpace(raw)
+		if word == "" {
+			continue
+		}
+		if _, ok := seen[word]; ok {
+			continue
+		}
+		seen[word] = struct{}{}
+		results = append(results, word)
+	}
+	return results
+}
+
 func normalizeAICCLeadFields(inputs []AICCLeadFieldInput) ([]AICCLeadFieldInput, error) {
 	if len(inputs) > 20 {
 		return nil, fmt.Errorf("%w: AICC 留资字段最多 20 个", ErrInvalidArgument)
@@ -933,6 +1032,37 @@ func toAICCAgentResult(row sqlc.AiccAgent) AICCAgentResult {
 		CreatedAt:      row.CreatedAt,
 		UpdatedAt:      row.UpdatedAt,
 	}
+}
+
+// defaultAICCAgentSettingsResult 为历史无配置行智能体提供管理端可直接渲染的默认运营配置。
+func defaultAICCAgentSettingsResult(agentID string) AICCAgentSettingsResult {
+	return AICCAgentSettingsResult{
+		AgentID:                 agentID,
+		MessageLimitPerSession:  aiccDefaultMessageLimitPerSession,
+		SensitiveWords:          []string{},
+		BlockedVisitorEnabled:   true,
+		SessionResumeTTLMinutes: aiccDefaultSessionResumeTTLMin,
+	}
+}
+
+// toAICCAgentSettingsResult 将数据库配置行转换为管理端视图，并显式暴露损坏 JSON 方便排查数据问题。
+func toAICCAgentSettingsResult(row sqlc.AiccAgentSetting) (AICCAgentSettingsResult, error) {
+	words := []string{}
+	if len(row.SensitiveWordsJson) > 0 {
+		if err := json.Unmarshal(row.SensitiveWordsJson, &words); err != nil {
+			return AICCAgentSettingsResult{}, fmt.Errorf("解析 AICC 敏感词配置失败: %w", err)
+		}
+		if words == nil {
+			words = []string{}
+		}
+	}
+	return AICCAgentSettingsResult{
+		AgentID:                 row.AgentID,
+		MessageLimitPerSession:  row.MessageLimitPerSession,
+		SensitiveWords:          words,
+		BlockedVisitorEnabled:   row.BlockedVisitorEnabled,
+		SessionResumeTTLMinutes: row.SessionResumeTtlMinutes,
+	}, nil
 }
 
 func toAICCKnowledgeResult(agent sqlc.AiccAgent, rows []sqlc.AiccAgentKnowledge) AICCKnowledgeResult {

@@ -857,6 +857,164 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aicc/agents/{agentId}/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * AICC 智能体运营配置
+         * @description 企业管理员读取消息上限、敏感词、访客封禁和会话续接配置
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 智能体 ID */
+                    agentId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.AICCAgentSettingsResult"];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        /**
+         * 保存 AICC 智能体运营配置
+         * @description 企业管理员保存消息上限、敏感词、访客封禁和会话续接配置
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 智能体 ID */
+                    agentId: string;
+                };
+                cookie?: never;
+            };
+            /** @description 运营配置 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.UpdateAICCAgentSettingsRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.AICCAgentSettingsResult"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/aicc/agents/{agentId}/start": {
         parameters: {
             query?: never;
@@ -15362,6 +15520,16 @@ export interface components {
             /** @description Scenario 是智能体适用业务场景说明。 */
             scenario?: string;
         };
+        "handlers.UpdateAICCAgentSettingsRequest": {
+            /** @description BlockedVisitorEnabled 控制是否启用访客封禁检查。 */
+            blocked_visitor_enabled?: boolean;
+            /** @description MessageLimitPerSession 限制单个公开会话最多发送多少条访客消息。 */
+            message_limit_per_session: number;
+            /** @description SensitiveWords 是公开端发送前拦截的敏感词列表。 */
+            sensitive_words?: string[];
+            /** @description SessionResumeTTLMinutes 控制公开端刷新续接有效期。 */
+            session_resume_ttl_minutes: number;
+        };
         "handlers.UpdateAppLocaleRequest": {
             /** @description Locale 是 hermes bot 对终端用户说话的语言（en/zh）；取值集合由 service 层校验。 */
             locale: string;
@@ -15807,6 +15975,20 @@ export interface components {
             updated_at?: string;
             /** @description WidgetToken 是嵌入组件 token；仅管理面返回。 */
             widget_token?: string;
+        };
+        "service.AICCAgentSettingsResult": {
+            /** @description AgentID 是智能体主键。 */
+            agent_id?: string;
+            /** @description BlockedVisitorCount 是当前已封禁访客数量；没有统计查询时保持 0。 */
+            blocked_visitor_count?: number;
+            /** @description BlockedVisitorEnabled 表示是否启用访客封禁检查。 */
+            blocked_visitor_enabled?: boolean;
+            /** @description MessageLimitPerSession 限制单个公开会话最多发送多少条访客消息。 */
+            message_limit_per_session?: number;
+            /** @description SensitiveWords 是公开端发送前拦截的敏感词列表。 */
+            sensitive_words?: string[];
+            /** @description SessionResumeTTLMinutes 控制公开端刷新续接有效期。 */
+            session_resume_ttl_minutes?: number;
         };
         "service.AICCAnalyticsResult": {
             /** @description CompletedLeadSessions 是已完成留资的会话数。 */

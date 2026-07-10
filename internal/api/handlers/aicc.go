@@ -27,6 +27,8 @@ type aiccService interface {
 	UpdateAgent(ctx context.Context, principal auth.Principal, agentID string, input service.AICCAgentInput) (service.AICCAgentResult, error)
 	SetAgentStatus(ctx context.Context, principal auth.Principal, agentID, action string) (service.AICCAgentResult, error)
 	DeleteAgent(ctx context.Context, principal auth.Principal, agentID string) error
+	GetAgentSettings(ctx context.Context, principal auth.Principal, agentID string) (service.AICCAgentSettingsResult, error)
+	UpdateAgentSettings(ctx context.Context, principal auth.Principal, agentID string, input service.AICCAgentSettingsInput) (service.AICCAgentSettingsResult, error)
 	ListSessions(ctx context.Context, principal auth.Principal, agentID string, options service.AICCSessionListOptions) ([]service.AICCSessionResult, error)
 	GetSession(ctx context.Context, principal auth.Principal, sessionID string) (service.AICCSessionDetailResult, error)
 	ListLeads(ctx context.Context, principal auth.Principal, orgID string, limit, offset int32) ([]service.AICCLeadResult, error)
@@ -54,6 +56,8 @@ func RegisterAICCRoutes(router gin.IRouter, handler *AICCHandler) {
 	group.DELETE("/agents/:agentId", handler.DeleteAgent)
 	group.POST("/agents/:agentId/start", handler.StartAgent)
 	group.POST("/agents/:agentId/stop", handler.StopAgent)
+	group.GET("/agents/:agentId/settings", handler.GetAgentSettings)
+	group.PUT("/agents/:agentId/settings", handler.UpdateAgentSettings)
 	group.GET("/agents/:agentId/lead-fields", handler.ListLeadFields)
 	group.PUT("/agents/:agentId/lead-fields", handler.ReplaceLeadFields)
 	group.GET("/agents/:agentId/knowledge", handler.GetAgentKnowledge)
@@ -240,6 +244,65 @@ func (h *AICCHandler) DeleteAgent(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// GetAgentSettings 读取 AICC 智能体运营配置。
+//
+// @Summary      AICC 智能体运营配置
+// @Description  企业管理员读取消息上限、敏感词、访客封禁和会话续接配置
+// @Tags         aicc
+// @Produce      json
+// @Security     BearerAuth
+// @Param        agentId  path      string  true  "智能体 ID"
+// @Success      200      {object}  map[string]service.AICCAgentSettingsResult
+// @Failure      401      {object}  ErrorResponse
+// @Failure      403      {object}  ErrorResponse
+// @Failure      404      {object}  ErrorResponse
+// @Failure      500      {object}  ErrorResponse
+// @Router       /aicc/agents/{agentId}/settings [get]
+func (h *AICCHandler) GetAgentSettings(c *gin.Context) {
+	result, err := h.service.GetAgentSettings(c.Request.Context(), principalFromCtx(c), c.Param("agentId"))
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"settings": result})
+}
+
+// UpdateAgentSettings 保存 AICC 智能体运营配置。
+//
+// @Summary      保存 AICC 智能体运营配置
+// @Description  企业管理员保存消息上限、敏感词、访客封禁和会话续接配置
+// @Tags         aicc
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        agentId  path      string                          true  "智能体 ID"
+// @Param        body     body      UpdateAICCAgentSettingsRequest  true  "运营配置"
+// @Success      200      {object}  map[string]service.AICCAgentSettingsResult
+// @Failure      400      {object}  ErrorResponse
+// @Failure      401      {object}  ErrorResponse
+// @Failure      403      {object}  ErrorResponse
+// @Failure      404      {object}  ErrorResponse
+// @Failure      500      {object}  ErrorResponse
+// @Router       /aicc/agents/{agentId}/settings [put]
+func (h *AICCHandler) UpdateAgentSettings(c *gin.Context) {
+	var req UpdateAICCAgentSettingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeBindError(c, err)
+		return
+	}
+	result, err := h.service.UpdateAgentSettings(c.Request.Context(), principalFromCtx(c), c.Param("agentId"), service.AICCAgentSettingsInput{
+		MessageLimitPerSession:  req.MessageLimitPerSession,
+		SensitiveWords:          req.SensitiveWords,
+		BlockedVisitorEnabled:   req.BlockedVisitorEnabled,
+		SessionResumeTTLMinutes: req.SessionResumeTTLMinutes,
+	})
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"settings": result})
 }
 
 // GetAgentKnowledge 读取 AICC 智能体知识范围。
