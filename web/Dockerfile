@@ -23,6 +23,9 @@ WORKDIR /src
 # 使用 NPM_CONFIG_REGISTRY 而非 `npm config set`, 避免向用户目录写入 .npmrc 残留。
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY}
+# onnxruntime-node 的 npm 包已内置 CPU 二进制; Docker 静态构建不需要 CUDA provider,
+# 否则 postinstall 会默认从 GitHub Releases 拉取 GPU 包, 国内网络下容易构建失败。
+ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip
 
 # 先复制 manifest 并 npm ci 安装依赖,后续业务代码变更不会失效该层
 COPY package.json package-lock.json ./
