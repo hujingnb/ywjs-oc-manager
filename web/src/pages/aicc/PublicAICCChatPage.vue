@@ -13,6 +13,10 @@
           <n-tag :type="sessionToken ? 'success' : 'default'" :bordered="false">
             {{ sessionToken ? t('aicc.publicChat.online') : t('aicc.publicChat.ready') }}
           </n-tag>
+          <n-button size="small" secondary :type="isResolved ? 'success' : 'default'" :disabled="!sessionToken || isResolved || isSending" :loading="resolveBusy" @click="markSessionResolved">
+            <template #icon><CheckCircle2 :size="14" /></template>
+            {{ isResolved ? t('aicc.publicChat.resolved') : t('aicc.publicChat.markResolved') }}
+          </n-button>
           <n-button size="small" secondary :disabled="isSending" @click="startNewConversation">
             <template #icon><Plus :size="14" /></template>
             {{ t('aicc.publicChat.newConversation') }}
@@ -29,15 +33,6 @@
           <div class="bubble">
             <p v-if="message.text">{{ message.text }}</p>
             <img v-if="message.imageUrl" :src="message.imageUrl" :alt="t('aicc.publicChat.uploadedImageAlt')" />
-            <div v-if="message.role === 'assistant' && message.messageId" class="feedback-row">
-              <button type="button" :disabled="message.feedbackSent" @click="sendFeedback(message, true)">
-                <ThumbsUp :size="14" />
-              </button>
-              <button type="button" :disabled="message.feedbackSent" @click="sendFeedback(message, false)">
-                <ThumbsDown :size="14" />
-              </button>
-              <span v-if="message.feedbackSent">{{ t('aicc.publicChat.feedbackSent') }}</span>
-            </div>
           </div>
         </article>
         <article v-if="isSending" class="message-row assistant">
@@ -65,7 +60,7 @@
               v-model:value="leadValues[field.field_key]"
               :type="field.field_type === 'number' ? 'text' : 'text'"
               :placeholder="field.prompt_text || field.label"
-              :input-props="{ inputmode: field.field_type === 'number' ? 'numeric' : field.field_type === 'phone' ? 'tel' : field.field_type === 'email' ? 'email' : 'text' }"
+              :input-props="leadFieldInputProps(field)"
             />
           </label>
         </div>
@@ -79,6 +74,8 @@
         </button>
         <input
           ref="fileInputEl"
+          id="aicc-public-image"
+          name="aicc_public_image"
           class="hidden-input"
           type="file"
           accept="image/png,image/jpeg,image/gif,image/webp"
@@ -111,7 +108,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { NAlert, NButton, NInput, NTag } from 'naive-ui'
 import {
-  ImagePlus, MessageCircle, Plus, Send, ShieldCheck, ThumbsDown, ThumbsUp, X,
+  CheckCircle2, ImagePlus, MessageCircle, Plus, Send, ShieldCheck, X,
 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
@@ -122,8 +119,8 @@ import {
   fetchAICCPublicConfig,
   fetchAICCPublicSession,
   readAICCPublicStoredSessionToken,
+  resolveAICCPublicSession,
   sendAICCPublicMessage,
-  submitAICCPublicFeedback,
   submitAICCPublicLeadValues,
   uploadAICCPublicImage,
 } from '@/api/hooks/useAICC'
@@ -138,8 +135,6 @@ interface ChatMessage {
   role: 'visitor' | 'assistant'
   text?: string
   imageUrl?: string
-  messageId?: string
-  feedbackSent?: boolean
 }
 
 interface PendingImage {
@@ -157,6 +152,7 @@ const draft = ref('')
 const messages = ref<ChatMessage[]>([])
 const errorMessage = ref('')
 const isSending = ref(false)
+const resolveBusy = ref(false)
 const consentBusy = ref(false)
 const leadBusy = ref(false)
 const leadComplete = ref(false)
@@ -164,6 +160,7 @@ const deferredLeadValues = ref<Record<string, string> | null>(null)
 const hasConsent = ref(false)
 const leadValues = ref<Record<string, string>>({})
 const pendingImage = ref<PendingImage | null>(null)
+const resolutionStatus = ref<'resolved' | 'unresolved' | 'unknown' | string>('unknown')
 const messageListEl = ref<HTMLElement | null>(null)
 const fileInputEl = ref<HTMLInputElement | null>(null)
 
@@ -175,6 +172,7 @@ const showLeadForm = computed(() => leadFields.value.length > 0 && !leadComplete
 const canSend = computed(() => Boolean(config.value) && !needsConsent.value && !needsLead.value && !isSending.value)
 const canSubmit = computed(() => canSend.value && (draft.value.trim().length > 0 || Boolean(pendingImage.value)))
 const hasVisitorMessage = computed(() => messages.value.some(message => message.role === 'visitor'))
+const isResolved = computed(() => resolutionStatus.value === 'resolved')
 // notice 模式的隐私说明只用于进入页面时告知访客，访客开始对话后隐藏以减少输入区占用。
 const showPrivacyNotice = computed(() => Boolean(privacyText.value) && !hasVisitorMessage.value)
 
@@ -271,7 +269,6 @@ async function submitMessage() {
       id: crypto.randomUUID(),
       role: 'assistant',
       text: response.text || t('aicc.publicChat.defaultAssistantReply'),
-      messageId: response.message_id,
     })
   } catch (err) {
     errorMessage.value = publicMessageErrorText(err)
@@ -286,6 +283,7 @@ async function ensureSessionReadyForSend(): Promise<string> {
   if (!sessionToken.value) {
     const session = await createAICCPublicSession(publicToken.value, publicChannel.value)
     sessionToken.value = session.session_token ?? ''
+    resolutionStatus.value = 'unknown'
   }
   if (!sessionToken.value) {
     throw new Error(t('aicc.publicChat.sendFailed'))
@@ -309,6 +307,8 @@ function startNewConversation() {
   draft.value = ''
   errorMessage.value = ''
   isSending.value = false
+  resolveBusy.value = false
+  resolutionStatus.value = 'unknown'
   deferredLeadValues.value = null
   leadValues.value = Object.fromEntries(leadFields.value.map(field => [field.field_key, '']))
   leadComplete.value = !leadFields.value.some(field => field.required)
@@ -327,6 +327,7 @@ function resetMessagesToGreeting() {
 
 async function restoreSessionMessages(token: string) {
   const detail = await fetchAICCPublicSession(token)
+  resolutionStatus.value = detail.resolution_status || 'unknown'
   const restored = detail.messages.map(toChatMessage).filter((message): message is ChatMessage => Boolean(message))
   if (restored.length > 0) {
     messages.value = restored
@@ -341,7 +342,18 @@ function toChatMessage(message: AICCMessage): ChatMessage | null {
     id: message.id,
     role: message.direction === 'visitor' ? 'visitor' : 'assistant',
     text: message.text,
-    messageId: message.direction === 'assistant' ? message.id : undefined,
+  }
+}
+
+function leadFieldInputProps(field: AICCLeadField) {
+  let inputmode: 'numeric' | 'tel' | 'email' | 'text' = 'text'
+  if (field.field_type === 'number') inputmode = 'numeric'
+  if (field.field_type === 'phone') inputmode = 'tel'
+  if (field.field_type === 'email') inputmode = 'email'
+  return {
+    id: `aicc-public-lead-${field.field_key}`,
+    name: `aicc_public_lead_${field.field_key}`,
+    inputmode,
   }
 }
 
@@ -367,13 +379,17 @@ function isApiErrorCode(err: unknown, code: string): boolean {
   return typeof body === 'object' && body !== null && 'code' in body && (body as { code?: unknown }).code === code
 }
 
-async function sendFeedback(message: ChatMessage, helpful: boolean) {
-  if (!sessionToken.value || !message.messageId || message.feedbackSent) return
+async function markSessionResolved() {
+  if (!sessionToken.value || isResolved.value || resolveBusy.value) return
+  resolveBusy.value = true
+  errorMessage.value = ''
   try {
-    await submitAICCPublicFeedback(sessionToken.value, message.messageId, helpful)
-    message.feedbackSent = true
+    const result = await resolveAICCPublicSession(sessionToken.value)
+    resolutionStatus.value = result.resolution_status || 'resolved'
   } catch (err) {
     errorMessage.value = friendlyAICCError(err)
+  } finally {
+    resolveBusy.value = false
   }
 }
 
@@ -533,15 +549,6 @@ async function scrollToBottom() {
   color: var(--color-text-secondary);
 }
 
-.feedback-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--color-text-tertiary);
-  font-size: 12px;
-}
-
-.feedback-row button,
 .icon-control,
 .pending-image button {
   display: grid;
@@ -550,11 +557,6 @@ async function scrollToBottom() {
   border-radius: 6px;
   background: #ffffff;
   cursor: pointer;
-}
-
-.feedback-row button {
-  width: 28px;
-  height: 28px;
 }
 
 .privacy-gate,

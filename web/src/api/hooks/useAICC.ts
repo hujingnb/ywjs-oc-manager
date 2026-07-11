@@ -22,6 +22,7 @@ import type {
   AICCPublicImageResult,
   AICCPublicLeadValuesResult,
   AICCPublicMessageResult,
+  AICCPublicResolutionResult,
   AICCPublicSession,
   AICCPublicSessionDetail,
   AICCSession,
@@ -449,6 +450,15 @@ export async function submitAICCPublicFeedback(
     withAuth: false,
     body: { helpful },
   })
+}
+
+// resolveAICCPublicSession 将当前公开访客会话标记为已解决，不绑定单条助手回复。
+export async function resolveAICCPublicSession(sessionToken: string): Promise<AICCPublicResolutionResult> {
+  const response = await apiRequest<{ resolution: AICCPublicResolutionResult }>(`/api/v1/public/aicc/sessions/${sessionToken}/resolve`, {
+    method: 'POST',
+    withAuth: false,
+  })
+  return response.resolution
 }
 
 // uploadAICCPublicImage 直接用 fetch 上传二进制图片；apiRequest 只处理 JSON，不适合该接口。

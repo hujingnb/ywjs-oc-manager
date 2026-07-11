@@ -29,6 +29,8 @@ type publicAICCServiceStub struct {
 	leadErr        error
 	feedbackResult service.AICCPublicFeedbackResult
 	feedbackErr    error
+	resolveResult  service.AICCPublicResolutionResult
+	resolveErr     error
 	consentErr     error
 
 	lastPublicToken   string
@@ -39,6 +41,7 @@ type publicAICCServiceStub struct {
 	lastMessageInput  service.AICCPublicMessageInput
 	lastLeadInput     service.AICCPublicLeadValuesInput
 	lastFeedbackInput service.AICCPublicFeedbackInput
+	lastResolveToken  string
 }
 
 func (s *publicAICCServiceStub) PublicConfig(_ context.Context, publicToken, channel string) (service.AICCPublicConfigResult, error) {
@@ -81,6 +84,11 @@ func (s *publicAICCServiceStub) SubmitLeadValues(_ context.Context, input servic
 func (s *publicAICCServiceStub) SubmitFeedback(_ context.Context, input service.AICCPublicFeedbackInput) (service.AICCPublicFeedbackResult, error) {
 	s.lastFeedbackInput = input
 	return s.feedbackResult, s.feedbackErr
+}
+
+func (s *publicAICCServiceStub) ResolveSession(_ context.Context, sessionToken string) (service.AICCPublicResolutionResult, error) {
+	s.lastResolveToken = sessionToken
+	return s.resolveResult, s.resolveErr
 }
 
 func newPublicAICCTestRouter(t *testing.T, svc publicAICCService) *gin.Engine {
@@ -199,6 +207,21 @@ func TestPublicAICCHandlerSubmitFeedbackRequiresHelpful(t *testing.T) {
 	router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
+}
+
+// TestPublicAICCHandlerResolveSession 覆盖公开会话级已解决入口：
+// session token 只来自路径，不再要求绑定某条助手消息。
+func TestPublicAICCHandlerResolveSession(t *testing.T) {
+	svc := &publicAICCServiceStub{resolveResult: service.AICCPublicResolutionResult{ResolutionStatus: "resolved"}}
+	router := newPublicAICCTestRouter(t, svc)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/sessions/sess-1/resolve", nil)
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "resolved")
+	assert.Equal(t, "sess-1", svc.lastResolveToken)
 }
 
 // TestPublicAICCHandlerMapsConversationGates 覆盖公开访客消息入口的隐私同意和留资阻断错误映射。

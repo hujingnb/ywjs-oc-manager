@@ -18,6 +18,7 @@ const apiState = vi.hoisted(() => ({
   consent: vi.fn(),
   submitLeadValues: vi.fn(),
   submitFeedback: vi.fn(),
+  resolveSession: vi.fn(),
   uploadImage: vi.fn(),
   readStoredSession: vi.fn(),
   clearStoredSession: vi.fn(),
@@ -37,6 +38,7 @@ vi.mock('@/api/hooks/useAICC', () => ({
   consentAICCPublicSession: apiState.consent,
   submitAICCPublicLeadValues: apiState.submitLeadValues,
   submitAICCPublicFeedback: apiState.submitFeedback,
+  resolveAICCPublicSession: apiState.resolveSession,
   uploadAICCPublicImage: apiState.uploadImage,
 }))
 
@@ -108,6 +110,7 @@ describe('PublicAICCChatPage', () => {
     apiState.consent.mockReset()
     apiState.submitLeadValues.mockReset()
     apiState.submitFeedback.mockReset()
+    apiState.resolveSession.mockReset()
     apiState.uploadImage.mockReset()
     apiState.readStoredSession.mockReset()
     apiState.clearStoredSession.mockReset()
@@ -121,8 +124,9 @@ describe('PublicAICCChatPage', () => {
       lead_fields: [],
     })
     apiState.createSession.mockResolvedValue({ session_token: 'session-token' })
-    apiState.fetchSession.mockResolvedValue({ messages: [] })
+    apiState.fetchSession.mockResolvedValue({ messages: [], resolution_status: 'unknown' })
     apiState.sendMessage.mockResolvedValue({ message_id: 'message-1', text: '收到' })
+    apiState.resolveSession.mockResolvedValue({ resolution_status: 'resolved' })
   })
 
   // 场景：访客或挂件只打开公开页但没有发送消息时，不应创建 0 消息会话。
@@ -200,6 +204,7 @@ describe('PublicAICCChatPage', () => {
   it('restores stored session messages after page refresh', async () => {
     apiState.readStoredSession.mockReturnValue('stored-session-token')
     apiState.fetchSession.mockResolvedValue({
+      resolution_status: 'unknown',
       messages: [
         { id: 'msg-1', direction: 'visitor', text: '刷新前的问题' },
         { id: 'msg-2', direction: 'assistant', text: '刷新前的回复' },
@@ -213,6 +218,36 @@ describe('PublicAICCChatPage', () => {
     expect(wrapper.text()).toContain('刷新前的问题')
     expect(wrapper.text()).toContain('刷新前的回复')
     expect(wrapper.text()).not.toContain('您好，请问有什么可以帮您？')
+  })
+
+  // 场景：公开页不再渲染单条助手回复反馈，避免把某条消息评价误当成会话解决状态。
+  it('does not render per-message feedback controls for assistant replies', async () => {
+    const wrapper = mountPublicChat()
+    await flushPromises()
+
+    await wrapper.find('textarea').setValue('报价多少')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('收到')
+    expect(wrapper.find('.feedback-row').exists()).toBe(false)
+    expect(apiState.submitFeedback).not.toHaveBeenCalled()
+  })
+
+  // 场景：访客点击顶部“已解决”时，只标记当前会话，不依赖任何 message id。
+  it('marks the current session resolved from the header action', async () => {
+    apiState.readStoredSession.mockReturnValue('stored-session-token')
+    const wrapper = mountPublicChat()
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text().includes('已解决'))?.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(apiState.resolveSession).toHaveBeenCalledWith('stored-session-token')
+    expect(apiState.submitFeedback).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('已解决')
   })
 
   // 场景：访客主动新建对话时只清除当前会话，下一次发送才懒创建新 session，避免空会话。

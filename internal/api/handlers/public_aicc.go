@@ -26,6 +26,7 @@ type publicAICCService interface {
 	SendMessage(ctx context.Context, input service.AICCPublicMessageInput) (service.AICCPublicMessageResult, error)
 	SubmitLeadValues(ctx context.Context, input service.AICCPublicLeadValuesInput) (service.AICCPublicLeadValuesResult, error)
 	SubmitFeedback(ctx context.Context, input service.AICCPublicFeedbackInput) (service.AICCPublicFeedbackResult, error)
+	ResolveSession(ctx context.Context, sessionToken string) (service.AICCPublicResolutionResult, error)
 }
 
 // NewPublicAICCHandler 创建公开 AICC handler。
@@ -43,6 +44,7 @@ func RegisterPublicAICCRoutes(router gin.IRouter, handler *PublicAICCHandler) {
 	group.POST("/sessions/:sessionToken/images", handler.UploadImage)
 	group.POST("/sessions/:sessionToken/messages", handler.SendMessage)
 	group.POST("/sessions/:sessionToken/lead-values", handler.SubmitLeadValues)
+	group.POST("/sessions/:sessionToken/resolve", handler.ResolveSession)
 	group.POST("/sessions/:sessionToken/messages/:messageId/feedback", handler.Feedback)
 }
 
@@ -280,6 +282,27 @@ func (h *PublicAICCHandler) Feedback(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"feedback": result})
+}
+
+// ResolveSession 将当前公开会话标记为已解决。
+//
+// @Summary      标记 AICC 公开会话已解决
+// @Description  访客通过 session token 将当前会话标记为已解决，不绑定单条助手回复
+// @Tags         public-aicc
+// @Produce      json
+// @Param        sessionToken  path      string  true  "会话 token"
+// @Success      200           {object}  map[string]service.AICCPublicResolutionResult
+// @Failure      401           {object}  ErrorResponse
+// @Failure      404           {object}  ErrorResponse
+// @Failure      500           {object}  ErrorResponse
+// @Router       /public/aicc/sessions/{sessionToken}/resolve [post]
+func (h *PublicAICCHandler) ResolveSession(c *gin.Context) {
+	result, err := h.service.ResolveSession(c.Request.Context(), c.Param("sessionToken"))
+	if err != nil {
+		writePublicAICCError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"resolution": result})
 }
 
 func writePublicAICCError(c *gin.Context, err error) {

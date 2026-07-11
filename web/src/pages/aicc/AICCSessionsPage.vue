@@ -14,13 +14,13 @@
           </div>
           <n-tag size="small" :bordered="false">{{ sessions.length }}</n-tag>
         </div>
-        <div class="session-filters">
+        <div ref="sessionFiltersEl" class="session-filters">
           <n-select v-model:value="resolutionFilter" clearable :options="resolutionOptions" :placeholder="t('aicc.sessions.filters.resolution')" />
           <n-select v-model:value="leadFilter" clearable :options="leadOptions" :placeholder="t('aicc.sessions.filters.lead')" />
           <n-select v-model:value="channelFilter" clearable :options="channelOptions" :placeholder="t('aicc.sessions.filters.channel')" />
-          <n-input v-model:value="regionFilter" clearable :placeholder="t('aicc.sessions.filters.region')" />
-          <n-date-picker v-model:value="dateRange" type="datetimerange" clearable :start-placeholder="t('aicc.sessions.filters.startTime')" :end-placeholder="t('aicc.sessions.filters.endTime')" />
-          <n-input v-model:value="keywordFilter" clearable :placeholder="t('aicc.sessions.filters.keyword')" />
+          <n-input v-model:value="regionFilter" clearable :placeholder="t('aicc.sessions.filters.region')" :input-props="{ id: 'aicc-session-region-filter', name: 'aicc_session_region_filter' }" />
+          <n-date-picker class="date-range-filter" v-model:value="dateRange" type="datetimerange" clearable :start-placeholder="t('aicc.sessions.filters.startTime')" :end-placeholder="t('aicc.sessions.filters.endTime')" />
+          <n-input v-model:value="keywordFilter" clearable :placeholder="t('aicc.sessions.filters.keyword')" :input-props="{ id: 'aicc-session-keyword-filter', name: 'aicc_session_keyword_filter' }" />
         </div>
         <n-spin :show="sessionsQuery.isLoading.value">
           <n-alert v-if="sessionsQuery.error.value" type="error" :bordered="false">
@@ -44,8 +44,8 @@
                 <strong>{{ formatShortId(session.id) }}</strong>
                 <small>{{ session.channel || 'web_link' }} · {{ session.region || t('aicc.sessions.unknownRegion') }}</small>
               </span>
-              <n-tag size="small" :type="session.resolution_status === 'resolved' ? 'success' : 'warning'" :bordered="false">
-                {{ session.resolution_status === 'resolved' ? t('aicc.sessions.resolved') : t('aicc.sessions.followUp') }}
+              <n-tag size="small" :type="resolutionTagType(session.resolution_status)" :bordered="false">
+                {{ resolutionLabel(session.resolution_status) }}
               </n-tag>
               <small class="meta-text">{{ t('aicc.sessions.messageCount', { count: session.message_count ?? 0 }) }}</small>
               <small class="time-text">{{ formatDate(session.last_active_at || session.created_at) }}</small>
@@ -114,7 +114,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUpdated, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NAlert, NDatePicker, NInput, NSelect, NSpin, NTag, type SelectOption } from 'naive-ui'
 import { MessageSquareText } from 'lucide-vue-next'
@@ -138,6 +138,7 @@ const regionFilter = ref('')
 const dateRange = ref<[number, number] | null>(null)
 const keywordFilter = ref('')
 const isApplyingRouteQuery = ref(false)
+const sessionFiltersEl = ref<HTMLElement | null>(null)
 const currentAgentId = computed(() => props.agentId)
 const supportedChannelFilters = new Set(['web_link', 'web_widget'])
 const sessionFilters = computed<AICCSessionFilters>(() => ({
@@ -156,6 +157,9 @@ const sessions = computed(() => sessionsQuery.data.value ?? [])
 const selectedSession = computed(() => detailQuery.data.value?.session)
 const messages = computed(() => detailQuery.data.value?.messages ?? [])
 const leadValues = computed(() => detailQuery.data.value?.lead_values ?? [])
+
+onMounted(syncDateRangeInputAttrs)
+onUpdated(syncDateRangeInputAttrs)
 
 const resolutionOptions = computed<SelectOption[]>(() => [
   { label: t('aicc.sessions.resolutionOptions.resolved'), value: 'resolved' },
@@ -231,6 +235,34 @@ function roleLabel(role?: string) {
   if (role === 'assistant') return t('aicc.sessions.roles.assistant')
   if (role === 'system') return t('aicc.sessions.roles.system')
   return t('aicc.sessions.roles.visitor')
+}
+
+function resolutionLabel(status?: string) {
+  if (status === 'resolved') return t('aicc.sessions.resolved')
+  if (status === 'unresolved') return t('aicc.sessions.followUp')
+  return t('aicc.sessions.unknownResolution')
+}
+
+function resolutionTagType(status?: string) {
+  if (status === 'resolved') return 'success'
+  if (status === 'unresolved') return 'warning'
+  return 'default'
+}
+
+function syncDateRangeInputAttrs() {
+  void nextTick(() => {
+    const inputs = sessionFiltersEl.value?.querySelectorAll<HTMLInputElement>('.date-range-filter input') ?? []
+    const attrs = [
+      { id: 'aicc-session-start-filter', name: 'aicc_session_start_filter' }, // 开始时间筛选输入。
+      { id: 'aicc-session-end-filter', name: 'aicc_session_end_filter' }, // 结束时间筛选输入。
+    ]
+    inputs.forEach((input, index) => {
+      const attr = attrs[index]
+      if (!attr) return
+      input.id = attr.id
+      input.name = attr.name
+    })
+  })
 }
 
 function stringQuery(value: unknown): string | null {

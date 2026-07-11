@@ -787,6 +787,42 @@ func TestAICCPublicSubmitFeedbackRejectsWrongSession(t *testing.T) {
 	assert.Equal(t, "", store.resolutionStatus)
 }
 
+// TestAICCPublicResolveSessionMarksSessionResolved 覆盖公开会话级解决入口：
+// 访客只持有当前 session token 时，可将整个会话标记为已解决，且不写入单条回复反馈。
+func TestAICCPublicResolveSessionMarksSessionResolved(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive},
+		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	result, err := svc.ResolveSession(context.Background(), "tok")
+
+	require.NoError(t, err)
+	assert.Equal(t, domain.AICCResolutionResolved, result.ResolutionStatus)
+	assert.Equal(t, domain.AICCResolutionResolved, store.resolutionStatus)
+	assert.Empty(t, store.feedback.MessageID)
+}
+
+// TestAICCPublicResolveSessionRejectsExpiredToken 覆盖会话级解决入口的授权边界：
+// 过期或无效 token 不能改变任何会话状态。
+func TestAICCPublicResolveSessionRejectsExpiredToken(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive},
+		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(-time.Minute)},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	_, err := svc.ResolveSession(context.Background(), "tok")
+
+	require.ErrorIs(t, err, ErrAICCInvalidSession)
+	assert.Equal(t, "", store.resolutionStatus)
+}
+
 type fakeAICCPublicStore struct {
 	org                 sqlc.Organization
 	agent               sqlc.AiccAgent

@@ -187,6 +187,8 @@ export interface AICCPublicSession {
 export interface AICCPublicSessionDetail {
   // 当前会话已保存的消息。
   messages: AICCMessage[]
+  // 当前会话级解决状态。
+  resolution_status?: 'resolved' | 'unresolved' | 'unknown' | string
 }
 
 // AICCPublicMessageResult 是公开消息接口返回的助手回复。
@@ -213,6 +215,12 @@ export interface AICCPublicLeadValuesResult {
   lead_status: 'pending' | 'complete' | 'skipped' | string
   // 仍缺失的必填字段 key。
   missing_required_keys?: string[]
+}
+
+// AICCPublicResolutionResult 是访客将当前会话标记为已解决后的状态。
+export interface AICCPublicResolutionResult {
+  // 当前会话级解决状态。
+  resolution_status: 'resolved' | 'unresolved' | 'unknown' | string
 }
 
 // AICCSession 是企业管理员查看访客会话列表时的摘要信息。
