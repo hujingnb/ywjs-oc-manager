@@ -140,4 +140,19 @@ describe('PublicAICCChatPage', () => {
     expect(apiState.sendMessage).toHaveBeenCalledWith('session-token', { text: '报价多少', image_file_id: undefined })
     expect(wrapper.text()).toContain('收到')
   })
+
+  // 场景：隐私提示只在访客刚进入公开页时展示，发送消息后不再占用输入区上方空间。
+  it('hides the privacy notice after the visitor sends the first message', async () => {
+    const wrapper = mountPublicChat()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('我们会使用本次对话内容回答问题。')
+
+    await wrapper.find('textarea').setValue('报价多少')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.text()).not.toContain('我们会使用本次对话内容回答问题。')
+  })
 })

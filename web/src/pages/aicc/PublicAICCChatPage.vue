@@ -65,7 +65,7 @@
         </div>
         <n-button type="primary" attr-type="submit" :loading="leadBusy">{{ t('aicc.publicChat.submitLead') }}</n-button>
       </form>
-      <section v-else-if="privacyText" class="privacy-note">
+      <section v-else-if="showPrivacyNotice" class="privacy-note">
         <ShieldCheck :size="16" />
         <span>{{ privacyText }}</span>
       </section>
@@ -167,6 +167,9 @@ const needsLead = computed(() => leadFields.value.some(field => field.required) 
 const showLeadForm = computed(() => leadFields.value.length > 0 && !leadComplete.value && !needsConsent.value)
 const canSend = computed(() => Boolean(config.value) && !needsConsent.value && !needsLead.value && !isSending.value)
 const canSubmit = computed(() => canSend.value && (draft.value.trim().length > 0 || Boolean(pendingImage.value)))
+const hasVisitorMessage = computed(() => messages.value.some(message => message.role === 'visitor'))
+// notice 模式的隐私说明只用于进入页面时告知访客，访客开始对话后隐藏以减少输入区占用。
+const showPrivacyNotice = computed(() => Boolean(privacyText.value) && !hasVisitorMessage.value)
 
 onMounted(() => {
   void boot()
