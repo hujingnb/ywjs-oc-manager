@@ -17,12 +17,14 @@ type fakeConversationOps struct {
 	sessions    []ocops.ConversationSession
 	chatOut     ocops.ConversationChatResult
 	gotSID      string
+	listSource  string
 	lastReq     ocops.ConversationChatReq // 记录最后一次 SessionChat/SessionChatStream 的请求，供富化断言
 	createCalls int
 	createReq   ocops.ConversationCreateReq
 }
 
-func (f *fakeConversationOps) ListSessions(_ context.Context, _ ocops.Endpoint, _ string, _, _ int) ([]ocops.ConversationSession, error) {
+func (f *fakeConversationOps) ListSessions(_ context.Context, _ ocops.Endpoint, source string, _, _ int) ([]ocops.ConversationSession, error) {
+	f.listSource = source
 	return f.sessions, nil
 }
 func (f *fakeConversationOps) SessionMessages(_ context.Context, _ ocops.Endpoint, sid string) ([]ocops.ConversationMessage, error) {

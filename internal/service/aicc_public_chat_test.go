@@ -24,8 +24,9 @@ func TestAICCPublicHermesChatCreatesHermesSessionBeforeChat(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "您好，我可以介绍产品和服务。", reply)
+	assert.Equal(t, "web", ops.listSource)
 	assert.Equal(t, 1, ops.createCalls)
-	assert.Equal(t, "aicc", ops.createReq.Source)
+	assert.Equal(t, "web", ops.createReq.Source)
 	assert.Equal(t, "AICC aicc-session-1", ops.createReq.Title)
 	assert.Equal(t, "new", ops.gotSID)
 	assert.Equal(t, "你好", ops.lastReq.Message)
