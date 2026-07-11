@@ -27,7 +27,7 @@ type AICCAgentResponse = {
 async function enableAICCForFixtureOrg(page: Page): Promise<void> {
   const fx = loadE2EFixture()
   await forceZh(page)
-  await loginAs(page, 'platform_admin', fx)
+  await loginAs(page, 'platform_admin', fx, 'zh')
   await page.goto('/organizations')
 
   const orgRow = page.getByRole('row', { name: new RegExp(fx.org_code) })
@@ -46,7 +46,7 @@ async function enableAICCForFixtureOrg(page: Page): Promise<void> {
     .locator('.n-form-item')
     .filter({ hasText: 'AICC 智能体数量上限' })
     .locator('input')
-    .fill('3')
+    .fill('10')
 
   const configSaved = page.waitForResponse(response =>
     response.url().includes('/api/v1/organizations/')
@@ -61,7 +61,7 @@ async function enableAICCForFixtureOrg(page: Page): Promise<void> {
 async function createAICCAgentAsOrgAdmin(page: Page): Promise<AICCAgentResponse['agent']> {
   const fx = loadE2EFixture()
   await forceZh(page)
-  await loginAs(page, 'org_admin', fx)
+  await loginAs(page, 'org_admin', fx, 'zh')
   await openAICCConsole(page)
   await openAICCSettings(page)
   await page.getByRole('button', { name: '新建智能体' }).click()

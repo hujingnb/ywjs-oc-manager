@@ -10,7 +10,7 @@ test.setTimeout(120_000)
 async function enableFixtureAICC(page: Page): Promise<void> {
   const fx = loadE2EFixture()
   await forceZh(page)
-  await loginAs(page, 'platform_admin', fx)
+  await loginAs(page, 'platform_admin', fx, 'zh')
   await page.goto('/organizations')
   const row = page.getByRole('row', { name: new RegExp(fx.org_code) })
   await row.getByRole('button', { name: '编辑' }).click()
@@ -81,7 +81,7 @@ test('平台管理员可从企业列表进入指定 AICC 且不能新建智能�
 test('企业管理员从概览进入 AICC 并切换中英文子页面', async ({ page }) => {
   await enableFixtureAICC(page)
   await clearLoginState(page)
-  await loginAs(page, 'org_admin', loadE2EFixture())
+  await loginAs(page, 'org_admin', loadE2EFixture(), 'zh')
   await page.goto('/')
 
   const entry = page.getByRole('link', { name: /AICC 客服/ })
@@ -101,7 +101,7 @@ test('企业管理员从概览进入 AICC 并切换中英文子页面', async ({
 test('企业普通成员无 AICC 入口且直接访问会被拒绝', async ({ page }) => {
   await enableFixtureAICC(page)
   await clearLoginState(page)
-  await loginAs(page, 'org_member', loadE2EFixture())
+  await loginAs(page, 'org_member', loadE2EFixture(), 'zh')
 
   await page.goto('/aicc-console')
   await expect(page).not.toHaveURL(/\/aicc-console/)

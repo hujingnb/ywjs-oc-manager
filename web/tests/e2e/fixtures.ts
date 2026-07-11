@@ -34,6 +34,7 @@ export async function loginAs(
   page: Page,
   role: 'platform_admin' | 'org_admin' | 'org_member',
   fx: E2EFixture = loadE2EFixture(),
+  locale?: 'zh' | 'en',
 ): Promise<void> {
   const credential = {
     platform_admin: { u: fx.platform_admin_login, p: fx.platform_admin_password },
@@ -51,4 +52,14 @@ export async function loginAs(
   await page.getByLabel(/^(密码|Password)$/).fill(credential.p)
   await page.getByRole('button', { name: /^(登录|Log in)$/ }).click()
   await page.waitForURL((url) => !url.pathname.startsWith('/login'))
+  // 登录完成后后端会以用户偏好覆盖登录前 localStorage；测试需要固定文案时，
+  // 必须通过真实语言切换器再次写入用户偏好，避免用例顺序改变后定位器失效。
+  if (locale) {
+    const current = locale === 'zh' ? '简体中文' : 'English'
+    const switcher = page.getByRole('button', { name: /^(Language|语言|English|简体中文)$/ })
+    if (await switcher.getByText(current, { exact: true }).count() === 0) {
+      await switcher.click()
+      await page.locator('.n-dropdown-option', { hasText: current }).click()
+    }
+  }
 }

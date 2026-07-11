@@ -17,7 +17,7 @@ type AICCAgent = {
 async function prepareKnowledgeAgent(page: Page): Promise<AICCAgent> {
   const fx = loadE2EFixture()
   await forceZh(page)
-  await loginAs(page, 'platform_admin', fx)
+  await loginAs(page, 'platform_admin', fx, 'zh')
   await page.goto('/organizations')
   const row = page.getByRole('row', { name: new RegExp(fx.org_code) })
   await row.getByRole('button', { name: '编辑' }).click()
@@ -30,7 +30,7 @@ async function prepareKnowledgeAgent(page: Page): Promise<AICCAgent> {
   expect((await configSaved).ok()).toBeTruthy()
 
   await clearLoginState(page)
-  await loginAs(page, 'org_admin', fx)
+  await loginAs(page, 'org_admin', fx, 'zh')
   await openAICCConsole(page)
   await openAICCSettings(page)
   await page.getByRole('button', { name: '新建智能体' }).click()
