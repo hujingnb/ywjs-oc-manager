@@ -45,9 +45,9 @@ func (c *AICCPublicHermesChat) ChatAICC(ctx context.Context, appID, sessionID, t
 
 func (c *AICCPublicHermesChat) ensureHermesSession(ctx context.Context, ep ocops.Endpoint, aiccSessionID string) (string, error) {
 	title := "AICC " + aiccSessionID
-	// Hermes api_server 的会话 source 由运行时渠道定义，当前公开网页入口应落到 web；
-	// AICC 自身归属用标题前缀隔离，避免把未知 source=aicc 传给上游导致 400。
-	sessions, err := c.ops.ListSessions(ctx, ep, "web", 100, 0)
+	// Hermes 创建会话时接受 source=web，但持久化后可能按 api_server 回显；
+	// 这里必须不带 source 过滤，只用 AICC 专属标题匹配，避免查不到已有会话后重复创建触发 400。
+	sessions, err := c.ops.ListSessions(ctx, ep, "", 100, 0)
 	if err != nil {
 		return "", mapOcOpsConversationErr(err)
 	}
