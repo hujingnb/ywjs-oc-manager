@@ -356,7 +356,7 @@ import {
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
-  Copy, Download, ExternalLink, HelpCircle, PauseCircle, PlayCircle, Plus, QrCode, Save, Trash2,
+  Copy, Download, ExternalLink, PauseCircle, PlayCircle, Plus, QrCode, Save, Trash2,
 } from 'lucide-vue-next'
 
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
@@ -416,7 +416,7 @@ const FieldLabel = defineComponent({
           class: 'field-help-trigger',
           'aria-label': labelProps.help,
           'data-test': 'field-help',
-        }, [h(HelpCircle, { size: 14 })]),
+        }, '?'),
         default: () => labelProps.help,
       }),
     ])
@@ -939,7 +939,7 @@ function openDedicatedKnowledge() {
   color: var(--color-text-secondary);
 }
 
-.field-label-with-help {
+:deep(.field-label-with-help) {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -947,25 +947,32 @@ function openDedicatedKnowledge() {
   vertical-align: middle;
 }
 
-.field-help-trigger {
+:deep(.field-help-trigger) {
   display: inline-grid;
-  width: 18px;
-  height: 18px;
+  width: 15px;
+  height: 15px;
   place-items: center;
   padding: 0;
-  border: 0;
+  border: 1px solid var(--color-divider);
   border-radius: 50%;
-  background: transparent;
+  background: var(--color-surface);
   color: var(--color-text-secondary);
   cursor: help;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  opacity: 0.72;
 }
 
-.field-help-trigger:hover,
-.field-help-trigger:focus-visible {
+:deep(.field-help-trigger:hover),
+:deep(.field-help-trigger:focus-visible) {
+  border-color: var(--color-primary);
+  background: var(--color-surface-muted);
   color: var(--color-primary);
+  opacity: 1;
 }
 
-.field-help-trigger:focus-visible {
+:deep(.field-help-trigger:focus-visible) {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }

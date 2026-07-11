@@ -262,6 +262,7 @@ describe('AICCManagerPage', () => {
     const helpTriggers = wrapper.findAll('[data-test="field-help"]')
 
     expect(helpTriggers).toHaveLength(15)
+    expect(helpTriggers.every(trigger => trigger.text() === '?')).toBe(true)
     expect(helpTriggers.some(trigger =>
       trigger.attributes('aria-label') === '开启后，系统会根据敏感词命中、异常频率等规则标记高风险访客，并阻止其继续发送消息。',
     )).toBe(true)
