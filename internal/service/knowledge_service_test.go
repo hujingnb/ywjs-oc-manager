@@ -274,8 +274,8 @@ func TestRuntimeSearchOrgRetrieveErrorUsesEnterpriseCopy(t *testing.T) {
 	require.ErrorContains(t, err, "RAGFlow 检索企业知识库失败")
 }
 
-// TestRuntimeSearchAICCUsesConfiguredKnowledgeScope 验证 AICC 隐藏 app 的 runtime 检索只使用
-// 智能体配置的知识范围，专属文档结果还必须按允许的 RAGFlow document id 过滤。
+// TestRuntimeSearchAICCUsesConfiguredKnowledgeScope 验证 AICC 隐藏 app 的 runtime 检索：
+// 当前客服知识库默认启用，企业知识库和行业知识库按智能体配置开关/列表启用。
 func TestRuntimeSearchAICCUsesConfiguredKnowledgeScope(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
 	store.aiccAgentsByApp = map[string]sqlc.AiccAgent{
@@ -308,27 +308,33 @@ func TestRuntimeSearchAICCUsesConfiguredKnowledgeScope(t *testing.T) {
 	assert.Equal(t, []string{testRemoteAppDatasetID}, rf.retrieveCalls[0].datasetIDs)
 	assert.Equal(t, []string{testRemoteOrgDatasetID}, rf.retrieveCalls[1].datasetIDs)
 	assert.Equal(t, []string{testRemoteIndustryDatasetID}, rf.retrieveCalls[2].datasetIDs)
-	require.Len(t, result.Results, 3)
-	assert.Equal(t, []string{"app", "org", "industry"}, []string{result.Results[0].Scope, result.Results[1].Scope, result.Results[2].Scope})
-	assert.Equal(t, "allowed-doc", result.Results[0].DocumentID)
-	for _, hit := range result.Results {
-		assert.NotEqual(t, "blocked-doc", hit.DocumentID)
-	}
+	require.Len(t, result.Results, 4)
+	assert.Equal(t, []string{"app", "app", "org", "industry"}, []string{result.Results[0].Scope, result.Results[1].Scope, result.Results[2].Scope, result.Results[3].Scope})
+	assert.Equal(t, "blocked-doc", result.Results[0].DocumentID)
+	assert.Equal(t, "allowed-doc", result.Results[1].DocumentID)
 }
 
-// TestRuntimeSearchAICCWithEmptyScopeReturnsNoHits 验证 AICC 智能体存在但未配置知识范围时，
-// runtime 不再回退到普通 app 的 app/org/版本行业库默认检索。
-func TestRuntimeSearchAICCWithEmptyScopeReturnsNoHits(t *testing.T) {
+// TestRuntimeSearchAICCWithEmptyScopeUsesCurrentAgentKnowledge 验证 AICC 智能体存在但未配置知识范围时，
+// runtime 仍默认检索当前客服知识库，但不回退企业库或版本行业库。
+func TestRuntimeSearchAICCWithEmptyScopeUsesCurrentAgentKnowledge(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
 	store.aiccAgentsByApp = map[string]sqlc.AiccAgent{
 		testKnowledgeApp: {ID: "aicc-agent-1", AppID: testKnowledgeApp, OrgID: testKnowledgeOrg},
+	}
+	rf.retrieveChunksByDataset = map[string][]ragflow.RetrievalChunk{
+		testRemoteAppDatasetID: {
+			{DocumentID: "agent-doc", DocumentName: "agent.md", DatasetID: testRemoteAppDatasetID, Content: "当前客服知识", Similarity: 0.9},
+		},
 	}
 
 	result, err := svc.RuntimeSearch(context.Background(), testRuntimeToken, "退款政策", 8)
 
 	require.NoError(t, err)
-	assert.Empty(t, rf.retrieveCalls)
-	assert.Empty(t, result.Results)
+	require.Len(t, rf.retrieveCalls, 1)
+	assert.Equal(t, []string{testRemoteAppDatasetID}, rf.retrieveCalls[0].datasetIDs)
+	require.Len(t, result.Results, 1)
+	assert.Equal(t, "app", result.Results[0].Scope)
+	assert.Equal(t, "agent-doc", result.Results[0].DocumentID)
 }
 
 // TestCreateIndustryKnowledgeBasePlatformOnly 验证行业库创建只允许平台管理员，且名称会去除首尾空白。

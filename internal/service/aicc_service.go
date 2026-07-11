@@ -53,10 +53,10 @@ type AICCStore interface {
 	ListAICCAgentsByOrg(ctx context.Context, arg sqlc.ListAICCAgentsByOrgParams) ([]sqlc.AiccAgent, error)
 	// ListAICCAgentKnowledge 列出智能体当前可检索知识范围。
 	ListAICCAgentKnowledge(ctx context.Context, agentID string) ([]sqlc.AiccAgentKnowledge, error)
-	// ListIndustryKnowledgeBases 列出平台行业库，AICC 管理页只读展示名称和文档数。
-	ListIndustryKnowledgeBases(ctx context.Context, arg sqlc.ListIndustryKnowledgeBasesParams) ([]sqlc.ListIndustryKnowledgeBasesRow, error)
-	// ListRAGFlowDocumentsByScope 列出隐藏 app 专属知识库文件，供 AICC 选择可检索文档。
-	ListRAGFlowDocumentsByScope(ctx context.Context, arg sqlc.ListRAGFlowDocumentsByScopeParams) ([]sqlc.RagflowDocument, error)
+	// GetApp 读取 AICC 隐藏 app，用于按企业授权版本收敛行业知识库候选范围。
+	GetApp(ctx context.Context, id string) (sqlc.App, error)
+	// ListIndustryKnowledgeBasesByAssistantVersion 列出当前客服隐藏 app 版本关联的行业知识库。
+	ListIndustryKnowledgeBasesByAssistantVersion(ctx context.Context, versionID string) ([]sqlc.IndustryKnowledgeBasis, error)
 	// DeleteAICCAgentKnowledgeByAgent 清空智能体知识范围，配合 AddAICCAgentKnowledge 整组替换。
 	DeleteAICCAgentKnowledgeByAgent(ctx context.Context, agentID string) error
 	// AddAICCAgentKnowledge 写入单条知识范围配置。
@@ -476,7 +476,7 @@ func (s *AICCService) GetAgentKnowledge(ctx context.Context, principal auth.Prin
 	return toAICCKnowledgeResult(agent, rows), nil
 }
 
-// ListAgentKnowledgeOptions 读取 AICC 管理页配置知识范围所需的行业库和专属文档候选项。
+// ListAgentKnowledgeOptions 读取 AICC 管理页配置知识范围所需的行业库候选项。
 func (s *AICCService) ListAgentKnowledgeOptions(ctx context.Context, principal auth.Principal, agentID string) (AICCKnowledgeOptionsResult, error) {
 	agent, err := s.getAgentRow(ctx, agentID)
 	if err != nil {
@@ -485,24 +485,21 @@ func (s *AICCService) ListAgentKnowledgeOptions(ctx context.Context, principal a
 	if !auth.CanViewAICC(principal, agent.OrgID) {
 		return AICCKnowledgeOptionsResult{}, ErrForbidden
 	}
-	bases, err := s.store.ListIndustryKnowledgeBases(ctx, sqlc.ListIndustryKnowledgeBasesParams{
-		Limit:  200,
-		Offset: 0,
-	})
+	app, err := s.store.GetApp(ctx, agent.AppID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return AICCKnowledgeOptionsResult{}, ErrNotFound
+	}
+	if err != nil {
+		return AICCKnowledgeOptionsResult{}, fmt.Errorf("查询 AICC 隐藏应用失败: %w", err)
+	}
+	if !app.VersionID.Valid {
+		return toAICCKnowledgeOptionsResult(nil), nil
+	}
+	bases, err := s.store.ListIndustryKnowledgeBasesByAssistantVersion(ctx, app.VersionID.String)
 	if err != nil {
 		return AICCKnowledgeOptionsResult{}, fmt.Errorf("查询 AICC 行业知识库候选失败: %w", err)
 	}
-	documents, err := s.store.ListRAGFlowDocumentsByScope(ctx, sqlc.ListRAGFlowDocumentsByScopeParams{
-		ScopeType: "app",
-		OrgID:     nullStr(agent.OrgID),
-		AppID:     nullStr(agent.AppID),
-		Limit:     200,
-		Offset:    0,
-	})
-	if err != nil {
-		return AICCKnowledgeOptionsResult{}, fmt.Errorf("查询 AICC 专属文档候选失败: %w", err)
-	}
-	return toAICCKnowledgeOptionsResult(bases, documents), nil
+	return toAICCKnowledgeOptionsResult(bases), nil
 }
 
 // ReplaceAgentKnowledge 整组替换智能体知识范围，避免局部勾选和删除产生不一致配置。
@@ -544,23 +541,9 @@ func (s *AICCService) ReplaceAgentKnowledge(ctx context.Context, principal auth.
 				return fmt.Errorf("保存 AICC 行业知识范围失败: %w", err)
 			}
 		}
-		for _, id := range normalized.AppDocumentIDs {
-			if err := store.AddAICCAgentKnowledge(ctx, sqlc.AddAICCAgentKnowledgeParams{
-				ID:                newUUID(),
-				AgentID:           agentID,
-				AgentOrgID:        agent.OrgID,
-				ScopeType:         domain.AICCKnowledgeScopeTypeAppDocument,
-				OrgID:             nullStr(agent.OrgID),
-				AppID:             nullStr(agent.AppID),
-				RagflowDocumentID: nullStr(id),
-			}); err != nil {
-				return fmt.Errorf("保存 AICC 专属文档范围失败: %w", err)
-			}
-		}
 		if err := s.recordAICCAudit(ctx, store, principal, agent.OrgID, agentID, "update_knowledge", map[string]any{
 			"use_org_knowledge":           normalized.UseOrgKnowledge,
 			"industry_knowledge_base_ids": normalized.IndustryKnowledgeBaseIDs,
-			"app_document_ids":            normalized.AppDocumentIDs,
 		}); err != nil {
 			return err
 		}
@@ -1077,14 +1060,9 @@ func normalizeAICCKnowledgeInput(input AICCKnowledgeInput) (AICCKnowledgeInput, 
 	if err != nil {
 		return AICCKnowledgeInput{}, err
 	}
-	documentIDs, err := normalizeAICCKnowledgeIDs(input.AppDocumentIDs, 200, "专属文档")
-	if err != nil {
-		return AICCKnowledgeInput{}, err
-	}
 	return AICCKnowledgeInput{
 		UseOrgKnowledge:          input.UseOrgKnowledge,
 		IndustryKnowledgeBaseIDs: industryIDs,
-		AppDocumentIDs:           documentIDs,
 	}, nil
 }
 
@@ -1286,31 +1264,20 @@ func toAICCKnowledgeResult(agent sqlc.AiccAgent, rows []sqlc.AiccAgentKnowledge)
 			if row.IndustryKnowledgeBaseID.Valid {
 				result.IndustryKnowledgeBaseIDs = append(result.IndustryKnowledgeBaseIDs, row.IndustryKnowledgeBaseID.String)
 			}
-		case domain.AICCKnowledgeScopeTypeAppDocument:
-			if row.RagflowDocumentID.Valid {
-				result.AppDocumentIDs = append(result.AppDocumentIDs, row.RagflowDocumentID.String)
-			}
 		}
 	}
 	return result
 }
 
-func toAICCKnowledgeOptionsResult(bases []sqlc.ListIndustryKnowledgeBasesRow, documents []sqlc.RagflowDocument) AICCKnowledgeOptionsResult {
+func toAICCKnowledgeOptionsResult(bases []sqlc.IndustryKnowledgeBasis) AICCKnowledgeOptionsResult {
 	result := AICCKnowledgeOptionsResult{
 		IndustryKnowledgeBases: make([]AICCKnowledgeOption, 0, len(bases)),
-		AppDocuments:           make([]AICCKnowledgeOption, 0, len(documents)),
+		AppDocuments:           []AICCKnowledgeOption{},
 	}
 	for _, base := range bases {
 		result.IndustryKnowledgeBases = append(result.IndustryKnowledgeBases, AICCKnowledgeOption{
-			ID:            base.ID,
-			Name:          base.Name,
-			DocumentCount: base.DocumentCount,
-		})
-	}
-	for _, document := range documents {
-		result.AppDocuments = append(result.AppDocuments, AICCKnowledgeOption{
-			ID:   document.ID,
-			Name: document.Name,
+			ID:   base.ID,
+			Name: base.Name,
 		})
 	}
 	return result

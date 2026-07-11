@@ -323,7 +323,7 @@ func (h *AICCHandler) UpdateAgentSettings(c *gin.Context) {
 // GetAgentKnowledge 读取 AICC 智能体知识范围。
 //
 // @Summary      AICC 智能体知识范围
-// @Description  读取企业知识库、行业知识库和专属文档的挂载配置
+// @Description  读取企业知识库开关、行业知识库选择和当前客服知识库入口
 // @Tags         aicc
 // @Produce      json
 // @Security     BearerAuth
@@ -346,7 +346,7 @@ func (h *AICCHandler) GetAgentKnowledge(c *gin.Context) {
 // ListAgentKnowledgeOptions 读取 AICC 知识范围候选项。
 //
 // @Summary      AICC 知识范围候选项
-// @Description  读取企业管理员可选择的行业知识库和当前智能体专属文档
+// @Description  读取企业管理员可选择的行业知识库
 // @Tags         aicc
 // @Produce      json
 // @Security     BearerAuth
@@ -369,7 +369,7 @@ func (h *AICCHandler) ListAgentKnowledgeOptions(c *gin.Context) {
 // ReplaceAgentKnowledge 整组保存 AICC 智能体知识范围。
 //
 // @Summary      保存 AICC 智能体知识范围
-// @Description  企业管理员整组替换企业知识库、行业知识库和专属文档挂载配置
+// @Description  企业管理员整组替换企业知识库开关和行业知识库选择
 // @Tags         aicc
 // @Accept       json
 // @Produce      json
@@ -392,7 +392,6 @@ func (h *AICCHandler) ReplaceAgentKnowledge(c *gin.Context) {
 	result, err := h.service.ReplaceAgentKnowledge(c.Request.Context(), principalFromCtx(c), c.Param("agentId"), service.AICCKnowledgeInput{
 		UseOrgKnowledge:          req.UseOrgKnowledge,
 		IndustryKnowledgeBaseIDs: req.IndustryKnowledgeBaseIDs,
-		AppDocumentIDs:           req.AppDocumentIDs,
 	})
 	if err != nil {
 		writeServiceError(c, err)

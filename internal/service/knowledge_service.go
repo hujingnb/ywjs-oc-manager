@@ -557,21 +557,19 @@ func (s *KnowledgeService) runtimeSearchAICC(ctx context.Context, app sqlc.App, 
 	}
 	scope := normalizeRuntimeAICCKnowledgeScope(rows)
 	hits := []KnowledgeSearchHit{}
-	if len(scope.AppDocumentIDs) > 0 {
-		appDataset, err := s.getAppDataset(ctx, app.ID)
-		if err != nil {
-			return KnowledgeSearchResult{}, true, err
-		}
-		appRemoteID, err := requireRemoteDatasetID(appDataset)
-		if err != nil {
-			return KnowledgeSearchResult{}, true, err
-		}
-		chunks, err := s.ragflowClient().Retrieve(ctx, []string{appRemoteID}, question, topK)
-		if err != nil {
-			return KnowledgeSearchResult{}, true, fmt.Errorf("RAGFlow 检索 AICC 专属知识库失败: %w", err)
-		}
-		hits = append(hits, searchHitsFromChunks("app", filterRuntimeChunksByDocument(chunks, scope.AppDocumentIDs))...)
+	appDataset, err := s.getAppDataset(ctx, app.ID)
+	if err != nil {
+		return KnowledgeSearchResult{}, true, err
 	}
+	appRemoteID, err := requireRemoteDatasetID(appDataset)
+	if err != nil {
+		return KnowledgeSearchResult{}, true, err
+	}
+	chunks, err := s.ragflowClient().Retrieve(ctx, []string{appRemoteID}, question, topK)
+	if err != nil {
+		return KnowledgeSearchResult{}, true, fmt.Errorf("RAGFlow 检索 AICC 当前客服知识库失败: %w", err)
+	}
+	hits = append(hits, searchHitsFromChunks("app", chunks)...)
 	if scope.UseOrgKnowledge {
 		orgDataset, err := s.getOrgDataset(ctx, app.OrgID)
 		if err != nil {
@@ -612,13 +610,11 @@ func (s *KnowledgeService) runtimeSearchAICC(ctx context.Context, app sqlc.App, 
 type runtimeAICCKnowledgeScope struct {
 	UseOrgKnowledge          bool
 	IndustryKnowledgeBaseIDs []string
-	AppDocumentIDs           []string
 }
 
 func normalizeRuntimeAICCKnowledgeScope(rows []sqlc.AiccAgentKnowledge) runtimeAICCKnowledgeScope {
 	scope := runtimeAICCKnowledgeScope{}
 	industrySeen := map[string]bool{}
-	documentSeen := map[string]bool{}
 	for _, row := range rows {
 		switch row.ScopeType {
 		case "org":
@@ -629,32 +625,9 @@ func normalizeRuntimeAICCKnowledgeScope(rows []sqlc.AiccAgentKnowledge) runtimeA
 				industrySeen[id] = true
 				scope.IndustryKnowledgeBaseIDs = append(scope.IndustryKnowledgeBaseIDs, id)
 			}
-		case "app_document":
-			id := strings.TrimSpace(row.RagflowDocumentID.String)
-			if id != "" && !documentSeen[id] {
-				documentSeen[id] = true
-				scope.AppDocumentIDs = append(scope.AppDocumentIDs, id)
-			}
 		}
 	}
 	return scope
-}
-
-func filterRuntimeChunksByDocument(chunks []ragflow.RetrievalChunk, allowedDocumentIDs []string) []ragflow.RetrievalChunk {
-	if len(chunks) == 0 || len(allowedDocumentIDs) == 0 {
-		return nil
-	}
-	allowed := map[string]bool{}
-	for _, id := range allowedDocumentIDs {
-		allowed[id] = true
-	}
-	filtered := make([]ragflow.RetrievalChunk, 0, len(chunks))
-	for _, chunk := range chunks {
-		if allowed[chunk.DocumentID] {
-			filtered = append(filtered, chunk)
-		}
-	}
-	return filtered
 }
 
 // RuntimeAddFile 供 Hermes 把工作目录中的报告写入当前实例知识库。

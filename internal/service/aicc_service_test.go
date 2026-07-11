@@ -20,58 +20,58 @@ import (
 
 // fakeAICCStore 是 AICC service 单测使用的最小 store，记录创建入参与返回组织配置。
 type fakeAICCStore struct {
-	org                 sqlc.Organization
-	count               int64
-	agents              map[string]sqlc.AiccAgent
-	settings            map[string]sqlc.AiccAgentSetting
-	knowledge           map[string][]sqlc.AiccAgentKnowledge
-	industryBases       []sqlc.ListIndustryKnowledgeBasesRow
-	appDocuments        []sqlc.RagflowDocument
-	sessions            map[string]sqlc.AiccSession
-	messages            map[string][]sqlc.AiccMessage
-	leads               map[string]sqlc.AiccLead
-	leadValues          map[string][]sqlc.ListAICCLeadValuesByLeadRow
-	sessionValues       map[string][]sqlc.ListAICCLeadValuesBySessionRow
-	leadFields          map[string][]sqlc.AiccLeadField
-	todayCount          int64
-	unreadCount         int64
-	blockedCount        int64
-	resolved            int64
-	unresolved          int64
-	completeLead        int64
-	analyticsSummary    AICCAnalyticsSummary
-	analyticsTrend      []AICCTrendBucket
-	analyticsRegions    []AICCTopItemResult
-	analyticsRegionRows []sqlc.ListAICCRegionsInRangeRow
-	topQuestions        []sqlc.ListAICCTopVisitorQuestionsByOrgRow
-	topSources          []sqlc.ListAICCTopSourceURLsByOrgRow
-	audits              []sqlc.CreateAuditLogParams
-	createArg           sqlc.CreateAICCAgentParams
-	upsertSettings      *sqlc.UpsertAICCAgentSettingsParams
-	addKnowledge        []sqlc.AddAICCAgentKnowledgeParams
-	updateArg           sqlc.UpdateAICCAgentProfileParams
-	statusArg           sqlc.SetAICCAgentStatusParams
-	sessionArg          sqlc.ListAICCSessionsByAgentParams
-	analyticsArg        AICCAnalyticsOptions
-	completedLeadArg    sqlc.CountAICCCompletedLeadSessionsInRangeParams
-	topQuestionsArg     sqlc.ListAICCTopVisitorQuestionsInRangeParams
-	topSourcesArg       sqlc.ListAICCTopSourceURLsInRangeParams
-	countBlockedArg     string
-	readLeadArg         sqlc.MarkAICCLeadReadParams
-	createField         sqlc.UpsertAICCLeadFieldParams
-	deletedID           string
-	createErr           error
-	getErr              error
-	getSettingsErr      error
-	upsertSettingsErr   error
-	blockedCountErr     error
-	listErr             error
-	updateErr           error
-	statusErr           error
-	deleteErr           error
-	sessionsErr         error
-	leadsErr            error
-	organization        error
+	org                  sqlc.Organization
+	count                int64
+	agents               map[string]sqlc.AiccAgent
+	apps                 map[string]sqlc.App
+	settings             map[string]sqlc.AiccAgentSetting
+	knowledge            map[string][]sqlc.AiccAgentKnowledge
+	versionIndustryBases map[string][]sqlc.IndustryKnowledgeBasis
+	sessions             map[string]sqlc.AiccSession
+	messages             map[string][]sqlc.AiccMessage
+	leads                map[string]sqlc.AiccLead
+	leadValues           map[string][]sqlc.ListAICCLeadValuesByLeadRow
+	sessionValues        map[string][]sqlc.ListAICCLeadValuesBySessionRow
+	leadFields           map[string][]sqlc.AiccLeadField
+	todayCount           int64
+	unreadCount          int64
+	blockedCount         int64
+	resolved             int64
+	unresolved           int64
+	completeLead         int64
+	analyticsSummary     AICCAnalyticsSummary
+	analyticsTrend       []AICCTrendBucket
+	analyticsRegions     []AICCTopItemResult
+	analyticsRegionRows  []sqlc.ListAICCRegionsInRangeRow
+	topQuestions         []sqlc.ListAICCTopVisitorQuestionsByOrgRow
+	topSources           []sqlc.ListAICCTopSourceURLsByOrgRow
+	audits               []sqlc.CreateAuditLogParams
+	createArg            sqlc.CreateAICCAgentParams
+	upsertSettings       *sqlc.UpsertAICCAgentSettingsParams
+	addKnowledge         []sqlc.AddAICCAgentKnowledgeParams
+	updateArg            sqlc.UpdateAICCAgentProfileParams
+	statusArg            sqlc.SetAICCAgentStatusParams
+	sessionArg           sqlc.ListAICCSessionsByAgentParams
+	analyticsArg         AICCAnalyticsOptions
+	completedLeadArg     sqlc.CountAICCCompletedLeadSessionsInRangeParams
+	topQuestionsArg      sqlc.ListAICCTopVisitorQuestionsInRangeParams
+	topSourcesArg        sqlc.ListAICCTopSourceURLsInRangeParams
+	countBlockedArg      string
+	readLeadArg          sqlc.MarkAICCLeadReadParams
+	createField          sqlc.UpsertAICCLeadFieldParams
+	deletedID            string
+	createErr            error
+	getErr               error
+	getSettingsErr       error
+	upsertSettingsErr    error
+	blockedCountErr      error
+	listErr              error
+	updateErr            error
+	statusErr            error
+	deleteErr            error
+	sessionsErr          error
+	leadsErr             error
+	organization         error
 }
 
 // GetOrganization 返回测试预置的企业开通配置。
@@ -201,20 +201,18 @@ func (f *fakeAICCStore) ListAICCAgentKnowledge(_ context.Context, agentID string
 	return append([]sqlc.AiccAgentKnowledge(nil), f.knowledge[agentID]...), nil
 }
 
-// ListIndustryKnowledgeBases 返回 AICC 管理页可选择的平台行业库候选项。
-func (f *fakeAICCStore) ListIndustryKnowledgeBases(_ context.Context, _ sqlc.ListIndustryKnowledgeBasesParams) ([]sqlc.ListIndustryKnowledgeBasesRow, error) {
-	return append([]sqlc.ListIndustryKnowledgeBasesRow(nil), f.industryBases...), nil
+// GetApp 返回 AICC 隐藏 app，用于按当前版本收敛行业知识库候选范围。
+func (f *fakeAICCStore) GetApp(_ context.Context, id string) (sqlc.App, error) {
+	row, ok := f.apps[id]
+	if !ok {
+		return sqlc.App{}, sql.ErrNoRows
+	}
+	return row, nil
 }
 
-// ListRAGFlowDocumentsByScope 返回 AICC 隐藏 app 专属文档候选项。
-func (f *fakeAICCStore) ListRAGFlowDocumentsByScope(_ context.Context, arg sqlc.ListRAGFlowDocumentsByScopeParams) ([]sqlc.RagflowDocument, error) {
-	rows := make([]sqlc.RagflowDocument, 0, len(f.appDocuments))
-	for _, row := range f.appDocuments {
-		if row.ScopeType == arg.ScopeType && row.OrgID.String == arg.OrgID.String && row.AppID.String == arg.AppID.String {
-			rows = append(rows, row)
-		}
-	}
-	return rows, nil
+// ListIndustryKnowledgeBasesByAssistantVersion 返回当前隐藏 app 版本授权的行业库候选项。
+func (f *fakeAICCStore) ListIndustryKnowledgeBasesByAssistantVersion(_ context.Context, versionID string) ([]sqlc.IndustryKnowledgeBasis, error) {
+	return append([]sqlc.IndustryKnowledgeBasis(nil), f.versionIndustryBases[versionID]...), nil
 }
 
 // DeleteAICCAgentKnowledgeByAgent 清空智能体知识范围，模拟整组替换的第一步。
@@ -647,6 +645,13 @@ func seededAICCStore() *fakeAICCStore {
 				UpdatedAt:     time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC),
 			},
 		},
+		apps: map[string]sqlc.App{
+			"app-hidden-1": {
+				ID:        "app-hidden-1",
+				OrgID:     "org-1",
+				VersionID: null.StringFrom("version-1"),
+			},
+		},
 		knowledge: map[string][]sqlc.AiccAgentKnowledge{
 			"agent-1": {
 				{ID: "knowledge-org", AgentID: "agent-1", AgentOrgID: "org-1", ScopeType: domain.AICCKnowledgeScopeTypeOrg, OrgID: null.StringFrom("org-1")},
@@ -654,11 +659,10 @@ func seededAICCStore() *fakeAICCStore {
 				{ID: "knowledge-doc", AgentID: "agent-1", AgentOrgID: "org-1", ScopeType: domain.AICCKnowledgeScopeTypeAppDocument, OrgID: null.StringFrom("org-1"), AppID: null.StringFrom("app-hidden-1"), RagflowDocumentID: null.StringFrom("doc-1")},
 			},
 		},
-		industryBases: []sqlc.ListIndustryKnowledgeBasesRow{
-			{ID: "industry-1", Name: "售前行业库", DocumentCount: 2},
-		},
-		appDocuments: []sqlc.RagflowDocument{
-			{ID: "doc-1", ScopeType: "app", OrgID: null.StringFrom("org-1"), AppID: null.StringFrom("app-hidden-1"), Name: "专属话术.md", ParseStatus: "completed"},
+		versionIndustryBases: map[string][]sqlc.IndustryKnowledgeBasis{
+			"version-1": {
+				{ID: "industry-1", Name: "售前行业库"},
+			},
 		},
 		sessions: map[string]sqlc.AiccSession{
 			"session-1": {
@@ -1004,7 +1008,7 @@ func TestAICCServiceStatusAndDelete(t *testing.T) {
 	})
 }
 
-// TestAICCServiceGetAgentKnowledge 覆盖知识范围回显：返回企业知识库开关、行业库和专属文档配置。
+// TestAICCServiceGetAgentKnowledge 覆盖知识范围回显：返回企业知识库开关、行业库和当前客服知识库入口。
 func TestAICCServiceGetAgentKnowledge(t *testing.T) {
 	svc := NewAICCService(seededAICCStore(), &fakeAICCHiddenAppCreator{})
 
@@ -1015,18 +1019,18 @@ func TestAICCServiceGetAgentKnowledge(t *testing.T) {
 	assert.Equal(t, "app-hidden-1", result.AppID)
 	assert.True(t, result.UseOrgKnowledge)
 	assert.Equal(t, []string{"industry-1"}, result.IndustryKnowledgeBaseIDs)
-	assert.Equal(t, []string{"doc-1"}, result.AppDocumentIDs)
+	assert.Empty(t, result.AppDocumentIDs)
 }
 
-// TestAICCServiceListAgentKnowledgeOptions 覆盖 AICC 知识候选项：企业管理员可读取行业库和当前隐藏 app 文档。
+// TestAICCServiceListAgentKnowledgeOptions 覆盖 AICC 知识候选项：企业管理员只选择行业库，当前客服知识库默认启用。
 func TestAICCServiceListAgentKnowledgeOptions(t *testing.T) {
 	svc := NewAICCService(seededAICCStore(), &fakeAICCHiddenAppCreator{})
 
 	result, err := svc.ListAgentKnowledgeOptions(context.Background(), aiccOrgAdmin(), "agent-1")
 
 	require.NoError(t, err)
-	assert.Equal(t, []AICCKnowledgeOption{{ID: "industry-1", Name: "售前行业库", DocumentCount: 2}}, result.IndustryKnowledgeBases)
-	assert.Equal(t, []AICCKnowledgeOption{{ID: "doc-1", Name: "专属话术.md"}}, result.AppDocuments)
+	assert.Equal(t, []AICCKnowledgeOption{{ID: "industry-1", Name: "售前行业库"}}, result.IndustryKnowledgeBases)
+	assert.Empty(t, result.AppDocuments)
 }
 
 // TestAICCServiceListAgentKnowledgeOptionsRejectsCrossOrg 覆盖跨企业主体不能读取候选项。
@@ -1038,7 +1042,7 @@ func TestAICCServiceListAgentKnowledgeOptionsRejectsCrossOrg(t *testing.T) {
 	require.ErrorIs(t, err, ErrForbidden)
 }
 
-// TestAICCServiceReplaceAgentKnowledge 覆盖知识范围整组保存：输入会 trim、去重并按三类 scope 写回。
+// TestAICCServiceReplaceAgentKnowledge 覆盖知识范围整组保存：输入会 trim、去重并按企业/行业 scope 写回。
 func TestAICCServiceReplaceAgentKnowledge(t *testing.T) {
 	store := seededAICCStore()
 	svc := NewAICCService(store, &fakeAICCHiddenAppCreator{})
@@ -1046,19 +1050,16 @@ func TestAICCServiceReplaceAgentKnowledge(t *testing.T) {
 	result, err := svc.ReplaceAgentKnowledge(context.Background(), aiccOrgAdmin(), "agent-1", AICCKnowledgeInput{
 		UseOrgKnowledge:          true,
 		IndustryKnowledgeBaseIDs: []string{" industry-2 ", "industry-2"},
-		AppDocumentIDs:           []string{"doc-2", " doc-3 "},
 	})
 
 	require.NoError(t, err)
 	assert.True(t, result.UseOrgKnowledge)
 	assert.Equal(t, []string{"industry-2"}, result.IndustryKnowledgeBaseIDs)
-	assert.Equal(t, []string{"doc-2", "doc-3"}, result.AppDocumentIDs)
-	require.Len(t, store.addKnowledge, 4)
+	assert.Empty(t, result.AppDocumentIDs)
+	require.Len(t, store.addKnowledge, 2)
 	assert.Equal(t, domain.AICCKnowledgeScopeTypeOrg, store.addKnowledge[0].ScopeType)
 	assert.Equal(t, null.StringFrom("org-1"), store.addKnowledge[0].OrgID)
 	assert.Equal(t, domain.AICCKnowledgeScopeTypeIndustry, store.addKnowledge[1].ScopeType)
-	assert.Equal(t, domain.AICCKnowledgeScopeTypeAppDocument, store.addKnowledge[2].ScopeType)
-	assert.Equal(t, null.StringFrom("app-hidden-1"), store.addKnowledge[2].AppID)
 	require.Len(t, store.audits, 1)
 	assert.Equal(t, "update_knowledge", store.audits[0].Action)
 }
@@ -1073,7 +1074,6 @@ func TestAICCServiceReplaceAgentKnowledgeValidation(t *testing.T) {
 	}{
 		{name: "平台管理员不可保存", principal: auth.Principal{Role: domain.UserRolePlatformAdmin}, input: AICCKnowledgeInput{UseOrgKnowledge: true}, wantErr: ErrForbidden}, // 场景：平台只读排障不能改企业知识范围。
 		{name: "行业库 ID 为空返回参数错误", principal: aiccOrgAdmin(), input: AICCKnowledgeInput{IndustryKnowledgeBaseIDs: []string{" "}}, wantErr: ErrInvalidArgument},       // 场景：空 ID 不应进入数据库外键校验。
-		{name: "专属文档 ID 为空返回参数错误", principal: aiccOrgAdmin(), input: AICCKnowledgeInput{AppDocumentIDs: []string{""}}, wantErr: ErrInvalidArgument},                 // 场景：空文档 ID 不应进入数据库外键校验。
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -235,31 +235,29 @@ type AICCKnowledgeInput struct {
 	UseOrgKnowledge bool `json:"use_org_knowledge"`
 	// IndustryKnowledgeBaseIDs 是额外挂载的平台行业知识库 ID 列表。
 	IndustryKnowledgeBaseIDs []string `json:"industry_knowledge_base_ids"`
-	// AppDocumentIDs 是该智能体隐藏 app 专属知识库中允许检索的文档 ID 列表。
-	AppDocumentIDs []string `json:"app_document_ids"`
 }
 
 // AICCKnowledgeResult 是管理端回显的智能体知识范围配置。
 type AICCKnowledgeResult struct {
 	// AgentID 是智能体主键。
 	AgentID string `json:"agent_id"`
-	// AppID 是绑定隐藏 app ID，前端用它跳转到专属文档库维护入口。
+	// AppID 是绑定隐藏 app ID，前端用它跳转到当前客服知识库维护入口。
 	AppID string `json:"app_id"`
 	// UseOrgKnowledge 表示是否允许检索本企业共享知识库。
 	UseOrgKnowledge bool `json:"use_org_knowledge"`
 	// IndustryKnowledgeBaseIDs 是已挂载的平台行业知识库 ID 列表。
 	IndustryKnowledgeBaseIDs []string `json:"industry_knowledge_base_ids"`
-	// AppDocumentIDs 是已挂载的专属文档 ID 列表。
+	// AppDocumentIDs 保留给旧客户端兼容；当前客服知识库默认启用，不再逐文档配置。
 	AppDocumentIDs []string `json:"app_document_ids"`
 }
 
 // AICCKnowledgeOption 描述 AICC 知识范围下拉框可选项。
 type AICCKnowledgeOption struct {
-	// ID 是行业库或文档主键，保存知识范围时原样提交。
+	// ID 是行业库主键，保存知识范围时原样提交。
 	ID string `json:"id"`
 	// Name 是管理端展示名。
 	Name string `json:"name"`
-	// DocumentCount 是行业库已缓存文档数；文档选项固定为 0。
+	// DocumentCount 是行业库已缓存文档数。
 	DocumentCount int64 `json:"document_count"`
 }
 
@@ -267,7 +265,7 @@ type AICCKnowledgeOption struct {
 type AICCKnowledgeOptionsResult struct {
 	// IndustryKnowledgeBases 是平台行业库候选项，企业管理员只读选择。
 	IndustryKnowledgeBases []AICCKnowledgeOption `json:"industry_knowledge_bases"`
-	// AppDocuments 是该智能体隐藏 app 专属知识库中的文档候选项。
+	// AppDocuments 保留给旧客户端兼容；当前客服知识库默认启用，不再逐文档选择。
 	AppDocuments []AICCKnowledgeOption `json:"app_documents"`
 }
 

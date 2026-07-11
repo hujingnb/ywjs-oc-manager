@@ -457,7 +457,7 @@ export interface paths {
         };
         /**
          * AICC 智能体知识范围
-         * @description 读取企业知识库、行业知识库和专属文档的挂载配置
+         * @description 读取企业知识库开关、行业知识库选择和当前客服知识库入口
          */
         get: {
             parameters: {
@@ -522,7 +522,7 @@ export interface paths {
         };
         /**
          * 保存 AICC 智能体知识范围
-         * @description 企业管理员整组替换企业知识库、行业知识库和专属文档挂载配置
+         * @description 企业管理员整组替换企业知识库开关和行业知识库选择
          */
         put: {
             parameters: {
@@ -615,7 +615,7 @@ export interface paths {
         };
         /**
          * AICC 知识范围候选项
-         * @description 读取企业管理员可选择的行业知识库和当前智能体专属文档
+         * @description 读取企业管理员可选择的行业知识库
          */
         get: {
             parameters: {
@@ -15580,8 +15580,6 @@ export interface components {
             title: string;
         };
         "handlers.ReplaceAICCKnowledgeRequest": {
-            /** @description AppDocumentIDs 是该智能体隐藏 app 专属知识库中允许检索的文档 ID 列表。 */
-            app_document_ids?: string[];
             /** @description IndustryKnowledgeBaseIDs 是额外挂载的平台行业知识库 ID 列表。 */
             industry_knowledge_base_ids?: string[];
             /** @description UseOrgKnowledge 表示是否允许智能体检索本企业共享知识库。 */
@@ -16148,15 +16146,15 @@ export interface components {
             unresolved_sessions?: number;
         };
         "service.AICCKnowledgeOption": {
-            /** @description DocumentCount 是行业库已缓存文档数；文档选项固定为 0。 */
+            /** @description DocumentCount 是行业库已缓存文档数。 */
             document_count?: number;
-            /** @description ID 是行业库或文档主键，保存知识范围时原样提交。 */
+            /** @description ID 是行业库主键，保存知识范围时原样提交。 */
             id?: string;
             /** @description Name 是管理端展示名。 */
             name?: string;
         };
         "service.AICCKnowledgeOptionsResult": {
-            /** @description AppDocuments 是该智能体隐藏 app 专属知识库中的文档候选项。 */
+            /** @description AppDocuments 保留给旧客户端兼容；当前客服知识库默认启用，不再逐文档选择。 */
             app_documents?: components["schemas"]["service.AICCKnowledgeOption"][];
             /** @description IndustryKnowledgeBases 是平台行业库候选项，企业管理员只读选择。 */
             industry_knowledge_bases?: components["schemas"]["service.AICCKnowledgeOption"][];
@@ -16164,9 +16162,9 @@ export interface components {
         "service.AICCKnowledgeResult": {
             /** @description AgentID 是智能体主键。 */
             agent_id?: string;
-            /** @description AppDocumentIDs 是已挂载的专属文档 ID 列表。 */
+            /** @description AppDocumentIDs 保留给旧客户端兼容；当前客服知识库默认启用，不再逐文档配置。 */
             app_document_ids?: string[];
-            /** @description AppID 是绑定隐藏 app ID，前端用它跳转到专属文档库维护入口。 */
+            /** @description AppID 是绑定隐藏 app ID，前端用它跳转到当前客服知识库维护入口。 */
             app_id?: string;
             /** @description IndustryKnowledgeBaseIDs 是已挂载的平台行业知识库 ID 列表。 */
             industry_knowledge_base_ids?: string[];

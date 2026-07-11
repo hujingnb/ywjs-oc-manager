@@ -207,7 +207,7 @@ export function useAICCKnowledgeQuery(agentId: Ref<string | undefined>) {
   })
 }
 
-// useAICCKnowledgeOptionsQuery 查询 AICC 知识范围配置页的行业库和专属文档候选项。
+// useAICCKnowledgeOptionsQuery 查询 AICC 知识范围配置页的企业授权行业库候选项。
 export function useAICCKnowledgeOptionsQuery(agentId: Ref<string | undefined>) {
   return useQuery<AICCKnowledgeOptions | null>({
     queryKey: computed(() => aiccKnowledgeOptionsKey(agentId.value)),
@@ -220,7 +220,7 @@ export function useAICCKnowledgeOptionsQuery(agentId: Ref<string | undefined>) {
   })
 }
 
-// useReplaceAICCKnowledge 整组保存智能体可检索的企业、行业和专属文档范围。
+// useReplaceAICCKnowledge 整组保存智能体可检索的企业和行业知识范围。
 export function useReplaceAICCKnowledge() {
   const client = useQueryClient()
   return useMutation({

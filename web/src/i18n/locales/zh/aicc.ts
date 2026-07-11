@@ -12,9 +12,9 @@ export default {
     agentLoading: '正在加载智能体',
     agentLoadFailed: '智能体加载失败',
     knowledgeRedirect: {
-      loading: '正在加载专属知识库',
+      loading: '正在加载当前客服的知识库',
       noAgent: '请先选择智能体',
-      loadFailed: '专属知识库加载失败',
+      loadFailed: '当前客服的知识库加载失败',
     },
     nav: {
       reception: '接待台',
@@ -55,7 +55,7 @@ export default {
       knowledge: {
         eyebrow: 'KNOWLEDGE',
         title: '知识库',
-        description: '配置智能体可检索的行业知识库、企业知识库和专属文档。',
+        description: '管理当前客服的知识库，并配置行业知识库和企业知识库检索范围。',
       },
       sessions: {
         eyebrow: 'SESSIONS',
@@ -147,18 +147,19 @@ export default {
     knowledge: {
       eyebrow: '知识库范围',
       title: '智能体检索来源',
-      dedicatedDocs: '专属文档',
       noAgent: '保存智能体后可配置知识库范围。',
       useOrgKnowledge: '使用企业共享知识库',
-      industryKnowledge: '平台行业知识库',
+      industryKnowledge: '行业知识库',
       industryPlaceholder: '选择可供该智能体检索的行业知识库',
-      dedicatedDocuments: '专属文档',
-      appDocsPlaceholder: '选择隐藏实例知识库中的文档',
+      currentAgentKnowledge: '当前客服的知识库',
+      currentAgentKnowledgeDesc: '直接启用，上传和管理的文件只服务于当前智能客服。',
+      manageCurrentKnowledge: '管理当前客服知识库',
+      enabled: '已启用',
       save: '保存知识范围',
       help: {
         useOrgKnowledge: '开启后，智能体回答时可以检索本企业共享知识库中的内容。',
-        industryKnowledge: '选择平台预置的行业知识库，适合补充通用行业术语、政策或产品知识。',
-        dedicatedDocuments: '选择该智能体专属隐藏实例中的文档，只对当前智能体生效。',
+        industryKnowledge: '可选择的行业知识库由平台管理员在创建或配置企业时授权，适合补充通用行业术语、政策或产品知识。',
+        currentAgentKnowledge: '当前客服自己的知识库始终参与检索；这里不再按单个文档勾选。',
       },
     },
     leadFields: {

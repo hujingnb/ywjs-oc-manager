@@ -235,9 +235,9 @@
                 <p class="eyebrow">{{ t('aicc.manager.knowledge.eyebrow') }}</p>
                 <strong>{{ t('aicc.manager.knowledge.title') }}</strong>
               </div>
-              <n-button :disabled="!selectedAgent" @click="openDedicatedKnowledge">
+              <n-button :disabled="!selectedAgent" @click="openCurrentAgentKnowledge">
                 <template #icon><ExternalLink :size="16" /></template>
-                {{ t('aicc.manager.knowledge.dedicatedDocs') }}
+                {{ t('aicc.manager.knowledge.manageCurrentKnowledge') }}
               </n-button>
             </div>
             <div v-if="!selectedAgent" class="state-text">{{ t('aicc.manager.knowledge.noAgent') }}</div>
@@ -259,20 +259,13 @@
                   :placeholder="t('aicc.manager.knowledge.industryPlaceholder')"
                 />
               </n-form-item>
-              <n-form-item>
-                <template #label>
-                  <FieldLabel :label="t('aicc.manager.knowledge.dedicatedDocuments')" :help="t('aicc.manager.knowledge.help.dedicatedDocuments')" />
-                </template>
-                <n-select
-                  v-model:value="knowledgeForm.app_document_ids"
-                  multiple
-                  clearable
-                  filterable
-                  :loading="knowledgeOptionsQuery.isFetching.value"
-                  :options="appDocumentOptions"
-                  :placeholder="t('aicc.manager.knowledge.appDocsPlaceholder')"
-                />
-              </n-form-item>
+              <div class="current-knowledge-row">
+                <div>
+                  <FieldLabel :label="t('aicc.manager.knowledge.currentAgentKnowledge')" :help="t('aicc.manager.knowledge.help.currentAgentKnowledge')" />
+                  <p>{{ t('aicc.manager.knowledge.currentAgentKnowledgeDesc') }}</p>
+                </div>
+                <n-tag size="small" type="success" :bordered="false">{{ t('aicc.manager.knowledge.enabled') }}</n-tag>
+              </div>
               <n-space justify="end">
                 <n-button :loading="knowledgeBusy" @click="saveKnowledge">
                   <template #icon><Save :size="16" /></template>
@@ -494,14 +487,7 @@ const qrDataUrl = ref('')
 
 const industryKnowledgeOptions = computed<SelectOption[]>(() =>
   (knowledgeOptionsQuery.data.value?.industry_knowledge_bases ?? []).map(item => ({
-    label: `${item.name} (${item.document_count})`,
-    value: item.id,
-  })),
-)
-
-const appDocumentOptions = computed<SelectOption[]>(() =>
-  (knowledgeOptionsQuery.data.value?.app_documents ?? []).map(item => ({
-    label: item.name,
+    label: item.document_count > 0 ? `${item.name} (${item.document_count})` : item.name,
     value: item.id,
   })),
 )
@@ -574,7 +560,6 @@ watch(
       ? {
           use_org_knowledge: knowledge.use_org_knowledge,
           industry_knowledge_base_ids: [...knowledge.industry_knowledge_base_ids],
-          app_document_ids: [...knowledge.app_document_ids],
         }
       : emptyKnowledgeForm())
   },
@@ -633,7 +618,6 @@ function emptyKnowledgeForm(): KnowledgeForm {
   return {
     use_org_knowledge: true,
     industry_knowledge_base_ids: [],
-    app_document_ids: [],
   }
 }
 
@@ -776,7 +760,6 @@ async function saveKnowledge() {
       payload: {
         use_org_knowledge: knowledgeForm.use_org_knowledge,
         industry_knowledge_base_ids: [...knowledgeForm.industry_knowledge_base_ids],
-        app_document_ids: [...knowledgeForm.app_document_ids],
       },
     })
     setFeedback(t('aicc.manager.feedback.knowledgeSaved'))
@@ -875,7 +858,7 @@ function downloadQRCode() {
   anchor.click()
 }
 
-function openDedicatedKnowledge() {
+function openCurrentAgentKnowledge() {
   if (!selectedKnowledgeAppId.value) return
   window.open(`/apps/${selectedKnowledgeAppId.value}/knowledge`, '_blank', 'noopener,noreferrer')
 }
@@ -1100,6 +1083,23 @@ function openDedicatedKnowledge() {
 
 .settings-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.current-knowledge-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
+.current-knowledge-row p {
+  margin: 6px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
 }
 
 .section-heading strong {

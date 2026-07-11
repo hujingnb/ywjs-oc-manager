@@ -214,7 +214,6 @@ func (s *aiccServiceStub) ReplaceAgentKnowledge(_ context.Context, principal aut
 		AppID:                    "app-hidden-1",
 		UseOrgKnowledge:          input.UseOrgKnowledge,
 		IndustryKnowledgeBaseIDs: input.IndustryKnowledgeBaseIDs,
-		AppDocumentIDs:           input.AppDocumentIDs,
 	}, nil
 }
 
@@ -361,15 +360,14 @@ func TestAICCHandlerBasicRoutes(t *testing.T) {
 		{name: "读取知识候选项路由返回 options", method: http.MethodGet, path: "/api/v1/aicc/agents/agent-1/knowledge-options", wantStatus: http.StatusOK, assertion: func(t *testing.T, svc *aiccServiceStub, body string) {
 			assert.Equal(t, "agent-1", svc.lastAgentID)
 			assert.Contains(t, body, "industry-1")
-			assert.Contains(t, body, "doc-1")
-		}}, // 场景：企业管理员打开知识范围配置时读取行业库和专属文档候选项。
-		{name: "保存知识范围路由绑定配置", method: http.MethodPut, path: "/api/v1/aicc/agents/agent-1/knowledge", body: `{"use_org_knowledge":true,"industry_knowledge_base_ids":["industry-1"],"app_document_ids":["doc-1"]}`, wantStatus: http.StatusOK, assertion: func(t *testing.T, svc *aiccServiceStub, body string) {
+			assert.NotContains(t, body, "doc-1")
+		}}, // 场景：企业管理员打开知识范围配置时读取企业授权的行业库候选项。
+		{name: "保存知识范围路由绑定配置", method: http.MethodPut, path: "/api/v1/aicc/agents/agent-1/knowledge", body: `{"use_org_knowledge":true,"industry_knowledge_base_ids":["industry-1"]}`, wantStatus: http.StatusOK, assertion: func(t *testing.T, svc *aiccServiceStub, body string) {
 			assert.Equal(t, "agent-1", svc.lastAgentID)
 			assert.True(t, svc.lastKnowledge.UseOrgKnowledge)
 			assert.Equal(t, []string{"industry-1"}, svc.lastKnowledge.IndustryKnowledgeBaseIDs)
-			assert.Equal(t, []string{"doc-1"}, svc.lastKnowledge.AppDocumentIDs)
 			assert.Contains(t, body, "knowledge")
-		}}, // 场景：企业管理员整组保存企业、行业和专属文档范围。
+		}}, // 场景：企业管理员整组保存企业和行业知识范围。
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -383,11 +381,11 @@ func TestAICCHandlerBasicRoutes(t *testing.T) {
 					AppID:                    "app-hidden-1",
 					UseOrgKnowledge:          true,
 					IndustryKnowledgeBaseIDs: []string{"industry-1"},
-					AppDocumentIDs:           []string{"doc-1"},
+					AppDocumentIDs:           []string{},
 				},
 				optionsResult: service.AICCKnowledgeOptionsResult{
 					IndustryKnowledgeBases: []service.AICCKnowledgeOption{{ID: "industry-1", Name: "行业库", DocumentCount: 2}},
-					AppDocuments:           []service.AICCKnowledgeOption{{ID: "doc-1", Name: "专属文档"}},
+					AppDocuments:           []service.AICCKnowledgeOption{},
 				},
 			}
 			router := newAICCTestRouter(t, svc)

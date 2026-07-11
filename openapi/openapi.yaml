@@ -657,12 +657,6 @@ components:
       type: object
     handlers.ReplaceAICCKnowledgeRequest:
       properties:
-        app_document_ids:
-          description: AppDocumentIDs 是该智能体隐藏 app 专属知识库中允许检索的文档 ID 列表。
-          items:
-            type: string
-          type: array
-          uniqueItems: false
         industry_knowledge_base_ids:
           description: IndustryKnowledgeBaseIDs 是额外挂载的平台行业知识库 ID 列表。
           items:
@@ -1599,10 +1593,10 @@ components:
     service.AICCKnowledgeOption:
       properties:
         document_count:
-          description: DocumentCount 是行业库已缓存文档数；文档选项固定为 0。
+          description: DocumentCount 是行业库已缓存文档数。
           type: integer
         id:
-          description: ID 是行业库或文档主键，保存知识范围时原样提交。
+          description: ID 是行业库主键，保存知识范围时原样提交。
           type: string
         name:
           description: Name 是管理端展示名。
@@ -1611,7 +1605,7 @@ components:
     service.AICCKnowledgeOptionsResult:
       properties:
         app_documents:
-          description: AppDocuments 是该智能体隐藏 app 专属知识库中的文档候选项。
+          description: AppDocuments 保留给旧客户端兼容；当前客服知识库默认启用，不再逐文档选择。
           items:
             $ref: '#/components/schemas/service.AICCKnowledgeOption'
           type: array
@@ -1629,13 +1623,13 @@ components:
           description: AgentID 是智能体主键。
           type: string
         app_document_ids:
-          description: AppDocumentIDs 是已挂载的专属文档 ID 列表。
+          description: AppDocumentIDs 保留给旧客户端兼容；当前客服知识库默认启用，不再逐文档配置。
           items:
             type: string
           type: array
           uniqueItems: false
         app_id:
-          description: AppID 是绑定隐藏 app ID，前端用它跳转到专属文档库维护入口。
+          description: AppID 是绑定隐藏 app ID，前端用它跳转到当前客服知识库维护入口。
           type: string
         industry_knowledge_base_ids:
           description: IndustryKnowledgeBaseIDs 是已挂载的平台行业知识库 ID 列表。
@@ -3249,7 +3243,7 @@ paths:
       - aicc
   /aicc/agents/{agentId}/knowledge:
     get:
-      description: 读取企业知识库、行业知识库和专属文档的挂载配置
+      description: 读取企业知识库开关、行业知识库选择和当前客服知识库入口
       parameters:
       - description: 智能体 ID
         in: path
@@ -3296,7 +3290,7 @@ paths:
       tags:
       - aicc
     put:
-      description: 企业管理员整组替换企业知识库、行业知识库和专属文档挂载配置
+      description: 企业管理员整组替换企业知识库开关和行业知识库选择
       parameters:
       - description: 智能体 ID
         in: path
@@ -3361,7 +3355,7 @@ paths:
       - aicc
   /aicc/agents/{agentId}/knowledge-options:
     get:
-      description: 读取企业管理员可选择的行业知识库和当前智能体专属文档
+      description: 读取企业管理员可选择的行业知识库
       parameters:
       - description: 智能体 ID
         in: path

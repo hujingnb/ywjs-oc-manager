@@ -12,9 +12,9 @@ export default {
     agentLoading: 'Loading agents',
     agentLoadFailed: 'Failed to load agents',
     knowledgeRedirect: {
-      loading: 'Loading dedicated knowledge base',
+      loading: 'Loading current agent knowledge base',
       noAgent: 'Select an agent first',
-      loadFailed: 'Failed to load dedicated knowledge base',
+      loadFailed: 'Failed to load current agent knowledge base',
     },
     nav: {
       reception: 'Reception',
@@ -55,7 +55,7 @@ export default {
       knowledge: {
         eyebrow: 'KNOWLEDGE',
         title: 'Knowledge',
-        description: 'Configure the industry, organization, and dedicated documents this agent can retrieve.',
+        description: 'Manage the current agent knowledge base and configure industry and organization retrieval scope.',
       },
       sessions: {
         eyebrow: 'SESSIONS',
@@ -147,18 +147,19 @@ export default {
     knowledge: {
       eyebrow: 'Knowledge scope',
       title: 'Agent retrieval sources',
-      dedicatedDocs: 'Dedicated docs',
       noAgent: 'Save the agent before configuring knowledge scope.',
       useOrgKnowledge: 'Use organization shared knowledge',
-      industryKnowledge: 'Platform industry knowledge',
+      industryKnowledge: 'Industry knowledge',
       industryPlaceholder: 'Select industry knowledge bases available to this agent',
-      dedicatedDocuments: 'Dedicated docs',
-      appDocsPlaceholder: 'Select documents from the hidden instance knowledge base',
+      currentAgentKnowledge: 'Current agent knowledge base',
+      currentAgentKnowledgeDesc: 'Enabled directly. Uploaded files are used only by the current customer-service agent.',
+      manageCurrentKnowledge: 'Manage current agent knowledge',
+      enabled: 'Enabled',
       save: 'Save knowledge scope',
       help: {
         useOrgKnowledge: 'Allows the agent to retrieve content from the organization shared knowledge base when answering.',
-        industryKnowledge: 'Select platform-provided industry knowledge for common terminology, policies, or product context.',
-        dedicatedDocuments: 'Select documents from this agent’s dedicated hidden instance. These documents only apply to the current agent.',
+        industryKnowledge: 'Available industry knowledge bases are authorized by the platform administrator when creating or configuring the organization.',
+        currentAgentKnowledge: 'The current agent knowledge base always participates in retrieval; individual documents are no longer selected here.',
       },
     },
     leadFields: {

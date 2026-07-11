@@ -250,6 +250,8 @@ describe('AICCManagerPage', () => {
     expect(wrapper.text()).toContain('智能体名称')
     expect(wrapper.text()).toContain('单会话消息上限')
     expect(wrapper.text()).toContain('知识库范围')
+    expect(wrapper.text()).toContain('当前客服的知识库')
+    expect(wrapper.text()).not.toContain('专属文档')
     expect(wrapper.text()).toContain('访客留资')
     expect(wrapper.text()).not.toContain('嵌入占位')
   })
@@ -265,6 +267,9 @@ describe('AICCManagerPage', () => {
     expect(helpTriggers.every(trigger => trigger.text() === '?')).toBe(true)
     expect(helpTriggers.some(trigger =>
       trigger.attributes('aria-label') === '开启后，系统会根据敏感词命中、异常频率等规则标记高风险访客，并阻止其继续发送消息。',
+    )).toBe(true)
+    expect(helpTriggers.some(trigger =>
+      trigger.attributes('aria-label') === '当前客服自己的知识库始终参与检索；这里不再按单个文档勾选。',
     )).toBe(true)
   })
 

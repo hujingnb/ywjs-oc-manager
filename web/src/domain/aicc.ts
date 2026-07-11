@@ -122,26 +122,26 @@ export interface AICCAgentSettingsPayload {
 export interface AICCKnowledge {
   // 智能体主键。
   agent_id: string
-  // 绑定隐藏 app ID，用于跳转专属知识库。
+  // 绑定隐藏 app ID，用于跳转当前客服的知识库。
   app_id: string
   // 是否检索企业共享知识库。
   use_org_knowledge: boolean
   // 平台行业知识库 ID 列表。
   industry_knowledge_base_ids: string[]
-  // 隐藏 app 专属文档 ID 列表。
+  // 保留旧接口字段兼容；当前客服的知识库默认启用，不再按文档勾选。
   app_document_ids: string[]
 }
 
 // AICCKnowledgePayload 是保存知识范围时提交的完整快照。
-export type AICCKnowledgePayload = Pick<AICCKnowledge, 'use_org_knowledge' | 'industry_knowledge_base_ids' | 'app_document_ids'>
+export type AICCKnowledgePayload = Pick<AICCKnowledge, 'use_org_knowledge' | 'industry_knowledge_base_ids'>
 
 // AICCKnowledgeOption 是 AICC 知识范围下拉框候选项。
 export interface AICCKnowledgeOption {
-  // 候选项主键，保存时写入行业库 ID 或专属文档 ID。
+  // 候选项主键，保存时写入行业库 ID。
   id: string
   // 用户可见名称。
   name: string
-  // 行业库文档数；专属文档候选项为 0。
+  // 行业库文档数；按版本授权查询时可能返回 0。
   document_count: number
 }
 
@@ -149,7 +149,7 @@ export interface AICCKnowledgeOption {
 export interface AICCKnowledgeOptions {
   // 平台行业知识库候选项。
   industry_knowledge_bases: AICCKnowledgeOption[]
-  // 当前智能体隐藏 app 下的专属文档候选项。
+  // 保留旧接口字段兼容；当前客服的知识库不再按文档勾选。
   app_documents: AICCKnowledgeOption[]
 }
 
