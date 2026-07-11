@@ -120,6 +120,7 @@ import {
   createAICCPublicSession,
   clearAICCPublicStoredSessionToken,
   fetchAICCPublicConfig,
+  fetchAICCPublicSession,
   readAICCPublicStoredSessionToken,
   sendAICCPublicMessage,
   submitAICCPublicFeedback,
@@ -127,7 +128,7 @@ import {
   uploadAICCPublicImage,
 } from '@/api/hooks/useAICC'
 import type { ApiError } from '@/api/client'
-import type { AICCLeadField, AICCPublicConfig } from '@/domain/aicc'
+import type { AICCLeadField, AICCMessage, AICCPublicConfig } from '@/domain/aicc'
 import { normalizeAICCPublicChannel } from '@/domain/aicc'
 
 // PublicAICCChatPage 是访客公开客服页，不依赖后台登录态。
@@ -193,7 +194,11 @@ async function boot() {
     hasConsent.value = config.value.privacy_mode !== 'consent_required'
     leadValues.value = Object.fromEntries((config.value.lead_fields ?? []).map(field => [field.field_key, '']))
     leadComplete.value = !(config.value.lead_fields ?? []).some(field => field.required)
-    resetMessagesToGreeting()
+    if (sessionToken.value) {
+      await restoreSessionMessages(sessionToken.value)
+    } else {
+      resetMessagesToGreeting()
+    }
   } catch (err) {
     errorMessage.value = friendlyAICCError(err)
   }
@@ -318,6 +323,26 @@ function resetMessagesToGreeting() {
     role: 'assistant',
     text: config.value?.greeting || t('aicc.publicChat.defaultGreeting'),
   }]
+}
+
+async function restoreSessionMessages(token: string) {
+  const detail = await fetchAICCPublicSession(token)
+  const restored = detail.messages.map(toChatMessage).filter((message): message is ChatMessage => Boolean(message))
+  if (restored.length > 0) {
+    messages.value = restored
+    return
+  }
+  resetMessagesToGreeting()
+}
+
+function toChatMessage(message: AICCMessage): ChatMessage | null {
+  if (message.direction !== 'visitor' && message.direction !== 'assistant') return null
+  return {
+    id: message.id,
+    role: message.direction === 'visitor' ? 'visitor' : 'assistant',
+    text: message.text,
+    messageId: message.direction === 'assistant' ? message.id : undefined,
+  }
 }
 
 function publicMessageErrorText(err: unknown): string {

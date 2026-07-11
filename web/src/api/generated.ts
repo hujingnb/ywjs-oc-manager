@@ -13362,6 +13362,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/public/aicc/sessions/{sessionToken}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * AICC 公开会话详情
+         * @description 访客端通过 session token 恢复当前会话消息
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 会话 token */
+                    sessionToken: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.AICCPublicSessionDetailResult"];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/public/aicc/sessions/{sessionToken}/consent": {
         parameters: {
             query?: never;
@@ -16266,6 +16337,10 @@ export interface components {
         "service.AICCPublicMessageResult": {
             message_id?: string;
             text?: string;
+        };
+        "service.AICCPublicSessionDetailResult": {
+            /** @description Messages 是当前公开会话的消息镜像，用于刷新页面后恢复对话内容。 */
+            messages?: components["schemas"]["service.AICCMessageResult"][];
         };
         "service.AICCPublicSessionResult": {
             privacy_mode?: string;

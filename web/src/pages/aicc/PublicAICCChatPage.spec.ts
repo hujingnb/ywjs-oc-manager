@@ -14,6 +14,7 @@ const apiState = vi.hoisted(() => ({
   fetchConfig: vi.fn(),
   createSession: vi.fn(),
   sendMessage: vi.fn(),
+  fetchSession: vi.fn(),
   consent: vi.fn(),
   submitLeadValues: vi.fn(),
   submitFeedback: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock('vue-router', () => ({
 vi.mock('@/api/hooks/useAICC', () => ({
   fetchAICCPublicConfig: apiState.fetchConfig,
   createAICCPublicSession: apiState.createSession,
+  fetchAICCPublicSession: apiState.fetchSession,
   readAICCPublicStoredSessionToken: apiState.readStoredSession,
   clearAICCPublicStoredSessionToken: apiState.clearStoredSession,
   sendAICCPublicMessage: apiState.sendMessage,
@@ -102,6 +104,7 @@ describe('PublicAICCChatPage', () => {
     apiState.fetchConfig.mockReset()
     apiState.createSession.mockReset()
     apiState.sendMessage.mockReset()
+    apiState.fetchSession.mockReset()
     apiState.consent.mockReset()
     apiState.submitLeadValues.mockReset()
     apiState.submitFeedback.mockReset()
@@ -118,6 +121,7 @@ describe('PublicAICCChatPage', () => {
       lead_fields: [],
     })
     apiState.createSession.mockResolvedValue({ session_token: 'session-token' })
+    apiState.fetchSession.mockResolvedValue({ messages: [] })
     apiState.sendMessage.mockResolvedValue({ message_id: 'message-1', text: '收到' })
   })
 
@@ -190,6 +194,25 @@ describe('PublicAICCChatPage', () => {
 
     expect(apiState.createSession).not.toHaveBeenCalled()
     expect(apiState.sendMessage).toHaveBeenCalledWith('stored-session-token', { text: '继续刚才的问题', image_file_id: undefined })
+  })
+
+  // 场景：公开页刷新续接会话时，应拉取并渲染服务端已保存的历史消息。
+  it('restores stored session messages after page refresh', async () => {
+    apiState.readStoredSession.mockReturnValue('stored-session-token')
+    apiState.fetchSession.mockResolvedValue({
+      messages: [
+        { id: 'msg-1', direction: 'visitor', text: '刷新前的问题' },
+        { id: 'msg-2', direction: 'assistant', text: '刷新前的回复' },
+      ],
+    })
+
+    const wrapper = mountPublicChat()
+    await flushPromises()
+
+    expect(apiState.fetchSession).toHaveBeenCalledWith('stored-session-token')
+    expect(wrapper.text()).toContain('刷新前的问题')
+    expect(wrapper.text()).toContain('刷新前的回复')
+    expect(wrapper.text()).not.toContain('您好，请问有什么可以帮您？')
   })
 
   // 场景：访客主动新建对话时只清除当前会话，下一次发送才懒创建新 session，避免空会话。

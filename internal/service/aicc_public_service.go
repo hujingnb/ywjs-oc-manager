@@ -58,6 +58,8 @@ type AICCPublicStore interface {
 	GetAICCAgentSettings(ctx context.Context, agentID string) (sqlc.AiccAgentSetting, error)
 	// CountAICCVisitorMessagesBySession 统计当前会话已写入的访客消息数量，用于发送前拦截。
 	CountAICCVisitorMessagesBySession(ctx context.Context, sessionID string) (int64, error)
+	// ListAICCMessagesBySession 读取当前会话消息，用于访客刷新页面后恢复对话内容。
+	ListAICCMessagesBySession(ctx context.Context, sessionID string) ([]sqlc.AiccMessage, error)
 	// GetActiveAICCBlockedVisitor 按匿名访客 hash 查询有效封禁记录，避免公开端继续消耗模型。
 	GetActiveAICCBlockedVisitor(ctx context.Context, arg sqlc.GetActiveAICCBlockedVisitorParams) (sqlc.AiccBlockedVisitor, error)
 	// CreateAICCSession 创建公开访客会话。
@@ -134,6 +136,12 @@ type AICCPublicSessionResult struct {
 	PrivacyText        string `json:"privacy_text,omitempty"`
 	PrivacyNoticeShown bool   `json:"privacy_notice_shown"`
 	Restored           bool   `json:"restored"`
+}
+
+// AICCPublicSessionDetailResult 是访客持有 session token 时可恢复的会话内容。
+type AICCPublicSessionDetailResult struct {
+	// Messages 是当前公开会话的消息镜像，用于刷新页面后恢复对话内容。
+	Messages []AICCMessageResult `json:"messages"`
 }
 
 // AICCPublicConfigResult 是公开访客端可读取的智能体展示配置。
@@ -316,6 +324,26 @@ func (s *AICCPublicService) CreateSession(ctx context.Context, publicToken strin
 		PrivacyText:        strOrEmpty(agent.PrivacyText),
 		PrivacyNoticeShown: privacyNoticeShown,
 	}, nil
+}
+
+// GetSession 通过公开 session token 恢复当前访客会话消息。
+func (s *AICCPublicService) GetSession(ctx context.Context, sessionToken string) (AICCPublicSessionDetailResult, error) {
+	session, err := s.store.GetAICCSessionByToken(ctx, strings.TrimSpace(sessionToken))
+	if err != nil || !session.ExpiresAt.After(s.now()) {
+		return AICCPublicSessionDetailResult{}, ErrAICCInvalidSession
+	}
+	if _, err := s.activeAgentBySession(ctx, session); err != nil {
+		return AICCPublicSessionDetailResult{}, err
+	}
+	messages, err := s.store.ListAICCMessagesBySession(ctx, session.ID)
+	if err != nil {
+		return AICCPublicSessionDetailResult{}, fmt.Errorf("查询 AICC 公开会话消息失败: %w", err)
+	}
+	result := AICCPublicSessionDetailResult{Messages: make([]AICCMessageResult, 0, len(messages))}
+	for _, row := range messages {
+		result.Messages = append(result.Messages, toAICCMessageResult(row))
+	}
+	return result, nil
 }
 
 // Consent 记录访客对隐私说明的同意。

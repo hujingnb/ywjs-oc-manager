@@ -23,6 +23,7 @@ import type {
   AICCPublicLeadValuesResult,
   AICCPublicMessageResult,
   AICCPublicSession,
+  AICCPublicSessionDetail,
   AICCSession,
   AICCSessionFilters,
   AICCSessionDetail,
@@ -351,6 +352,14 @@ export async function createAICCPublicSession(publicToken: string, channel: AICC
   if (response.session.session_token) {
     writeAICCPublicSessionToken(storageKey, response.session.session_token)
   }
+  return response.session
+}
+
+// fetchAICCPublicSession 通过访客 session token 读取当前会话消息，用于刷新页面后恢复对话内容。
+export async function fetchAICCPublicSession(sessionToken: string): Promise<AICCPublicSessionDetail> {
+  const response = await apiRequest<{ session: AICCPublicSessionDetail }>(`/api/v1/public/aicc/sessions/${sessionToken}`, {
+    withAuth: false,
+  })
   return response.session
 }
 

@@ -1801,6 +1801,15 @@ components:
         text:
           type: string
       type: object
+    service.AICCPublicSessionDetailResult:
+      properties:
+        messages:
+          description: Messages 是当前公开会话的消息镜像，用于刷新页面后恢复对话内容。
+          items:
+            $ref: '#/components/schemas/service.AICCMessageResult'
+          type: array
+          uniqueItems: false
+      type: object
     service.AICCPublicSessionResult:
       properties:
         privacy_mode:
@@ -11961,6 +11970,46 @@ paths:
                 $ref: '#/components/schemas/handlers.ErrorResponse'
           description: Internal Server Error
       summary: 创建 AICC 公开会话
+      tags:
+      - public-aicc
+  /public/aicc/sessions/{sessionToken}:
+    get:
+      description: 访客端通过 session token 恢复当前会话消息
+      parameters:
+      - description: 会话 token
+        in: path
+        name: sessionToken
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AICCPublicSessionDetailResult'
+                type: object
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      summary: AICC 公开会话详情
       tags:
       - public-aicc
   /public/aicc/sessions/{sessionToken}/consent:

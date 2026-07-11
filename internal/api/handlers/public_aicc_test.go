@@ -18,7 +18,9 @@ type publicAICCServiceStub struct {
 	configResult   service.AICCPublicConfigResult
 	configErr      error
 	sessionResult  service.AICCPublicSessionResult
+	detailResult   service.AICCPublicSessionDetailResult
 	sessionErr     error
+	detailErr      error
 	imageResult    service.AICCPublicImageResult
 	imageErr       error
 	messageResult  service.AICCPublicMessageResult
@@ -49,6 +51,11 @@ func (s *publicAICCServiceStub) CreateSession(_ context.Context, publicToken str
 	s.lastPublicToken = publicToken
 	s.lastSessionInput = input
 	return s.sessionResult, s.sessionErr
+}
+
+func (s *publicAICCServiceStub) GetSession(_ context.Context, sessionToken string) (service.AICCPublicSessionDetailResult, error) {
+	s.lastSessionToken = sessionToken
+	return s.detailResult, s.detailErr
 }
 
 func (s *publicAICCServiceStub) Consent(_ context.Context, sessionToken string) error {
@@ -114,6 +121,23 @@ func TestPublicAICCHandlerSendMessage(t *testing.T) {
 	assert.Contains(t, recorder.Body.String(), "msg-1")
 	assert.Equal(t, "sess-1", svc.lastMessageInput.SessionToken)
 	assert.Equal(t, "你好", svc.lastMessageInput.Text)
+}
+
+// TestPublicAICCHandlerGetSession 覆盖公开会话刷新恢复：
+// 访客持有 session token 时可读取本会话消息，用于刷新页面后恢复对话内容。
+func TestPublicAICCHandlerGetSession(t *testing.T) {
+	svc := &publicAICCServiceStub{detailResult: service.AICCPublicSessionDetailResult{
+		Messages: []service.AICCMessageResult{{ID: "msg-1", Direction: "visitor", Text: "报价多少"}},
+	}}
+	router := newPublicAICCTestRouter(t, svc)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/public/aicc/sessions/sess-1", nil)
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "sess-1", svc.lastSessionToken)
+	assert.Contains(t, recorder.Body.String(), "报价多少")
 }
 
 // TestPublicAICCHandlerUploadImage 覆盖公开图片上传入口：session token 来自路径，文件名来自 query。

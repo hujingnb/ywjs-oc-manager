@@ -50,6 +50,43 @@ func TestAICCPublicChatRequiresLeadFields(t *testing.T) {
 	require.ErrorIs(t, err, ErrAICCLeadRequired)
 }
 
+// TestAICCPublicGetSessionReturnsMessages 覆盖公开页刷新恢复：
+// 持有有效 session token 的访客只能读取本会话消息，用于前端恢复对话内容。
+func TestAICCPublicGetSessionReturnsMessages(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+		messages: []sqlc.AiccMessage{
+			{ID: "msg-1", SessionID: "session-1", AgentID: "agent-1", Direction: domain.AICCMessageDirectionVisitor, ContentType: domain.AICCMessageContentTypeText, TextContent: null.StringFrom("报价多少"), CreatedAt: aiccPublicTestNow.Add(-time.Minute)},
+			{ID: "msg-2", SessionID: "session-1", AgentID: "agent-1", Direction: domain.AICCMessageDirectionAssistant, ContentType: domain.AICCMessageContentTypeText, TextContent: null.StringFrom("这是报价说明"), CreatedAt: aiccPublicTestNow},
+		},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	result, err := svc.GetSession(context.Background(), "tok")
+
+	require.NoError(t, err)
+	require.Len(t, result.Messages, 2)
+	assert.Equal(t, "报价多少", result.Messages[0].Text)
+	assert.Equal(t, "这是报价说明", result.Messages[1].Text)
+}
+
+// TestAICCPublicGetSessionRejectsExpiredSession 覆盖公开会话详情授权边界：
+// 过期或无效 token 不能读取历史消息。
+func TestAICCPublicGetSessionRejectsExpiredSession(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		session: sqlc.AiccSession{ID: "session-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(-time.Minute)},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	_, err := svc.GetSession(context.Background(), "tok")
+
+	require.ErrorIs(t, err, ErrAICCInvalidSession)
+}
+
 // TestAICCPublicSubmitLeadValuesCompletesRequiredFields 覆盖留资提交闭环：
 // 必填字段写入后 session 标记完成，同时生成企业线索主记录供管理端列表和导出使用。
 func TestAICCPublicSubmitLeadValuesCompletesRequiredFields(t *testing.T) {
@@ -755,6 +792,7 @@ type fakeAICCPublicStore struct {
 	agent               sqlc.AiccAgent
 	session             sqlc.AiccSession
 	message             sqlc.AiccMessage
+	messages            []sqlc.AiccMessage
 	image               sqlc.AiccImage
 	settings            sqlc.AiccAgentSetting
 	blockedVisitor      sqlc.AiccBlockedVisitor
@@ -845,6 +883,13 @@ func (f *fakeAICCPublicStore) CountAICCVisitorMessagesBySession(_ context.Contex
 		return 0, sql.ErrNoRows
 	}
 	return f.visitorMessageCount, nil
+}
+
+func (f *fakeAICCPublicStore) ListAICCMessagesBySession(_ context.Context, sessionID string) ([]sqlc.AiccMessage, error) {
+	if f.session.ID != sessionID {
+		return nil, sql.ErrNoRows
+	}
+	return f.messages, nil
 }
 
 func (f *fakeAICCPublicStore) GetActiveAICCBlockedVisitor(_ context.Context, arg sqlc.GetActiveAICCBlockedVisitorParams) (sqlc.AiccBlockedVisitor, error) {

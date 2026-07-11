@@ -183,6 +183,12 @@ export interface AICCPublicSession {
   privacy_notice_shown?: boolean
 }
 
+// AICCPublicSessionDetail 是公开访客刷新页面后按 session token 恢复的会话内容。
+export interface AICCPublicSessionDetail {
+  // 当前会话已保存的消息。
+  messages: AICCMessage[]
+}
+
 // AICCPublicMessageResult 是公开消息接口返回的助手回复。
 export interface AICCPublicMessageResult {
   // 消息 ID，用于后续反馈绑定。

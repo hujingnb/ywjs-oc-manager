@@ -20,6 +20,7 @@ type PublicAICCHandler struct {
 type publicAICCService interface {
 	PublicConfig(ctx context.Context, publicToken, channel string) (service.AICCPublicConfigResult, error)
 	CreateSession(ctx context.Context, publicToken string, input service.AICCPublicSessionInput) (service.AICCPublicSessionResult, error)
+	GetSession(ctx context.Context, sessionToken string) (service.AICCPublicSessionDetailResult, error)
 	Consent(ctx context.Context, sessionToken string) error
 	UploadImage(ctx context.Context, input service.AICCPublicImageInput) (service.AICCPublicImageResult, error)
 	SendMessage(ctx context.Context, input service.AICCPublicMessageInput) (service.AICCPublicMessageResult, error)
@@ -37,6 +38,7 @@ func RegisterPublicAICCRoutes(router gin.IRouter, handler *PublicAICCHandler) {
 	group := router.Group("/api/v1/public/aicc")
 	group.GET("/agents/:publicToken/config", handler.Config)
 	group.POST("/agents/:publicToken/sessions", handler.CreateSession)
+	group.GET("/sessions/:sessionToken", handler.GetSession)
 	group.POST("/sessions/:sessionToken/consent", handler.Consent)
 	group.POST("/sessions/:sessionToken/images", handler.UploadImage)
 	group.POST("/sessions/:sessionToken/messages", handler.SendMessage)
@@ -101,6 +103,27 @@ func (h *PublicAICCHandler) CreateSession(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"session": result})
+}
+
+// GetSession 返回访客当前会话消息。
+//
+// @Summary      AICC 公开会话详情
+// @Description  访客端通过 session token 恢复当前会话消息
+// @Tags         public-aicc
+// @Produce      json
+// @Param        sessionToken  path      string  true  "会话 token"
+// @Success      200           {object}  map[string]service.AICCPublicSessionDetailResult
+// @Failure      401           {object}  ErrorResponse
+// @Failure      404           {object}  ErrorResponse
+// @Failure      500           {object}  ErrorResponse
+// @Router       /public/aicc/sessions/{sessionToken} [get]
+func (h *PublicAICCHandler) GetSession(c *gin.Context) {
+	result, err := h.service.GetSession(c.Request.Context(), c.Param("sessionToken"))
+	if err != nil {
+		writePublicAICCError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"session": result})
 }
 
 // Consent 记录隐私同意。
