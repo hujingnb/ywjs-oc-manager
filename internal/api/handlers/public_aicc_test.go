@@ -154,7 +154,8 @@ func TestPublicAICCHandlerSendMessage(t *testing.T) {
 // 访客持有 session token 时可读取本会话消息，用于刷新页面后恢复对话内容。
 func TestPublicAICCHandlerGetSession(t *testing.T) {
 	svc := &publicAICCServiceStub{detailResult: service.AICCPublicSessionDetailResult{
-		Messages: []service.AICCMessageResult{{ID: "msg-1", Direction: "visitor", Text: "报价多少"}},
+		Messages:   []service.AICCMessageResult{{ID: "msg-1", Direction: "visitor", Text: "报价多少"}},
+		LeadStatus: "complete",
 	}}
 	router := newPublicAICCTestRouter(t, svc)
 
@@ -165,6 +166,7 @@ func TestPublicAICCHandlerGetSession(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	assert.Equal(t, "sess-1", svc.lastSessionToken)
 	assert.Contains(t, recorder.Body.String(), "报价多少")
+	assert.Contains(t, recorder.Body.String(), `"lead_status":"complete"`)
 }
 
 // TestPublicAICCHandlerUploadImage 覆盖公开图片上传入口：session token 来自路径，文件名来自 query。

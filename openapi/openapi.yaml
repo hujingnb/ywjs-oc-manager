@@ -1816,6 +1816,9 @@ components:
       type: object
     service.AICCPublicSessionDetailResult:
       properties:
+        lead_status:
+          description: LeadStatus 是当前会话的留资完成状态，公开页刷新后据此决定是否继续展示留资表单。
+          type: string
         messages:
           description: Messages 是当前公开会话的消息镜像，用于刷新页面后恢复对话内容。
           items:

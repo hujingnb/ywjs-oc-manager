@@ -333,6 +333,10 @@ function resetMessagesToGreeting() {
 async function restoreSessionMessages(token: string) {
   const detail = await fetchAICCPublicSession(token)
   resolutionStatus.value = detail.resolution_status || 'unknown'
+  if (detail.lead_status === 'complete' || detail.lead_status === 'skipped') {
+    leadComplete.value = true
+    deferredLeadValues.value = null
+  }
   const restored = detail.messages.map(toChatMessage).filter((message): message is ChatMessage => Boolean(message))
   if (restored.length > 0) {
     messages.value = restored

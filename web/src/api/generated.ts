@@ -16500,6 +16500,8 @@ export interface components {
             resolution_status?: string;
         };
         "service.AICCPublicSessionDetailResult": {
+            /** @description LeadStatus 是当前会话的留资完成状态，公开页刷新后据此决定是否继续展示留资表单。 */
+            lead_status?: string;
             /** @description Messages 是当前公开会话的消息镜像，用于刷新页面后恢复对话内容。 */
             messages?: components["schemas"]["service.AICCMessageResult"][];
             /** @description ResolutionStatus 是当前会话级解决状态，公开页刷新后据此恢复“已解决”按钮状态。 */

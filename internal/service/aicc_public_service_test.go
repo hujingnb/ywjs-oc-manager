@@ -519,6 +519,33 @@ func TestAICCPublicCreateSessionRestoresExistingSession(t *testing.T) {
 	assert.Equal(t, 0, store.createdSessionCount)
 }
 
+// TestAICCPublicGetSessionReturnsLeadStatus 覆盖公开页刷新恢复：
+// 已恢复的会话必须返回自身留资状态，前端才能避免对已留资访客重复弹留资表单。
+func TestAICCPublicGetSessionReturnsLeadStatus(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:   sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent: sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", PublicToken: "pub", Status: domain.AICCAgentStatusActive},
+		session: sqlc.AiccSession{
+			ID:               "session-1",
+			AgentID:          "agent-1",
+			OrgID:            "org-1",
+			SessionToken:     "tok",
+			LeadStatus:       domain.AICCLeadStatusComplete,
+			ResolutionStatus: domain.AICCResolutionUnknown,
+			ExpiresAt:        aiccPublicTestNow.Add(time.Hour),
+		},
+		messages: []sqlc.AiccMessage{{ID: "msg-1", SessionID: "session-1", Direction: domain.AICCMessageDirectionVisitor, TextContent: null.StringFrom("报价多少")}},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	result, err := svc.GetSession(context.Background(), "tok")
+
+	require.NoError(t, err)
+	assert.Equal(t, domain.AICCLeadStatusComplete, result.LeadStatus)
+	assert.Len(t, result.Messages, 1)
+}
+
 // TestAICCPublicCreateSessionRestoresByCreatedAtWhenLastActiveMissing 覆盖历史数据兼容：
 // last_active_at 缺失时使用 created_at 判断续接窗口，避免旧会话数据无法刷新恢复。
 func TestAICCPublicCreateSessionRestoresByCreatedAtWhenLastActiveMissing(t *testing.T) {

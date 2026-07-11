@@ -220,6 +220,37 @@ describe('PublicAICCChatPage', () => {
     expect(wrapper.text()).not.toContain('您好，请问有什么可以帮您？')
   })
 
+  // 场景：公开页刷新恢复已完成留资的会话时，不能因为当前客服配置了必填字段而重复展示留资表单。
+  it('does not show the lead form when the restored session already completed lead capture', async () => {
+    apiState.readStoredSession.mockReturnValue('stored-session-token')
+    apiState.fetchConfig.mockResolvedValue({
+      name: '售前接待',
+      greeting: '您好，请问有什么可以帮您？',
+      privacy_mode: 'notice',
+      privacy_text: '我们会使用本次对话内容回答问题。',
+      retention_days: 180,
+      lead_fields: [
+        { field_key: 'contact_phone', label: '联系电话', field_type: 'phone', required: true },
+      ],
+    })
+    apiState.fetchSession.mockResolvedValue({
+      resolution_status: 'unknown',
+      lead_status: 'complete',
+      messages: [
+        { id: 'msg-1', direction: 'visitor', text: '刷新前的问题' },
+        { id: 'msg-2', direction: 'assistant', text: '刷新前的回复' },
+      ],
+    })
+
+    const wrapper = mountPublicChat()
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.text()).not.toContain('请先留下联系方式')
+    expect(wrapper.find('.lead-gate').exists()).toBe(false)
+    expect(wrapper.find('textarea').attributes('disabled')).toBeUndefined()
+  })
+
   // 场景：公开页不再渲染单条助手回复反馈，避免把某条消息评价误当成会话解决状态。
   it('does not render per-message feedback controls for assistant replies', async () => {
     const wrapper = mountPublicChat()

@@ -189,6 +189,8 @@ export interface AICCPublicSessionDetail {
   messages: AICCMessage[]
   // 当前会话级解决状态。
   resolution_status?: 'resolved' | 'unresolved' | 'unknown' | string
+  // 当前会话留资状态，用于刷新恢复后避免重复弹出留资表单。
+  lead_status?: 'pending' | 'complete' | 'skipped' | string
 }
 
 // AICCPublicMessageResult 是公开消息接口返回的助手回复。

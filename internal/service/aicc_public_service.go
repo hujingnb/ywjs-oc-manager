@@ -144,6 +144,8 @@ type AICCPublicSessionDetailResult struct {
 	Messages []AICCMessageResult `json:"messages"`
 	// ResolutionStatus 是当前会话级解决状态，公开页刷新后据此恢复“已解决”按钮状态。
 	ResolutionStatus string `json:"resolution_status"`
+	// LeadStatus 是当前会话的留资完成状态，公开页刷新后据此决定是否继续展示留资表单。
+	LeadStatus string `json:"lead_status"`
 }
 
 // AICCPublicConfigResult 是公开访客端可读取的智能体展示配置。
@@ -361,6 +363,7 @@ func (s *AICCPublicService) GetSession(ctx context.Context, sessionToken string)
 	result := AICCPublicSessionDetailResult{
 		Messages:         make([]AICCMessageResult, 0, len(messages)),
 		ResolutionStatus: session.ResolutionStatus,
+		LeadStatus:       session.LeadStatus,
 	}
 	for _, row := range messages {
 		result.Messages = append(result.Messages, toAICCMessageResult(row))
