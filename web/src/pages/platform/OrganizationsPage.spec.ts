@@ -11,6 +11,7 @@ import type { Organization } from '@/api'
 const createOrganization = vi.hoisted(() => vi.fn())
 const updateOrganization = vi.hoisted(() => vi.fn())
 const updateOrganizationAICCConfig = vi.hoisted(() => vi.fn())
+const routerPush = vi.hoisted(() => vi.fn())
 const bytesPerGB = 1024 * 1024 * 1024
 
 // organizationsState 允许单个测试覆盖组织容量，验证编辑表单不会丢失非整 GB bytes。
@@ -79,6 +80,10 @@ vi.mock('@/api/hooks/useRecharge', () => ({
   useRechargesQuery: () => ({ data: ref([]), isLoading: ref(false) }),
 }))
 
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: routerPush }),
+}))
+
 describe('OrganizationsPage', () => {
   // clipboardMock 捕获复制信息动作，避免测试依赖真实浏览器剪贴板权限。
   const clipboardMock = vi.fn()
@@ -87,6 +92,7 @@ describe('OrganizationsPage', () => {
     createOrganization.mockReset()
     updateOrganization.mockReset()
     updateOrganizationAICCConfig.mockReset()
+    routerPush.mockReset()
     clipboardMock.mockReset()
     organizationsState.items = [{ ...organizationsState.defaultOrg }]
     // 测试断言中文文案，设置 zh 语言以匹配 t() 返回值。
@@ -269,6 +275,26 @@ describe('OrganizationsPage', () => {
 
     expect(wrapper.text()).toContain('企业标识')
     expect(wrapper.text()).toContain('test-org')
+  })
+
+  // AICC 入口位于企业行操作内；只对已开通 AICC 的企业展示，并携带企业 ID 进入独立工作台。
+  it('为已开通 AICC 的企业提供进入 AICC 工作台入口', async () => {
+    const wrapper = mountPage()
+
+    const aiccButton = wrapper.findAll('button').find(button => button.text().includes('进入 AICC'))
+    expect(aiccButton).toBeTruthy()
+    await aiccButton!.trigger('click')
+
+    expect(routerPush).toHaveBeenCalledWith({ path: '/aicc-console', query: { org_id: 'org-1' } })
+  })
+
+  // 未开通 AICC 的企业不能展示工作台入口，避免平台管理员进入后看到无数据或误以为已开通。
+  it('未开通 AICC 的企业不展示进入 AICC 工作台入口', () => {
+    organizationsState.items = [{ ...organizationsState.defaultOrg, aicc_enabled: false }]
+
+    const wrapper = mountPage()
+
+    expect(wrapper.text()).not.toContain('进入 AICC')
   })
 
   it('复制企业信息时写入指定格式的管理员登录信息', async () => {

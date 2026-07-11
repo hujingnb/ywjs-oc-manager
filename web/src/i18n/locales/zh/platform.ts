@@ -50,6 +50,7 @@ export default {
       unlimited: '不限',
     },
     actions: {
+      enterAICC: '进入 AICC',
       edit: '编辑',
       copyInfo: '复制信息',
       rechargeHistory: '充值记录',

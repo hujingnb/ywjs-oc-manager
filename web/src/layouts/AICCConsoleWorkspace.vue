@@ -147,6 +147,7 @@ const agentsError = computed<Error | null>(() => agentsQuery.error.value instanc
 const selectedOrgId = computed(() => selectedOrgIdState.value)
 const selectedAgentId = computed(() => selectedAgentIdState.value)
 const selectedAgent = computed(() => agents.value.find(agent => agent.id === selectedAgentIdState.value))
+const requestedOrgId = computed(() => typeof route.query.org_id === 'string' ? route.query.org_id : undefined)
 const organizationOptions = computed<SelectOption[]>(() => aiccOrganizations.value.map(org => ({
   label: org.name || org.code || org.id,
   value: org.id,
@@ -221,7 +222,10 @@ watch(
       return
     }
     if (selectedOrgIdState.value && items.some(org => org.id === selectedOrgIdState.value)) return
-    selectedOrgIdState.value = items[0]?.id
+    const requestedOrg = requestedOrgId.value && items.some(org => org.id === requestedOrgId.value)
+      ? requestedOrgId.value
+      : undefined
+    selectedOrgIdState.value = requestedOrg ?? items[0]?.id
     selectedAgentIdState.value = undefined
     isCreatingAgent.value = false
   },

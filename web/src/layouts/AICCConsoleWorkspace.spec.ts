@@ -9,7 +9,7 @@ import { AICCConsoleContextKey } from '@/pages/aicc/aiccConsoleContext'
 import AICCConsoleWorkspace from './AICCConsoleWorkspace.vue'
 
 const routerPush = vi.hoisted(() => vi.fn())
-const routeState = vi.hoisted(() => ({ path: '/aicc-console' }))
+const routeState = vi.hoisted(() => ({ path: '/aicc-console', query: {} as Record<string, unknown> }))
 const authState = vi.hoisted(() => ({
   user: makeAuthUser({ id: 'owner-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' }),
 }))
@@ -170,6 +170,7 @@ function navItems(wrapper: ReturnType<typeof mountWorkspace>) {
 describe('AICCConsoleWorkspace', () => {
   beforeEach(() => {
     routeState.path = '/aicc-console'
+    routeState.query = {}
     routerPush.mockClear()
     authState.user = makeAuthUser({ id: 'owner-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' })
     agentsState.data.value = [
@@ -305,6 +306,17 @@ describe('AICCConsoleWorkspace', () => {
     expect(wrapper.text()).toContain('测试企业')
     expect(wrapper.text()).not.toContain('未开通企业')
     expect(agentsState.lastOrgIdRef.value?.value).toBe('org-1')
+    expect(agentsState.lastEnabled.value?.()).toBe(true)
+  })
+
+  // 覆盖企业列表直达入口：平台管理员带 org_id 进入时，默认查看该企业而不是列表首个企业。
+  it('uses route org_id query as the initial organization for platform_admin', () => {
+    authState.user = makeAuthUser({ id: 'platform-1', username: 'platform', display_name: '平台管理员', role: 'platform_admin', org_id: undefined })
+    routeState.query = { org_id: 'org-2' }
+
+    mountWorkspace()
+
+    expect(agentsState.lastOrgIdRef.value?.value).toBe('org-2')
     expect(agentsState.lastEnabled.value?.()).toBe(true)
   })
 

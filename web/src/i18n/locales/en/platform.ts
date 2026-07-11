@@ -50,6 +50,7 @@ export default {
       unlimited: 'Unlimited',
     },
     actions: {
+      enterAICC: 'Open AICC',
       edit: 'Edit',
       copyInfo: 'Copy info',
       rechargeHistory: 'Recharge history',

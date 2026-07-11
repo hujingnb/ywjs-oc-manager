@@ -333,6 +333,7 @@
 
 <script setup lang="ts">
 import { computed, h, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQueries, type UseMutationReturnType } from '@tanstack/vue-query'
 import { Plus, X } from 'lucide-vue-next'
@@ -358,6 +359,7 @@ import { formatDisplayAmount, formatQuotaValue } from '@/pages/usage/usageFormat
 
 // OrganizationsPage 是平台组织管理页，负责创建组织、编辑组织、启停组织和给组织充值。
 const { t } = useI18n()
+const router = useRouter()
 const { data: organizations, isLoading, error } = useOrganizationsQuery()
 const createMutation = useCreateOrganization()
 const updateMutation = useUpdateOrganization()
@@ -669,6 +671,11 @@ async function submitOrganization() {
   await submitForm()
 }
 
+// enterAICCConsole 从企业列表进入 AICC 子系统，并把当前企业作为平台管理员初始查看范围。
+function enterAICCConsole(org: Organization) {
+  void router.push({ path: '/aicc-console', query: { org_id: org.id } })
+}
+
 // columns 展示组织基础信息、状态、余额和操作；改为 computed 以引用响应式的 balanceByOrgId 和 t()。
 const columns = computed(() => [
   // 名称列：含 remark 副标题
@@ -717,6 +724,7 @@ const columns = computed(() => [
   },
   // 启用/禁用互斥：用两条 RowAction + hidden 分别渲染；编辑按钮放在首位方便操作
   actionColumn<Organization>([
+    { label: t('platform.orgs.actions.enterAICC'), type: 'primary', onClick: enterAICCConsole, hidden: r => r.aicc_enabled !== true },
     { label: t('platform.orgs.actions.edit'), onClick: openEditForm },
     { label: t('platform.orgs.actions.copyInfo'), onClick: r => { void copyOrganizationInfo(r) } },
     { label: t('platform.orgs.actions.rechargeHistory'), onClick: openRechargeHistory },
