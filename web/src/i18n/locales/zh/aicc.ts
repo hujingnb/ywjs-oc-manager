@@ -152,14 +152,14 @@ export default {
       industryKnowledge: '行业知识库',
       industryPlaceholder: '选择可供该智能体检索的行业知识库',
       currentAgentKnowledge: '当前客服的知识库',
-      currentAgentKnowledgeDesc: '直接启用，上传和管理的文件只服务于当前智能客服。',
+      currentAgentKnowledgeDesc: '用于存放只服务于当前智能客服的资料，可在独立知识库页面上传和管理。',
       manageCurrentKnowledge: '管理当前客服知识库',
       enabled: '已启用',
       save: '保存知识范围',
       help: {
         useOrgKnowledge: '开启后，智能体回答时可以检索本企业共享知识库中的内容。',
         industryKnowledge: '可选择的行业知识库由平台管理员在创建或配置企业时授权，适合补充通用行业术语、政策或产品知识。',
-        currentAgentKnowledge: '当前客服自己的知识库始终参与检索；这里不再按单个文档勾选。',
+        currentAgentKnowledge: '当前客服回答访客问题时会结合这里维护的资料，适合放产品说明、服务话术和常见问题。',
       },
     },
     leadFields: {

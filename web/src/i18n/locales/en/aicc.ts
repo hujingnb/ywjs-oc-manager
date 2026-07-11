@@ -152,14 +152,14 @@ export default {
       industryKnowledge: 'Industry knowledge',
       industryPlaceholder: 'Select industry knowledge bases available to this agent',
       currentAgentKnowledge: 'Current agent knowledge base',
-      currentAgentKnowledgeDesc: 'Enabled directly. Uploaded files are used only by the current customer-service agent.',
+      currentAgentKnowledgeDesc: 'Stores materials used only by this customer-service agent. Upload and manage files on its knowledge base page.',
       manageCurrentKnowledge: 'Manage current agent knowledge',
       enabled: 'Enabled',
       save: 'Save knowledge scope',
       help: {
         useOrgKnowledge: 'Allows the agent to retrieve content from the organization shared knowledge base when answering.',
         industryKnowledge: 'Available industry knowledge bases are authorized by the platform administrator when creating or configuring the organization.',
-        currentAgentKnowledge: 'The current agent knowledge base always participates in retrieval; individual documents are no longer selected here.',
+        currentAgentKnowledge: 'The agent uses these materials when answering visitors. It is suitable for product notes, service scripts, and FAQs.',
       },
     },
     leadFields: {

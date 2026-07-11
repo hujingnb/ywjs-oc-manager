@@ -270,7 +270,7 @@ describe('AICCManagerPage', () => {
       trigger.attributes('aria-label') === '开启后，系统会根据敏感词命中、异常频率等规则标记高风险访客，并阻止其继续发送消息。',
     )).toBe(true)
     expect(helpTriggers.some(trigger =>
-      trigger.attributes('aria-label') === '当前客服自己的知识库始终参与检索；这里不再按单个文档勾选。',
+      trigger.attributes('aria-label') === '当前客服回答访客问题时会结合这里维护的资料，适合放产品说明、服务话术和常见问题。',
     )).toBe(true)
   })
 
