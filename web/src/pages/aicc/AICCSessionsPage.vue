@@ -139,6 +139,7 @@ const dateRange = ref<[number, number] | null>(null)
 const keywordFilter = ref('')
 const isApplyingRouteQuery = ref(false)
 const currentAgentId = computed(() => props.agentId)
+const supportedChannelFilters = new Set(['web_link', 'web_widget'])
 const sessionFilters = computed<AICCSessionFilters>(() => ({
   resolution_status: resolutionFilter.value || undefined,
   lead_status: leadFilter.value || undefined,
@@ -171,7 +172,6 @@ const leadOptions = computed<SelectOption[]>(() => [
 const channelOptions = computed<SelectOption[]>(() => [
   { label: t('aicc.sessions.channelOptions.webLink'), value: 'web_link' },
   { label: t('aicc.sessions.channelOptions.webWidget'), value: 'web_widget' },
-  { label: t('aicc.sessions.channelOptions.voice'), value: 'voice' },
 ])
 
 watch(
@@ -180,7 +180,7 @@ watch(
     isApplyingRouteQuery.value = true
     resolutionFilter.value = stringQuery(query.resolution_status)
     leadFilter.value = stringQuery(query.lead_status)
-    channelFilter.value = stringQuery(query.channel)
+    channelFilter.value = normalizeChannelQuery(query.channel)
     regionFilter.value = stringQuery(query.region) ?? ''
     keywordFilter.value = stringQuery(query.keyword) ?? ''
     const start = parseQueryDate(query.start_at)
@@ -236,6 +236,11 @@ function roleLabel(role?: string) {
 function stringQuery(value: unknown): string | null {
   if (Array.isArray(value)) return typeof value[0] === 'string' ? value[0] : null
   return typeof value === 'string' && value ? value : null
+}
+
+function normalizeChannelQuery(value: unknown): string | null {
+  const channel = stringQuery(value)
+  return channel && supportedChannelFilters.has(channel) ? channel : null
 }
 
 function parseQueryDate(value: unknown): number | null {

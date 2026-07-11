@@ -262,7 +262,6 @@ export default {
     channelOptions: {
       webLink: 'Public link',
       webWidget: 'Web widget',
-      voice: 'Voice care',
     },
     roles: {
       assistant: 'Assistant',

@@ -262,7 +262,6 @@ export default {
     channelOptions: {
       webLink: '公开链接',
       webWidget: '网页挂件',
-      voice: '语音客服',
     },
     roles: {
       assistant: '助手',
