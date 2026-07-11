@@ -120,8 +120,8 @@ func TestRAGFlowKnowledgeUploadAppAllowsExactQuota(t *testing.T) {
 	require.Len(t, rf.uploadCalls, 1)
 }
 
-// TestRAGFlowKnowledgeRejectsAICCHiddenApp 覆盖普通实例知识库入口隔离：AICC 隐藏 app
-// 不允许通过普通 app 知识库接口读写，避免绕过 AICC 知识配置边界。
+// TestRAGFlowKnowledgeRejectsAICCHiddenApp 覆盖普通隐藏实例隔离：未绑定 AICC 智能体的隐藏 app
+// 不允许通过普通 app 知识库接口读写，避免意外暴露不可见实例。
 func TestRAGFlowKnowledgeRejectsAICCHiddenApp(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
 	app := store.apps[testKnowledgeApp]
@@ -132,6 +132,23 @@ func TestRAGFlowKnowledgeRejectsAICCHiddenApp(t *testing.T) {
 
 	require.ErrorIs(t, err, ErrNotFound)
 	assert.Empty(t, rf.uploadCalls)
+}
+
+// TestRAGFlowKnowledgeAllowsAICCHiddenAppForAgentAdmin 覆盖 AICC 专属知识库入口：企业管理员可
+// 管理当前智能体绑定的隐藏实例知识库，上传仍复用实例知识库的配额与解析链路。
+func TestRAGFlowKnowledgeAllowsAICCHiddenAppForAgentAdmin(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	app := store.apps[testKnowledgeApp]
+	app.AiccHidden = true
+	store.apps[testKnowledgeApp] = app
+	store.aiccAgentsByApp = map[string]sqlc.AiccAgent{}
+	store.aiccAgentsByApp[testKnowledgeApp] = sqlc.AiccAgent{ID: "agent-1", OrgID: testKnowledgeOrg, AppID: testKnowledgeApp}
+
+	_, err := svc.SaveAppFile(context.Background(), orgKnowledgeAdmin(), testKnowledgeApp, "b.md", strings.NewReader("bb"), 2)
+
+	require.NoError(t, err)
+	require.Len(t, rf.uploadCalls, 1)
+	assert.Equal(t, "b.md", rf.uploadCalls[0].filename)
 }
 
 // TestRAGFlowKnowledgeDeleteAppRejectsOtherOwner 验证实例知识库删除先按 manager app owner 判权，禁止路径不会调用 RAGFlow。

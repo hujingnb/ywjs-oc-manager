@@ -116,6 +116,22 @@ func TestGetAppHidesAICCHiddenApp(t *testing.T) {
 	require.ErrorIs(t, err, ErrNotFound)
 }
 
+// TestGetAppAllowsAICCHiddenAppForAgentAdmin 覆盖 AICC 专属知识库入口：企业管理员可打开
+// 绑定到 AICC 智能体的隐藏实例详情，供前端复用实例知识库上传管理页。
+func TestGetAppAllowsAICCHiddenAppForAgentAdmin(t *testing.T) {
+	svc, store := newAppServiceWithStore(t)
+	app := store.mustSeedApp(t)
+	app.AiccHidden = true
+	store.app = app
+	store.aiccAgent = sqlc.AiccAgent{ID: "agent-1", OrgID: store.organization.ID, AppID: testAppServiceAppID}
+
+	result, err := svc.Get(context.Background(), appOrgAdminPrincipal(store.organization), testAppServiceAppID)
+
+	require.NoError(t, err)
+	assert.Equal(t, testAppServiceAppID, result.ID)
+	assert.Equal(t, "测试实例", result.Name)
+}
+
 func newAppServiceWithStore(t *testing.T) (*AppService, *appServiceStoreStub) {
 	t.Helper()
 	store := &appServiceStoreStub{
@@ -206,6 +222,7 @@ type appServiceStoreStub struct {
 	organization sqlc.Organization
 	user         sqlc.User
 	app          sqlc.App
+	aiccAgent    sqlc.AiccAgent
 	// versionRevision 是 stub 返回的版本 revision，用于 WithVersion 联查。
 	versionRevision int32
 	// versionImageID 是 stub 返回的版本 image_id，用于 WithVersion 联查。
@@ -220,6 +237,14 @@ type appServiceStoreStub struct {
 	// webPublishErr 默认置 sql.ErrNoRows（企业未配置 web-publish），用于 web_publish_pending_restart 检测。
 	webPublishCfg sqlc.OrgWebPublishConfig
 	webPublishErr error
+}
+
+// GetAICCAgentByAppID 返回隐藏 app 绑定的 AICC 智能体；未配置时模拟数据库无行。
+func (s *appServiceStoreStub) GetAICCAgentByAppID(_ context.Context, appID string) (sqlc.AiccAgent, error) {
+	if s.aiccAgent.AppID != appID {
+		return sqlc.AiccAgent{}, sql.ErrNoRows
+	}
+	return s.aiccAgent, nil
 }
 
 // GetWebPublishConfig 返回预置 web-publish 配置；webPublishErr 非 nil 时优先返回它（默认 sql.ErrNoRows）。

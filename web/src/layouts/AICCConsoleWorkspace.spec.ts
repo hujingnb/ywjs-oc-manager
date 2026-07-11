@@ -161,7 +161,7 @@ describe('AICCConsoleWorkspace', () => {
       '/aicc-console',
       '/aicc-console/sessions',
       '/aicc-console/leads',
-      '/aicc-console/knowledge',
+      '/apps/app-1/knowledge',
       '/aicc-console/analytics',
       '/aicc-console/settings',
     ])
@@ -175,10 +175,21 @@ describe('AICCConsoleWorkspace', () => {
       '/aicc-console',
       '/aicc-console/sessions',
       '/aicc-console/leads',
-      '/aicc-console/knowledge',
+      '/apps/app-1/knowledge',
       '/aicc-console/analytics',
       '/aicc-console/settings',
     ])
+  })
+
+  // 覆盖左侧菜单选中态：子路由不能被根路径 /aicc-console 抢先匹配成接待台。
+  it('marks the matched child route as active in the left rail', () => {
+    routeState.path = '/aicc-console/sessions'
+
+    const wrapper = mountWorkspace()
+    const activeItems = navItems(wrapper).filter(item => item.classes('active'))
+
+    expect(activeItems).toHaveLength(1)
+    expect(activeItems[0].text()).toBe('会话')
   })
 
   // 覆盖 demo 版顶栏：返回概览入口与智能体选择处于同一工作台顶栏内。

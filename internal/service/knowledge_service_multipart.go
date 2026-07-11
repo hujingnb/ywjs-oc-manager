@@ -132,7 +132,7 @@ func (s *KnowledgeService) InitAppUpload(ctx context.Context, principal auth.Pri
 	if err := s.ensureMultipartEnabled(); err != nil {
 		return KnowledgeUploadInitResult{}, err
 	}
-	app, err := s.getApp(ctx, appID)
+	app, err := s.getApp(ctx, principal, appID)
 	if err != nil {
 		return KnowledgeUploadInitResult{}, err
 	}
@@ -153,7 +153,7 @@ func (s *KnowledgeService) UploadAppPart(ctx context.Context, principal auth.Pri
 	if err := s.ensureMultipartEnabled(); err != nil {
 		return err
 	}
-	app, err := s.getApp(ctx, appID)
+	app, err := s.getApp(ctx, principal, appID)
 	if err != nil {
 		return err
 	}
@@ -172,7 +172,7 @@ func (s *KnowledgeService) CompleteAppUpload(ctx context.Context, principal auth
 	if err := s.ensureMultipartEnabled(); err != nil {
 		return KnowledgeDocumentResult{}, err
 	}
-	app, err := s.getApp(ctx, appID)
+	app, err := s.getApp(ctx, principal, appID)
 	if err != nil {
 		return KnowledgeDocumentResult{}, err
 	}
@@ -195,7 +195,7 @@ func (s *KnowledgeService) AbortAppUpload(ctx context.Context, principal auth.Pr
 	if err := s.ensureMultipartEnabled(); err != nil {
 		return err
 	}
-	app, err := s.getApp(ctx, appID)
+	app, err := s.getApp(ctx, principal, appID)
 	if err != nil {
 		return err
 	}

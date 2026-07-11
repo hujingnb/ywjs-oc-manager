@@ -36,6 +36,8 @@ type AppStore interface {
 	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) error
 	// GetOrganization 按 id 加载组织记录，用于 allowlist 校验等场景。
 	GetOrganization(ctx context.Context, id string) (sqlc.Organization, error)
+	// GetAICCAgentByAppID 判断隐藏 app 是否确属 AICC 智能体，供专属知识库入口放行。
+	GetAICCAgentByAppID(ctx context.Context, appID string) (sqlc.AiccAgent, error)
 	// SetAppVersion 更新实例绑定的助手版本 id，返回更新后的实例记录。
 	SetAppVersion(ctx context.Context, arg sqlc.SetAppVersionParams) error
 	// UpdateAppLocale 更新实例语言偏好（hermes 对终端用户说话的语言）。
@@ -156,7 +158,9 @@ func (s *AppService) Get(ctx context.Context, principal auth.Principal, appID st
 		return AppResult{}, fmt.Errorf("查询应用失败: %w", err)
 	}
 	if row.App.AiccHidden {
-		return AppResult{}, ErrNotFound
+		if err := s.ensureAICCHiddenAppManageAccess(ctx, principal, row.App); err != nil {
+			return AppResult{}, err
+		}
 	}
 	if !auth.CanViewApp(principal, row.App.OrgID, row.App.OwnerUserID) {
 		return AppResult{}, ErrForbidden
@@ -177,6 +181,22 @@ func (s *AppService) Get(ctx context.Context, principal auth.Principal, appID st
 		result.RuntimeImageSha256 = row.App.RuntimeImageSha256
 	}
 	return result, nil
+}
+
+// ensureAICCHiddenAppManageAccess 只为 AICC 绑定的隐藏 app 放开管理端详情读取；
+// 普通列表仍隐藏，且未绑定 AICC 智能体或跨企业主体继续按不存在/无权处理。
+func (s *AppService) ensureAICCHiddenAppManageAccess(ctx context.Context, principal auth.Principal, app sqlc.App) error {
+	agent, err := s.store.GetAICCAgentByAppID(ctx, app.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("查询 AICC 隐藏实例归属失败: %w", err)
+	}
+	if agent.OrgID != app.OrgID || !auth.CanManageAICCAgent(principal, agent.OrgID) {
+		return ErrForbidden
+	}
+	return nil
 }
 
 // ListByOrg 列出组织内的应用。

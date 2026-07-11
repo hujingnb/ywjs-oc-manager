@@ -11,6 +11,10 @@ export default {
     createAgent: 'New agent',
     agentLoading: 'Loading agents',
     agentLoadFailed: 'Failed to load agents',
+    knowledgeRedirect: {
+      loading: 'Opening dedicated knowledge base',
+      noAgent: 'Select an agent first',
+    },
     nav: {
       reception: 'Reception',
       sessions: 'Sessions',

@@ -68,9 +68,9 @@
           :key="item.path"
           class="aicc-workspace-nav-item"
           :class="{ active: activeKey === item.path }"
-          :href="item.path"
+          :href="resolveNavTarget(item)"
           data-test="workspace-nav-item"
-          @click.prevent="navigateTo(item.path)"
+          @click.prevent="navigateTo(item)"
         >
           <component :is="item.icon" :size="16" />
           <span>{{ t(item.labelKey) }}</span>
@@ -138,7 +138,10 @@ const selectedAgentIdModel = computed<string | null>({
 // activeKey 对根路径做精确匹配，避免 /aicc-console 吞掉所有子模块高亮。
 const activeKey = computed(() => {
   if (route.path === '/aicc-console') return '/aicc-console'
-  return navItems.find(item => route.path === item.path || route.path.startsWith(`${item.path}/`))?.path ?? '/aicc-console'
+  const matchedChild = navItems
+    .filter(item => item.path !== '/aicc-console')
+    .find(item => route.path === item.path || route.path.startsWith(`${item.path}/`))
+  return matchedChild?.path ?? '/aicc-console'
 })
 
 const selectedAgentStatusText = computed(() => {
@@ -209,8 +212,15 @@ function startCreateAgent() {
   isCreatingAgent.value = true
 }
 
-function navigateTo(path: string) {
-  void router.push(path)
+function resolveNavTarget(item: WorkspaceNavItem) {
+  if (item.path === '/aicc-console/knowledge' && selectedAgent.value?.app_id) {
+    return `/apps/${selectedAgent.value.app_id}/knowledge`
+  }
+  return item.path
+}
+
+function navigateTo(item: WorkspaceNavItem) {
+  void router.push(resolveNavTarget(item))
 }
 
 function returnToOverview() {

@@ -394,7 +394,7 @@ func (s *KnowledgeService) ReparseOrgFile(ctx context.Context, principal auth.Pr
 
 // ListApp 列出实例知识库文件。权限由 app 的真实 owner/org 决定，不信任请求方传入归属。
 func (s *KnowledgeService) ListApp(ctx context.Context, principal auth.Principal, appID string, page, pageSize int32, keyword, status string) (KnowledgeListResult, error) {
-	app, err := s.getApp(ctx, appID)
+	app, err := s.getApp(ctx, principal, appID)
 	if err != nil {
 		return KnowledgeListResult{}, err
 	}
@@ -411,7 +411,7 @@ func (s *KnowledgeService) ListApp(ctx context.Context, principal auth.Principal
 
 // SaveAppFile 上传实例知识库文件并触发解析。
 func (s *KnowledgeService) SaveAppFile(ctx context.Context, principal auth.Principal, appID, filename string, content io.Reader, size int64) (KnowledgeDocumentResult, error) {
-	app, err := s.getApp(ctx, appID)
+	app, err := s.getApp(ctx, principal, appID)
 	if err != nil {
 		return KnowledgeDocumentResult{}, err
 	}
@@ -430,7 +430,7 @@ func (s *KnowledgeService) SaveAppFile(ctx context.Context, principal auth.Princ
 
 // OpenAppFile 打开实例知识库文件流供下载。
 func (s *KnowledgeService) OpenAppFile(ctx context.Context, principal auth.Principal, appID, documentID string) (io.ReadCloser, int64, string, error) {
-	app, err := s.getApp(ctx, appID)
+	app, err := s.getApp(ctx, principal, appID)
 	if err != nil {
 		return nil, 0, "", err
 	}
@@ -446,7 +446,7 @@ func (s *KnowledgeService) OpenAppFile(ctx context.Context, principal auth.Princ
 
 // DeleteAppFile 删除实例知识库文件。
 func (s *KnowledgeService) DeleteAppFile(ctx context.Context, principal auth.Principal, appID, documentID string) error {
-	app, err := s.getApp(ctx, appID)
+	app, err := s.getApp(ctx, principal, appID)
 	if err != nil {
 		return err
 	}
@@ -462,7 +462,7 @@ func (s *KnowledgeService) DeleteAppFile(ctx context.Context, principal auth.Pri
 
 // ReparseAppFile 重新触发实例知识库文件解析。
 func (s *KnowledgeService) ReparseAppFile(ctx context.Context, principal auth.Principal, appID, documentID string) (KnowledgeDocumentResult, error) {
-	app, err := s.getApp(ctx, appID)
+	app, err := s.getApp(ctx, principal, appID)
 	if err != nil {
 		return KnowledgeDocumentResult{}, err
 	}
@@ -725,7 +725,7 @@ func (s *KnowledgeService) GetKnowledgeRAGFlowDatasetInfo(ctx context.Context, p
 	if !auth.CanManageKnowledgeRAGFlowDataset(principal) {
 		return KnowledgeRAGFlowDatasetInfoResult{}, ErrKnowledgeForbidden
 	}
-	target, dataset, err := s.resolveKnowledgeRAGFlowTarget(ctx, scope, targetID)
+	target, dataset, err := s.resolveKnowledgeRAGFlowTarget(ctx, principal, scope, targetID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return KnowledgeRAGFlowDatasetInfoResult{Scope: scope, TargetID: targetID, TargetName: target.Name, Status: "not_created"}, nil
 	}
@@ -748,7 +748,7 @@ func (s *KnowledgeService) UpdateKnowledgeEmbeddingModel(ctx context.Context, pr
 	if !auth.CanManageKnowledgeRAGFlowDataset(principal) {
 		return KnowledgeRAGFlowDatasetInfoResult{}, ErrKnowledgeForbidden
 	}
-	target, dataset, err := s.resolveKnowledgeRAGFlowTarget(ctx, scope, targetID)
+	target, dataset, err := s.resolveKnowledgeRAGFlowTarget(ctx, principal, scope, targetID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return KnowledgeRAGFlowDatasetInfoResult{}, ErrNotFound
@@ -785,7 +785,7 @@ type knowledgeRAGFlowTarget struct {
 }
 
 // resolveKnowledgeRAGFlowTarget 只解析已有 dataset 映射，不调用 getOrgDataset/getAppDataset 等懒创建路径。
-func (s *KnowledgeService) resolveKnowledgeRAGFlowTarget(ctx context.Context, scope, targetID string) (knowledgeRAGFlowTarget, sqlc.RagflowDataset, error) {
+func (s *KnowledgeService) resolveKnowledgeRAGFlowTarget(ctx context.Context, principal auth.Principal, scope, targetID string) (knowledgeRAGFlowTarget, sqlc.RagflowDataset, error) {
 	if s.store == nil {
 		return knowledgeRAGFlowTarget{}, sqlc.RagflowDataset{}, ErrKnowledgeMissing
 	}
@@ -804,7 +804,7 @@ func (s *KnowledgeService) resolveKnowledgeRAGFlowTarget(ctx context.Context, sc
 		}
 		return knowledgeRAGFlowTarget{Name: org.Name}, dataset, nil
 	case KnowledgeRAGFlowScopeApp:
-		app, err := s.getApp(ctx, targetID)
+		app, err := s.getApp(ctx, principal, targetID)
 		if err != nil {
 			return knowledgeRAGFlowTarget{}, sqlc.RagflowDataset{}, err
 		}
@@ -1363,7 +1363,7 @@ func (s *KnowledgeService) datasetByDocument(ctx context.Context, document sqlc.
 	}
 }
 
-func (s *KnowledgeService) getApp(ctx context.Context, appID string) (sqlc.App, error) {
+func (s *KnowledgeService) getApp(ctx context.Context, principal auth.Principal, appID string) (sqlc.App, error) {
 	if s.store == nil {
 		return sqlc.App{}, ErrKnowledgeMissing
 	}
@@ -1376,9 +1376,27 @@ func (s *KnowledgeService) getApp(ctx context.Context, appID string) (sqlc.App, 
 		return sqlc.App{}, fmt.Errorf("查询应用失败: %w", err)
 	}
 	if app.AiccHidden {
-		return sqlc.App{}, ErrNotFound
+		if err := s.ensureAICCHiddenAppKnowledgeAccess(ctx, principal, app); err != nil {
+			return sqlc.App{}, err
+		}
 	}
 	return app, nil
+}
+
+// ensureAICCHiddenAppKnowledgeAccess 只放行当前企业管理员管理其 AICC 智能体绑定的隐藏实例知识库；
+// 未绑定 AICC 智能体的隐藏 app 继续按不存在处理，避免普通隐藏资源泄露。
+func (s *KnowledgeService) ensureAICCHiddenAppKnowledgeAccess(ctx context.Context, principal auth.Principal, app sqlc.App) error {
+	agent, err := s.store.GetAICCAgentByAppID(ctx, app.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("查询 AICC 隐藏实例知识库归属失败: %w", err)
+	}
+	if agent.OrgID != app.OrgID || !auth.CanManageAICCAgent(principal, agent.OrgID) {
+		return ErrKnowledgeForbidden
+	}
+	return nil
 }
 
 func (s *KnowledgeService) getOrg(ctx context.Context, orgID string) (sqlc.Organization, error) {

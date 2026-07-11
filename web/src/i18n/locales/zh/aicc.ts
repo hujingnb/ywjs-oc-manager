@@ -11,6 +11,10 @@ export default {
     createAgent: '新建智能体',
     agentLoading: '正在加载智能体',
     agentLoadFailed: '智能体加载失败',
+    knowledgeRedirect: {
+      loading: '正在打开专属知识库',
+      noAgent: '请先选择智能体',
+    },
     nav: {
       reception: '接待台',
       sessions: '会话',
