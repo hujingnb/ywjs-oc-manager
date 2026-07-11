@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { i18n } from '@/i18n'
 import type { AICCLead, AICCSessionDetail } from '@/domain/aicc'
+import { AICCConsoleContextKey, type AICCConsoleContext } from './aiccConsoleContext'
 import AICCLeadsPage from './AICCLeadsPage.vue'
 
 const queryState = vi.hoisted(() => {
@@ -66,9 +67,23 @@ const TagStub = defineComponent({
 
 function mountLeadsPage() {
   i18n.global.locale.value = 'zh'
+  const consoleContext: AICCConsoleContext = {
+    agents: computed(() => []),
+    selectedOrgId: computed(() => 'org-1'),
+    isPlatformAdmin: computed(() => false),
+    selectedAgentId: computed(() => 'agent-1'),
+    selectedAgent: computed(() => undefined),
+    agentsLoading: computed(() => false),
+    agentsError: computed(() => null),
+    selectAgent: vi.fn(),
+    startCreateAgent: vi.fn(),
+  }
   return mount(AICCLeadsPage, {
     global: {
       plugins: [i18n],
+      provide: {
+        [AICCConsoleContextKey as symbol]: consoleContext,
+      },
       stubs: {
         NTag: TagStub,
         'n-tag': TagStub,
