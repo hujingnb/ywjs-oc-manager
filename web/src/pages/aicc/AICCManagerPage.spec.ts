@@ -263,6 +263,23 @@ describe('AICCManagerPage', () => {
     expect(wrapper.text()).not.toContain('嵌入占位')
   })
 
+  // 覆盖设置页路由体验：进入独立设置页时不应再触发旧版锚点滚动，避免页面跳动。
+  it('does not scroll when opening the dedicated settings route', async () => {
+    const scrollIntoView = vi.fn()
+    const previousScrollIntoView = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = scrollIntoView
+    try {
+      const { context } = makeConsoleContext()
+
+      mountManager(context, { initialSection: 'settings' })
+      await Promise.resolve()
+
+      expect(scrollIntoView).not.toHaveBeenCalled()
+    } finally {
+      Element.prototype.scrollIntoView = previousScrollIntoView
+    }
+  })
+
   // 覆盖设置页字段说明：每个主要配置字段后都应有帮助入口，并展示业务解释文案。
   it('shows help tooltips for settings form fields', () => {
     const { context } = makeConsoleContext()

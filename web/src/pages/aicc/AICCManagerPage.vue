@@ -169,7 +169,7 @@
             </n-space>
           </n-form>
 
-          <div v-if="isReceptionRoute || isSettingsRoute" ref="settingsPanelEl" class="operations-panel">
+          <div v-if="isReceptionRoute || isSettingsRoute" class="operations-panel">
             <div class="section-heading">
               <div>
                 <p class="eyebrow">{{ t('aicc.manager.delivery.eyebrow') }}</p>
@@ -514,7 +514,6 @@ const feedbackDanger = ref(false)
 const activeSection = ref<ManagerTab>(sectionToTab(props.initialSection))
 const currentRouteSection = ref<InitialSection>(props.initialSection)
 const knowledgePanelEl = ref<HTMLElement>()
-const settingsPanelEl = ref<HTMLElement>()
 const { t } = useI18n()
 
 const settingsQuery = useAICCSettingsQuery(selectedAgentId)
@@ -640,8 +639,6 @@ watch(
     activeSection.value = sectionToTab(section)
     if (section === 'knowledge') {
       void scrollKnowledgePanelIntoView()
-    } else if (section === 'settings') {
-      void scrollSettingsPanelIntoView()
     }
   },
   { immediate: true },
@@ -657,13 +654,6 @@ async function scrollKnowledgePanelIntoView() {
   await nextTick()
   if (typeof knowledgePanelEl.value?.scrollIntoView === 'function') {
     knowledgePanelEl.value.scrollIntoView({ block: 'start', behavior: 'smooth' })
-  }
-}
-
-async function scrollSettingsPanelIntoView() {
-  await nextTick()
-  if (typeof settingsPanelEl.value?.scrollIntoView === 'function') {
-    settingsPanelEl.value.scrollIntoView({ block: 'start', behavior: 'smooth' })
   }
 }
 
