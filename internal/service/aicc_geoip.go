@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"log/slog"
@@ -21,6 +22,8 @@ import (
 const (
 	// aiccGeoIPArchiveURL 是 GeoIP 数据更新源；使用国内 Gitee archive，避免构建和运行期依赖 GitHub。
 	aiccGeoIPArchiveURL = "https://gitee.com/lionsoul/ip2region/repository/archive/master.zip"
+	// aiccGeoIPUserAgent 让 Gitee archive 入口按下载请求处理；Go 默认客户端会被返回 HTML 页面。
+	aiccGeoIPUserAgent = "Wget/1.21.4"
 	// aiccGeoIPBuiltinDir 是镜像构建阶段内置 xdb 数据的位置，启动时优先作为兜底数据源。
 	aiccGeoIPBuiltinDir = "/usr/local/share/oc-manager/geoip"
 	// aiccGeoIPRuntimeDir 是运行期定期更新后的 xdb 数据目录，不需要用户挂载配置文件。
@@ -71,7 +74,7 @@ type AICCIP2RegionResolver struct {
 // NewAICCIP2RegionResolver 创建 GeoIP 解析器，并从运行期目录或镜像内置目录加载可用数据。
 func NewAICCIP2RegionResolver() *AICCIP2RegionResolver {
 	resolver := &AICCIP2RegionResolver{
-		client: &http.Client{Timeout: 60 * time.Second},
+		client: newAICCGeoIPHTTPClient(),
 	}
 	_ = resolver.Reload()
 	return resolver
@@ -142,12 +145,14 @@ func (r *AICCIP2RegionResolver) StartUpdater(ctx context.Context, logger *slog.L
 func (r *AICCIP2RegionResolver) UpdateFromArchive(ctx context.Context) error {
 	client := r.client
 	if client == nil {
-		client = http.DefaultClient
+		client = newAICCGeoIPHTTPClient()
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, aiccGeoIPArchiveURL, nil)
 	if err != nil {
 		return err
 	}
+	req.Header.Set("Accept", "application/zip,application/octet-stream,*/*")
+	req.Header.Set("User-Agent", aiccGeoIPUserAgent)
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -162,6 +167,9 @@ func (r *AICCIP2RegionResolver) UpdateFromArchive(ctx context.Context) error {
 	}
 	if int64(len(body)) > aiccGeoIPArchiveMaxBytes {
 		return fmt.Errorf("AICC GeoIP 数据包超过大小限制")
+	}
+	if err := validateAICCGeoIPArchive(body, resp.Header.Get("Content-Type")); err != nil {
+		return err
 	}
 	parent := filepath.Dir(aiccGeoIPRuntimeDir)
 	if err := os.MkdirAll(parent, 0755); err != nil {
@@ -184,6 +192,14 @@ func (r *AICCIP2RegionResolver) UpdateFromArchive(ctx context.Context) error {
 		}
 	}
 	return r.Reload()
+}
+
+func newAICCGeoIPHTTPClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// Gitee archive 对 Go 默认 HTTP/2 请求会返回 HTML 仓库页面；固定 HTTP/1.1 才会进入 zip 下载链路。
+	transport.ForceAttemptHTTP2 = false
+	transport.TLSClientConfig = &tls.Config{NextProtos: []string{"http/1.1"}}
+	return &http.Client{Timeout: 60 * time.Second, Transport: transport}
 }
 
 func (r *AICCIP2RegionResolver) updateAndLog(ctx context.Context, logger *slog.Logger) {
@@ -209,6 +225,13 @@ func existingAICCGeoIPPath(path string) string {
 		return ""
 	}
 	return path
+}
+
+func validateAICCGeoIPArchive(body []byte, contentType string) error {
+	if len(body) < 4 || !bytes.Equal(body[:4], []byte{'P', 'K', 0x03, 0x04}) {
+		return fmt.Errorf("AICC GeoIP 数据包不是有效 zip 文件: content_type=%s", contentType)
+	}
+	return nil
 }
 
 func extractAICCGeoIPArchive(readerAt io.ReaderAt, size int64, targetDir string) error {

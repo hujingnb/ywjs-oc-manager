@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -68,4 +69,26 @@ func TestExtractAICCGeoIPArchive(t *testing.T) {
 	v6, err := os.ReadFile(filepath.Join(targetDir, aiccGeoIPv6File))
 	require.NoError(t, err)
 	assert.Equal(t, "v6-data", string(v6))
+}
+
+// TestValidateAICCGeoIPArchiveRejectsHTML 覆盖下载源异常返回 HTML 的场景：
+// 更新器应在解包前给出明确错误，避免日志只显示底层 zip 解析失败。
+func TestValidateAICCGeoIPArchiveRejectsHTML(t *testing.T) {
+	err := validateAICCGeoIPArchive([]byte("<!DOCTYPE html>"), "text/html; charset=utf-8")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "不是有效 zip 文件")
+	assert.Contains(t, err.Error(), "text/html")
+}
+
+// TestNewAICCGeoIPHTTPClientDisablesHTTP2 覆盖 Gitee archive 下载兼容性：
+// 运行期更新固定使用 HTTP/1.1，避免 Go 默认 HTTP/2 请求被 Gitee 返回仓库 HTML 页面。
+func TestNewAICCGeoIPHTTPClientDisablesHTTP2(t *testing.T) {
+	client := newAICCGeoIPHTTPClient()
+	transport, ok := client.Transport.(*http.Transport)
+	require.True(t, ok)
+
+	assert.False(t, transport.ForceAttemptHTTP2)
+	require.NotNil(t, transport.TLSClientConfig)
+	assert.Equal(t, []string{"http/1.1"}, transport.TLSClientConfig.NextProtos)
 }
