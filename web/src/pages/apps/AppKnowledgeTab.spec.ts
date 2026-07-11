@@ -144,9 +144,9 @@ vi.mock('@/api/hooks/useKnowledge', async () => {
   }
 })
 
-function mountTab() {
+function mountTab(props: Partial<InstanceType<typeof AppKnowledgeTab>['$props']> = {}) {
   return mount(AppKnowledgeTab, {
-    props: { appId: 'app-1' },
+    props: { appId: 'app-1', ...props },
     global: {
       plugins: [i18n],
       provide: {
@@ -432,5 +432,26 @@ describe('AppKnowledgeTab', () => {
     await wrapper.find('button').trigger('click')
 
     expect(mocks.downloadAppKnowledgeFile).toHaveBeenCalledWith('app-1', 'doc-app-1', 'readme.md')
+  })
+
+  // 覆盖 AICC 平台管理员只读模式：即使全局应用权限允许管理，嵌入页也不能展示上传、删除和拖拽上传入口。
+  it('readOnly 模式下不允许管理实例知识库文件', async () => {
+    mocks.canManage.mockReturnValue(true)
+    const wrapper = mountTab({ readOnly: true })
+    const first = new File(['a'], 'a.md')
+
+    expect(wrapper.find('input[type="file"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('下载')
+    expect(wrapper.text()).not.toContain('删除')
+
+    await wrapper.find('.knowledge-drop-zone').trigger('drop', {
+      dataTransfer: {
+        items: [],
+        files: [first],
+      },
+    })
+
+    expect(mocks.run).not.toHaveBeenCalled()
+    expect(mocks.mutateAsync).not.toHaveBeenCalled()
   })
 })

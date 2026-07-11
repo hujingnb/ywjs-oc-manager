@@ -114,8 +114,11 @@ import { parseStatusLabel, parseStatusTagType, PARSE_STATUS_FILTER_OPTIONS } fro
 const parseStatusOptions = computed(() => PARSE_STATUS_FILTER_OPTIONS.map(opt => ({ ...opt, label: t(opt.label) })))
 import RAGFlowDatasetInfoDialog from '@/components/RAGFlowDatasetInfoDialog.vue'
 
-// AppKnowledgeTab 管理单个应用的 RAGFlow 知识库文件，权限来自应用详情注入。
-const props = defineProps<{ appId: string }>()
+// AppKnowledgeTab 管理单个应用的 RAGFlow 知识库文件，权限来自应用详情注入；
+// readOnly 用于 AICC 平台管理员排障视角，只允许查看和下载，不暴露写操作。
+const props = withDefaults(defineProps<{ appId: string; readOnly?: boolean }>(), {
+  readOnly: false,
+})
 const { t } = useI18n()
 const appIdRef = computed<string | undefined>(() => props.appId)
 const auth = useAuthStore()
@@ -143,8 +146,8 @@ const ragflowDialogOpen = ref(false)
 const uploadProgress = useUploadProgressStore()
 const message = useMessage()
 
-// canManage 控制上传和删除入口，后端仍会基于应用归属做最终权限校验。
-const canManage = computed(() => canManageApp(auth.user, app?.value))
+// canManage 控制上传和删除入口，后端仍会基于应用归属和 AICC 隐藏实例语义做最终权限校验。
+const canManage = computed(() => !props.readOnly && canManageApp(auth.user, app?.value))
 // canManageRAGFlowInfo 控制远端 dataset 运维入口，仅平台管理员可见。
 const canManageRAGFlowInfo = computed(() => canManageRAGFlowDatasetInfo(auth.user))
 // ragflowTargetName 给运维弹框展示实例名；注入值缺失时保留稳定兜底文案。

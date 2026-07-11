@@ -32,10 +32,15 @@ vi.mock('@/pages/apps/AppKnowledgeTab.vue', () => ({
         type: String,
         required: true,
       },
+      readOnly: {
+        type: Boolean,
+        default: false,
+      },
     },
     setup(props) {
       return () => h('section', { 'data-test': 'embedded-knowledge' }, [
         h('span', { 'data-test': 'embedded-app-id' }, props.appId),
+        h('span', { 'data-test': 'embedded-read-only' }, String(props.readOnly)),
       ])
     },
   }),
@@ -72,6 +77,7 @@ function makeContext(options: {
   selectedAgent?: AICCAgent
   agentsLoading?: boolean
   agentsError?: Error | null
+  platformAdmin?: boolean
 } = {}): AICCConsoleContext {
   const selectedAgent = ref<AICCAgent | undefined>(options.selectedAgent)
   const agents = computed(() => selectedAgent.value ? [selectedAgent.value] : [])
@@ -79,7 +85,7 @@ function makeContext(options: {
   return {
     agents,
     selectedOrgId: computed(() => selectedAgent.value?.org_id),
-    isPlatformAdmin: computed(() => false),
+    isPlatformAdmin: computed(() => options.platformAdmin ?? false),
     selectedAgentId: computed(() => selectedAgent.value?.id),
     selectedAgent: computed(() => selectedAgent.value),
     agentsLoading: computed(() => options.agentsLoading ?? false),
@@ -131,6 +137,13 @@ describe('AICCWorkbenchKnowledgePage', () => {
     const appIdRef = useAppQuery.mock.calls[0][0] as Ref<string | undefined>
 
     expect(appIdRef.value).toBe('app-1')
+  })
+
+  // 覆盖平台管理员只读入口：企业列表进入 AICC 后可查看当前客服知识库，但不展示上传等管理动作。
+  it('passes read-only mode to the embedded knowledge tab for platform admins', () => {
+    const wrapper = mountKnowledgePage(makeContext({ selectedAgent: makeAgent(), platformAdmin: true }))
+
+    expect(wrapper.find('[data-test="embedded-read-only"]').text()).toBe('true')
   })
 
   // 覆盖无智能体边界：未选择智能体时显示工作台内空态，不触发路由跳转。

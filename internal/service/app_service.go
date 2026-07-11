@@ -158,7 +158,7 @@ func (s *AppService) Get(ctx context.Context, principal auth.Principal, appID st
 		return AppResult{}, fmt.Errorf("查询应用失败: %w", err)
 	}
 	if row.App.AiccHidden {
-		if err := s.ensureAICCHiddenAppManageAccess(ctx, principal, row.App); err != nil {
+		if err := s.ensureAICCHiddenAppViewAccess(ctx, principal, row.App); err != nil {
 			return AppResult{}, err
 		}
 	}
@@ -183,9 +183,9 @@ func (s *AppService) Get(ctx context.Context, principal auth.Principal, appID st
 	return result, nil
 }
 
-// ensureAICCHiddenAppManageAccess 只为 AICC 绑定的隐藏 app 放开管理端详情读取；
-// 普通列表仍隐藏，且未绑定 AICC 智能体或跨企业主体继续按不存在/无权处理。
-func (s *AppService) ensureAICCHiddenAppManageAccess(ctx context.Context, principal auth.Principal, app sqlc.App) error {
+// ensureAICCHiddenAppViewAccess 只为 AICC 绑定的隐藏 app 放开 AICC 工作台详情读取；
+// 普通列表仍隐藏，且未绑定 AICC 智能体或无 AICC 查看权限的主体继续按不存在/无权处理。
+func (s *AppService) ensureAICCHiddenAppViewAccess(ctx context.Context, principal auth.Principal, app sqlc.App) error {
 	agent, err := s.store.GetAICCAgentByAppID(ctx, app.ID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
@@ -193,7 +193,7 @@ func (s *AppService) ensureAICCHiddenAppManageAccess(ctx context.Context, princi
 	if err != nil {
 		return fmt.Errorf("查询 AICC 隐藏实例归属失败: %w", err)
 	}
-	if agent.OrgID != app.OrgID || !auth.CanManageAICCAgent(principal, agent.OrgID) {
+	if agent.OrgID != app.OrgID || !auth.CanViewAICC(principal, agent.OrgID) {
 		return ErrForbidden
 	}
 	return nil

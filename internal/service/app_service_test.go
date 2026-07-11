@@ -132,6 +132,22 @@ func TestGetAppAllowsAICCHiddenAppForAgentAdmin(t *testing.T) {
 	assert.Equal(t, "测试实例", result.Name)
 }
 
+// TestGetAppAllowsAICCHiddenAppForPlatformViewer 覆盖平台管理员从企业列表进入 AICC 工作台后，
+// 可以只读打开当前客服绑定的隐藏实例详情，供知识库页加载实例上下文。
+func TestGetAppAllowsAICCHiddenAppForPlatformViewer(t *testing.T) {
+	svc, store := newAppServiceWithStore(t)
+	app := store.mustSeedApp(t)
+	app.AiccHidden = true
+	store.app = app
+	store.aiccAgent = sqlc.AiccAgent{ID: "agent-1", OrgID: store.organization.ID, AppID: testAppServiceAppID}
+
+	result, err := svc.Get(context.Background(), platformAdmin(), testAppServiceAppID)
+
+	require.NoError(t, err)
+	assert.Equal(t, testAppServiceAppID, result.ID)
+	assert.Equal(t, "测试实例", result.Name)
+}
+
 func newAppServiceWithStore(t *testing.T) (*AppService, *appServiceStoreStub) {
 	t.Helper()
 	store := &appServiceStoreStub{

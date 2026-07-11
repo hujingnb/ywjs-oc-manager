@@ -11,7 +11,11 @@
   <div v-else-if="appQuery.error.value" class="knowledge-inline-state danger" role="alert">
     {{ t('aicc.console.knowledgeRedirect.loadFailed') }}
   </div>
-  <AppKnowledgeTab v-else :app-id="appId" />
+  <AppKnowledgeTab
+    v-else
+    :app-id="appId"
+    :read-only="context?.isPlatformAdmin.value ?? false"
+  />
 </template>
 
 <script setup lang="ts">

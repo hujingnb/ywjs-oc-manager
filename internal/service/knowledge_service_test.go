@@ -151,6 +151,42 @@ func TestRAGFlowKnowledgeAllowsAICCHiddenAppForAgentAdmin(t *testing.T) {
 	assert.Equal(t, "b.md", rf.uploadCalls[0].filename)
 }
 
+// TestRAGFlowKnowledgeAllowsAICCHiddenAppListForPlatformViewer 覆盖平台管理员只读查看 AICC 当前客服知识库：
+// 隐藏实例已绑定 AICC 智能体时，列表读取应放行并继续复用实例知识库分页链路。
+func TestRAGFlowKnowledgeAllowsAICCHiddenAppListForPlatformViewer(t *testing.T) {
+	svc, store, _ := newRAGFlowKnowledgeTestService(t)
+	app := store.apps[testKnowledgeApp]
+	app.AiccHidden = true
+	store.apps[testKnowledgeApp] = app
+	store.aiccAgentsByApp = map[string]sqlc.AiccAgent{
+		testKnowledgeApp: {ID: "agent-1", OrgID: testKnowledgeOrg, AppID: testKnowledgeApp},
+	}
+	store.docs[testKnowledgeDocument] = testDocument(t, "app", "agent.md", store.appDataset.ID)
+
+	result, err := svc.ListApp(context.Background(), platformKnowledgePrincipal(), testKnowledgeApp, 1, 50, "", "")
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), result.Total)
+	assert.Equal(t, "agent.md", result.Items[0].Name)
+}
+
+// TestRAGFlowKnowledgeRejectsAICCHiddenAppWriteForPlatformViewer 覆盖平台管理员进入 AICC 工作台的只读边界：
+// 当前客服知识库可查看，但上传、删除、重解析仍必须由企业管理员执行。
+func TestRAGFlowKnowledgeRejectsAICCHiddenAppWriteForPlatformViewer(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	app := store.apps[testKnowledgeApp]
+	app.AiccHidden = true
+	store.apps[testKnowledgeApp] = app
+	store.aiccAgentsByApp = map[string]sqlc.AiccAgent{
+		testKnowledgeApp: {ID: "agent-1", OrgID: testKnowledgeOrg, AppID: testKnowledgeApp},
+	}
+
+	_, err := svc.SaveAppFile(context.Background(), platformKnowledgePrincipal(), testKnowledgeApp, "b.md", strings.NewReader("bb"), 2)
+
+	require.ErrorIs(t, err, ErrKnowledgeForbidden)
+	assert.Empty(t, rf.uploadCalls)
+}
+
 // TestRAGFlowKnowledgeDeleteAppRejectsOtherOwner 验证实例知识库删除先按 manager app owner 判权，禁止路径不会调用 RAGFlow。
 func TestRAGFlowKnowledgeDeleteAppRejectsOtherOwner(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
