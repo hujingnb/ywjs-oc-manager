@@ -15,6 +15,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +28,8 @@ import (
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/config"
+	"oc-manager/internal/integrations/newapi"
+	"oc-manager/internal/service"
 )
 
 // fixture 是 stdout 末行写出的 JSON 结构；字段名与 web/tests/e2e/fixtures.ts 一致。
@@ -87,9 +90,16 @@ func main() {
 		log.Fatalf("truncate 失败: %v", err)
 	}
 
-	fx, err := buildFixture(ctx, db)
+	runtimeImageID, err := e2eRuntimeImageID(cfg)
+	if err != nil {
+		log.Fatalf("选择 E2E runtime image 失败: %v", err)
+	}
+	fx, err := buildFixture(ctx, db, runtimeImageID)
 	if err != nil {
 		log.Fatalf("构造 fixture 失败: %v", err)
+	}
+	if err := provisionE2ENewAPIUser(ctx, db, cfg, fx); err != nil {
+		log.Fatalf("构造 fixture new-api 凭据失败: %v", err)
 	}
 
 	// 标准输出最后一行写 fixture JSON；前面的 log 走 stderr。
@@ -106,6 +116,86 @@ func requireE2EGuard() error {
 		return errors.New("seed-e2e 需要 OCM_E2E=1 环境变量；本命令会 TRUNCATE 业务表，禁止误在生产执行")
 	}
 	return nil
+}
+
+// e2eRuntimeImageID 选择 manager 当前配置中的首个 Hermes runtime image ID。
+// E2E 隐藏 app 必须复用真实 allowlist，不能写入仅存在于测试代码中的占位镜像。
+func e2eRuntimeImageID(cfg config.Config) (string, error) {
+	if len(cfg.Hermes.RuntimeImages) == 0 || strings.TrimSpace(cfg.Hermes.RuntimeImages[0].ID) == "" {
+		return "", errors.New("Hermes runtime image 未配置")
+	}
+	return strings.TrimSpace(cfg.Hermes.RuntimeImages[0].ID), nil
+}
+
+// provisionE2ENewAPIUser 为 raw SQL 创建的 fixture 企业补齐正式运行链路需要的
+// new-api 用户三件套。密文格式与 OrganizationService 完全一致，明文不写日志或 stdout。
+func provisionE2ENewAPIUser(ctx context.Context, db *sql.DB, cfg config.Config, fx fixture) error {
+	if strings.TrimSpace(cfg.NewAPI.BaseURL) == "" || strings.TrimSpace(cfg.NewAPI.AdminToken) == "" || cfg.NewAPI.AdminUserID == 0 {
+		return errors.New("new-api 管理配置不完整")
+	}
+	masterKey, err := base64.StdEncoding.DecodeString(cfg.Security.MasterKey)
+	if err != nil {
+		return fmt.Errorf("master_key base64 解码失败: %w", err)
+	}
+	cipher, err := auth.NewCipher(masterKey)
+	if err != nil {
+		return fmt.Errorf("初始化 cipher 失败: %w", err)
+	}
+
+	// 固定测试用户名并先删除旧账号，使破坏性 E2E seed 可重复执行且不会在 new-api 累积孤儿用户。
+	// 该名称保持在 new-api 的 12 字符上限内，并与任何正式组织命名空间区分。
+	username := e2eNewAPIUsername()
+	password := "E2e-" + strings.ReplaceAll(uuid.NewString()[:16], "-", "")
+	client := newapi.NewClient(cfg.NewAPI.BaseURL, cfg.NewAPI.AdminToken, cfg.NewAPI.AdminUserID)
+	oldUser, err := client.FindUserByUsername(ctx, username)
+	if err == nil {
+		if err := client.DeleteUser(ctx, oldUser.ID); err != nil && !errors.Is(err, newapi.ErrNotFound) {
+			return fmt.Errorf("删除旧 new-api E2E 用户失败: %w", err)
+		}
+	} else if !errors.Is(err, newapi.ErrNotFound) {
+		return fmt.Errorf("查询旧 new-api E2E 用户失败: %w", err)
+	}
+	user, err := client.CreateUser(ctx, newapi.CreateUserInput{
+		Username:    username,
+		Password:    password,
+		DisplayName: fx.OrgName,
+	})
+	if err != nil {
+		return fmt.Errorf("创建 new-api E2E 用户失败: %w", err)
+	}
+	accessToken, err := client.BootstrapUserAccessToken(ctx, username, password)
+	if err != nil {
+		_ = client.DeleteUser(ctx, user.ID)
+		return fmt.Errorf("获取 new-api E2E access token 失败: %w", err)
+	}
+	payload, err := json.Marshal(service.OrganizationCredentials{
+		Username:    username,
+		Password:    password,
+		AccessToken: accessToken,
+	})
+	if err != nil {
+		_ = client.DeleteUser(ctx, user.ID)
+		return fmt.Errorf("序列化 new-api E2E 凭据失败: %w", err)
+	}
+	ciphertext, err := cipher.Encrypt(payload)
+	if err != nil {
+		_ = client.DeleteUser(ctx, user.ID)
+		return fmt.Errorf("加密 new-api E2E 凭据失败: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE organizations
+		SET newapi_user_id = ?, newapi_username = ?, newapi_user_credentials_ciphertext = ?
+		WHERE id = ?`, fmt.Sprintf("%d", user.ID), username, ciphertext, fx.OrgID); err != nil {
+		_ = client.DeleteUser(ctx, user.ID)
+		return fmt.Errorf("写入 new-api E2E 凭据失败: %w", err)
+	}
+	return nil
+}
+
+// e2eNewAPIUsername 返回 seed-e2e 独占的固定 new-api 用户名。
+// 固定值允许初始化前精确删除上一次测试账号，避免随机用户名持续占用本地测试资源。
+func e2eNewAPIUsername() string {
+	return "e2eaicc"
 }
 
 // truncate 清掉 e2e 相关表；users 表只保留 platform_admin 行（保留 cmd/seed-admin
@@ -170,7 +260,7 @@ func ensurePlatformAdmin(ctx context.Context, db *sql.DB, username, password str
 // 所有主键由应用层 uuid.NewString() 生成（CHAR(36)）；MySQL :exec 无 RETURNING，直接复用生成的 id。
 // migration 000003 已删除 runtime_nodes 表及 apps.runtime_node_id / container_id / container_name 列，
 // 因此不再插入节点行，apps INSERT 也不含上述列。
-func buildFixture(ctx context.Context, db *sql.DB) (fixture, error) {
+func buildFixture(ctx context.Context, db *sql.DB, runtimeImageID string) (fixture, error) {
 	var fx fixture
 	fx.PlatformAdminLogin = "admin"
 	fx.PlatformAdminPassword = "admin123"
@@ -229,8 +319,8 @@ func buildFixture(ctx context.Context, db *sql.DB) (fixture, error) {
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO assistant_versions
 			(id, name, system_prompt, image_id, main_model)
-		VALUES (?, 'e2e-version', 'You are a test assistant.', 'e2e-image:dev', 'gpt-4')`,
-		versionID,
+		VALUES (?, 'e2e-version', 'You are a test assistant.', ?, 'gpt-4')`,
+		versionID, runtimeImageID,
 	); err != nil {
 		return fx, fmt.Errorf("create assistant_version: %w", err)
 	}

@@ -11,27 +11,27 @@
 | AICC-ENTRY-01 | 企业管理员从概览进入独立工作台 | 待执行 | 待执行 | BLOCKED |
 | AICC-ENTRY-02 | 平台管理员从企业列表进入指定企业工作台 | 待执行 | 待执行 | BLOCKED |
 | AICC-ENTRY-03 | 企业普通成员无入口且直接访问被拒绝 | 待执行 | 待执行 | BLOCKED |
-| AICC-ORG-01 | 平台可开通或关闭企业 AICC | 待执行 | 待执行 | BLOCKED |
+| AICC-ORG-01 | 平台可开通或关闭企业 AICC | `aicc.spec.ts` 已覆盖开通 | Chromium 已验证开通；关闭待测 | BLOCKED |
 | AICC-ORG-02 | 智能体数量上限生效 | 待执行 | 待执行 | BLOCKED |
-| AICC-AGENT-01 | 企业管理员可新建、编辑、启停和删除智能体 | 待执行 | 待执行 | BLOCKED |
+| AICC-AGENT-01 | 企业管理员可新建、编辑、启停和删除智能体 | `aicc.spec.ts` 已覆盖新建、启动 | Chromium 已验证新建、启动；编辑、停用、删除待测 | BLOCKED |
 | AICC-AGENT-02 | 顶部切换智能体后所有模块使用同一智能体 | 待执行 | 待执行 | BLOCKED |
 | AICC-DELIVERY-01 | 独立链接和二维码指向正确公开页 | 待执行 | 待执行 | BLOCKED |
-| AICC-DELIVERY-02 | 网页挂件可打开并记录来源页 | 待执行 | 待执行 | BLOCKED |
+| AICC-DELIVERY-02 | 网页挂件可打开并记录来源页 | `aicc.spec.ts` 已覆盖挂件加载 | Chromium 已验证挂件打开；来源记录待测 | BLOCKED |
 | AICC-DELIVERY-03 | 域名白名单阻止未授权站点 | 待执行 | 待执行 | BLOCKED |
-| AICC-SESSION-01 | 打开公开页或挂件不创建空 session | 待执行 | 待执行 | BLOCKED |
-| AICC-SESSION-02 | 首次发送消息只创建一个 session | 待执行 | 待执行 | BLOCKED |
-| AICC-SESSION-03 | 刷新恢复原 session 和消息 | 待执行 | 待执行 | BLOCKED |
+| AICC-SESSION-01 | 打开公开页或挂件不创建空 session | `aicc.spec.ts` 监听首条消息前请求 | Chromium 未观察到提前创建请求 | PASS |
+| AICC-SESSION-02 | 首次发送消息只创建一个 session | `aicc.spec.ts` 校验首次消息建会话 | Chromium 已验证单次建会话并成功发消息 | PASS |
+| AICC-SESSION-03 | 刷新恢复原 session 和消息 | `aicc.spec.ts` 校验 localStorage token 和恢复接口 | Chromium 刷新后原消息可见 | PASS |
 | AICC-SESSION-04 | 新建对话建立新 session 边界 | 待执行 | 待执行 | BLOCKED |
 | AICC-SESSION-05 | 零消息会话不进入后台列表 | 待执行 | 待执行 | BLOCKED |
-| AICC-SESSION-06 | 会话列表筛选和分页正确 | 待执行 | 待执行 | BLOCKED |
+| AICC-SESSION-06 | 会话列表筛选和分页正确 | `aicc.spec.ts` 已覆盖来源和地域筛选 | Chromium 已验证筛选参数；分页待测 | BLOCKED |
 | AICC-SESSION-07 | 来源、地域、消息数量和详情一致 | 待执行 | 待执行 | BLOCKED |
 | AICC-STATUS-01 | 新会话默认显示跟进中 | 待执行 | 待执行 | BLOCKED |
 | AICC-STATUS-02 | 会话级已解决和未解决正确流转 | 待执行 | 待执行 | BLOCKED |
 | AICC-LEAD-01 | 自定义留资字段和必填规则生效 | 待执行 | 待执行 | BLOCKED |
 | AICC-LEAD-02 | 已留资恢复会话不重复强制留资 | 待执行 | 待执行 | BLOCKED |
-| AICC-LEAD-03 | 线索列表、已读、关联会话和 CSV 正确 | 待执行 | 待执行 | BLOCKED |
+| AICC-LEAD-03 | 线索列表、已读、关联会话和 CSV 正确 | `aicc.spec.ts` 已覆盖列表和 CSV | Chromium 已验证未读线索与导出；已读、关联会话待测 | BLOCKED |
 | AICC-KB-01 | 当前客服知识库始终参与检索 | 待执行 | 待执行 | BLOCKED |
-| AICC-KB-02 | 企业知识库可启用和停用 | 待执行 | 待执行 | BLOCKED |
+| AICC-KB-02 | 企业知识库可启用和停用 | `aicc.spec.ts` 已覆盖启用配置保存 | Chromium 已验证启用；停用及检索效果待测 | BLOCKED |
 | AICC-KB-03 | 只能选择平台授权的行业知识库 | 待执行 | 待执行 | BLOCKED |
 | AICC-KB-04 | 当前客服知识库可上传、解析、下载和删除 | 待执行 | 待执行 | BLOCKED |
 | AICC-KB-05 | RAGFlow 故障和无匹配知识行为稳定 | 待执行 | 待执行 | BLOCKED |
@@ -44,7 +44,7 @@
 | AICC-AUTH-02 | 平台管理员只读边界生效 | 待执行 | 待执行 | BLOCKED |
 | AICC-I18N-01 | 工作台和公开页中英文用户文案完整 | 待执行 | 待执行 | BLOCKED |
 | AICC-MOBILE-01 | 移动视口无溢出、遮挡或不可操作控件 | 待执行 | 待执行 | BLOCKED |
-| AICC-ANALYTICS-01 | 趋势、地域、来源、问题和线索统计正确 | 待执行 | 待执行 | BLOCKED |
+| AICC-ANALYTICS-01 | 趋势、地域、来源、问题和线索统计正确 | `aicc.spec.ts` 已覆盖时间和智能体筛选参数 | Chromium 已验证筛选请求；统计口径待测 | BLOCKED |
 | AICC-ANALYTICS-02 | 未解决率排除跟进中会话 | 待执行 | 待执行 | BLOCKED |
 | AICC-GEOIP-01 | 镜像内置 IPv4/IPv6 XDB 可解析地域 | 待执行 | 待执行 | BLOCKED |
 | AICC-GEOIP-02 | 国内更新源可定期安装有效 XDB | 待执行 | 待执行 | BLOCKED |
