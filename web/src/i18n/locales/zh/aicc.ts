@@ -12,8 +12,9 @@ export default {
     agentLoading: '正在加载智能体',
     agentLoadFailed: '智能体加载失败',
     knowledgeRedirect: {
-      loading: '正在打开专属知识库',
+      loading: '正在加载专属知识库',
       noAgent: '请先选择智能体',
+      loadFailed: '专属知识库加载失败',
     },
     nav: {
       reception: '接待台',

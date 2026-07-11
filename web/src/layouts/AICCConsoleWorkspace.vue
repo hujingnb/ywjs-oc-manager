@@ -213,9 +213,6 @@ function startCreateAgent() {
 }
 
 function resolveNavTarget(item: WorkspaceNavItem) {
-  if (item.path === '/aicc-console/knowledge' && selectedAgent.value?.app_id) {
-    return `/apps/${selectedAgent.value.app_id}/knowledge`
-  }
   return item.path
 }
 

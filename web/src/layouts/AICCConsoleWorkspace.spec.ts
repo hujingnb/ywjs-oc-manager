@@ -161,7 +161,7 @@ describe('AICCConsoleWorkspace', () => {
       '/aicc-console',
       '/aicc-console/sessions',
       '/aicc-console/leads',
-      '/apps/app-1/knowledge',
+      '/aicc-console/knowledge',
       '/aicc-console/analytics',
       '/aicc-console/settings',
     ])
@@ -175,7 +175,7 @@ describe('AICCConsoleWorkspace', () => {
       '/aicc-console',
       '/aicc-console/sessions',
       '/aicc-console/leads',
-      '/apps/app-1/knowledge',
+      '/aicc-console/knowledge',
       '/aicc-console/analytics',
       '/aicc-console/settings',
     ])

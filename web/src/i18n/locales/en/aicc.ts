@@ -12,8 +12,9 @@ export default {
     agentLoading: 'Loading agents',
     agentLoadFailed: 'Failed to load agents',
     knowledgeRedirect: {
-      loading: 'Opening dedicated knowledge base',
+      loading: 'Loading dedicated knowledge base',
       noAgent: 'Select an agent first',
+      loadFailed: 'Failed to load dedicated knowledge base',
     },
     nav: {
       reception: 'Reception',
