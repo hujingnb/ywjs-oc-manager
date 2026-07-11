@@ -155,4 +155,15 @@ describe('PublicAICCChatPage', () => {
 
     expect(wrapper.text()).not.toContain('我们会使用本次对话内容回答问题。')
   })
+
+  // 场景：notice 模式的隐私提示是轻量文本，不再使用带图标和背景框的提示容器。
+  it('renders the privacy notice as plain helper text before the first message', async () => {
+    const wrapper = mountPublicChat()
+    await flushPromises()
+
+    const privacyNotice = wrapper.find('.privacy-copy')
+    expect(privacyNotice.exists()).toBe(true)
+    expect(privacyNotice.text()).toBe('我们会使用本次对话内容回答问题。')
+    expect(wrapper.find('.privacy-note').exists()).toBe(false)
+  })
 })

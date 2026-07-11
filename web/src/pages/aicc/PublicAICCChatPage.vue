@@ -65,10 +65,7 @@
         </div>
         <n-button type="primary" attr-type="submit" :loading="leadBusy">{{ t('aicc.publicChat.submitLead') }}</n-button>
       </form>
-      <section v-else-if="showPrivacyNotice" class="privacy-note">
-        <ShieldCheck :size="16" />
-        <span>{{ privacyText }}</span>
-      </section>
+      <p v-else-if="showPrivacyNotice" class="privacy-copy">{{ privacyText }}</p>
 
       <form class="composer" @submit.prevent="submitMessage">
         <button class="icon-control" type="button" :disabled="!canSend" :title="t('aicc.publicChat.chooseImage')" @click="fileInputEl?.click()">
@@ -368,8 +365,8 @@ async function scrollToBottom() {
 }
 
 .chat-window {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  display: flex;
+  flex-direction: column;
   width: min(920px, 100%);
   height: calc(100vh - 48px);
   margin: 0 auto;
@@ -431,6 +428,7 @@ async function scrollToBottom() {
   display: grid;
   align-content: start;
   gap: 12px;
+  flex: 1 1 auto;
   min-height: 0;
   padding: 18px;
   overflow: auto;
@@ -500,7 +498,6 @@ async function scrollToBottom() {
 }
 
 .privacy-gate,
-.privacy-note,
 .lead-gate {
   display: flex;
   align-items: center;
@@ -546,20 +543,30 @@ async function scrollToBottom() {
   font-size: 12px;
 }
 
-.privacy-note {
-  color: var(--color-text-secondary);
-  border-color: var(--color-divider);
-  background: var(--color-surface-muted);
+.privacy-copy {
+  margin: 0 16px 8px;
+  color: var(--color-text-tertiary);
   font-size: 12px;
+  line-height: 1.5;
 }
 
 .composer {
-  display: flex;
-  align-items: flex-end;
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: end;
   gap: 10px;
   padding: 14px 16px;
   border-top: 1px solid var(--color-divider);
   background: #ffffff;
+}
+
+.composer :deep(.n-input) {
+  min-width: 0;
+}
+
+.composer :deep(.n-input-wrapper) {
+  min-height: 36px;
 }
 
 .icon-control {
@@ -606,16 +613,12 @@ async function scrollToBottom() {
   }
 
   .composer {
-    align-items: stretch;
-    flex-wrap: wrap;
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+    align-items: end;
   }
 
   .lead-fields {
     grid-template-columns: 1fr;
-  }
-
-  .composer :deep(.n-input) {
-    flex-basis: calc(100% - 46px);
   }
 }
 </style>
