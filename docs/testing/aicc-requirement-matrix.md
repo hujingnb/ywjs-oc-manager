@@ -8,9 +8,9 @@
 
 | ID | 需求 | 自动化证据 | 浏览器/环境证据 | 结果 |
 |---|---|---|---|---|
-| AICC-ENTRY-01 | 企业管理员从概览进入独立工作台 | 待执行 | 待执行 | BLOCKED |
-| AICC-ENTRY-02 | 平台管理员从企业列表进入指定企业工作台 | 待执行 | 待执行 | BLOCKED |
-| AICC-ENTRY-03 | 企业普通成员无入口且直接访问被拒绝 | 待执行 | 待执行 | BLOCKED |
+| AICC-ENTRY-01 | 企业管理员从概览进入独立工作台 | `aicc-access-i18n.spec.ts` | Chromium 已从概览卡片进入 | PASS |
+| AICC-ENTRY-02 | 平台管理员从企业列表进入指定企业工作台 | `aicc-access-i18n.spec.ts` | Chromium 已验证 `org_id` 范围和只读界面 | PASS |
+| AICC-ENTRY-03 | 企业普通成员无入口且直接访问被拒绝 | `aicc-access-i18n.spec.ts` | Chromium 已验证无入口并被路由守卫拒绝 | PASS |
 | AICC-ORG-01 | 平台可开通或关闭企业 AICC | `aicc.spec.ts` 已覆盖开通 | Chromium 已验证开通；关闭待测 | BLOCKED |
 | AICC-ORG-02 | 智能体数量上限生效 | 待执行 | 待执行 | BLOCKED |
 | AICC-AGENT-01 | 企业管理员可新建、编辑、启停和删除智能体 | `aicc.spec.ts` 已覆盖新建、启动 | Chromium 已验证新建、启动；编辑、停用、删除待测 | BLOCKED |
@@ -41,8 +41,8 @@
 | AICC-SAFETY-01 | 消息数量和频率限制生效 | 待执行 | 待执行 | BLOCKED |
 | AICC-SAFETY-02 | 访客封禁、敏感词和余额不足路径稳定 | 待执行 | 待执行 | BLOCKED |
 | AICC-AUTH-01 | 未登录、伪造 token 和跨企业访问被拒绝 | 待执行 | 待执行 | BLOCKED |
-| AICC-AUTH-02 | 平台管理员只读边界生效 | 待执行 | 待执行 | BLOCKED |
-| AICC-I18N-01 | 工作台和公开页中英文用户文案完整 | 待执行 | 待执行 | BLOCKED |
+| AICC-AUTH-02 | 平台管理员只读边界生效 | `aicc-access-i18n.spec.ts` 已验证无新建入口 | Chromium 界面只读；写 API 拒绝待测 | BLOCKED |
+| AICC-I18N-01 | 工作台和公开页中英文用户文案完整 | `aicc-access-i18n.spec.ts` 已覆盖工作台六个子页 | Chromium 已验证工作台中英文；公开页待测 | BLOCKED |
 | AICC-MOBILE-01 | 移动视口无溢出、遮挡或不可操作控件 | 待执行 | 待执行 | BLOCKED |
 | AICC-ANALYTICS-01 | 趋势、地域、来源、问题和线索统计正确 | `aicc.spec.ts` 已覆盖时间和智能体筛选参数 | Chromium 已验证筛选请求；统计口径待测 | BLOCKED |
 | AICC-ANALYTICS-02 | 未解决率排除跟进中会话 | 待执行 | 待执行 | BLOCKED |
