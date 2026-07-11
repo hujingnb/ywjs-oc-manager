@@ -336,7 +336,7 @@ export async function fetchAICCPublicConfig(publicToken: string, channel: AICCPu
 
 // createAICCPublicSession 为公开访客创建短期会话 token。
 export async function createAICCPublicSession(publicToken: string, channel: AICCPublicChannel = 'web_link'): Promise<AICCPublicSession> {
-  const storageKey = `aicc:session:${publicToken}:${channel}`
+  const storageKey = aiccPublicSessionStorageKey(publicToken, channel)
   const storedSessionToken = readAICCPublicSessionToken(storageKey)
   const response = await apiRequest<{ session: AICCPublicSession }>(`/api/v1/public/aicc/agents/${publicToken}/sessions`, {
     method: 'POST',
@@ -352,6 +352,27 @@ export async function createAICCPublicSession(publicToken: string, channel: AICC
     writeAICCPublicSessionToken(storageKey, response.session.session_token)
   }
   return response.session
+}
+
+// readAICCPublicStoredSessionToken 读取当前公开入口的本地会话 token，用于页面刷新后恢复内存状态。
+export function readAICCPublicStoredSessionToken(publicToken: string, channel: AICCPublicChannel = 'web_link'): string {
+  return readAICCPublicSessionToken(aiccPublicSessionStorageKey(publicToken, channel))
+}
+
+// clearAICCPublicStoredSessionToken 清除当前公开入口的本地会话 token，用于访客主动新建对话。
+export function clearAICCPublicStoredSessionToken(publicToken: string, channel: AICCPublicChannel = 'web_link'): void {
+  const key = aiccPublicSessionStorageKey(publicToken, channel)
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // localStorage 不可用时忽略，当前页面仍会清掉内存会话。
+  }
+}
+
+// aiccPublicSessionStorageKey 按公开入口和渠道隔离访客会话，避免公开链接与挂件互相串会话。
+function aiccPublicSessionStorageKey(publicToken: string, channel: AICCPublicChannel): string {
+  return `aicc:session:${publicToken}:${channel}`
 }
 
 // readAICCPublicSessionToken 容忍隐私模式禁用 localStorage，公开页仍可退化为新建会话。

@@ -9,9 +9,15 @@
           <p>AI Integrated Customer Care</p>
           <h1>{{ config?.name || t('aicc.publicChat.defaultTitle') }}</h1>
         </div>
-        <n-tag :type="sessionToken ? 'success' : 'default'" :bordered="false">
-          {{ sessionToken ? t('aicc.publicChat.online') : t('aicc.publicChat.ready') }}
-        </n-tag>
+        <div class="header-actions">
+          <n-tag :type="sessionToken ? 'success' : 'default'" :bordered="false">
+            {{ sessionToken ? t('aicc.publicChat.online') : t('aicc.publicChat.ready') }}
+          </n-tag>
+          <n-button size="small" secondary :disabled="isSending" @click="startNewConversation">
+            <template #icon><Plus :size="14" /></template>
+            {{ t('aicc.publicChat.newConversation') }}
+          </n-button>
+        </div>
       </header>
 
       <n-alert v-if="errorMessage" type="error" :bordered="false" class="inline-alert">
@@ -105,14 +111,16 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { NAlert, NButton, NInput, NTag } from 'naive-ui'
 import {
-  ImagePlus, MessageCircle, Send, ShieldCheck, ThumbsDown, ThumbsUp, X,
+  ImagePlus, MessageCircle, Plus, Send, ShieldCheck, ThumbsDown, ThumbsUp, X,
 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
 import {
   consentAICCPublicSession,
   createAICCPublicSession,
+  clearAICCPublicStoredSessionToken,
   fetchAICCPublicConfig,
+  readAICCPublicStoredSessionToken,
   sendAICCPublicMessage,
   submitAICCPublicFeedback,
   submitAICCPublicLeadValues,
@@ -141,6 +149,7 @@ interface PendingImage {
 const route = useRoute()
 const { t } = useI18n()
 const publicToken = computed(() => String(route.params.publicToken ?? ''))
+const publicChannel = computed(() => normalizeAICCPublicChannel(route.query.aicc_channel))
 const config = ref<AICCPublicConfig | null>(null)
 const sessionToken = ref('')
 const draft = ref('')
@@ -179,16 +188,12 @@ onBeforeUnmount(() => {
 async function boot() {
   errorMessage.value = ''
   try {
-    const channel = normalizeAICCPublicChannel(route.query.aicc_channel)
-    config.value = await fetchAICCPublicConfig(publicToken.value, channel)
+    config.value = await fetchAICCPublicConfig(publicToken.value, publicChannel.value)
+    sessionToken.value = readAICCPublicStoredSessionToken(publicToken.value, publicChannel.value)
     hasConsent.value = config.value.privacy_mode !== 'consent_required'
     leadValues.value = Object.fromEntries((config.value.lead_fields ?? []).map(field => [field.field_key, '']))
     leadComplete.value = !(config.value.lead_fields ?? []).some(field => field.required)
-    messages.value = [{
-      id: crypto.randomUUID(),
-      role: 'assistant',
-      text: config.value.greeting || t('aicc.publicChat.defaultGreeting'),
-    }]
+    resetMessagesToGreeting()
   } catch (err) {
     errorMessage.value = friendlyAICCError(err)
   }
@@ -274,8 +279,7 @@ async function submitMessage() {
 
 async function ensureSessionReadyForSend(): Promise<string> {
   if (!sessionToken.value) {
-    const channel = normalizeAICCPublicChannel(route.query.aicc_channel)
-    const session = await createAICCPublicSession(publicToken.value, channel)
+    const session = await createAICCPublicSession(publicToken.value, publicChannel.value)
     sessionToken.value = session.session_token ?? ''
   }
   if (!sessionToken.value) {
@@ -292,6 +296,28 @@ async function ensureSessionReadyForSend(): Promise<string> {
     deferredLeadValues.value = null
   }
   return sessionToken.value
+}
+
+function startNewConversation() {
+  clearAICCPublicStoredSessionToken(publicToken.value, publicChannel.value)
+  sessionToken.value = ''
+  draft.value = ''
+  errorMessage.value = ''
+  isSending.value = false
+  deferredLeadValues.value = null
+  leadValues.value = Object.fromEntries(leadFields.value.map(field => [field.field_key, '']))
+  leadComplete.value = !leadFields.value.some(field => field.required)
+  hasConsent.value = config.value?.privacy_mode !== 'consent_required'
+  clearPendingImage()
+  resetMessagesToGreeting()
+}
+
+function resetMessagesToGreeting() {
+  messages.value = [{
+    id: crypto.randomUUID(),
+    role: 'assistant',
+    text: config.value?.greeting || t('aicc.publicChat.defaultGreeting'),
+  }]
 }
 
 function publicMessageErrorText(err: unknown): string {
@@ -408,6 +434,15 @@ async function scrollToBottom() {
 .chat-header h1 {
   margin-top: 2px;
   font-size: 20px;
+}
+
+.header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
 }
 
 .agent-badge {
@@ -610,6 +645,14 @@ async function scrollToBottom() {
     height: 100vh;
     border: 0;
     border-radius: 0;
+  }
+
+  .chat-header {
+    align-items: flex-start;
+  }
+
+  .header-actions {
+    max-width: 118px;
   }
 
   .composer {

@@ -18,6 +18,8 @@ const apiState = vi.hoisted(() => ({
   submitLeadValues: vi.fn(),
   submitFeedback: vi.fn(),
   uploadImage: vi.fn(),
+  readStoredSession: vi.fn(),
+  clearStoredSession: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -27,6 +29,8 @@ vi.mock('vue-router', () => ({
 vi.mock('@/api/hooks/useAICC', () => ({
   fetchAICCPublicConfig: apiState.fetchConfig,
   createAICCPublicSession: apiState.createSession,
+  readAICCPublicStoredSessionToken: apiState.readStoredSession,
+  clearAICCPublicStoredSessionToken: apiState.clearStoredSession,
   sendAICCPublicMessage: apiState.sendMessage,
   consentAICCPublicSession: apiState.consent,
   submitAICCPublicLeadValues: apiState.submitLeadValues,
@@ -102,6 +106,9 @@ describe('PublicAICCChatPage', () => {
     apiState.submitLeadValues.mockReset()
     apiState.submitFeedback.mockReset()
     apiState.uploadImage.mockReset()
+    apiState.readStoredSession.mockReset()
+    apiState.clearStoredSession.mockReset()
+    apiState.readStoredSession.mockReturnValue('')
     apiState.fetchConfig.mockResolvedValue({
       name: '售前接待',
       greeting: '您好，请问有什么可以帮您？',
@@ -165,5 +172,52 @@ describe('PublicAICCChatPage', () => {
     expect(privacyNotice.exists()).toBe(true)
     expect(privacyNotice.text()).toBe('我们会使用本次对话内容回答问题。')
     expect(wrapper.find('.privacy-note').exists()).toBe(false)
+  })
+
+  // 场景：公开页刷新后应恢复本地 session token，继续发送消息时不重新创建会话。
+  it('resumes the stored public session after page refresh', async () => {
+    apiState.readStoredSession.mockReturnValue('stored-session-token')
+    const wrapper = mountPublicChat()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('在线')
+    expect(apiState.createSession).not.toHaveBeenCalled()
+
+    await wrapper.find('textarea').setValue('继续刚才的问题')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+    await nextTick()
+
+    expect(apiState.createSession).not.toHaveBeenCalled()
+    expect(apiState.sendMessage).toHaveBeenCalledWith('stored-session-token', { text: '继续刚才的问题', image_file_id: undefined })
+  })
+
+  // 场景：访客主动新建对话时只清除当前会话，下一次发送才懒创建新 session，避免空会话。
+  it('clears the current session when starting a new conversation', async () => {
+    apiState.readStoredSession.mockReturnValue('stored-session-token')
+    const wrapper = mountPublicChat()
+    await flushPromises()
+
+    await wrapper.find('textarea').setValue('旧会话消息')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+    await nextTick()
+    expect(wrapper.text()).toContain('旧会话消息')
+
+    await wrapper.findAll('button').find(button => button.text().includes('新建对话'))?.trigger('click')
+    await nextTick()
+
+    expect(apiState.clearStoredSession).toHaveBeenCalledWith('public-token', 'web_link')
+    expect(apiState.createSession).not.toHaveBeenCalled()
+    expect(wrapper.text()).not.toContain('旧会话消息')
+    expect(wrapper.text()).toContain('您好，请问有什么可以帮您？')
+
+    await wrapper.find('textarea').setValue('新会话消息')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+    await nextTick()
+
+    expect(apiState.createSession).toHaveBeenCalledTimes(1)
+    expect(apiState.sendMessage).toHaveBeenLastCalledWith('session-token', { text: '新会话消息', image_file_id: undefined })
   })
 })

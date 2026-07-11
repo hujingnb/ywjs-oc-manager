@@ -333,6 +333,7 @@ export default {
     online: 'Online',
     connecting: 'Connecting',
     ready: 'Ready',
+    newConversation: 'New chat',
     messageListLabel: 'Customer-care messages',
     uploadedImageAlt: 'Visitor uploaded image',
     feedbackSent: 'Feedback sent',

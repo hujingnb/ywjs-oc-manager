@@ -333,6 +333,7 @@ export default {
     online: '在线',
     connecting: '连接中',
     ready: '准备就绪',
+    newConversation: '新建对话',
     messageListLabel: '客服消息',
     uploadedImageAlt: '访客上传的图片',
     feedbackSent: '已反馈',
