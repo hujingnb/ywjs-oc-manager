@@ -50,7 +50,7 @@ export default {
       config: {
         eyebrow: 'RECEPTION',
         title: 'Reception',
-        description: 'Maintain agent configuration, delivery entry points, knowledge scope, and operations policies.',
+        description: 'Review the current agent status, public entry points, and widget delivery details.',
       },
       knowledge: {
         eyebrow: 'KNOWLEDGE',
@@ -75,7 +75,7 @@ export default {
       settings: {
         eyebrow: 'SETTINGS',
         title: 'Settings',
-        description: 'Maintain public entry points, session resume, sensitive words, and visitor safety policies.',
+        description: 'Maintain agent profile, conversation rules, knowledge scope, and lead fields.',
       },
     },
     status: {
@@ -111,6 +111,8 @@ export default {
     delivery: {
       eyebrow: 'Delivery and safety',
       title: 'Public entry and session resume',
+      publicTitle: 'Public entry',
+      settingsTitle: 'Session resume and safety',
       blockedVisitors: 'Blocked visitors {count}',
       noAgent: 'Save the agent before configuring public entry and operational safety policies.',
       publicLink: 'Public link',

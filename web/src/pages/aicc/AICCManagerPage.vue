@@ -34,7 +34,7 @@
         </n-alert>
 
         <div v-if="activeSection === 'config'" class="aicc-section-content">
-          <div class="status-grid">
+          <div v-if="isReceptionRoute" class="status-grid">
             <div class="status-tile">
               <span>{{ t('aicc.manager.status.runtime') }}</span>
               <strong>{{ selectedAgent ? statusMeta(selectedAgent.status).label : t('aicc.manager.status.draft') }}</strong>
@@ -49,7 +49,7 @@
             </div>
           </div>
 
-          <n-form class="agent-form" :model="form" label-placement="top" @submit.prevent="submitForm">
+          <n-form v-if="isSettingsRoute" class="agent-form" :model="form" label-placement="top" @submit.prevent="submitForm">
             <div class="agent-fields">
               <div>
                 <n-form-item :label="t('aicc.manager.form.name')" required>
@@ -121,19 +121,19 @@
             </n-space>
           </n-form>
 
-          <div ref="settingsPanelEl" class="operations-panel">
+          <div v-if="isReceptionRoute || isSettingsRoute" ref="settingsPanelEl" class="operations-panel">
             <div class="section-heading">
               <div>
                 <p class="eyebrow">{{ t('aicc.manager.delivery.eyebrow') }}</p>
-                <strong>{{ t('aicc.manager.delivery.title') }}</strong>
+                <strong>{{ isReceptionRoute ? t('aicc.manager.delivery.publicTitle') : t('aicc.manager.delivery.settingsTitle') }}</strong>
               </div>
-              <n-tag v-if="settingsQuery.data.value?.blocked_visitor_count !== undefined" size="small" :bordered="false">
+              <n-tag v-if="isSettingsRoute && settingsQuery.data.value?.blocked_visitor_count !== undefined" size="small" :bordered="false">
                 {{ t('aicc.manager.delivery.blockedVisitors', { count: settingsQuery.data.value?.blocked_visitor_count }) }}
               </n-tag>
             </div>
             <div v-if="!selectedAgent" class="state-text">{{ t('aicc.manager.delivery.noAgent') }}</div>
             <template v-else>
-              <div class="delivery-grid">
+              <div v-if="isReceptionRoute" class="delivery-grid">
                 <div class="public-link-box">
                   <span>{{ t('aicc.manager.delivery.publicLink') }}</span>
                   <n-input :value="publicLink || t('aicc.manager.status.generatedAfterSave')" readonly :input-props="{ readonly: true }" />
@@ -163,7 +163,7 @@
                 </div>
               </div>
 
-              <n-form class="settings-form" :model="settingsForm" label-placement="top">
+              <n-form v-if="isSettingsRoute" class="settings-form" :model="settingsForm" label-placement="top">
                 <div class="settings-grid">
                   <n-form-item :label="t('aicc.manager.delivery.messageLimit')">
                     <n-input-number v-model:value="settingsForm.message_limit_per_session" :min="1" :max="1000" style="width: 100%" />
@@ -184,7 +184,7 @@
                   </n-form-item>
                 </div>
               </n-form>
-              <n-space justify="end">
+              <n-space v-if="isSettingsRoute" justify="end">
                 <n-button :loading="settingsBusy" @click="saveSettings">
                   <template #icon><Save :size="16" /></template>
                   {{ t('aicc.manager.delivery.saveSettings') }}
@@ -193,7 +193,7 @@
             </template>
           </div>
 
-          <div ref="knowledgePanelEl" class="knowledge-panel">
+          <div v-if="isSettingsRoute" ref="knowledgePanelEl" class="knowledge-panel">
             <div class="section-heading">
               <div>
                 <p class="eyebrow">{{ t('aicc.manager.knowledge.eyebrow') }}</p>
@@ -240,7 +240,7 @@
             </template>
           </div>
 
-          <div class="lead-field-panel">
+          <div v-if="isSettingsRoute" class="lead-field-panel">
             <div class="section-heading">
               <div>
                 <p class="eyebrow">{{ t('aicc.manager.leadFields.eyebrow') }}</p>
@@ -273,7 +273,7 @@
             </n-space>
           </div>
 
-          <div class="snippet-panel">
+          <div v-if="isReceptionRoute" class="snippet-panel">
             <span>{{ t('aicc.manager.snippet.placeholder') }}</span>
             <code>{{ widgetSnippet }}</code>
             <n-button size="small" :disabled="!selectedAgent?.widget_token" @click="copyText(widgetSnippet)">
@@ -413,7 +413,9 @@ const deleteBusy = computed(() => deleteMutation.isPending.value)
 const settingsBusy = computed(() => settingsMutation.isPending.value || settingsQuery.isFetching.value)
 const leadFieldBusy = computed(() => leadFieldMutation.isPending.value || leadFieldsQuery.isFetching.value)
 const knowledgeBusy = computed(() => knowledgeMutation.isPending.value || knowledgeQuery.isFetching.value)
-// 标题文案跟随顶部路由语义；默认接待台路由复用配置页内容与标题。
+const isReceptionRoute = computed(() => currentRouteSection.value === 'reception')
+const isSettingsRoute = computed(() => currentRouteSection.value === 'settings')
+// 标题文案跟随顶部路由语义；接待台和设置页在同一数据容器内展示不同职责的内容。
 const currentSectionKey = computed(() => currentRouteSection.value === 'reception' ? 'config' : currentRouteSection.value)
 const currentSectionEyebrow = computed(() => t(`aicc.manager.sections.${currentSectionKey.value}.eyebrow`))
 const currentSectionTitle = computed(() => t(`aicc.manager.sections.${currentSectionKey.value}.title`))
@@ -528,7 +530,7 @@ watch(
   { immediate: true },
 )
 
-// 路由级入口只负责打开现有工作台区域；知识库暂复用配置页并滚动到知识配置块。
+// 路由级入口把工作台拆成概览、运营数据和设置几类内容；知识库页面已独立复用实例知识库。
 function sectionToTab(section: InitialSection): ManagerTab {
   if (section === 'sessions' || section === 'leads' || section === 'analytics') return section
   return 'config'

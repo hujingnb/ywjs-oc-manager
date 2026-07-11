@@ -50,7 +50,7 @@ export default {
       config: {
         eyebrow: 'RECEPTION',
         title: '接待台',
-        description: '维护智能体配置、投放入口、知识范围和运营策略。',
+        description: '查看当前智能体运行状态、公开入口和挂件投放信息。',
       },
       knowledge: {
         eyebrow: 'KNOWLEDGE',
@@ -75,7 +75,7 @@ export default {
       settings: {
         eyebrow: 'SETTINGS',
         title: '设置',
-        description: '维护公开入口、会话续接、敏感词和访客安全策略。',
+        description: '维护智能体资料、会话规则、知识范围和留资字段。',
       },
     },
     status: {
@@ -111,6 +111,8 @@ export default {
     delivery: {
       eyebrow: '投放与安全策略',
       title: '公开入口和会话续接',
+      publicTitle: '公开入口',
+      settingsTitle: '会话续接与安全策略',
       blockedVisitors: '封禁访客 {count}',
       noAgent: '保存智能体后可配置公开入口和运营安全策略。',
       publicLink: '公开链接',

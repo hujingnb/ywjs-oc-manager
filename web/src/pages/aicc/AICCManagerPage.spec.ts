@@ -137,9 +137,10 @@ const CheckboxStub = defineComponent({
 })
 const SwitchStub = CheckboxStub
 
-function mountManager(context: AICCConsoleContext) {
+function mountManager(context: AICCConsoleContext, props: { initialSection?: 'reception' | 'settings' } = {}) {
   i18n.global.locale.value = 'zh'
   return mount(AICCManagerPage, {
+    props,
     global: {
       plugins: [i18n],
       provide: {
@@ -220,6 +221,30 @@ describe('AICCManagerPage', () => {
     expect(wrapper.find('.agent-rail').exists()).toBe(false)
     expect(wrapper.findAll('button').filter(button => button.text() === '新建智能体')).toHaveLength(0)
     expect(wrapper.text()).toContain('售前接待')
+  })
+
+  // 覆盖左侧菜单语义：接待台只展示投放和运行概览，不再混入设置表单。
+  it('renders reception as a delivery overview instead of the settings form', () => {
+    const { context } = makeConsoleContext()
+    const wrapper = mountManager(context, { initialSection: 'reception' })
+
+    expect(wrapper.text()).toContain('公开链接')
+    expect(wrapper.text()).toContain('嵌入占位')
+    expect(wrapper.text()).not.toContain('智能体名称')
+    expect(wrapper.text()).not.toContain('单会话消息上限')
+    expect(wrapper.text()).not.toContain('访客留资')
+  })
+
+  // 覆盖左侧菜单语义：设置页承载规则配置，不再重复展示接待台投放概览。
+  it('renders settings as the dedicated configuration page', () => {
+    const { context } = makeConsoleContext()
+    const wrapper = mountManager(context, { initialSection: 'settings' })
+
+    expect(wrapper.text()).toContain('智能体名称')
+    expect(wrapper.text()).toContain('单会话消息上限')
+    expect(wrapper.text()).toContain('知识库范围')
+    expect(wrapper.text()).toContain('访客留资')
+    expect(wrapper.text()).not.toContain('嵌入占位')
   })
 
   // 覆盖顶部新建智能体联动：顶部选择区清空智能体后，内容区表单必须进入新建态且不残留旧名称。
