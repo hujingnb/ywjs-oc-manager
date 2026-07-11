@@ -53,7 +53,7 @@
           </template>
         </n-spin>
         <n-pagination
-          v-if="sessionTotal > pageSize || page > 1"
+          v-if="sessionTotal > 0"
           v-model:page="page"
           v-model:page-size="pageSize"
           class="session-pagination"

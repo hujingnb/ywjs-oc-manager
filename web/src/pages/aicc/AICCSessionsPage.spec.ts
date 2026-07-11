@@ -216,6 +216,16 @@ describe('AICCSessionsPage', () => {
     expect(queryState.sessionFilters?.value.offset).toBe(0)
   })
 
+  // 覆盖分页可见性：即使当前只有一页，也展示分页器和每页条数入口，避免用户误以为没有分页能力。
+  it('shows pagination controls when sessions exist even if total fits on one page', () => {
+    queryState.sessions.data.value = { sessions: makeSessions(3), total: 3 }
+
+    const wrapper = mountSessions()
+
+    expect(wrapper.find('nav').exists()).toBe(true)
+    expect(wrapper.text()).toContain('total:3')
+  })
+
   // 覆盖分页交互：点击下一页后，查询条件中的 offset 按当前 pageSize 推进。
   it('updates query offset when changing pages', async () => {
     queryState.sessions.data.value = { sessions: makeSessions(25), total: 25 }

@@ -12,13 +12,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestAICCIP2RegionResolverSkipsPrivateAddresses 覆盖隐私边界：
-// 内网、回环和保留地址不进入 IP 库查询，也不生成运营地域。
-func TestAICCIP2RegionResolverSkipsPrivateAddresses(t *testing.T) {
+// TestAICCIP2RegionResolverLabelsPrivateAddresses 覆盖本地联调边界：
+// 内网和回环地址不进入 IP 库查询，但会保存“本地网络”，避免管理端误显示未知地域。
+func TestAICCIP2RegionResolverLabelsPrivateAddresses(t *testing.T) {
 	resolver := &AICCIP2RegionResolver{}
 
-	assert.Equal(t, "", resolver.Resolve(context.Background(), "127.0.0.1"))
-	assert.Equal(t, "", resolver.Resolve(context.Background(), "10.0.0.8"))
+	assert.Equal(t, "本地网络", resolver.Resolve(context.Background(), "127.0.0.1"))
+	assert.Equal(t, "本地网络", resolver.Resolve(context.Background(), "10.0.0.8"))
 	assert.Equal(t, "", resolver.Resolve(context.Background(), "192.0.2.1"))
 	assert.Equal(t, "", resolver.Resolve(context.Background(), ""))
 }

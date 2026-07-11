@@ -365,6 +365,23 @@ func TestPublicAICCHandlerCreateSessionPassesRequestMetadata(t *testing.T) {
 	assert.NotEmpty(t, svc.lastSessionInput.RemoteIP)
 }
 
+// TestPublicAICCHandlerCreateSessionPrefersForwardedPublicIP 覆盖反向代理入口：
+// 公开页经过 Ingress 时应优先使用 X-Forwarded-For 中的公网地址做地域解析。
+func TestPublicAICCHandlerCreateSessionPrefersForwardedPublicIP(t *testing.T) {
+	svc := &publicAICCServiceStub{sessionResult: service.AICCPublicSessionResult{SessionToken: "sess-token", PrivacyMode: "notice"}}
+	router := newPublicAICCTestRouter(t, svc)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/agents/pub/sessions", bytes.NewBufferString(`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Forwarded-For", "10.42.0.1, 8.8.8.8, 172.18.0.3")
+	request.Header.Set("X-Real-IP", "1.1.1.1")
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusCreated, recorder.Code)
+	assert.Equal(t, "8.8.8.8", svc.lastSessionInput.RemoteIP)
+}
+
 // TestPublicAICCHandlerMapsDomainForbidden 覆盖挂件域名白名单拒绝：返回 403 和稳定错误码。
 func TestPublicAICCHandlerMapsDomainForbidden(t *testing.T) {
 	router := newPublicAICCTestRouter(t, &publicAICCServiceStub{sessionErr: service.ErrAICCDomainForbidden})

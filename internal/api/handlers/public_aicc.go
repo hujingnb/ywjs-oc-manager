@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/netip"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -99,7 +101,7 @@ func (h *PublicAICCHandler) CreateSession(c *gin.Context) {
 		Referrer:     req.Referrer,
 		SessionToken: req.SessionToken,
 		Origin:       c.GetHeader("Origin"),
-		RemoteIP:     c.ClientIP(),
+		RemoteIP:     publicAICCClientIP(c),
 		UserAgent:    c.GetHeader("User-Agent"),
 	})
 	if err != nil {
@@ -107,6 +109,53 @@ func (h *PublicAICCHandler) CreateSession(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"session": result})
+}
+
+// publicAICCClientIP 优先从代理头中提取第一个公网地址，用于公开会话地域解析。
+// 如果只拿到内网地址，则回退给 c.ClientIP，由 service 标记为本地网络。
+func publicAICCClientIP(c *gin.Context) string {
+	for _, header := range []string{"X-Forwarded-For", "X-Real-IP", "CF-Connecting-IP", "True-Client-IP"} {
+		for _, part := range strings.Split(c.GetHeader(header), ",") {
+			ip := strings.TrimSpace(part)
+			addr, err := netip.ParseAddr(ip)
+			if err == nil && addr.IsValid() && publicAICCForwardedIP(addr) {
+				return addr.String()
+			}
+		}
+	}
+	return c.ClientIP()
+}
+
+func publicAICCForwardedIP(addr netip.Addr) bool {
+	if addr.IsPrivate() {
+		return false
+	}
+	for _, prefix := range aiccForwardedNonPublicIPPrefixes {
+		if prefix.Contains(addr) {
+			return false
+		}
+	}
+	return true
+}
+
+var aiccForwardedNonPublicIPPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("127.0.0.0/8"),
+	netip.MustParsePrefix("169.254.0.0/16"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("224.0.0.0/4"),
+	netip.MustParsePrefix("::/128"),
+	netip.MustParsePrefix("::1/128"),
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("100::/64"),
+	netip.MustParsePrefix("2001:db8::/32"),
+	netip.MustParsePrefix("fe80::/10"),
+	netip.MustParsePrefix("ff00::/8"),
 }
 
 // GetSession 返回访客当前会话消息。

@@ -79,8 +79,14 @@ func NewAICCIP2RegionResolver() *AICCIP2RegionResolver {
 
 // Resolve 将公网 IP 转为运营侧可读地域；私网、保留地址或库不可用时返回空字符串。
 func (r *AICCIP2RegionResolver) Resolve(_ context.Context, remoteIP string) string {
-	ip, ok := parseAICCPublicIP(remoteIP)
-	if !ok {
+	ip, err := netip.ParseAddr(strings.TrimSpace(remoteIP))
+	if err != nil || !ip.IsValid() {
+		return ""
+	}
+	if aiccLocalNetworkIP(ip) {
+		return "本地网络"
+	}
+	if !aiccPublicGeoIP(ip) {
 		return ""
 	}
 	r.mu.RLock()
@@ -249,17 +255,20 @@ func writeAICCGeoIPArchiveFile(file *zip.File, targetPath string) error {
 	return dst.Close()
 }
 
-func parseAICCPublicIP(remoteIP string) (netip.Addr, bool) {
-	ip, err := netip.ParseAddr(strings.TrimSpace(remoteIP))
-	if err != nil || !ip.IsValid() || ip.IsPrivate() {
-		return netip.Addr{}, false
+func aiccLocalNetworkIP(ip netip.Addr) bool {
+	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast()
+}
+
+func aiccPublicGeoIP(ip netip.Addr) bool {
+	if aiccLocalNetworkIP(ip) {
+		return false
 	}
 	for _, prefix := range aiccNonPublicIPPrefixes {
 		if prefix.Contains(ip) {
-			return netip.Addr{}, false
+			return false
 		}
 	}
-	return ip, true
+	return true
 }
 
 func formatAICCIPRegion(raw string) string {
