@@ -634,6 +634,30 @@ func TestAICCPublicCreateWidgetSessionStoresRequestHashes(t *testing.T) {
 	assert.NotEqual(t, "Mozilla/5.0 AICC Test", store.createdSession.UserAgentHash.String)
 }
 
+// TestAICCPublicCreateSessionStoresResolvedRegion 覆盖地域接入：
+// 公开会话创建时只保存解析后的粗粒度地域，不保存明文 IP。
+func TestAICCPublicCreateSessionStoresResolvedRegion(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org: sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent: sqlc.AiccAgent{
+			ID:            "agent-1",
+			OrgID:         "org-1",
+			Status:        domain.AICCAgentStatusActive,
+			PrivacyMode:   domain.AICCPrivacyModeNotice,
+			PublicToken:   "pub",
+			RetentionDays: 30,
+		},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.SetGeoIPResolver(fakeAICCGeoIPResolver{region: "上海市"})
+
+	_, err := svc.CreateSession(context.Background(), "pub", AICCPublicSessionInput{RemoteIP: "8.8.8.8"})
+
+	require.NoError(t, err)
+	assert.Equal(t, null.StringFrom("上海市"), store.createdSession.Region)
+	assert.NotEqual(t, "8.8.8.8", store.createdSession.IpHash.String)
+}
+
 // TestAICCPublicCreateSessionHonorsRateLimiter 覆盖公开入口限流：
 // 限流器拒绝时不能继续创建会话，防止匿名访客刷会话消耗企业额度。
 func TestAICCPublicCreateSessionHonorsRateLimiter(t *testing.T) {
@@ -863,6 +887,15 @@ func TestAICCPublicResolveSessionRejectsExpiredToken(t *testing.T) {
 
 	require.ErrorIs(t, err, ErrAICCInvalidSession)
 	assert.Equal(t, "", store.resolutionStatus)
+}
+
+// fakeAICCGeoIPResolver 用于公开会话单测隔离真实 IP 库文件。
+type fakeAICCGeoIPResolver struct {
+	region string
+}
+
+func (f fakeAICCGeoIPResolver) Resolve(_ context.Context, _ string) string {
+	return f.region
 }
 
 type fakeAICCPublicStore struct {

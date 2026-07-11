@@ -236,6 +236,7 @@ type AICCPublicService struct {
 	blob  AICCPublicImageBlob
 	chat  AICCHermesChat
 	limit AICCRateLimiter
+	geo   AICCGeoIPResolver
 	now   func() time.Time
 }
 
@@ -252,6 +253,9 @@ func (s *AICCPublicService) SetImageBlob(blob AICCPublicImageBlob) { s.blob = bl
 
 // SetRateLimiter 注入公开匿名入口限流器；未注入时保持兼容，不启用限流。
 func (s *AICCPublicService) SetRateLimiter(limiter AICCRateLimiter) { s.limit = limiter }
+
+// SetGeoIPResolver 注入公开会话地域解析器；未注入时地域为空，不影响访客对话。
+func (s *AICCPublicService) SetGeoIPResolver(resolver AICCGeoIPResolver) { s.geo = resolver }
 
 // PublicConfig 返回访客端可展示的公开智能体配置。
 func (s *AICCPublicService) PublicConfig(ctx context.Context, publicToken, channel string) (AICCPublicConfigResult, error) {
@@ -325,7 +329,7 @@ func (s *AICCPublicService) CreateSession(ctx context.Context, publicToken strin
 		Channel:            channel,
 		SourceUrl:          null.StringFrom(strings.TrimSpace(input.SourceURL)),
 		Referrer:           null.StringFrom(strings.TrimSpace(input.Referrer)),
-		Region:             nullStr(resolveAICCRegion(input.RemoteIP)),
+		Region:             nullStr(s.resolveAICCRegion(ctx, input.RemoteIP)),
 		IpHash:             nullStr(hashAICCVisitorMarker(input.RemoteIP)),
 		UserAgentHash:      nullStr(hashAICCVisitorMarker(input.UserAgent)),
 		PrivacyNoticeShown: privacyNoticeShown,
@@ -653,9 +657,22 @@ func containsAICCSensitiveWord(text string, words []string) bool {
 	return false
 }
 
-// resolveAICCRegion 预留地域解析钩子；当前不引入外部 IP 库，所有地址均返回空地域。
+// resolveAICCRegion 解析公开访客粗粒度地域；无解析器或库缺失时返回空地域。
+func (s *AICCPublicService) resolveAICCRegion(ctx context.Context, remoteIP string) string {
+	if s.geo == nil {
+		return ""
+	}
+	region := strings.TrimSpace(s.geo.Resolve(ctx, remoteIP))
+	runes := []rune(region)
+	if len(runes) > 64 {
+		return string(runes[:64])
+	}
+	return region
+}
+
+// resolveAICCRegion 保留旧测试和内部工具的空地域兼容行为。
 func resolveAICCRegion(remoteIP string) string {
-	_ = strings.TrimSpace(remoteIP)
+	_ = remoteIP
 	return ""
 }
 

@@ -257,6 +257,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	aiccPublicService := service.NewAICCPublicService(dbStore.Queries, service.NewAICCPublicHermesChat(ocopsClient, aiccOcOpsResolver))
 	aiccPublicService.SetTxRunner(store.NewAICCPublicRunner(dbStore))
 	aiccPublicService.SetRateLimiter(service.NewRedisAICCRateLimiter(imagecoordRedis, cfg.Redis.KeyPrefix))
+	aiccGeoIPResolver := service.NewAICCIP2RegionResolver()
+	aiccPublicService.SetGeoIPResolver(aiccGeoIPResolver)
 
 	channelRegistry := channel.NewRegistry()
 	channelService := service.NewChannelService(dbStore.Queries, channelRegistry, redisQueue)
@@ -864,6 +866,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// 多副本通过 Redis 锁 ocm:aicc-retention:lock 互斥；S3 未启用时只清理数据库侧数据。
 	aiccRetention := service.NewAICCRetentionService(dbStore.Queries, aiccImageCleaner)
 	aiccworker.NewRetentionLoop(aiccRetention, distLocker, uuid.NewString(), logger).Start(gctx)
+	aiccGeoIPResolver.StartUpdater(gctx, logger)
 
 	// SiteReaper Loop：周期（60s）扫描过期 active 站点，置 expired 并删整站前缀。
 	// 多副本通过 Redis 锁 ocm:webpublish-reaper:lock 互斥，复用 distLocker + 新 uuid instanceID。

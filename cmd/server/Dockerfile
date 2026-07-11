@@ -70,14 +70,19 @@ FROM ${DOCKER_HUB_MIRROR}/alpine:${ALPINE_VERSION}
 
 # 全局 ARG 在 FROM 之后默认不可见, 需要在 stage 内 redeclare 才能被下方 RUN 引用。
 ARG ALPINE_MIRROR
+ARG AICC_GEOIP_ARCHIVE_URL=https://gitee.com/lionsoul/ip2region/repository/archive/master.zip
 
 # ca-certificates: manager-api 调用 new-api / agent HTTPS 端点必需
 # tzdata        : 让 TZ=Asia/Shanghai 在容器内生效
 # wget          : deploy/manage/docker-compose.yml healthcheck 使用 `wget -qO- /healthz`
+# unzip         : 构建时抽取内置 AICC GeoIP xdb 数据文件
 # 与 builder 阶段一致, 先把 apk 仓库切到国内镜像再安装。
 RUN sed -i "s|dl-cdn.alpinelinux.org|${ALPINE_MIRROR}|g" /etc/apk/repositories && \
-    apk add --no-cache ca-certificates tzdata wget && \
-    mkdir -p /var/lib/oc-manager/data /etc/manager
+    apk add --no-cache ca-certificates tzdata wget unzip && \
+    mkdir -p /var/lib/oc-manager/data /etc/manager /usr/local/share/oc-manager/geoip && \
+    wget -qO /tmp/aicc-geoip.zip "${AICC_GEOIP_ARCHIVE_URL}" && \
+    unzip -j /tmp/aicc-geoip.zip "*/data/ip2region_v4.xdb" "*/data/ip2region_v6.xdb" -d /usr/local/share/oc-manager/geoip && \
+    rm -f /tmp/aicc-geoip.zip
 
 COPY --from=builder /out/oc-manager  /usr/local/bin/oc-manager
 COPY --from=builder /out/migrate     /usr/local/bin/migrate
