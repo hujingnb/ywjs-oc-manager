@@ -6,6 +6,7 @@ import { getStoredAccessToken } from '@/api/client'
 import AICCConsoleLayout from '@/layouts/AICCConsoleLayout.vue'
 import DashboardLayout from '@/layouts/DashboardLayout.vue'
 import AICCManagerPage from '@/pages/aicc/AICCManagerPage.vue'
+import AICCWidgetPreviewPage from '@/pages/aicc/AICCWidgetPreviewPage.vue'
 import PublicAICCChatPage from '@/pages/aicc/PublicAICCChatPage.vue'
 import AppAuditTab from '@/pages/apps/AppAuditTab.vue'
 import AppChannelsTab from '@/pages/apps/AppChannelsTab.vue'
@@ -72,6 +73,11 @@ export const router = createRouter({
         { path: 'analytics', component: () => import('@/pages/aicc/AICCWorkbenchAnalyticsPage.vue') },
         { path: 'settings', component: AICCManagerPage, props: { initialSection: 'settings' } },
       ],
+    },
+    {
+      path: '/aicc-widget-preview/:widgetToken',
+      component: AICCWidgetPreviewPage,
+      meta: { allowedRoles: ORG_ADMIN_ONLY },
     },
     {
       path: '/',

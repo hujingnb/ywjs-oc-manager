@@ -372,9 +372,15 @@
           <div v-if="isReceptionRoute" class="snippet-panel">
             <span>{{ t('aicc.manager.snippet.placeholder') }}</span>
             <code>{{ widgetSnippet }}</code>
-            <n-button size="small" :disabled="!selectedAgent?.widget_token" @click="copyText(widgetSnippet)">
-              <template #icon><Copy :size="14" /></template>
-            </n-button>
+            <div class="snippet-actions">
+              <n-button size="small" :disabled="!selectedAgent?.widget_token" @click="copyText(widgetSnippet)">
+                <template #icon><Copy :size="14" /></template>
+              </n-button>
+              <n-button size="small" :disabled="!selectedAgent?.widget_token" @click="openWidgetPreview">
+                <template #icon><ExternalLink :size="14" /></template>
+                {{ t('aicc.manager.snippet.previewWidget') }}
+              </n-button>
+            </div>
           </div>
         </div>
         <AICCSessionsPage v-else-if="activeSection === 'sessions'" :agent-id="selectedAgentId" />
@@ -911,6 +917,12 @@ function openPublicLink() {
   window.open(publicLink.value, '_blank', 'noopener,noreferrer')
 }
 
+function openWidgetPreview() {
+  const token = selectedAgent.value?.widget_token
+  if (!token || typeof window === 'undefined') return
+  window.open(`/aicc-widget-preview/${encodeURIComponent(token)}`, '_blank', 'noopener,noreferrer')
+}
+
 function downloadQRCode() {
   if (!qrDataUrl.value || !selectedAgent.value) return
   const anchor = document.createElement('a')
@@ -1202,6 +1214,13 @@ function openCurrentAgentKnowledge() {
   min-width: 0;
   color: var(--color-text-secondary);
   font-size: 12px;
+}
+
+.snippet-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 @media (max-width: 900px) {

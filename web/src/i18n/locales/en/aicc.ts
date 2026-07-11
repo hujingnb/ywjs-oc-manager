@@ -178,6 +178,22 @@ export default {
     },
     snippet: {
       placeholder: 'Embed snippet',
+      previewWidget: 'Preview widget',
+    },
+    widgetPreview: {
+      eyebrow: 'Widget Preview',
+      title: 'Website widget preview',
+      back: 'Back to reception',
+      heroEyebrow: 'AICC customer service',
+      heroTitle: 'Sample product consultation page',
+      heroDescription: 'Use this page to preview how the widget appears on a company website. The online-service entry should appear at the bottom right.',
+      cardsLabel: 'Preview content',
+      cardPricingTitle: 'Pricing consultation',
+      cardPricingText: 'Test package differences, trial options, activation flow, and applicable scenarios.',
+      cardProductTitle: 'Product features',
+      cardProductText: 'Test whether the agent answers feature and usage questions within the configured business scenario.',
+      cardFaqTitle: 'Common questions',
+      cardFaqText: 'Suggested tests: how to activate, whether org knowledge is supported, and how to embed the widget.',
     },
     deleteModal: {
       title: 'Delete AICC agent',

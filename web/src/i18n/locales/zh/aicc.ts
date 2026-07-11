@@ -178,6 +178,22 @@ export default {
     },
     snippet: {
       placeholder: '嵌入占位',
+      previewWidget: '预览挂件效果',
+    },
+    widgetPreview: {
+      eyebrow: 'Widget Preview',
+      title: '官网挂件预览',
+      back: '返回接待台',
+      heroEyebrow: 'AICC 在线客服',
+      heroTitle: '模拟官网产品咨询页',
+      heroDescription: '这个页面用于查看挂件在企业官网中的展示效果。右下角应出现在线客服入口，可以点击后发起测试咨询。',
+      cardsLabel: '预览内容',
+      cardPricingTitle: '套餐咨询',
+      cardPricingText: '可测试套餐差异、试用方式、开通流程和适用场景等问题。',
+      cardProductTitle: '产品功能',
+      cardProductText: '可测试客服是否围绕当前业务场景回答功能介绍和使用建议。',
+      cardFaqTitle: '常见问题',
+      cardFaqText: '建议测试：如何开通？是否支持企业知识库？如何嵌入官网？',
     },
     deleteModal: {
       title: '删除 AICC 智能体',

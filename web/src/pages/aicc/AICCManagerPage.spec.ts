@@ -232,15 +232,21 @@ describe('AICCManagerPage', () => {
   })
 
   // 覆盖左侧菜单语义：接待台只展示投放和运行概览，不再混入设置表单。
-  it('renders reception as a delivery overview instead of the settings form', () => {
+  it('renders reception as a delivery overview instead of the settings form', async () => {
     const { context } = makeConsoleContext()
     const wrapper = mountManager(context, { initialSection: 'reception' })
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
 
     expect(wrapper.text()).toContain('公开链接')
     expect(wrapper.text()).toContain('嵌入占位')
+    expect(wrapper.text()).toContain('预览挂件效果')
     expect(wrapper.text()).not.toContain('智能体名称')
     expect(wrapper.text()).not.toContain('单会话消息上限')
     expect(wrapper.text()).not.toContain('访客留资')
+
+    await wrapper.findAll('button').find(button => button.text().includes('预览挂件效果'))?.trigger('click')
+    expect(openSpy).toHaveBeenCalledWith('/aicc-widget-preview/widget-token', '_blank', 'noopener,noreferrer')
+    openSpy.mockRestore()
   })
 
   // 覆盖左侧菜单语义：设置页承载规则配置，不再重复展示接待台投放概览。
