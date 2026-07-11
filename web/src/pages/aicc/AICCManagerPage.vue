@@ -56,7 +56,12 @@
                   <template #label>
                     <FieldLabel :label="t('aicc.manager.form.name')" :help="t('aicc.manager.form.help.name')" />
                   </template>
-                  <n-input v-model:value="form.name" maxlength="80" :placeholder="t('aicc.manager.form.namePlaceholder')" />
+                  <n-input
+                    v-model:value="form.name"
+                    maxlength="80"
+                    :input-props="{ id: 'aicc-agent-name', name: 'aicc_agent_name' }"
+                    :placeholder="t('aicc.manager.form.namePlaceholder')"
+                  />
                 </n-form-item>
               </div>
               <div>
@@ -64,7 +69,13 @@
                   <template #label>
                     <FieldLabel :label="t('aicc.manager.form.retentionDays')" :help="t('aicc.manager.form.help.retentionDays')" />
                   </template>
-                  <n-input-number v-model:value="form.retention_days" :min="1" :max="3650" style="width: 100%" />
+                  <n-input-number
+                    v-model:value="form.retention_days"
+                    :min="1"
+                    :max="3650"
+                    :input-props="{ id: 'aicc-retention-days', name: 'aicc_retention_days' }"
+                    style="width: 100%"
+                  />
                 </n-form-item>
               </div>
               <div>
@@ -72,7 +83,11 @@
                   <template #label>
                     <FieldLabel :label="t('aicc.manager.form.privacyMode')" :help="t('aicc.manager.form.help.privacyMode')" />
                   </template>
-                  <n-select v-model:value="form.privacy_mode" :options="privacyOptions" />
+                  <n-select
+                    v-model:value="form.privacy_mode"
+                    :input-props="{ id: 'aicc-privacy-mode', name: 'aicc_privacy_mode' }"
+                    :options="privacyOptions"
+                  />
                 </n-form-item>
               </div>
               <div>
@@ -80,7 +95,12 @@
                   <template #label>
                     <FieldLabel :label="t('aicc.manager.form.greeting')" :help="t('aicc.manager.form.help.greeting')" />
                   </template>
-                  <n-input v-model:value="form.greeting" maxlength="240" :placeholder="t('aicc.manager.form.greetingPlaceholder')" />
+                  <n-input
+                    v-model:value="form.greeting"
+                    maxlength="240"
+                    :input-props="{ id: 'aicc-greeting', name: 'aicc_greeting' }"
+                    :placeholder="t('aicc.manager.form.greetingPlaceholder')"
+                  />
                 </n-form-item>
               </div>
               <div class="field-full">
@@ -92,6 +112,7 @@
                     v-model:value="form.scenario"
                     type="textarea"
                     :autosize="{ minRows: 3, maxRows: 5 }"
+                    :input-props="{ id: 'aicc-scenario', name: 'aicc_scenario' }"
                     :placeholder="t('aicc.manager.form.scenarioPlaceholder')"
                   />
                 </n-form-item>
@@ -105,6 +126,7 @@
                     v-model:value="form.answer_boundary"
                     type="textarea"
                     :autosize="{ minRows: 3, maxRows: 5 }"
+                    :input-props="{ id: 'aicc-answer-boundary', name: 'aicc_answer_boundary' }"
                     :placeholder="t('aicc.manager.form.answerBoundaryPlaceholder')"
                   />
                 </n-form-item>
@@ -118,6 +140,7 @@
                     v-model:value="form.privacy_text"
                     type="textarea"
                     :autosize="{ minRows: 3, maxRows: 5 }"
+                    :input-props="{ id: 'aicc-privacy-text', name: 'aicc_privacy_text' }"
                     :placeholder="t('aicc.manager.form.privacyTextPlaceholder')"
                   />
                 </n-form-item>
@@ -131,6 +154,7 @@
                     v-model:value="form.allowed_domains_text"
                     type="textarea"
                     :autosize="{ minRows: 2, maxRows: 4 }"
+                    :input-props="{ id: 'aicc-allowed-domains', name: 'aicc_allowed_domains' }"
                     :placeholder="t('aicc.manager.form.allowedDomainsPlaceholder')"
                   />
                 </n-form-item>
@@ -160,7 +184,11 @@
               <div v-if="isReceptionRoute" class="delivery-grid">
                 <div class="public-link-box">
                   <span>{{ t('aicc.manager.delivery.publicLink') }}</span>
-                  <n-input :value="publicLink || t('aicc.manager.status.generatedAfterSave')" readonly :input-props="{ readonly: true }" />
+                  <n-input
+                    :value="publicLink || t('aicc.manager.status.generatedAfterSave')"
+                    readonly
+                    :input-props="{ id: 'aicc-public-link', name: 'aicc_public_link', readonly: true }"
+                  />
                   <n-space>
                     <n-button size="small" :disabled="!publicLink" @click="copyText(publicLink)">
                       <template #icon><Copy :size="14" /></template>
@@ -193,13 +221,25 @@
                     <template #label>
                       <FieldLabel :label="t('aicc.manager.delivery.messageLimit')" :help="t('aicc.manager.delivery.help.messageLimit')" />
                     </template>
-                    <n-input-number v-model:value="settingsForm.message_limit_per_session" :min="1" :max="1000" style="width: 100%" />
+                    <n-input-number
+                      v-model:value="settingsForm.message_limit_per_session"
+                      :min="1"
+                      :max="1000"
+                      :input-props="{ id: 'aicc-message-limit', name: 'aicc_message_limit' }"
+                      style="width: 100%"
+                    />
                   </n-form-item>
                   <n-form-item>
                     <template #label>
                       <FieldLabel :label="t('aicc.manager.delivery.resumeTtl')" :help="t('aicc.manager.delivery.help.resumeTtl')" />
                     </template>
-                    <n-input-number v-model:value="settingsForm.session_resume_ttl_minutes" :min="1" :max="1440" style="width: 100%" />
+                    <n-input-number
+                      v-model:value="settingsForm.session_resume_ttl_minutes"
+                      :min="1"
+                      :max="1440"
+                      :input-props="{ id: 'aicc-session-resume-ttl', name: 'aicc_session_resume_ttl' }"
+                      style="width: 100%"
+                    />
                   </n-form-item>
                   <n-form-item>
                     <template #label>
@@ -215,6 +255,7 @@
                       v-model:value="settingsForm.sensitive_words_text"
                       type="textarea"
                       :autosize="{ minRows: 3, maxRows: 6 }"
+                      :input-props="{ id: 'aicc-sensitive-words', name: 'aicc_sensitive_words' }"
                       :placeholder="t('aicc.manager.delivery.sensitiveWordsPlaceholder')"
                     />
                   </n-form-item>
@@ -255,6 +296,7 @@
                   clearable
                   filterable
                   :loading="knowledgeOptionsQuery.isFetching.value"
+                  :input-props="{ id: 'aicc-industry-knowledge', name: 'aicc_industry_knowledge' }"
                   :options="industryKnowledgeOptions"
                   :placeholder="t('aicc.manager.knowledge.industryPlaceholder')"
                 />
@@ -290,11 +332,30 @@
             <div v-else-if="leadFieldRows.length === 0" class="empty-inline">{{ t('aicc.manager.leadFields.empty') }}</div>
             <div v-else class="lead-field-list">
               <div v-for="(field, index) in leadFieldRows" :key="field.local_id" class="lead-field-row">
-                <n-input v-model:value="field.label" :placeholder="t('aicc.manager.leadFields.labelPlaceholder')" maxlength="128" />
-                <n-input v-model:value="field.field_key" :placeholder="t('aicc.manager.leadFields.keyPlaceholder')" maxlength="64" />
-                <n-select v-model:value="field.field_type" :options="leadFieldTypeOptions" />
+                <n-input
+                  v-model:value="field.label"
+                  :input-props="{ id: `aicc-lead-field-label-${index}`, name: `aicc_lead_field_label_${index}` }"
+                  :placeholder="t('aicc.manager.leadFields.labelPlaceholder')"
+                  maxlength="128"
+                />
+                <n-input
+                  v-model:value="field.field_key"
+                  :input-props="{ id: `aicc-lead-field-key-${index}`, name: `aicc_lead_field_key_${index}` }"
+                  :placeholder="t('aicc.manager.leadFields.keyPlaceholder')"
+                  maxlength="64"
+                />
+                <n-select
+                  v-model:value="field.field_type"
+                  :input-props="{ id: `aicc-lead-field-type-${index}`, name: `aicc_lead_field_type_${index}` }"
+                  :options="leadFieldTypeOptions"
+                />
                 <n-checkbox v-model:checked="field.required">{{ t('aicc.manager.leadFields.required') }}</n-checkbox>
-                <n-input v-model:value="field.prompt_text" :placeholder="t('aicc.manager.leadFields.promptPlaceholder')" maxlength="160" />
+                <n-input
+                  v-model:value="field.prompt_text"
+                  :input-props="{ id: `aicc-lead-field-prompt-${index}`, name: `aicc_lead_field_prompt_${index}` }"
+                  :placeholder="t('aicc.manager.leadFields.promptPlaceholder')"
+                  maxlength="160"
+                />
                 <n-button quaternary circle type="error" @click="removeLeadField(index)">
                   <template #icon><Trash2 :size="15" /></template>
                 </n-button>

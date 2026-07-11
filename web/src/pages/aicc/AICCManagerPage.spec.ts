@@ -108,10 +108,11 @@ const FormItemStub = defineComponent({
 })
 
 const InputStub = defineComponent({
-  props: ['value', 'placeholder'],
+  props: ['value', 'placeholder', 'inputProps'],
   emits: ['update:value'],
   setup(props, { emit }) {
     return () => h('input', {
+      ...(props.inputProps as Record<string, unknown> | undefined),
       value: props.value ?? '',
       placeholder: props.placeholder as string,
       onInput: (event: Event) => emit('update:value', (event.target as HTMLInputElement).value),
@@ -271,6 +272,17 @@ describe('AICCManagerPage', () => {
     expect(helpTriggers.some(trigger =>
       trigger.attributes('aria-label') === '当前客服自己的知识库始终参与检索；这里不再按单个文档勾选。',
     )).toBe(true)
+  })
+
+  // 覆盖浏览器表单识别：设置页用户可输入控件必须带 id 或 name，避免 Chrome DevTools 可访问性提示。
+  it('adds id or name to settings form controls', () => {
+    const { context } = makeConsoleContext()
+    const wrapper = mountManager(context, { initialSection: 'settings' })
+
+    const fields = wrapper.findAll('input:not([type="checkbox"]), textarea')
+    const missingIdentity = fields.filter(field => !field.attributes('id') && !field.attributes('name'))
+
+    expect(missingIdentity).toHaveLength(0)
   })
 
   // 覆盖顶部新建智能体联动：顶部选择区清空智能体后，内容区表单必须进入新建态且不残留旧名称。
