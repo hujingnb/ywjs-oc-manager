@@ -118,6 +118,8 @@ func TestAICCOcOpsResolverFromStoreAllowsHiddenApp(t *testing.T) {
 		ID:              "app-hidden",
 		OrgID:           "org-1",
 		OwnerUserID:     "admin-1",
+		Status:          "binding_waiting",
+		RuntimePhase:    "ready",
 		RuntimeImageRef: "registry/hermes:v1",
 		AiccHidden:      true,
 	}}
@@ -130,6 +132,27 @@ func TestAICCOcOpsResolverFromStoreAllowsHiddenApp(t *testing.T) {
 	assert.Equal(t, "http://app-app-hidden-ocops.oc-apps.svc:8080", loc.Endpoint.BaseURL)
 }
 
+// TestAICCOcOpsResolverFromStoreRejectsUnreadyHiddenApp 覆盖 AICC 公开转发故障：
+// 绑定 hidden app 已进入 error 或 runtime_phase 未 ready 时，不能继续返回可调用 oc-ops 坐标。
+func TestAICCOcOpsResolverFromStoreRejectsUnreadyHiddenApp(t *testing.T) {
+	store := &fakeOcOpsAppStore{app: sqlc.App{
+		ID:              "app-hidden",
+		OrgID:           "org-1",
+		OwnerUserID:     "admin-1",
+		Status:          "error",
+		RuntimePhase:    "unknown",
+		RuntimeImageRef: "registry/hermes:v1",
+		AiccHidden:      true,
+	}}
+	r := NewAICCOcOpsResolverFromStore(store, nil, "http://app-%s-ocops.oc-apps.svc:8080")
+
+	loc, err := r.Resolve(context.Background(), "app-hidden")
+
+	require.NoError(t, err)
+	assert.True(t, loc.Supported)
+	assert.Empty(t, loc.Endpoint.BaseURL)
+}
+
 // TestOcOpsResolverFromStoreSupported 验证非 -dev 镜像解析为 Supported=true，
 // 且 BaseURL 按模板以 appID 拼装、归属信息正确透传。
 func TestOcOpsResolverFromStoreSupported(t *testing.T) {
@@ -137,6 +160,8 @@ func TestOcOpsResolverFromStoreSupported(t *testing.T) {
 	store := &fakeOcOpsAppStore{app: sqlc.App{
 		OrgID:           "org-1",
 		OwnerUserID:     "user-1",
+		Status:          "running",
+		RuntimePhase:    "ready",
 		RuntimeImageRef: "registry/hermes:v2026.5.16",
 	}}
 	r := NewOcOpsResolverFromStore(store, nil, "http://app-%s-ocops.oc-apps.svc:8080")
@@ -181,6 +206,8 @@ func TestOcOpsResolverInjectsToken(t *testing.T) {
 		ID:                     "a1",
 		OrgID:                  "o1",
 		OwnerUserID:            "u1",
+		Status:                 "running",
+		RuntimePhase:           "ready",
 		RuntimeTokenCiphertext: null.StringFrom(ct),  // 有效密文
 		RuntimeImageRef:        "registry/hermes:v1", // 非 -dev，Supported=true
 	}}

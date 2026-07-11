@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"oc-manager/internal/auth"
+	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/ocops"
 	"oc-manager/internal/store/sqlc"
 )
@@ -153,15 +154,20 @@ func (r *OcOpsResolverFromStore) Resolve(ctx context.Context, appID string) (OcO
 		}
 		token = string(plain)
 	}
+	supported := !strings.HasSuffix(app.RuntimeImageRef, "-dev")
+	endpoint := ocops.Endpoint{}
+	if supported && domain.AppCanInitiateChannelAuth(app.Status, app.RuntimePhase) {
+		endpoint = ocops.Endpoint{
+			BaseURL: fmt.Sprintf(r.baseURLTpl, appID),
+			Token:   token,
+		}
+	}
 	return OcOpsAppLocation{
 		OrgID:       app.OrgID,
 		OwnerUserID: app.OwnerUserID,
-		Endpoint: ocops.Endpoint{
-			BaseURL: fmt.Sprintf(r.baseURLTpl, appID),
-			Token:   token,
-		},
+		Endpoint:    endpoint,
 		// dev stub 镜像（-dev 后缀）不含真实 hermes，标记为不支持
-		Supported: !strings.HasSuffix(app.RuntimeImageRef, "-dev"),
+		Supported: supported,
 	}, nil
 }
 
