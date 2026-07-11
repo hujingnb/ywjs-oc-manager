@@ -195,6 +195,8 @@ function makeConsoleContext() {
   const selectedAgent = computed(() => agents.value.find(agent => agent.id === selectedAgentIdState.value))
   const context: AICCConsoleContext = {
     agents: computed(() => agents.value),
+    selectedOrgId: computed(() => 'org-1'),
+    isPlatformAdmin: computed(() => false),
     selectedAgentId: computed(() => selectedAgentIdState.value) as ComputedRef<string | undefined>,
     selectedAgent,
     agentsLoading: computed(() => false),

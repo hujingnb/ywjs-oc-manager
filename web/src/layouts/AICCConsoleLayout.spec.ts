@@ -130,4 +130,16 @@ describe('AICCConsoleLayout', () => {
     expect(wrapper.find('[data-test="aicc-workspace"]').exists()).toBe(false)
     expect(routerReplace).not.toHaveBeenCalled()
   })
+
+  // 覆盖平台管理员入口：平台账号没有所属企业，不能被企业开通门禁挡在 AICC 工作台外。
+  it('renders workspace for platform_admin without an own organization', () => {
+    authState.user = { id: 'platform-1', username: 'platform', display_name: '平台管理员', role: 'platform_admin', org_id: '' }
+    organizationState.data.value = undefined
+    organizationState.isLoading.value = false
+
+    const wrapper = mountLayout()
+
+    expect(wrapper.find('[data-test="aicc-workspace"]').exists()).toBe(true)
+    expect(routerReplace).not.toHaveBeenCalled()
+  })
 })

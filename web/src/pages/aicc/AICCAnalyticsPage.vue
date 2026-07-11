@@ -169,6 +169,7 @@ import { useI18n } from 'vue-i18n'
 
 import { useAICCAnalyticsQuery } from '@/api/hooks/useAICC'
 import type { AICCAnalyticsFilters } from '@/domain/aicc'
+import { useRequiredAICCConsoleContext } from './aiccConsoleContext'
 
 const props = defineProps<{
   agentId?: string
@@ -176,6 +177,7 @@ const props = defineProps<{
   activeAgentCount: number
 }>()
 const { t } = useI18n()
+const consoleContext = useRequiredAICCConsoleContext()
 
 type RangePreset = 'today' | '7d' | '30d'
 
@@ -183,12 +185,16 @@ const rangePreset = ref<RangePreset>('7d')
 const bucket = ref<'day' | 'week'>('day')
 const range = ref(makeRange('7d'))
 const analyticsFilters = computed<AICCAnalyticsFilters>(() => ({
+  org_id: consoleContext.selectedOrgId.value,
   start_at: range.value.start_at,
   end_at: range.value.end_at,
   bucket: bucket.value,
   agent_id: props.agentId,
 }))
-const analyticsQuery = useAICCAnalyticsQuery(analyticsFilters)
+const analyticsQuery = useAICCAnalyticsQuery(
+  analyticsFilters,
+  () => !consoleContext.isPlatformAdmin.value || Boolean(consoleContext.selectedOrgId.value),
+)
 const analytics = computed(() => analyticsQuery.data.value)
 const topQuestions = computed(() => analytics.value?.top_questions ?? [])
 const topSources = computed(() => analytics.value?.top_sources ?? [])

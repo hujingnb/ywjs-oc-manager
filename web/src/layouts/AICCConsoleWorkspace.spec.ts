@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils'
 import { defineComponent, h, inject, isReadonly, nextTick } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { AuthUser, Organization } from '@/api'
 import { i18n } from '@/i18n'
 import type { AICCAgent } from '@/domain/aicc'
 import { AICCConsoleContextKey } from '@/pages/aicc/aiccConsoleContext'
@@ -9,6 +10,9 @@ import AICCConsoleWorkspace from './AICCConsoleWorkspace.vue'
 
 const routerPush = vi.hoisted(() => vi.fn())
 const routeState = vi.hoisted(() => ({ path: '/aicc-console' }))
+const authState = vi.hoisted(() => ({
+  user: makeAuthUser({ id: 'owner-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' }),
+}))
 const agentsState = vi.hoisted(() => {
   const { ref } = require('vue') as typeof import('vue')
 
@@ -16,8 +20,30 @@ const agentsState = vi.hoisted(() => {
     data: ref<AICCAgent[] | undefined>(undefined),
     isLoading: ref(false),
     error: ref<Error | null>(null),
+    lastOrgIdRef: ref<{ value?: string } | undefined>(undefined),
+    lastEnabled: ref<(() => boolean) | undefined>(undefined),
   }
 })
+const organizationsState = vi.hoisted(() => {
+  const { ref } = require('vue') as typeof import('vue')
+
+  return {
+    data: ref<Organization[]>([]),
+    isLoading: ref(false),
+  }
+})
+
+// makeAuthUser 生成完整 AuthUser 测试对象，避免角色切换测试缺失登录接口必返字段。
+function makeAuthUser(overrides: Partial<AuthUser>): AuthUser {
+  return {
+    id: 'user-1',
+    username: 'user',
+    display_name: '用户',
+    role: 'org_admin',
+    status: 'enabled',
+    ...overrides,
+  }
+}
 
 vi.mock('vue-router', () => ({
   RouterView: defineComponent({
@@ -44,7 +70,19 @@ vi.mock('vue-router', () => ({
 }))
 
 vi.mock('@/api/hooks/useAICC', () => ({
-  useAICCAgentsQuery: () => agentsState,
+  useAICCAgentsQuery: (orgId?: { value?: string }, enabled?: () => boolean) => {
+    agentsState.lastOrgIdRef.value = orgId
+    agentsState.lastEnabled.value = enabled
+    return agentsState
+  },
+}))
+
+vi.mock('@/api/hooks/useOrganizations', () => ({
+  useOrganizationsQuery: () => organizationsState,
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => authState,
 }))
 
 const ButtonStub = defineComponent({
@@ -61,9 +99,10 @@ const SelectStub = defineComponent({
   name: 'NSelect',
   props: ['value', 'options', 'placeholder', 'loading'],
   emits: ['update:value'],
-  setup(props, { emit }) {
+  setup(props, { emit, attrs }) {
     return () => h('select', {
-      'data-test': 'agent-switcher',
+      ...attrs,
+      'data-test': attrs['data-test'] ?? 'agent-switcher',
       'data-value-kind': props.value === null ? 'null' : typeof props.value,
       value: props.value ?? '',
       onChange: (event: Event) => emit('update:value', (event.target as HTMLSelectElement).value || undefined),
@@ -132,6 +171,7 @@ describe('AICCConsoleWorkspace', () => {
   beforeEach(() => {
     routeState.path = '/aicc-console'
     routerPush.mockClear()
+    authState.user = makeAuthUser({ id: 'owner-1', username: 'owner', display_name: '管理员', role: 'org_admin', org_id: 'org-1' })
     agentsState.data.value = [
       makeAgent(),
       makeAgent({
@@ -145,6 +185,14 @@ describe('AICCConsoleWorkspace', () => {
     ]
     agentsState.isLoading.value = false
     agentsState.error.value = null
+    agentsState.lastOrgIdRef.value = undefined
+    agentsState.lastEnabled.value = undefined
+    organizationsState.data.value = [
+      { id: 'org-disabled', name: '未开通企业', code: 'disabled', status: 'enabled', aicc_enabled: false },
+      { id: 'org-1', name: '测试企业', code: 'test-org', status: 'enabled', aicc_enabled: true },
+      { id: 'org-2', name: '第二企业', code: 'second-org', status: 'enabled', aicc_enabled: true },
+    ]
+    organizationsState.isLoading.value = false
   })
 
   // 覆盖最终工作台结构：顶部只做智能体选择，左侧菜单负责模块切换。
@@ -246,6 +294,18 @@ describe('AICCConsoleWorkspace', () => {
     expect(wrapper.text()).toContain('新建智能体')
     expect(wrapper.find('[data-test="context-selected-id"]').text()).toBe('none')
     expect(wrapper.find('[data-test="router-view"]').exists()).toBe(true)
+  })
+
+  // 覆盖平台管理员企业上下文：平台账号先选择已开通企业，再带 org_id 查询该企业智能体。
+  it('selects an AICC-enabled organization before querying agents for platform_admin', () => {
+    authState.user = makeAuthUser({ id: 'platform-1', username: 'platform', display_name: '平台管理员', role: 'platform_admin', org_id: undefined })
+
+    const wrapper = mountWorkspace()
+
+    expect(wrapper.text()).toContain('测试企业')
+    expect(wrapper.text()).not.toContain('未开通企业')
+    expect(agentsState.lastOrgIdRef.value?.value).toBe('org-1')
+    expect(agentsState.lastEnabled.value?.()).toBe(true)
   })
 
   // 覆盖智能体加载与失败状态：上下文条必须复用 i18n 文案提示当前数据状态。

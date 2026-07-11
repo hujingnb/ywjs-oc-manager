@@ -385,6 +385,8 @@ export interface AICCAnalytics {
 
 // AICCAnalyticsFilters 是统计页筛选条件。
 export interface AICCAnalyticsFilters {
+  // 平台管理员查看指定企业时传入；企业管理员为空时后端使用当前企业。
+  org_id?: string
   // 统计开始时间，RFC3339 字符串。
   start_at?: string
   // 统计结束时间，RFC3339 字符串。

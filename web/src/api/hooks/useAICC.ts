@@ -41,6 +41,7 @@ const aiccKnowledgeOptionsKey = (agentId?: string) => ['aicc', 'knowledge-option
 const aiccSessionsKey = (agentId?: string, filters?: AICCSessionFilters) => ['aicc', 'sessions', agentId, filters ?? {}] as const
 const aiccSessionKey = (sessionId?: string) => ['aicc', 'session', sessionId] as const
 const AICC_LEADS_KEY = ['aicc', 'leads'] as const
+const aiccLeadsKey = (orgId?: string) => [...AICC_LEADS_KEY, orgId ?? 'current'] as const
 const AICC_ANALYTICS_KEY = ['aicc', 'analytics'] as const
 const aiccAnalyticsKey = (filters?: AICCAnalyticsFilters) => [...AICC_ANALYTICS_KEY, filters ?? {}] as const
 
@@ -276,13 +277,14 @@ export function useAICCSessionQuery(sessionId: Ref<string | undefined>) {
   })
 }
 
-// useAICCLeadsQuery 查询当前企业的访客线索列表。
-export function useAICCLeadsQuery() {
+// useAICCLeadsQuery 查询访客线索列表；平台管理员传 orgId，企业管理员为空时使用当前企业。
+export function useAICCLeadsQuery(orgId?: Ref<string | undefined>, enabled?: () => boolean) {
   return useQuery<AICCLead[]>({
-    queryKey: AICC_LEADS_KEY,
+    queryKey: computed(() => aiccLeadsKey(orgId?.value)),
+    enabled,
     queryFn: async () => {
       const response = await apiRequest<{ leads: AICCLead[] }>('/api/v1/aicc/leads', {
-        query: { limit: 200 },
+        query: { limit: 200, org_id: orgId?.value },
       })
       return response.leads
     },
@@ -305,9 +307,10 @@ export function useMarkAICCLeadRead() {
 }
 
 // useAICCAnalyticsQuery 查询 AICC 运营看板统计；筛选条件进入 query key，避免不同时间窗口复用旧缓存。
-export function useAICCAnalyticsQuery(filters?: Ref<AICCAnalyticsFilters | undefined>) {
+export function useAICCAnalyticsQuery(filters?: Ref<AICCAnalyticsFilters | undefined>, enabled?: () => boolean) {
   return useQuery<AICCAnalytics>({
     queryKey: computed(() => aiccAnalyticsKey(filters?.value)),
+    enabled,
     queryFn: async () => {
       const currentFilters = filters?.value
       const response = await apiRequest<{ analytics: AICCAnalytics }>('/api/v1/aicc/analytics', {
@@ -316,6 +319,7 @@ export function useAICCAnalyticsQuery(filters?: Ref<AICCAnalyticsFilters | undef
           end_at: currentFilters?.end_at,
           bucket: currentFilters?.bucket,
           agent_id: currentFilters?.agent_id,
+          org_id: currentFilters?.org_id,
         },
       })
       return response.analytics
@@ -323,9 +327,9 @@ export function useAICCAnalyticsQuery(filters?: Ref<AICCAnalyticsFilters | undef
   })
 }
 
-// downloadAICCLeadsCSV 下载当前企业线索 CSV，用于运营人员离线跟进。
-export function downloadAICCLeadsCSV() {
-  return apiDownload('/api/v1/aicc/leads/export')
+// downloadAICCLeadsCSV 下载线索 CSV；平台管理员导出时需要绑定当前选择的企业。
+export function downloadAICCLeadsCSV(orgId?: string) {
+  return apiDownload('/api/v1/aicc/leads/export', { org_id: orgId })
 }
 
 // fetchAICCPublicConfig 读取访客公开配置；该接口不带 Authorization，避免公开链接受登录态影响。

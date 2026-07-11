@@ -16,13 +16,13 @@
             <h3>{{ form.name || t('aicc.manager.unnamedAgent') }}</h3>
           </div>
           <n-space>
-            <n-button v-if="selectedAgent" :disabled="statusBusy" @click="toggleStatus">
+            <n-button v-if="selectedAgent" :disabled="statusBusy || !canManageAICC" @click="toggleStatus">
               <template #icon>
                 <component :is="isSelectedRunning ? PauseCircle : PlayCircle" :size="16" />
               </template>
               {{ isSelectedRunning ? t('aicc.manager.stopReception') : t('aicc.manager.startReception') }}
             </n-button>
-            <n-button v-if="selectedAgent" type="error" ghost :disabled="deleteBusy" @click="deleteModalOpen = true">
+            <n-button v-if="selectedAgent" type="error" ghost :disabled="deleteBusy || !canManageAICC" @click="deleteModalOpen = true">
               <template #icon><Trash2 :size="16" /></template>
               {{ t('aicc.manager.delete') }}
             </n-button>
@@ -162,7 +162,7 @@
             </div>
             <n-space justify="end">
               <n-button attr-type="button" @click="resetForm">{{ t('aicc.manager.form.reset') }}</n-button>
-              <n-button type="primary" attr-type="submit" :loading="submitBusy">
+              <n-button type="primary" attr-type="submit" :loading="submitBusy" :disabled="!canManageAICC">
                 <template #icon><Save :size="16" /></template>
                 {{ t('aicc.manager.form.saveConfig') }}
               </n-button>
@@ -262,7 +262,7 @@
                 </div>
               </n-form>
               <n-space v-if="isSettingsRoute" justify="end">
-                <n-button :loading="settingsBusy" @click="saveSettings">
+                <n-button :loading="settingsBusy" :disabled="!canManageAICC" @click="saveSettings">
                   <template #icon><Save :size="16" /></template>
                   {{ t('aicc.manager.delivery.saveSettings') }}
                 </n-button>
@@ -309,7 +309,7 @@
                 <n-tag size="small" type="success" :bordered="false">{{ t('aicc.manager.knowledge.enabled') }}</n-tag>
               </div>
               <n-space justify="end">
-                <n-button :loading="knowledgeBusy" @click="saveKnowledge">
+                <n-button :loading="knowledgeBusy" :disabled="!canManageAICC" @click="saveKnowledge">
                   <template #icon><Save :size="16" /></template>
                   {{ t('aicc.manager.knowledge.save') }}
                 </n-button>
@@ -323,7 +323,7 @@
                 <p class="eyebrow">{{ t('aicc.manager.leadFields.eyebrow') }}</p>
                 <strong>{{ t('aicc.manager.leadFields.title') }}</strong>
               </div>
-              <n-button size="small" :disabled="!selectedAgent" @click="addLeadField">
+              <n-button size="small" :disabled="!selectedAgent || !canManageAICC" @click="addLeadField">
                 <template #icon><Plus :size="14" /></template>
                 {{ t('aicc.manager.leadFields.add') }}
               </n-button>
@@ -362,7 +362,7 @@
               </div>
             </div>
             <n-space justify="end">
-              <n-button :disabled="!selectedAgent" :loading="leadFieldBusy" @click="saveLeadFields">
+              <n-button :disabled="!selectedAgent || !canManageAICC" :loading="leadFieldBusy" @click="saveLeadFields">
                 <template #icon><Save :size="16" /></template>
                 {{ t('aicc.manager.leadFields.save') }}
               </n-button>
@@ -530,6 +530,7 @@ const deleteMutation = useDeleteAICCAgent()
 
 const selectedKnowledgeAppId = computed(() => knowledgeQuery.data.value?.app_id || selectedAgent.value?.app_id)
 const isSelectedRunning = computed(() => selectedAgent.value ? isAICCAgentRunning(selectedAgent.value) : false)
+const canManageAICC = computed(() => !consoleContext.isPlatformAdmin.value)
 const activeAgentCount = computed(() => agents.value.filter(agent => isAICCAgentRunning(agent)).length)
 const submitBusy = computed(() => createMutation.isPending.value || updateMutation.isPending.value)
 const statusBusy = computed(() => statusMutation.isPending.value)

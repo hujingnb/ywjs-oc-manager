@@ -912,6 +912,24 @@ func TestAICCSettingsDefaults(t *testing.T) {
 	assert.Nil(t, store.upsertSettings)
 }
 
+// TestAICCSettingsAllowsPlatformRead 覆盖平台排障读路径：
+// 平台管理员可以查看任意企业智能体的运营配置，但仍不能通过更新接口修改配置。
+func TestAICCSettingsAllowsPlatformRead(t *testing.T) {
+	store := seededAICCStore()
+	svc := NewAICCService(store, &fakeAICCHiddenAppCreator{})
+
+	result, err := svc.GetAgentSettings(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin, UserID: "platform-1"}, "agent-1")
+
+	require.NoError(t, err)
+	assert.Equal(t, "agent-1", result.AgentID)
+
+	_, err = svc.UpdateAgentSettings(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin, UserID: "platform-1"}, "agent-1", AICCAgentSettingsInput{
+		MessageLimitPerSession:  100,
+		SessionResumeTTLMinutes: 30,
+	})
+	require.ErrorIs(t, err, ErrForbidden)
+}
+
 // TestAICCSettingsUpdateNormalizesInput 覆盖设置保存：
 // 敏感词需要去空白、去空项、去重，消息上限和续接时间必须落在业务允许范围内。
 func TestAICCSettingsUpdateNormalizesInput(t *testing.T) {

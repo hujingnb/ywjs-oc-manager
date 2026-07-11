@@ -64,7 +64,7 @@ export const router = createRouter({
     {
       path: '/aicc-console',
       component: AICCConsoleLayout,
-      meta: { allowedRoles: ORG_ADMIN_ONLY },
+      meta: { allowedRoles: ORG_ADMIN_ABOVE },
       children: [
         { path: '', component: AICCManagerPage, props: { initialSection: 'reception' } },
         { path: 'sessions', component: () => import('@/pages/aicc/AICCWorkbenchSessionsPage.vue') },
@@ -99,7 +99,7 @@ export const router = createRouter({
         // 企业管理员可配置「自己企业且平台已开通」的 web-publish（页面按角色自适应，开通/停用仍仅平台管理员）。
         { path: 'platform/web-publish-config', component: WebPublishConfigPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },
         { path: 'members', component: MembersPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },
-        { path: 'aicc', redirect: '/aicc-console', meta: { allowedRoles: ORG_ADMIN_ONLY } },
+        { path: 'aicc', redirect: '/aicc-console', meta: { allowedRoles: ORG_ADMIN_ABOVE } },
         // published-sites：企业已发布站点列表 + 证书状态面板；平台管理员可跨企业查看并重试证书。
         { path: 'published-sites', component: PublishedSitesPage, meta: { allowedRoles: ORG_ADMIN_ABOVE } },
         { path: 'members/new', component: CreateMemberPage, meta: { allowedRoles: ORG_ADMIN_ONLY } },

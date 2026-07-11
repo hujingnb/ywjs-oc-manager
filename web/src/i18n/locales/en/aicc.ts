@@ -7,6 +7,7 @@ export default {
     checkingAccess: 'Checking customer-care access',
     currentAgent: 'Current agent',
     noAgentSelected: 'No agent selected',
+    switchOrganization: 'Switch organization',
     switchAgent: 'Switch agent',
     createAgent: 'New agent',
     agentLoading: 'Loading agents',

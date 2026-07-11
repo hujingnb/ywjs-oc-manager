@@ -40,7 +40,7 @@
             <template #icon><Eye :size="14" /></template>
             {{ t('aicc.leads.viewConversation') }}
           </n-button>
-          <n-button size="small" :disabled="!lead.unread" :loading="markReadMutation.isPending.value && activeLeadId === lead.id" @click="markRead(lead.id)">
+          <n-button size="small" :disabled="!lead.unread || !canManageAICC" :loading="markReadMutation.isPending.value && activeLeadId === lead.id" @click="markRead(lead.id)">
             <template #icon><Check :size="14" /></template>
             {{ t('aicc.leads.markRead') }}
           </n-button>
@@ -105,11 +105,17 @@ import { useI18n } from 'vue-i18n'
 
 import { downloadAICCLeadsCSV, useAICCLeadsQuery, useAICCSessionQuery, useMarkAICCLeadRead } from '@/api/hooks/useAICC'
 import type { AICCLead } from '@/domain/aicc'
+import { useRequiredAICCConsoleContext } from './aiccConsoleContext'
 
 const message = useMessage()
 const { t } = useI18n()
-const leadsQuery = useAICCLeadsQuery()
+const consoleContext = useRequiredAICCConsoleContext()
+const leadsQuery = useAICCLeadsQuery(
+  consoleContext.selectedOrgId,
+  () => !consoleContext.isPlatformAdmin.value || Boolean(consoleContext.selectedOrgId.value),
+)
 const markReadMutation = useMarkAICCLeadRead()
+const canManageAICC = computed(() => !consoleContext.isPlatformAdmin.value)
 
 const isExporting = ref(false)
 const activeLeadId = ref<string | undefined>()
@@ -149,7 +155,7 @@ function openLeadConversation(lead: AICCLead) {
   selectedLead.value = lead
   selectedSessionId.value = lead.latest_session_id
   transcriptOpen.value = true
-  if (lead.unread) {
+  if (lead.unread && canManageAICC.value) {
     void markReadQuietly(lead.id)
   }
 }
@@ -161,7 +167,7 @@ function closeLeadConversation() {
 async function exportLeads() {
   isExporting.value = true
   try {
-    const { blob, filename } = await downloadAICCLeadsCSV()
+    const { blob, filename } = await downloadAICCLeadsCSV(consoleContext.selectedOrgId.value)
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url

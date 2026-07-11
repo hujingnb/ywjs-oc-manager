@@ -303,7 +303,7 @@ func (s *AICCService) GetAgentSettings(ctx context.Context, principal auth.Princ
 	if err != nil {
 		return AICCAgentSettingsResult{}, err
 	}
-	if !auth.CanManageAICCAgent(principal, agent.OrgID) {
+	if !auth.CanViewAICC(principal, agent.OrgID) {
 		return AICCAgentSettingsResult{}, ErrForbidden
 	}
 	settings, err := s.store.GetAICCAgentSettings(ctx, agentID)

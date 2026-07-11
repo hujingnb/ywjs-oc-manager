@@ -78,6 +78,8 @@ function makeContext(options: {
 
   return {
     agents,
+    selectedOrgId: computed(() => selectedAgent.value?.org_id),
+    isPlatformAdmin: computed(() => false),
     selectedAgentId: computed(() => selectedAgent.value?.id),
     selectedAgent: computed(() => selectedAgent.value),
     agentsLoading: computed(() => options.agentsLoading ?? false),

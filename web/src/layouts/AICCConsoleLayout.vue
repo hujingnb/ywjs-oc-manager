@@ -24,16 +24,17 @@ import AICCConsoleWorkspace from './AICCConsoleWorkspace.vue'
 const { t } = useI18n()
 const router = useRouter()
 const auth = useAuthStore()
+const isPlatformAdmin = computed(() => auth.user?.role === 'platform_admin')
 const ownOrgId = computed(() => auth.user?.role === 'org_admin' ? auth.user.org_id ?? undefined : undefined)
 const { data: ownOrganization, isLoading: orgLoading } = useOrganizationQuery(ownOrgId)
-// canRenderConsole 在企业开通状态确认前保持 false，避免子页面提前挂载并发起 AICC API 请求。
-const canRenderConsole = computed(() => !orgLoading.value && ownOrganization.value?.aicc_enabled === true)
+// canRenderConsole 在企业开通状态确认前保持 false；平台管理员没有所属企业，由工作台内企业选择器决定查看范围。
+const canRenderConsole = computed(() => isPlatformAdmin.value || (!orgLoading.value && ownOrganization.value?.aicc_enabled === true))
 
-// AICC 子系统入口由企业开通状态控制；直接访问 /aicc-console 时也必须兜底拦截未开通企业。
+// AICC 子系统入口由企业开通状态控制；平台管理员属于跨企业只读排障入口，不做所属企业开通校验。
 watch(
-  () => ({ loading: orgLoading.value, enabled: ownOrganization.value?.aicc_enabled }),
-  ({ loading, enabled }) => {
-    if (!loading && enabled === false) {
+  () => ({ loading: orgLoading.value, enabled: ownOrganization.value?.aicc_enabled, platform: isPlatformAdmin.value }),
+  ({ loading, enabled, platform }) => {
+    if (!platform && !loading && enabled === false) {
       void router.replace('/')
     }
   },

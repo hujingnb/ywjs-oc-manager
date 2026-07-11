@@ -4,6 +4,8 @@ import type { AICCAgent } from '@/domain/aicc'
 
 export interface AICCConsoleContext {
   agents: ComputedRef<AICCAgent[]>
+  selectedOrgId: ComputedRef<string | undefined>
+  isPlatformAdmin: ComputedRef<boolean>
   selectedAgentId: ComputedRef<string | undefined>
   selectedAgent: ComputedRef<AICCAgent | undefined>
   agentsLoading: ComputedRef<boolean>

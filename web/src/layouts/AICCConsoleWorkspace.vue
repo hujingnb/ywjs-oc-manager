@@ -11,6 +11,17 @@
 
       <section class="aicc-agent-context" data-test="workspace-agent-bar" :aria-label="t('aicc.console.currentAgent')">
         <n-select
+          v-if="isPlatformAdmin"
+          v-model:value="selectedOrgIdModel"
+          class="aicc-org-select"
+          data-test="org-switcher"
+          size="small"
+          :options="organizationOptions"
+          :loading="organizationsLoading"
+          :placeholder="t('aicc.console.switchOrganization')"
+        />
+
+        <n-select
           v-model:value="selectedAgentIdModel"
           class="aicc-agent-select"
           data-test="agent-switcher"
@@ -45,7 +56,7 @@
           </div>
         </div>
 
-        <n-button size="small" type="primary" secondary @click="startCreateAgent">
+        <n-button v-if="!isPlatformAdmin" size="small" type="primary" secondary @click="startCreateAgent">
           <template #icon><Plus :size="15" /></template>
           {{ t('aicc.console.createAgent') }}
         </n-button>
@@ -93,8 +104,11 @@ import { ArrowLeft, BarChart3, BookOpen, LayoutDashboard, MessageSquare, Plus, S
 
 import LocaleSwitcher from '@/components/LocaleSwitcher.vue'
 import { useAICCAgentsQuery } from '@/api/hooks/useAICC'
+import { useOrganizationsQuery } from '@/api/hooks/useOrganizations'
+import type { Organization } from '@/api'
 import type { AICCAgent } from '@/domain/aicc'
 import { AICCConsoleContextKey } from '@/pages/aicc/aiccConsoleContext'
+import { useAuthStore } from '@/stores/auth'
 
 interface WorkspaceNavItem {
   path: string
@@ -105,9 +119,14 @@ interface WorkspaceNavItem {
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
+const auth = useAuthStore()
+const isPlatformAdmin = computed(() => auth.user?.role === 'platform_admin')
+const selectedOrgIdState = ref<string | undefined>()
 const selectedAgentIdState = ref<string | undefined>()
 const isCreatingAgent = ref(false)
-const agentsQuery = useAICCAgentsQuery()
+const organizationsQuery = useOrganizationsQuery(() => isPlatformAdmin.value)
+const selectedOrgIdForAgents = computed(() => isPlatformAdmin.value ? selectedOrgIdState.value : undefined)
+const agentsQuery = useAICCAgentsQuery(selectedOrgIdForAgents, () => !isPlatformAdmin.value || Boolean(selectedOrgIdState.value))
 
 // 顶部导航按工作台信息架构排序；路径与后续子页面路由保持一一对应。
 const navItems: WorkspaceNavItem[] = [
@@ -120,14 +139,32 @@ const navItems: WorkspaceNavItem[] = [
 ]
 
 const agents = computed(() => agentsQuery.data.value ?? [])
+const organizations = computed<Organization[]>(() => organizationsQuery.data.value ?? [])
+const aiccOrganizations = computed(() => organizations.value.filter(org => org.aicc_enabled === true))
+const organizationsLoading = computed(() => organizationsQuery.isLoading.value)
 const agentsLoading = computed(() => agentsQuery.isLoading.value)
 const agentsError = computed<Error | null>(() => agentsQuery.error.value instanceof Error ? agentsQuery.error.value : null)
+const selectedOrgId = computed(() => selectedOrgIdState.value)
 const selectedAgentId = computed(() => selectedAgentIdState.value)
 const selectedAgent = computed(() => agents.value.find(agent => agent.id === selectedAgentIdState.value))
+const organizationOptions = computed<SelectOption[]>(() => aiccOrganizations.value.map(org => ({
+  label: org.name || org.code || org.id,
+  value: org.id,
+})))
 const agentOptions = computed<SelectOption[]>(() => agents.value.map(agent => ({
   label: agent.name || t('aicc.console.noAgentSelected'),
   value: agent.id,
 })))
+
+// selectedOrgIdModel 只在平台管理员视角可写；切换企业时清空当前智能体，避免继续展示上一企业数据。
+const selectedOrgIdModel = computed<string | null>({
+  get: () => selectedOrgIdState.value ?? null,
+  set: (orgId?: string | null) => {
+    selectedOrgIdState.value = orgId ?? undefined
+    selectedAgentIdState.value = undefined
+    isCreatingAgent.value = false
+  },
+})
 
 // selectedAgentIdModel 是选择器的可写桥接层；注入给子页面的 selectedAgentId 保持 ComputedRef 只读。
 const selectedAgentIdModel = computed<string | null>({
@@ -175,6 +212,22 @@ const selectedAgentRetentionText = computed(() => {
   return t('aicc.manager.status.days', { count: selectedAgent.value.retention_days || 0 })
 })
 
+// 平台管理员首次进入时默认落到第一个已开通 AICC 的企业；企业列表变化时避免保留已失效企业。
+watch(
+  aiccOrganizations,
+  (items) => {
+    if (!isPlatformAdmin.value) {
+      selectedOrgIdState.value = undefined
+      return
+    }
+    if (selectedOrgIdState.value && items.some(org => org.id === selectedOrgIdState.value)) return
+    selectedOrgIdState.value = items[0]?.id
+    selectedAgentIdState.value = undefined
+    isCreatingAgent.value = false
+  },
+  { immediate: true },
+)
+
 // 智能体列表首次返回时默认进入第一个智能体；用户点击“新建智能体”后保留未选择态供子页面创建表单使用。
 watch(
   agents,
@@ -194,6 +247,8 @@ watch(
 
 provide(AICCConsoleContextKey, {
   agents,
+  selectedOrgId,
+  isPlatformAdmin,
   selectedAgentId,
   selectedAgent,
   agentsLoading,

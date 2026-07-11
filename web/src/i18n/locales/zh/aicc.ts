@@ -7,6 +7,7 @@ export default {
     checkingAccess: '正在检查客服开通状态',
     currentAgent: '当前智能体',
     noAgentSelected: '未选择智能体',
+    switchOrganization: '切换企业',
     switchAgent: '切换智能体',
     createAgent: '新建智能体',
     agentLoading: '正在加载智能体',
