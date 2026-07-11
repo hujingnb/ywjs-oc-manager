@@ -109,6 +109,8 @@ type UpdateOrganizationAICCConfigRequest struct {
 	Enabled *bool `json:"enabled" binding:"required"`
 	// AgentLimit 是智能体数量上限；nil 表示不限。
 	AgentLimit *int32 `json:"agent_limit"`
+	// IndustryKnowledgeBaseIDs 是平台授予该企业、可供 AICC 智能体选择的行业知识库。
+	IndustryKnowledgeBaseIDs []string `json:"industry_knowledge_base_ids"`
 }
 
 // CreateAICCAgentRequest 是企业管理员创建 AICC 智能体的请求体。

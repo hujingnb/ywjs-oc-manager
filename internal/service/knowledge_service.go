@@ -115,6 +115,8 @@ type KnowledgeStore interface {
 	SoftDeleteIndustryKnowledgeBase(ctx context.Context, id string) (int64, error)
 	// CountAssistantVersionsUsingIndustryKnowledgeBase 统计仍引用行业库的未删除助手版本。
 	CountAssistantVersionsUsingIndustryKnowledgeBase(ctx context.Context, industryKnowledgeBaseID string) (int64, error)
+	// CountOrganizationsUsingIndustryKnowledgeBase 统计仍被平台授权给企业的行业库。
+	CountOrganizationsUsingIndustryKnowledgeBase(ctx context.Context, industryKnowledgeBaseID string) (int64, error)
 	// CreateRAGFlowIndustryDatasetMapping 创建行业库 dataset 映射。
 	CreateRAGFlowIndustryDatasetMapping(ctx context.Context, arg sqlc.CreateRAGFlowIndustryDatasetMappingParams) error
 	// GetRAGFlowIndustryDataset 按行业库 ID 读取 dataset 映射。

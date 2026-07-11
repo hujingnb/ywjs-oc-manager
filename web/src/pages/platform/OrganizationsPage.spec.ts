@@ -30,6 +30,7 @@ const organizationsState = vi.hoisted(() => {
     assistant_version_ids: ['v-1'],
     aicc_enabled: true,
     aicc_agent_limit: 5,
+    industry_knowledge_base_ids: ['industry-1'],
   }
   return {
     defaultOrg,
@@ -67,6 +68,13 @@ vi.mock('@/api/hooks/useOrganizations', () => ({
 // mock 助手版本查询，供创建表单版本多选使用。
 vi.mock('@/api/hooks/useAssistantVersions', () => ({
   useAssistantVersionsQuery: () => versionsState,
+}))
+
+// mock 平台行业知识库查询，供企业 AICC 授权多选的回显和保存测试使用。
+vi.mock('@/api/hooks/useIndustryKnowledge', () => ({
+  useIndustryKnowledgeBasesQuery: () => ({
+    data: ref({ items: [{ id: 'industry-1', name: '行业库 A' }, { id: 'industry-2', name: '行业库 B' }] }),
+  }),
 }))
 
 vi.mock('@/api/hooks/useRecharge', () => ({
@@ -510,6 +518,7 @@ describe('OrganizationsPage', () => {
       payload: {
         enabled: true,
         agent_limit: 5,
+        industry_knowledge_base_ids: ['industry-1'],
       },
     }))
   })

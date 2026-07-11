@@ -53,10 +53,8 @@ type AICCStore interface {
 	ListAICCAgentsByOrg(ctx context.Context, arg sqlc.ListAICCAgentsByOrgParams) ([]sqlc.AiccAgent, error)
 	// ListAICCAgentKnowledge 列出智能体当前可检索知识范围。
 	ListAICCAgentKnowledge(ctx context.Context, agentID string) ([]sqlc.AiccAgentKnowledge, error)
-	// GetApp 读取 AICC 隐藏 app，用于按企业授权版本收敛行业知识库候选范围。
-	GetApp(ctx context.Context, id string) (sqlc.App, error)
-	// ListIndustryKnowledgeBasesByAssistantVersion 列出当前客服隐藏 app 版本关联的行业知识库。
-	ListIndustryKnowledgeBasesByAssistantVersion(ctx context.Context, versionID string) ([]sqlc.IndustryKnowledgeBasis, error)
+	// ListOrganizationIndustryKnowledgeBases 列出平台为企业授权的行业知识库。
+	ListOrganizationIndustryKnowledgeBases(ctx context.Context, orgID string) ([]sqlc.IndustryKnowledgeBasis, error)
 	// DeleteAICCAgentKnowledgeByAgent 清空智能体知识范围，配合 AddAICCAgentKnowledge 整组替换。
 	DeleteAICCAgentKnowledgeByAgent(ctx context.Context, agentID string) error
 	// AddAICCAgentKnowledge 写入单条知识范围配置。
@@ -487,19 +485,9 @@ func (s *AICCService) ListAgentKnowledgeOptions(ctx context.Context, principal a
 	if !auth.CanViewAICC(principal, agent.OrgID) {
 		return AICCKnowledgeOptionsResult{}, ErrForbidden
 	}
-	app, err := s.store.GetApp(ctx, agent.AppID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return AICCKnowledgeOptionsResult{}, ErrNotFound
-	}
+	bases, err := s.store.ListOrganizationIndustryKnowledgeBases(ctx, agent.OrgID)
 	if err != nil {
-		return AICCKnowledgeOptionsResult{}, fmt.Errorf("查询 AICC 隐藏应用失败: %w", err)
-	}
-	if !app.VersionID.Valid {
-		return toAICCKnowledgeOptionsResult(nil), nil
-	}
-	bases, err := s.store.ListIndustryKnowledgeBasesByAssistantVersion(ctx, app.VersionID.String)
-	if err != nil {
-		return AICCKnowledgeOptionsResult{}, fmt.Errorf("查询 AICC 行业知识库候选失败: %w", err)
+		return AICCKnowledgeOptionsResult{}, fmt.Errorf("查询企业已授权行业知识库失败: %w", err)
 	}
 	return toAICCKnowledgeOptionsResult(bases), nil
 }
@@ -516,6 +504,21 @@ func (s *AICCService) ReplaceAgentKnowledge(ctx context.Context, principal auth.
 	normalized, err := normalizeAICCKnowledgeInput(input)
 	if err != nil {
 		return AICCKnowledgeResult{}, err
+	}
+	if len(normalized.IndustryKnowledgeBaseIDs) > 0 {
+		bases, err := s.store.ListOrganizationIndustryKnowledgeBases(ctx, agent.OrgID)
+		if err != nil {
+			return AICCKnowledgeResult{}, fmt.Errorf("查询企业已授权行业知识库失败: %w", err)
+		}
+		authorized := make(map[string]struct{}, len(bases))
+		for _, base := range bases {
+			authorized[base.ID] = struct{}{}
+		}
+		for _, id := range normalized.IndustryKnowledgeBaseIDs {
+			if _, ok := authorized[id]; !ok {
+				return AICCKnowledgeResult{}, fmt.Errorf("%w: 行业知识库未获企业授权", ErrInvalidArgument)
+			}
+		}
 	}
 	run := func(store AICCStore) error {
 		if err := store.DeleteAICCAgentKnowledgeByAgent(ctx, agentID); err != nil {

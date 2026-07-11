@@ -954,6 +954,12 @@ components:
         enabled:
           description: Enabled 表示是否开通 AICC。
           type: boolean
+        industry_knowledge_base_ids:
+          description: IndustryKnowledgeBaseIDs 是平台授予该企业、可供 AICC 智能体选择的行业知识库。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
       required:
       - enabled
       type: object
@@ -2565,6 +2571,12 @@ components:
         id:
           description: ID 是 manager 企业 UUID。
           type: string
+        industry_knowledge_base_ids:
+          description: IndustryKnowledgeBaseIDs 是平台授予该企业、可供 AICC 智能体选择的行业知识库。
+          items:
+            type: string
+          type: array
+          uniqueItems: false
         knowledge_quota_bytes:
           description: KnowledgeQuotaBytes 是企业知识库累计容量上限，单位字节。
           type: integer
@@ -10125,7 +10137,7 @@ paths:
       - organizations
   /organizations/{orgId}/aicc-config:
     patch:
-      description: 平台管理员开通或关闭企业 AICC，并设置智能体数量上限
+      description: 平台管理员开通或关闭企业 AICC，设置智能体数量上限并授权行业知识库
       parameters:
       - description: 企业 ID
         in: path

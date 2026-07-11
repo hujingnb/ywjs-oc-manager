@@ -152,6 +152,13 @@ func (s *KnowledgeService) DeleteIndustryKnowledgeBase(ctx context.Context, prin
 		if inUse > 0 {
 			return ErrIndustryKnowledgeInUse
 		}
+		organizationInUse, err := store.CountOrganizationsUsingIndustryKnowledgeBase(ctx, base.ID)
+		if err != nil {
+			return fmt.Errorf("检查企业行业库授权失败: %w", err)
+		}
+		if organizationInUse > 0 {
+			return ErrIndustryKnowledgeInUse
+		}
 		localDataset, err := store.GetRAGFlowIndustryDataset(ctx, null.StringFrom(base.ID))
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("查询行业知识库 RAGFlow dataset 失败: %w", err)

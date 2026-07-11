@@ -377,6 +377,36 @@ func TestOrganizationServiceUpdateAICCConfig(t *testing.T) {
 	assert.Equal(t, int32(5), *result.AICCAgentLimit)
 }
 
+// TestOrganizationServiceUpdateAICCConfigUpdatesIndustryKnowledge 验证平台配置的行业库授权会整组替换并在响应中回显。
+func TestOrganizationServiceUpdateAICCConfigUpdatesIndustryKnowledge(t *testing.T) {
+	store := &organizationStoreStub{org: sqlc.Organization{ID: "org-1", Name: "Org", Code: "org", Status: domain.StatusActive}}
+	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
+
+	result, err := svc.UpdateAICCConfig(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, "org-1", AICCConfigInput{
+		Enabled:                  true,
+		IndustryKnowledgeBaseIDs: []string{" industry-1 ", "industry-1", "industry-2"},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"industry-1", "industry-2"}, result.IndustryKnowledgeBaseIDs)
+	assert.Equal(t, []sqlc.IndustryKnowledgeBasis{{ID: "industry-1", Name: "industry-1"}, {ID: "industry-2", Name: "industry-2"}}, store.organizationIndustryBases)
+	assert.True(t, store.cleanedUnauthorizedAICCKnowledge)
+}
+
+// TestOrganizationServiceUpdateAICCConfigRejectsMissingIndustryKnowledge 验证不存在的行业库在替换授权前被拒绝。
+func TestOrganizationServiceUpdateAICCConfigRejectsMissingIndustryKnowledge(t *testing.T) {
+	store := &organizationStoreStub{org: sqlc.Organization{ID: "org-1", Name: "Org", Code: "org", Status: domain.StatusActive}}
+	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
+
+	_, err := svc.UpdateAICCConfig(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, "org-1", AICCConfigInput{
+		Enabled:                  true,
+		IndustryKnowledgeBaseIDs: []string{"missing"},
+	})
+
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	assert.False(t, store.updateAICCConfigCalled)
+}
+
 // TestOrganizationServiceUpdateAICCConfigRejectsOrgAdmin 验证企业管理员不能修改平台开通配置。
 func TestOrganizationServiceUpdateAICCConfigRejectsOrgAdmin(t *testing.T) {
 	store := &organizationStoreStub{org: sqlc.Organization{ID: "org-1", Name: "Org", Code: "org", Status: domain.StatusActive}}
@@ -498,21 +528,23 @@ func (p *fakeProvisioner) DeleteUser(_ context.Context, userID int64) error {
 }
 
 type organizationStoreStub struct {
-	org                    sqlc.Organization
-	orgAdmin               sqlc.User
-	created                sqlc.CreateOrganizationParams
-	updated                sqlc.SetOrganizationNewAPIUserParams
-	createdUser            sqlc.CreateUserParams
-	createErr              error
-	createCalled           bool
-	updateCalled           bool
-	updateProfileCalled    bool
-	updateAICCConfigCalled bool
-	updateAICCConfigErr    error
-	createUserCalled       bool
-	hardDeleted            bool
-	updatedProfile         sqlc.UpdateOrganizationProfileParams
-	updatedAICCConfig      sqlc.UpdateOrganizationAICCConfigParams
+	org                              sqlc.Organization
+	orgAdmin                         sqlc.User
+	created                          sqlc.CreateOrganizationParams
+	updated                          sqlc.SetOrganizationNewAPIUserParams
+	createdUser                      sqlc.CreateUserParams
+	createErr                        error
+	createCalled                     bool
+	updateCalled                     bool
+	updateProfileCalled              bool
+	updateAICCConfigCalled           bool
+	updateAICCConfigErr              error
+	createUserCalled                 bool
+	hardDeleted                      bool
+	updatedProfile                   sqlc.UpdateOrganizationProfileParams
+	updatedAICCConfig                sqlc.UpdateOrganizationAICCConfigParams
+	organizationIndustryBases        []sqlc.IndustryKnowledgeBasis
+	cleanedUnauthorizedAICCKnowledge bool
 }
 
 func (s *organizationStoreStub) CreateOrganization(_ context.Context, arg sqlc.CreateOrganizationParams) error {
@@ -601,6 +633,37 @@ func (s *organizationStoreStub) UpdateOrganizationAICCConfig(_ context.Context, 
 	s.org.AiccEnabled = arg.AiccEnabled
 	s.org.AiccAgentLimit = arg.AiccAgentLimit
 	return nil
+}
+
+// GetIndustryKnowledgeBase 模拟平台行业库仍可用，供 AICC 授权配置的存在性校验使用。
+func (s *organizationStoreStub) GetIndustryKnowledgeBase(_ context.Context, id string) (sqlc.IndustryKnowledgeBasis, error) {
+	if id == "missing" {
+		return sqlc.IndustryKnowledgeBasis{}, sql.ErrNoRows
+	}
+	return sqlc.IndustryKnowledgeBasis{ID: id, Name: id}, nil
+}
+
+// ReplaceOrganizationIndustryKnowledgeBases 清空测试桩中的企业行业库授权。
+func (s *organizationStoreStub) ReplaceOrganizationIndustryKnowledgeBases(_ context.Context, _ string) error {
+	s.organizationIndustryBases = nil
+	return nil
+}
+
+// AddOrganizationIndustryKnowledgeBase 追加测试桩授权项，并模拟真实查询的一行写入结果。
+func (s *organizationStoreStub) AddOrganizationIndustryKnowledgeBase(_ context.Context, arg sqlc.AddOrganizationIndustryKnowledgeBaseParams) (int64, error) {
+	s.organizationIndustryBases = append(s.organizationIndustryBases, sqlc.IndustryKnowledgeBasis{ID: arg.IndustryKnowledgeBaseID, Name: arg.IndustryKnowledgeBaseID})
+	return 1, nil
+}
+
+// DeleteAICCAgentIndustryKnowledgeNotAuthorizedByOrg 记录失效关联清理已触发。
+func (s *organizationStoreStub) DeleteAICCAgentIndustryKnowledgeNotAuthorizedByOrg(_ context.Context, _ string) error {
+	s.cleanedUnauthorizedAICCKnowledge = true
+	return nil
+}
+
+// ListOrganizationIndustryKnowledgeBases 返回测试桩中企业已授权的行业库，用于响应回显。
+func (s *organizationStoreStub) ListOrganizationIndustryKnowledgeBases(_ context.Context, _ string) ([]sqlc.IndustryKnowledgeBasis, error) {
+	return append([]sqlc.IndustryKnowledgeBasis(nil), s.organizationIndustryBases...), nil
 }
 
 func (s *organizationStoreStub) mustSeedOrganization(t *testing.T, code string) sqlc.Organization {

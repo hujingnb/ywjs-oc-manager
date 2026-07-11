@@ -68,6 +68,16 @@ type OrganizationStore interface {
 	UpdateOrganizationProfile(ctx context.Context, arg sqlc.UpdateOrganizationProfileParams) error
 	// UpdateOrganizationAICCConfig 更新企业 AICC 开通配置（:exec），写入后通过 GetOrganization 读回。
 	UpdateOrganizationAICCConfig(ctx context.Context, arg sqlc.UpdateOrganizationAICCConfigParams) error
+	// GetIndustryKnowledgeBase 校验平台管理员提交的行业知识库仍存在且未删除。
+	GetIndustryKnowledgeBase(ctx context.Context, id string) (sqlc.IndustryKnowledgeBasis, error)
+	// ReplaceOrganizationIndustryKnowledgeBases 清空企业原有行业知识库授权。
+	ReplaceOrganizationIndustryKnowledgeBases(ctx context.Context, orgID string) error
+	// AddOrganizationIndustryKnowledgeBase 为企业追加一个已校验行业知识库授权。
+	AddOrganizationIndustryKnowledgeBase(ctx context.Context, arg sqlc.AddOrganizationIndustryKnowledgeBaseParams) (int64, error)
+	// DeleteAICCAgentIndustryKnowledgeNotAuthorizedByOrg 移除平台撤销授权后遗留在智能体上的行业库关联。
+	DeleteAICCAgentIndustryKnowledgeNotAuthorizedByOrg(ctx context.Context, orgID string) error
+	// ListOrganizationIndustryKnowledgeBases 读取企业当前行业知识库授权并回显到平台配置页。
+	ListOrganizationIndustryKnowledgeBases(ctx context.Context, orgID string) ([]sqlc.IndustryKnowledgeBasis, error)
 	// SetOrganizationStatus 更新组织状态（:exec），写入后通过 GetOrganization 读回。
 	SetOrganizationStatus(ctx context.Context, arg sqlc.SetOrganizationStatusParams) error
 }
@@ -174,6 +184,8 @@ type AICCConfigInput struct {
 	Enabled bool
 	// AgentLimit 是智能体数量上限；nil 表示不限。
 	AgentLimit *int32
+	// IndustryKnowledgeBaseIDs 是平台为企业授权的行业知识库 ID；空数组表示不授权任何行业库。
+	IndustryKnowledgeBaseIDs []string
 }
 
 // OrganizationResult 是企业对外响应视图，包含必要的 new-api 绑定状态。
@@ -210,6 +222,8 @@ type OrganizationResult struct {
 	AICCEnabled bool `json:"aicc_enabled"`
 	// AICCAgentLimit 是企业 AICC 智能体数量上限；nil 表示不限。
 	AICCAgentLimit *int32 `json:"aicc_agent_limit,omitempty"`
+	// IndustryKnowledgeBaseIDs 是平台授予该企业、可供 AICC 智能体选择的行业知识库。
+	IndustryKnowledgeBaseIDs []string `json:"industry_knowledge_base_ids"`
 }
 
 // CreateOrganization 创建组织：先 INSERT manager 端记录，再串联调 new-api 创业务 user 并落凭据密文。
@@ -539,7 +553,7 @@ func (s *OrganizationService) ListOrganizations(ctx context.Context, principal a
 	if err != nil {
 		return nil, fmt.Errorf("查询企业列表失败: %w", err)
 	}
-	return s.toOrganizationResultsWithAdminUsernames(ctx, orgs), nil
+	return s.toOrganizationResultsWithAdminUsernames(ctx, orgs)
 }
 
 // GetOrganization 根据角色限制组织访问范围。
@@ -554,7 +568,7 @@ func (s *OrganizationService) GetOrganization(ctx context.Context, principal aut
 	if err != nil {
 		return OrganizationResult{}, fmt.Errorf("查询企业失败: %w", err)
 	}
-	return s.toOrganizationResultWithAdminUsername(ctx, org), nil
+	return s.toOrganizationResultWithAdminUsername(ctx, org)
 }
 
 // UpdateOrganization 更新组织基础资料；生命周期状态必须走 enable/disable。
@@ -625,7 +639,7 @@ func (s *OrganizationService) UpdateOrganization(ctx context.Context, principal 
 	if err != nil {
 		return OrganizationResult{}, fmt.Errorf("读取更新后企业失败: %w", err)
 	}
-	return s.toOrganizationResultWithAdminUsername(ctx, org), nil
+	return s.toOrganizationResultWithAdminUsername(ctx, org)
 }
 
 // UpdateAICCConfig 更新企业 AICC 开通状态和智能体数量上限。
@@ -637,6 +651,18 @@ func (s *OrganizationService) UpdateAICCConfig(ctx context.Context, principal au
 	if input.AgentLimit != nil && *input.AgentLimit < 0 {
 		return OrganizationResult{}, fmt.Errorf("%w: AICC 智能体数量上限不能为负数", ErrInvalidArgument)
 	}
+	industryIDs, err := normalizeAICCKnowledgeIDs(input.IndustryKnowledgeBaseIDs, 20, "行业知识库")
+	if err != nil {
+		return OrganizationResult{}, err
+	}
+	// 先验证所有行业库，避免整组替换过程中因无效 ID 留下部分授权。
+	for _, id := range industryIDs {
+		if _, err := s.store.GetIndustryKnowledgeBase(ctx, id); errors.Is(err, sql.ErrNoRows) {
+			return OrganizationResult{}, fmt.Errorf("%w: 行业知识库不存在", ErrInvalidArgument)
+		} else if err != nil {
+			return OrganizationResult{}, fmt.Errorf("校验行业知识库失败: %w", err)
+		}
+	}
 	// UpdateOrganizationAICCConfig 为 :exec；写入后回读组织，确保响应包含数据库最终状态。
 	if err := s.store.UpdateOrganizationAICCConfig(ctx, sqlc.UpdateOrganizationAICCConfigParams{
 		AiccEnabled:    input.Enabled,
@@ -645,6 +671,24 @@ func (s *OrganizationService) UpdateAICCConfig(ctx context.Context, principal au
 	}); err != nil {
 		return OrganizationResult{}, fmt.Errorf("更新企业 AICC 配置失败: %w", err)
 	}
+	if err := s.store.ReplaceOrganizationIndustryKnowledgeBases(ctx, orgID); err != nil {
+		return OrganizationResult{}, fmt.Errorf("清空企业行业知识库授权失败: %w", err)
+	}
+	for _, id := range industryIDs {
+		affected, err := s.store.AddOrganizationIndustryKnowledgeBase(ctx, sqlc.AddOrganizationIndustryKnowledgeBaseParams{
+			OrgID:                   orgID,
+			IndustryKnowledgeBaseID: id,
+		})
+		if err != nil {
+			return OrganizationResult{}, fmt.Errorf("保存企业行业知识库授权失败: %w", err)
+		}
+		if affected != 1 {
+			return OrganizationResult{}, fmt.Errorf("%w: 行业知识库不存在", ErrInvalidArgument)
+		}
+	}
+	if err := s.store.DeleteAICCAgentIndustryKnowledgeNotAuthorizedByOrg(ctx, orgID); err != nil {
+		return OrganizationResult{}, fmt.Errorf("清理智能体失效行业知识库关联失败: %w", err)
+	}
 	org, err := s.store.GetOrganization(ctx, orgID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return OrganizationResult{}, ErrNotFound
@@ -652,7 +696,7 @@ func (s *OrganizationService) UpdateAICCConfig(ctx context.Context, principal au
 	if err != nil {
 		return OrganizationResult{}, fmt.Errorf("读取企业失败: %w", err)
 	}
-	return toOrganizationResult(org), nil
+	return s.toOrganizationResultWithAdminUsername(ctx, org)
 }
 
 // SetOrganizationStatus 启用或禁用企业；软删除后续由删除流程单独处理。
@@ -674,7 +718,7 @@ func (s *OrganizationService) SetOrganizationStatus(ctx context.Context, princip
 	if err != nil {
 		return OrganizationResult{}, fmt.Errorf("读取状态更新后企业失败: %w", err)
 	}
-	return s.toOrganizationResultWithAdminUsername(ctx, org), nil
+	return s.toOrganizationResultWithAdminUsername(ctx, org)
 }
 
 // DecryptOrganizationCredentials 把组织的 newapi_user_credentials_ciphertext 还原为明文凭据。
@@ -712,20 +756,32 @@ func toOrganizationResults(orgs []sqlc.Organization) []OrganizationResult {
 
 // toOrganizationResultsWithAdminUsernames 在组织基础视图上补充管理员用户名。
 // 密码明文只在创建请求里短暂出现，数据库只保存 hash，因此响应不会也不能包含管理员密码。
-func (s *OrganizationService) toOrganizationResultsWithAdminUsernames(ctx context.Context, orgs []sqlc.Organization) []OrganizationResult {
-	results := toOrganizationResults(orgs)
-	for idx, org := range orgs {
-		results[idx].AdminUsername = s.getOrgAdminUsername(ctx, org.ID)
+func (s *OrganizationService) toOrganizationResultsWithAdminUsernames(ctx context.Context, orgs []sqlc.Organization) ([]OrganizationResult, error) {
+	results := make([]OrganizationResult, 0, len(orgs))
+	for _, org := range orgs {
+		result, err := s.toOrganizationResultWithAdminUsername(ctx, org)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, result)
 	}
-	return results
+	return results, nil
 }
 
 // toOrganizationResultWithAdminUsername 为单组织响应补充管理员用户名；查不到管理员时保留空值，
 // 避免一个历史异常组织阻断组织资料、状态切换等主流程。
-func (s *OrganizationService) toOrganizationResultWithAdminUsername(ctx context.Context, org sqlc.Organization) OrganizationResult {
+func (s *OrganizationService) toOrganizationResultWithAdminUsername(ctx context.Context, org sqlc.Organization) (OrganizationResult, error) {
 	result := toOrganizationResult(org)
 	result.AdminUsername = s.getOrgAdminUsername(ctx, org.ID)
-	return result
+	bases, err := s.store.ListOrganizationIndustryKnowledgeBases(ctx, org.ID)
+	if err != nil {
+		return OrganizationResult{}, fmt.Errorf("查询企业行业知识库授权失败: %w", err)
+	}
+	result.IndustryKnowledgeBaseIDs = make([]string, 0, len(bases))
+	for _, base := range bases {
+		result.IndustryKnowledgeBaseIDs = append(result.IndustryKnowledgeBaseIDs, base.ID)
+	}
+	return result, nil
 }
 
 // getOrgAdminUsername 查询企业下最早创建且未下线的 org_admin。
@@ -769,6 +825,7 @@ func toOrganizationResult(org sqlc.Organization) OrganizationResult {
 		AssistantVersionIDs:           versionIDs,
 		AICCEnabled:                   org.AiccEnabled,
 		AICCAgentLimit:                int32PtrFromNullInt(org.AiccAgentLimit),
+		IndustryKnowledgeBaseIDs:      []string{},
 	}
 }
 

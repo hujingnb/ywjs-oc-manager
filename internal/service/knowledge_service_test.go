@@ -578,6 +578,18 @@ func TestDeleteIndustryKnowledgeBaseDetectsConcurrentVersionReference(t *testing
 	assert.Empty(t, rf.deleteDatasetCalls)
 }
 
+// TestDeleteIndustryKnowledgeBaseRejectsOrganizationAuthorization 验证已授权给企业的行业库不能被平台直接删除。
+func TestDeleteIndustryKnowledgeBaseRejectsOrganizationAuthorization(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	store.organizationIndustryInUseCount = 1
+
+	err := svc.DeleteIndustryKnowledgeBase(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, testIndustryKnowledgeBaseID)
+
+	require.ErrorIs(t, err, ErrIndustryKnowledgeInUse)
+	assert.Empty(t, store.deletedIndustryBaseID)
+	assert.Empty(t, rf.deleteDatasetCalls)
+}
+
 // TestUploadToDatasetRejectsScopeMismatchBeforeRemoteUpload 验证上传目标作用域与 dataset 不匹配时会在远端上传前失败。
 func TestUploadToDatasetRejectsScopeMismatchBeforeRemoteUpload(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
@@ -1179,49 +1191,50 @@ func newFakeKnowledgeStore(t *testing.T) *fakeKnowledgeStore {
 }
 
 type fakeKnowledgeStore struct {
-	apps                        map[string]sqlc.App
-	appsByToken                 map[string]sqlc.App
-	org                         sqlc.Organization
-	orgDataset                  sqlc.RagflowDataset
-	appDataset                  sqlc.RagflowDataset
-	industryBases               map[string]sqlc.IndustryKnowledgeBasis
-	industryDataset             sqlc.RagflowDataset
-	industryDatasets            map[string]sqlc.RagflowDataset
-	versionIndustryBases        map[string][]sqlc.IndustryKnowledgeBasis
-	aiccAgentsByApp             map[string]sqlc.AiccAgent
-	aiccKnowledge               map[string][]sqlc.AiccAgentKnowledge
-	missingOrgDataset           bool
-	missingAppDataset           bool
-	missingIndustryDataset      bool
-	missingOrgDatasetOnce       bool
-	missingAppDatasetOnce       bool
-	createIndustryDuplicateOnce bool
-	getOrganizationErr          error
-	getOrgDatasetErr            error
-	createOrgDatasetErr         error
-	createAppDatasetErr         error
-	replaceIndustryDocumentErr  error
-	replaceConcurrentRemoteID   string
-	claimDatasetErr             error
-	setActiveErr                error
-	deleteDatasetMappingErr     error
-	setActiveLosesClaim         bool
-	docs                        map[string]sqlc.RagflowDocument
-	createdDatasets             []createdDatasetCall
-	claimedDatasets             []sqlc.ClaimRAGFlowDatasetCreationParams
-	activatedDatasets           []sqlc.SetRAGFlowDatasetActiveParams
-	failedDatasets              []sqlc.MarkRAGFlowDatasetFailedParams
-	createdDocs                 []sqlc.CreateRAGFlowDocumentParams
-	createdIndustryDocs         []sqlc.CreateRAGFlowIndustryDocumentParams
-	deletedDatasetID            string
-	deletedIndustryBaseID       string
-	softDeleteIndustryAffected  int64
-	industryInUseCount          int64
-	getOrgDatasetCalls          int
-	nextDocument                string
-	now                         time.Time
-	events                      *[]string
-	manualReparseQueuedIDs      []string
+	apps                           map[string]sqlc.App
+	appsByToken                    map[string]sqlc.App
+	org                            sqlc.Organization
+	orgDataset                     sqlc.RagflowDataset
+	appDataset                     sqlc.RagflowDataset
+	industryBases                  map[string]sqlc.IndustryKnowledgeBasis
+	industryDataset                sqlc.RagflowDataset
+	industryDatasets               map[string]sqlc.RagflowDataset
+	versionIndustryBases           map[string][]sqlc.IndustryKnowledgeBasis
+	aiccAgentsByApp                map[string]sqlc.AiccAgent
+	aiccKnowledge                  map[string][]sqlc.AiccAgentKnowledge
+	missingOrgDataset              bool
+	missingAppDataset              bool
+	missingIndustryDataset         bool
+	missingOrgDatasetOnce          bool
+	missingAppDatasetOnce          bool
+	createIndustryDuplicateOnce    bool
+	getOrganizationErr             error
+	getOrgDatasetErr               error
+	createOrgDatasetErr            error
+	createAppDatasetErr            error
+	replaceIndustryDocumentErr     error
+	replaceConcurrentRemoteID      string
+	claimDatasetErr                error
+	setActiveErr                   error
+	deleteDatasetMappingErr        error
+	setActiveLosesClaim            bool
+	docs                           map[string]sqlc.RagflowDocument
+	createdDatasets                []createdDatasetCall
+	claimedDatasets                []sqlc.ClaimRAGFlowDatasetCreationParams
+	activatedDatasets              []sqlc.SetRAGFlowDatasetActiveParams
+	failedDatasets                 []sqlc.MarkRAGFlowDatasetFailedParams
+	createdDocs                    []sqlc.CreateRAGFlowDocumentParams
+	createdIndustryDocs            []sqlc.CreateRAGFlowIndustryDocumentParams
+	deletedDatasetID               string
+	deletedIndustryBaseID          string
+	softDeleteIndustryAffected     int64
+	industryInUseCount             int64
+	organizationIndustryInUseCount int64
+	getOrgDatasetCalls             int
+	nextDocument                   string
+	now                            time.Time
+	events                         *[]string
+	manualReparseQueuedIDs         []string
 }
 
 // createdDatasetCall 记录 CreateRAGFlowOrgDatasetMapping / CreateRAGFlowAppDatasetMapping 调用参数。
@@ -1386,6 +1399,11 @@ func (s *fakeKnowledgeStore) SoftDeleteIndustryKnowledgeBase(_ context.Context, 
 
 func (s *fakeKnowledgeStore) CountAssistantVersionsUsingIndustryKnowledgeBase(_ context.Context, _ string) (int64, error) {
 	return s.industryInUseCount, nil
+}
+
+// CountOrganizationsUsingIndustryKnowledgeBase 返回测试预置的企业授权引用数。
+func (s *fakeKnowledgeStore) CountOrganizationsUsingIndustryKnowledgeBase(_ context.Context, _ string) (int64, error) {
+	return s.organizationIndustryInUseCount, nil
 }
 
 func (s *fakeKnowledgeStore) ListIndustryKnowledgeBasesByAssistantVersion(_ context.Context, versionID string) ([]sqlc.IndustryKnowledgeBasis, error) {

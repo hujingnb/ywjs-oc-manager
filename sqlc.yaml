@@ -30,6 +30,7 @@ sql:
       - internal/migrations/000028_aicc.up.sql
       - internal/migrations/000029_aicc_lead_fields_soft_delete.up.sql
       - internal/migrations/000030_aicc_settings.up.sql
+      - internal/migrations/000031_aicc_org_industry_knowledge.up.sql
     queries: internal/store/queries
     gen:
       go:

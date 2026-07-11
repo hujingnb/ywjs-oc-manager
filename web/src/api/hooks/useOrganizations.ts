@@ -135,6 +135,8 @@ export interface OrganizationAICCConfigPayload {
   enabled: boolean
   // agent_limit 是智能体数量上限；null/undefined 表示不限。
   agent_limit?: number | null
+  // industry_knowledge_base_ids 是平台为该企业授权的行业知识库；空数组表示不授权任何行业库。
+  industry_knowledge_base_ids: string[]
 }
 
 // useUpdateOrganization 更新组织资料与助手版本 allowlist，自动失效列表缓存。

@@ -10520,7 +10520,7 @@ export interface paths {
         head?: never;
         /**
          * 更新企业 AICC 配置
-         * @description 平台管理员开通或关闭企业 AICC，并设置智能体数量上限
+         * @description 平台管理员开通或关闭企业 AICC，设置智能体数量上限并授权行业知识库
          */
         patch: {
             parameters: {
@@ -15960,6 +15960,8 @@ export interface components {
             agent_limit?: number;
             /** @description Enabled 表示是否开通 AICC。 */
             enabled: boolean;
+            /** @description IndustryKnowledgeBaseIDs 是平台授予该企业、可供 AICC 智能体选择的行业知识库。 */
+            industry_knowledge_base_ids?: string[];
         };
         "ocops.ConversationChatResult": {
             message?: components["schemas"]["ocops.ConversationMessage"];
@@ -16964,6 +16966,8 @@ export interface components {
             default_app_knowledge_quota_bytes?: number;
             /** @description ID 是 manager 企业 UUID。 */
             id?: string;
+            /** @description IndustryKnowledgeBaseIDs 是平台授予该企业、可供 AICC 智能体选择的行业知识库。 */
+            industry_knowledge_base_ids?: string[];
             /** @description KnowledgeQuotaBytes 是企业知识库累计容量上限，单位字节。 */
             knowledge_quota_bytes?: number;
             /** @description MaxInstanceCount 是企业实例数量上限；nil 表示不限制。 */

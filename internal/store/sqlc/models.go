@@ -451,6 +451,12 @@ type Organization struct {
 	AiccAgentLimit null.Int `db:"aicc_agent_limit" json:"aicc_agent_limit"`
 }
 
+type OrganizationIndustryKnowledgeBasis struct {
+	OrgID                   string    `db:"org_id" json:"org_id"`
+	IndustryKnowledgeBaseID string    `db:"industry_knowledge_base_id" json:"industry_knowledge_base_id"`
+	CreatedAt               time.Time `db:"created_at" json:"created_at"`
+}
+
 // 平台库 skill，平台管理员维护，多版本共存
 type PlatformSkill struct {
 	// 主键 UUID

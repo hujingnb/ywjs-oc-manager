@@ -15,6 +15,8 @@ type Querier interface {
 	AddAICCAgentKnowledge(ctx context.Context, arg AddAICCAgentKnowledgeParams) error
 	// 为助手版本追加一个行业知识库关联；只允许关联未删除行业库，复合主键保证同一版本不重复关联。
 	AddAssistantVersionIndustryKnowledgeBase(ctx context.Context, arg AddAssistantVersionIndustryKnowledgeBaseParams) (int64, error)
+	// 仅允许授权未删除的行业知识库；受影响行数为零表示提交了不存在的行业库。
+	AddOrganizationIndustryKnowledgeBase(ctx context.Context, arg AddOrganizationIndustryKnowledgeBaseParams) (int64, error)
 	// 判断指定应用下是否存在 status='bound' 的渠道绑定。
 	// app_initialize 在推进到 binding_waiting 之后调用：若发现已 bound（如切换助手
 	// 版本触发镜像重建后、容器重启前渠道凭证依旧落在 bind mount 目录、无需用户
@@ -56,6 +58,8 @@ type Querier interface {
 	CountChannelBindingsByApp(ctx context.Context, appID string) (int64, error)
 	// 统计行业知识库列表总数，过滤条件必须与 ListIndustryKnowledgeBases 保持一致。
 	CountIndustryKnowledgeBases(ctx context.Context, arg CountIndustryKnowledgeBasesParams) (int64, error)
+	// 统计平台已授权该行业库的企业，防止删除仍可被 AICC 使用的行业库。
+	CountOrganizationsUsingIndustryKnowledgeBase(ctx context.Context, industryKnowledgeBaseID string) (int64, error)
 	// 严格保护：版本出现在任意未删除组织 allowlist 时不可删除。
 	CountOrgsUsingVersion(ctx context.Context, jsonQUOTE string) (int64, error)
 	CountPendingSkillTickets(ctx context.Context) (int64, error)
@@ -102,6 +106,8 @@ type Querier interface {
 	CreateSkillTicketMessage(ctx context.Context, arg CreateSkillTicketMessageParams) error
 	CreateUser(ctx context.Context, arg CreateUserParams) error
 	DeactivateAICCLeadFieldsByAgent(ctx context.Context, agentID string) error
+	// 平台撤销企业行业库授权时，立即移除该企业全部智能体的失效行业库关联，避免历史配置继续参与检索。
+	DeleteAICCAgentIndustryKnowledgeNotAuthorizedByOrg(ctx context.Context, orgID string) error
 	DeleteAICCAgentKnowledgeByAgent(ctx context.Context, agentID string) error
 	DeleteAICCBlockedVisitor(ctx context.Context, arg DeleteAICCBlockedVisitorParams) (int64, error)
 	DeleteAICCSession(ctx context.Context, id string) error
@@ -245,6 +251,8 @@ type Querier interface {
 	ListIndustryKnowledgeBases(ctx context.Context, arg ListIndustryKnowledgeBasesParams) ([]ListIndustryKnowledgeBasesRow, error)
 	// 列出助手版本关联的未删除行业知识库，供发布配置和运行时检索范围使用。
 	ListIndustryKnowledgeBasesByAssistantVersion(ctx context.Context, versionID string) ([]IndustryKnowledgeBasis, error)
+	// 列出企业已获授权且未删除的行业知识库，供 AICC 配置候选项和平台配置回显使用。
+	ListOrganizationIndustryKnowledgeBases(ctx context.Context, orgID string) ([]IndustryKnowledgeBasis, error)
 	ListOrganizations(ctx context.Context, arg ListOrganizationsParams) ([]Organization, error)
 	ListPlatformSkills(ctx context.Context) ([]PlatformSkill, error)
 	// 扁平列出某个组织或实例知识库文件，支持按状态和文件名过滤。
@@ -321,6 +329,8 @@ type Querier interface {
 	RenewPublishedSite(ctx context.Context, arg RenewPublishedSiteParams) error
 	// 替换助手版本行业知识库关联前先清空旧关联，由调用方在同一事务中重新插入。
 	ReplaceAssistantVersionIndustryKnowledgeBases(ctx context.Context, versionID string) error
+	// 企业行业库授权使用整组替换，避免平台配置中的增删产生残留授权。
+	ReplaceOrganizationIndustryKnowledgeBases(ctx context.Context, orgID string) error
 	// 覆盖行业库同名文件时按旧远端 document ID 乐观替换本地映射；created_by 表示最近一次覆盖上传人，created_at 仍保留首创时间。
 	ReplaceRAGFlowIndustryDocument(ctx context.Context, arg ReplaceRAGFlowIndustryDocumentParams) error
 	// reaper 把已 running / succeeded 的 job 重置为 pending。

@@ -32,7 +32,7 @@
 | AICC-LEAD-03 | 线索列表、已读、关联会话和 CSV 正确 | `aicc.spec.ts` 覆盖完整闭环 | Chromium 已验证列表、自动已读、关联对话和 CSV | PASS |
 | AICC-KB-01 | 当前客服知识库始终参与检索 | `aicc-knowledge.spec.ts` 上传、解析、公开问答 | Chromium 已验证唯一口令命中；关闭企业库后仍可命中 | PASS |
 | AICC-KB-02 | 企业知识库可启用和停用 | `aicc-knowledge.spec.ts` 启用、停用和公开问答 | Chromium 已验证启用命中、停用后不再返回企业口令 | PASS |
-| AICC-KB-03 | 只能选择平台授权的行业知识库 | 待执行 | 待执行 | BLOCKED |
+| AICC-KB-03 | 只能选择平台授权的行业知识库 | `organization_service_test.go`、`aicc_service_test.go`、`OrganizationsPage.spec.ts` | Chrome DevTools 真实浏览器验证平台创建行业库、授权企业、企业管理员选择并保存；撤销授权后旧关联被清理且候选为空 | PASS |
 | AICC-KB-04 | 当前客服知识库可上传、解析、下载和删除 | `aicc-knowledge.spec.ts` | Chromium 已验证上传、RAGFlow 完成解析、下载和删除 | PASS |
 | AICC-KB-05 | RAGFlow 故障和无匹配知识行为稳定 | 待执行 | 待执行 | BLOCKED |
 | AICC-CHAT-01 | 知识问答实际调用 oc-kb 并返回命中内容 | `aicc-knowledge.spec.ts` | Chromium 经真实 Hermes/new-api/RAGFlow 返回当前客服和企业唯一口令 | PASS |

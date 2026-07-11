@@ -183,6 +183,16 @@
               </n-form-item>
             </n-grid-item>
             <n-grid-item :span="2">
+              <n-form-item :label="t('platform.orgs.form.labelAICCIndustryKnowledge')">
+                <n-select
+                  v-model:value="editForm.industry_knowledge_base_ids"
+                  multiple filterable clearable
+                  :options="industryKnowledgeOptions"
+                  :placeholder="t('platform.orgs.form.placeholderAICCIndustryKnowledge')"
+                />
+              </n-form-item>
+            </n-grid-item>
+            <n-grid-item :span="2">
               <n-space justify="end">
                 <n-button
                   attr-type="button"
@@ -348,6 +358,7 @@ import {
 } from '@/api/hooks/useOrganizations'
 import type { OrganizationFormPayload } from '@/api/hooks/useOrganizations'
 import { useAssistantVersionsQuery } from '@/api/hooks/useAssistantVersions'
+import { useIndustryKnowledgeBasesQuery } from '@/api/hooks/useIndustryKnowledge'
 import { apiRequest } from '@/api/client'
 import { useBillingStatusQuery, useOrgBalanceQuery, useRechargeMutation, useRechargesQuery } from '@/api/hooks/useRecharge'
 import type { BalanceDTO } from '@/api/hooks/useRecharge'
@@ -372,6 +383,12 @@ const modalMode = ref<'create' | 'edit'>('create')
 const editingOrg = ref<Organization | null>(null)
 // editFormVisible 控制编辑模式下表单的显隐（与 formVisible 分离以避免状态混用）。
 const editFormVisible = ref(false)
+// 行业知识库是平台资源，仅在编辑企业时加载，作为 AICC 企业授权的多选来源。
+const industryKnowledgeBasesQuery = useIndustryKnowledgeBasesQuery(() => editFormVisible.value)
+const industryKnowledgeOptions = computed(() => (industryKnowledgeBasesQuery.data.value?.items ?? []).map(base => ({
+  label: base.name,
+  value: base.id,
+})))
 // knowledgeQuotaGBDefault 是企业表单默认展示的知识库空间，固定为 1GB。
 const knowledgeQuotaGBDefault = 1
 // bytesPerGB 用于将表单中的 GB 输入换算成后端接收的 bytes。
@@ -435,6 +452,7 @@ const editForm = reactive({
   assistant_version_ids: [] as string[],
   aicc_enabled: false,
   aicc_agent_limit: undefined as number | undefined,
+  industry_knowledge_base_ids: [] as string[],
 })
 // editSubmitting 控制编辑提交中的 loading 状态。
 const editSubmitting = ref(false)
@@ -471,6 +489,8 @@ function openEditForm(org: Organization) {
   editForm.aicc_enabled = Boolean(org.aicc_enabled)
   editForm.aicc_agent_limit = typeof org.aicc_agent_limit === 'number'
     ? org.aicc_agent_limit : undefined
+  editForm.industry_knowledge_base_ids = org.industry_knowledge_base_ids
+    ? [...org.industry_knowledge_base_ids] : []
   editError.value = null
   aiccConfigError.value = null
   editFormVisible.value = true
@@ -534,6 +554,7 @@ async function submitAICCConfig() {
       payload: {
         enabled: editForm.aicc_enabled,
         agent_limit: typeof editForm.aicc_agent_limit === 'number' ? editForm.aicc_agent_limit : null,
+        industry_knowledge_base_ids: [...editForm.industry_knowledge_base_ids],
       },
     })
   } catch (err) {

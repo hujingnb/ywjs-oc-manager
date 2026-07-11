@@ -23,6 +23,7 @@ export default {
       personalKnowledgeQuotaHint: '该企业新建实例的默认个人知识库空间上限。仅对之后新建的实例生效，不影响已有实例；平台管理员仍可在实例中单独调整。',
       labelAICCEnabled: '开通 AICC',
       labelAICCAgentLimit: 'AICC 智能体数量上限',
+      labelAICCIndustryKnowledge: '授权行业知识库',
       saveAICCConfig: '保存 AICC 配置',
       labelRemark: '备注',
       labelVersions: '可用助手版本',
@@ -35,6 +36,7 @@ export default {
       placeholderPhone: '手机号',
       placeholderMaxInstance: '留空表示不限制',
       placeholderAICCAgentLimit: '留空表示不限制',
+      placeholderAICCIndustryKnowledge: '选择该企业的 AICC 可用行业知识库（可多选）',
       placeholderVersions: '选择该企业可用的助手版本（可多选，可留空）',
     },
     columns: {

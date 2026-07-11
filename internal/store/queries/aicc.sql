@@ -42,6 +42,22 @@ ORDER BY scope_type ASC, scope_identity_key ASC;
 DELETE FROM aicc_agent_knowledge
 WHERE agent_id = ?;
 
+-- name: DeleteAICCAgentIndustryKnowledgeNotAuthorizedByOrg :exec
+-- 平台撤销企业行业库授权时，立即移除该企业全部智能体的失效行业库关联，避免历史配置继续参与检索。
+DELETE ak
+FROM aicc_agent_knowledge ak
+JOIN aicc_agents aa
+  ON aa.id = ak.agent_id
+ AND aa.org_id = ak.agent_org_id
+WHERE aa.org_id = sqlc.arg(org_id)
+  AND ak.scope_type = 'industry'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM organization_industry_knowledge_bases oikb
+    WHERE oikb.org_id = aa.org_id
+      AND oikb.industry_knowledge_base_id = ak.industry_knowledge_base_id
+  );
+
 -- name: AddAICCAgentKnowledge :exec
 INSERT INTO aicc_agent_knowledge (
     id, agent_id, agent_org_id, scope_type, org_id, app_id,

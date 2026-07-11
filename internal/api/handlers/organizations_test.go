@@ -172,7 +172,7 @@ func TestOrganizationsHandlerUpdateAICCConfig(t *testing.T) {
 	router := newOrganizationsTestRouter(t, svc)
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPatch, "/api/v1/organizations/org-1/aicc-config", bytes.NewBufferString(`{"enabled":true,"agent_limit":5}`))
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/organizations/org-1/aicc-config", bytes.NewBufferString(`{"enabled":true,"agent_limit":5,"industry_knowledge_base_ids":["industry-1"]}`))
 	request.Header.Set("Content-Type", "application/json")
 	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(recorder, request)
@@ -182,6 +182,7 @@ func TestOrganizationsHandlerUpdateAICCConfig(t *testing.T) {
 	assert.True(t, svc.lastAICCConfigInput.Enabled)
 	require.NotNil(t, svc.lastAICCConfigInput.AgentLimit)
 	assert.Equal(t, int32(5), *svc.lastAICCConfigInput.AgentLimit)
+	assert.Equal(t, []string{"industry-1"}, svc.lastAICCConfigInput.IndustryKnowledgeBaseIDs)
 }
 
 // TestOrganizationsHandlerUpdateAICCConfigAllowsDisable 覆盖正常路径：显式 enabled=false 应合法透传，不能被必填校验误拒绝。

@@ -60,6 +60,11 @@ WHERE ikb.id = ? AND ikb.deleted_at IS NULL
     JOIN assistant_versions av ON av.id = avikb.version_id
     WHERE av.deleted_at IS NULL
       AND avikb.industry_knowledge_base_id = ikb.id
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM organization_industry_knowledge_bases oikb
+    WHERE oikb.industry_knowledge_base_id = ikb.id
   );
 
 -- name: CountAssistantVersionsUsingIndustryKnowledgeBase :one
@@ -69,6 +74,34 @@ FROM assistant_version_industry_knowledge_bases avikb
 JOIN assistant_versions av ON av.id = avikb.version_id
 WHERE av.deleted_at IS NULL
   AND avikb.industry_knowledge_base_id = ?;
+
+-- name: CountOrganizationsUsingIndustryKnowledgeBase :one
+-- 统计平台已授权该行业库的企业，防止删除仍可被 AICC 使用的行业库。
+SELECT count(*)
+FROM organization_industry_knowledge_bases
+WHERE industry_knowledge_base_id = ?;
+
+-- name: ListOrganizationIndustryKnowledgeBases :many
+-- 列出企业已获授权且未删除的行业知识库，供 AICC 配置候选项和平台配置回显使用。
+SELECT ikb.*
+FROM organization_industry_knowledge_bases oikb
+JOIN industry_knowledge_bases ikb ON ikb.id = oikb.industry_knowledge_base_id
+WHERE oikb.org_id = ?
+  AND ikb.deleted_at IS NULL
+ORDER BY ikb.name ASC, ikb.id ASC;
+
+-- name: ReplaceOrganizationIndustryKnowledgeBases :exec
+-- 企业行业库授权使用整组替换，避免平台配置中的增删产生残留授权。
+DELETE FROM organization_industry_knowledge_bases
+WHERE org_id = ?;
+
+-- name: AddOrganizationIndustryKnowledgeBase :execrows
+-- 仅允许授权未删除的行业知识库；受影响行数为零表示提交了不存在的行业库。
+INSERT INTO organization_industry_knowledge_bases (org_id, industry_knowledge_base_id)
+SELECT sqlc.arg(org_id), ikb.id
+FROM industry_knowledge_bases ikb
+WHERE ikb.id = sqlc.arg(industry_knowledge_base_id)
+  AND ikb.deleted_at IS NULL;
 
 -- name: ReplaceAssistantVersionIndustryKnowledgeBases :exec
 -- 替换助手版本行业知识库关联前先清空旧关联，由调用方在同一事务中重新插入。

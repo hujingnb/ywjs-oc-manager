@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS organization_industry_knowledge_bases;

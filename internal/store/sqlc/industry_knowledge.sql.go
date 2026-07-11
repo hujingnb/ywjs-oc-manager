@@ -34,6 +34,28 @@ func (q *Queries) AddAssistantVersionIndustryKnowledgeBase(ctx context.Context, 
 	return result.RowsAffected()
 }
 
+const addOrganizationIndustryKnowledgeBase = `-- name: AddOrganizationIndustryKnowledgeBase :execrows
+INSERT INTO organization_industry_knowledge_bases (org_id, industry_knowledge_base_id)
+SELECT ?, ikb.id
+FROM industry_knowledge_bases ikb
+WHERE ikb.id = ?
+  AND ikb.deleted_at IS NULL
+`
+
+type AddOrganizationIndustryKnowledgeBaseParams struct {
+	OrgID                   string `db:"org_id" json:"org_id"`
+	IndustryKnowledgeBaseID string `db:"industry_knowledge_base_id" json:"industry_knowledge_base_id"`
+}
+
+// 仅允许授权未删除的行业知识库；受影响行数为零表示提交了不存在的行业库。
+func (q *Queries) AddOrganizationIndustryKnowledgeBase(ctx context.Context, arg AddOrganizationIndustryKnowledgeBaseParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, addOrganizationIndustryKnowledgeBase, arg.OrgID, arg.IndustryKnowledgeBaseID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const countAssistantVersionsUsingIndustryKnowledgeBase = `-- name: CountAssistantVersionsUsingIndustryKnowledgeBase :one
 SELECT count(*)
 FROM assistant_version_industry_knowledge_bases avikb
@@ -64,6 +86,20 @@ type CountIndustryKnowledgeBasesParams struct {
 // 统计行业知识库列表总数，过滤条件必须与 ListIndustryKnowledgeBases 保持一致。
 func (q *Queries) CountIndustryKnowledgeBases(ctx context.Context, arg CountIndustryKnowledgeBasesParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countIndustryKnowledgeBases, arg.Keyword, arg.Keyword)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countOrganizationsUsingIndustryKnowledgeBase = `-- name: CountOrganizationsUsingIndustryKnowledgeBase :one
+SELECT count(*)
+FROM organization_industry_knowledge_bases
+WHERE industry_knowledge_base_id = ?
+`
+
+// 统计平台已授权该行业库的企业，防止删除仍可被 AICC 使用的行业库。
+func (q *Queries) CountOrganizationsUsingIndustryKnowledgeBase(ctx context.Context, industryKnowledgeBaseID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countOrganizationsUsingIndustryKnowledgeBase, industryKnowledgeBaseID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -263,6 +299,47 @@ func (q *Queries) ListIndustryKnowledgeBasesByAssistantVersion(ctx context.Conte
 	return items, nil
 }
 
+const listOrganizationIndustryKnowledgeBases = `-- name: ListOrganizationIndustryKnowledgeBases :many
+SELECT ikb.id, ikb.name, ikb.created_by, ikb.created_at, ikb.updated_at, ikb.deleted_at, ikb.name_active_key
+FROM organization_industry_knowledge_bases oikb
+JOIN industry_knowledge_bases ikb ON ikb.id = oikb.industry_knowledge_base_id
+WHERE oikb.org_id = ?
+  AND ikb.deleted_at IS NULL
+ORDER BY ikb.name ASC, ikb.id ASC
+`
+
+// 列出企业已获授权且未删除的行业知识库，供 AICC 配置候选项和平台配置回显使用。
+func (q *Queries) ListOrganizationIndustryKnowledgeBases(ctx context.Context, orgID string) ([]IndustryKnowledgeBasis, error) {
+	rows, err := q.db.QueryContext(ctx, listOrganizationIndustryKnowledgeBases, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []IndustryKnowledgeBasis{}
+	for rows.Next() {
+		var i IndustryKnowledgeBasis
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.NameActiveKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const renameIndustryKnowledgeBase = `-- name: RenameIndustryKnowledgeBase :exec
 UPDATE industry_knowledge_bases
 SET name = ?, updated_at = now()
@@ -291,6 +368,17 @@ func (q *Queries) ReplaceAssistantVersionIndustryKnowledgeBases(ctx context.Cont
 	return err
 }
 
+const replaceOrganizationIndustryKnowledgeBases = `-- name: ReplaceOrganizationIndustryKnowledgeBases :exec
+DELETE FROM organization_industry_knowledge_bases
+WHERE org_id = ?
+`
+
+// 企业行业库授权使用整组替换，避免平台配置中的增删产生残留授权。
+func (q *Queries) ReplaceOrganizationIndustryKnowledgeBases(ctx context.Context, orgID string) error {
+	_, err := q.db.ExecContext(ctx, replaceOrganizationIndustryKnowledgeBases, orgID)
+	return err
+}
+
 const softDeleteIndustryKnowledgeBase = `-- name: SoftDeleteIndustryKnowledgeBase :execrows
 UPDATE industry_knowledge_bases AS ikb
 SET deleted_at = now(), updated_at = now()
@@ -301,6 +389,11 @@ WHERE ikb.id = ? AND ikb.deleted_at IS NULL
     JOIN assistant_versions av ON av.id = avikb.version_id
     WHERE av.deleted_at IS NULL
       AND avikb.industry_knowledge_base_id = ikb.id
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM organization_industry_knowledge_bases oikb
+    WHERE oikb.industry_knowledge_base_id = ikb.id
   )
 `
 

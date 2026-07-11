@@ -165,7 +165,7 @@ func (h *OrganizationsHandler) Update(c *gin.Context) {
 // UpdateAICCConfig 更新企业 AICC 开通配置。
 //
 // @Summary      更新企业 AICC 配置
-// @Description  平台管理员开通或关闭企业 AICC，并设置智能体数量上限
+// @Description  平台管理员开通或关闭企业 AICC，设置智能体数量上限并授权行业知识库
 // @Tags         organizations
 // @Accept       json
 // @Produce      json
@@ -187,8 +187,9 @@ func (h *OrganizationsHandler) UpdateAICCConfig(c *gin.Context) {
 		return
 	}
 	result, err := h.service.UpdateAICCConfig(c.Request.Context(), principal, c.Param("orgId"), service.AICCConfigInput{
-		Enabled:    *req.Enabled,
-		AgentLimit: req.AgentLimit,
+		Enabled:                  *req.Enabled,
+		AgentLimit:               req.AgentLimit,
+		IndustryKnowledgeBaseIDs: req.IndustryKnowledgeBaseIDs,
 	})
 	if err != nil {
 		writeServiceError(c, err)
