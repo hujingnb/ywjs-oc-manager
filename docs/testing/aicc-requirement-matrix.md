@@ -30,12 +30,12 @@
 | AICC-LEAD-01 | 自定义留资字段和必填规则生效 | 待执行 | 待执行 | BLOCKED |
 | AICC-LEAD-02 | 已留资恢复会话不重复强制留资 | `aicc.spec.ts` 刷新恢复断言 | Chromium 刷新后原消息可见且留资表单不再出现 | PASS |
 | AICC-LEAD-03 | 线索列表、已读、关联会话和 CSV 正确 | `aicc.spec.ts` 覆盖完整闭环 | Chromium 已验证列表、自动已读、关联对话和 CSV | PASS |
-| AICC-KB-01 | 当前客服知识库始终参与检索 | 待执行 | 待执行 | BLOCKED |
-| AICC-KB-02 | 企业知识库可启用和停用 | `aicc.spec.ts` 已覆盖启用配置保存 | Chromium 已验证启用；停用及检索效果待测 | BLOCKED |
+| AICC-KB-01 | 当前客服知识库始终参与检索 | `aicc-knowledge.spec.ts` 上传、解析、公开问答 | Chromium 已验证唯一口令命中；关闭企业库后仍可命中 | PASS |
+| AICC-KB-02 | 企业知识库可启用和停用 | `aicc-knowledge.spec.ts` 启用、停用和公开问答 | Chromium 已验证启用命中、停用后不再返回企业口令 | PASS |
 | AICC-KB-03 | 只能选择平台授权的行业知识库 | 待执行 | 待执行 | BLOCKED |
-| AICC-KB-04 | 当前客服知识库可上传、解析、下载和删除 | 待执行 | 待执行 | BLOCKED |
+| AICC-KB-04 | 当前客服知识库可上传、解析、下载和删除 | `aicc-knowledge.spec.ts` | Chromium 已验证上传、RAGFlow 完成解析、下载和删除 | PASS |
 | AICC-KB-05 | RAGFlow 故障和无匹配知识行为稳定 | 待执行 | 待执行 | BLOCKED |
-| AICC-CHAT-01 | 知识问答实际调用 oc-kb 并返回命中内容 | 待执行 | 待执行 | BLOCKED |
+| AICC-CHAT-01 | 知识问答实际调用 oc-kb 并返回命中内容 | `aicc-knowledge.spec.ts` | Chromium 经真实 Hermes/new-api/RAGFlow 返回当前客服和企业唯一口令 | PASS |
 | AICC-CHAT-02 | 访客图片上传、恢复和限制正确 | 待执行 | 待执行 | BLOCKED |
 | AICC-CHAT-03 | 提示词注入不能越过知识范围或执行操作 | 待执行 | 待执行 | BLOCKED |
 | AICC-SAFETY-01 | 消息数量和频率限制生效 | 待执行 | 待执行 | BLOCKED |

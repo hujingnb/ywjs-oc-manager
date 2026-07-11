@@ -22,6 +22,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
@@ -163,7 +164,18 @@ func provisionE2ENewAPIUser(ctx context.Context, db *sql.DB, cfg config.Config, 
 	if err != nil {
 		return fmt.Errorf("创建 new-api E2E 用户失败: %w", err)
 	}
-	accessToken, err := client.BootstrapUserAccessToken(ctx, username, password)
+	// new-api 新建用户余额默认为 0；真实公开问答会在上游余额校验阶段被拒绝。
+	// 使用正式充值接口给本轮临时用户发放有限测试额度，避免绕过企业余额契约。
+	if _, err := client.RechargeUser(ctx, newapi.RechargeInput{
+		NewAPIUserID: user.ID,
+		CreditAmount: e2eNewAPICreditAmount(),
+	}); err != nil {
+		_ = client.DeleteUser(ctx, user.ID)
+		return fmt.Errorf("充值 new-api E2E 用户失败: %w", err)
+	}
+	accessToken, err := retryE2EAccessToken(ctx, func() (string, error) {
+		return client.BootstrapUserAccessToken(ctx, username, password)
+	}, waitE2ERetry)
 	if err != nil {
 		_ = client.DeleteUser(ctx, user.ID)
 		return fmt.Errorf("获取 new-api E2E access token 失败: %w", err)
@@ -192,6 +204,36 @@ func provisionE2ENewAPIUser(ctx context.Context, db *sql.DB, cfg config.Config, 
 	return nil
 }
 
+// retryE2EAccessToken 只处理本地高频回归触发的 new-api 登录 429。
+// 其它上游错误立即返回，避免 E2E 初始化把真实配置或鉴权故障伪装成暂时性波动。
+func retryE2EAccessToken(ctx context.Context, bootstrap func() (string, error), wait func(context.Context, time.Duration) error) (string, error) {
+	delays := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 30 * time.Second}
+	for attempt := 0; ; attempt++ {
+		token, err := bootstrap()
+		if err == nil {
+			return token, nil
+		}
+		if !strings.Contains(err.Error(), "status=429") || attempt >= len(delays) {
+			return "", err
+		}
+		if err := wait(ctx, delays[attempt]); err != nil {
+			return "", err
+		}
+	}
+}
+
+// waitE2ERetry 等待下一次 E2E 登录尝试；context 取消时立即停止初始化。
+func waitE2ERetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
 // e2eNewAPIUsername 返回 seed-e2e 独占的固定 new-api 用户名。
 // 固定值允许初始化前精确删除上一次测试账号，避免随机用户名持续占用本地测试资源。
 func e2eNewAPIUsername() string {
@@ -210,6 +252,19 @@ func e2eNewAPIUsername() string {
 func truncate(ctx context.Context, db *sql.DB) error {
 	stmts := []string{
 		`SET FOREIGN_KEY_CHECKS = 0`,
+		// AICC 由后续 migration 引入，必须在 apps/organizations 前清理；否则历史智能体会引用已清掉的隐藏 app，
+		// 造成下一轮工作台默认选中脏数据，破坏角色、知识库和会话回归的可重复性。
+		`TRUNCATE TABLE aicc_feedback`,
+		`TRUNCATE TABLE aicc_lead_values`,
+		`TRUNCATE TABLE aicc_leads`,
+		`TRUNCATE TABLE aicc_lead_fields`,
+		`TRUNCATE TABLE aicc_images`,
+		`TRUNCATE TABLE aicc_messages`,
+		`TRUNCATE TABLE aicc_sessions`,
+		`TRUNCATE TABLE aicc_blocked_visitors`,
+		`TRUNCATE TABLE aicc_agent_settings`,
+		`TRUNCATE TABLE aicc_agent_knowledge`,
+		`TRUNCATE TABLE aicc_agents`,
 		`TRUNCATE TABLE channel_bindings`,
 		`TRUNCATE TABLE ragflow_documents`,
 		`TRUNCATE TABLE ragflow_datasets`,
@@ -319,8 +374,8 @@ func buildFixture(ctx context.Context, db *sql.DB, runtimeImageID string) (fixtu
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO assistant_versions
 			(id, name, system_prompt, image_id, main_model)
-		VALUES (?, 'e2e-version', 'You are a test assistant.', ?, 'gpt-4')`,
-		versionID, runtimeImageID,
+		VALUES (?, 'e2e-version', 'You are a test assistant.', ?, ?)`,
+		versionID, runtimeImageID, e2eMainModel(),
 	); err != nil {
 		return fx, fmt.Errorf("create assistant_version: %w", err)
 	}
@@ -358,4 +413,15 @@ func buildFixture(ctx context.Context, db *sql.DB, runtimeImageID string) (fixtu
 	}
 
 	return fx, nil
+}
+
+// e2eMainModel 返回本地 local-init-models 初始化的可用聊天模型。
+// 不能使用历史硬编码 gpt-4：本地 new-api 仅配置 DeepSeek 渠道，错误模型会让 Hermes 在真实问答时返回 503。
+func e2eMainModel() string {
+	return "deepseek-chat"
+}
+
+// e2eNewAPICreditAmount 返回临时 E2E 用户的展示额度，覆盖多轮公开问答而不影响正式企业余额。
+func e2eNewAPICreditAmount() int64 {
+	return 100
 }

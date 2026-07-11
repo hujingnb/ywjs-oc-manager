@@ -2,7 +2,10 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -46,4 +49,51 @@ func TestE2ENewAPIUsernameIsStableAndValid(t *testing.T) {
 
 	assert.Equal(t, "e2eaicc", username)
 	assert.LessOrEqual(t, len(username), 12)
+}
+
+// 验证 E2E 助手版本使用 local-init-models 已配置的 DeepSeek 渠道模型，避免公开问答落到不存在的 gpt-4。
+func TestE2EMainModelUsesLocalAvailableChannel(t *testing.T) {
+	assert.Equal(t, "deepseek-chat", e2eMainModel())
+}
+
+// 验证临时 E2E 用户会获得正额度，避免真实 Hermes 问答在 new-api 余额校验阶段被拒绝。
+func TestE2ENewAPICreditAmountIsPositive(t *testing.T) {
+	assert.Positive(t, e2eNewAPICreditAmount())
+}
+
+// 验证 new-api 登录短暂限流时 seed 按序退避并最终返回 access token。
+func TestRetryE2EAccessTokenRetriesRateLimit(t *testing.T) {
+	attempts := 0
+	var delays []time.Duration
+	token, err := retryE2EAccessToken(context.Background(), func() (string, error) {
+		attempts++
+		if attempts < 3 {
+			return "", errors.New("上游服务异常: status=429")
+		}
+		return "access-token", nil
+	}, func(_ context.Context, delay time.Duration) error {
+		delays = append(delays, delay)
+		return nil
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "access-token", token)
+	assert.Equal(t, 3, attempts)
+	assert.Equal(t, []time.Duration{2 * time.Second, 4 * time.Second}, delays)
+}
+
+// 验证非限流错误不会重试，避免掩盖 new-api 配置、鉴权或协议故障。
+func TestRetryE2EAccessTokenRejectsOtherErrors(t *testing.T) {
+	attempts := 0
+	expected := errors.New("上游鉴权失败: status=401")
+	_, err := retryE2EAccessToken(context.Background(), func() (string, error) {
+		attempts++
+		return "", expected
+	}, func(context.Context, time.Duration) error {
+		t.Fatal("非限流错误不应进入等待")
+		return nil
+	})
+
+	require.ErrorIs(t, err, expected)
+	assert.Equal(t, 1, attempts)
 }
