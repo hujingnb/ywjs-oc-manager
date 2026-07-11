@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 
 import { expect, type Page } from '@playwright/test'
 
@@ -54,4 +55,28 @@ export async function waitForAICCRuntime(appId: string): Promise<void> {
     ],
     { encoding: 'utf8' },
   ).trim(), { timeout: 60_000 }).toBe('ready')
+}
+
+// seedAICCSessionsForPagination 为浏览器分页场景补充带消息的历史会话。
+// 数据只写入 seed-e2e 创建的当前 agent/org，避免为翻页展示重复调用 Hermes 并拖慢整套回归。
+export function seedAICCSessionsForPagination(agentId: string, orgId: string, count: number): void {
+  const statements: string[] = []
+  for (let index = 0; index < count; index += 1) {
+    const sessionId = randomUUID()
+    const messageId = randomUUID()
+    const token = `e2e-page-${randomUUID()}`
+    // 每条 fixture 都包含一条访客消息，符合后台“零消息会话不展示”的正式查询规则。
+    statements.push(
+      `INSERT INTO aicc_sessions (id, agent_id, org_id, session_token, channel, region, resolution_status, lead_status, expires_at, created_at) VALUES ('${sessionId}', '${agentId}', '${orgId}', '${token}', 'web_link', '本地网络', 'unknown', 'skipped', DATE_ADD(NOW(), INTERVAL 1 DAY), DATE_SUB(NOW(), INTERVAL ${index + 1} MINUTE));`,
+      `INSERT INTO aicc_messages (id, session_id, agent_id, direction, content_type, text_content) VALUES ('${messageId}', '${sessionId}', '${agentId}', 'visitor', 'text', '分页验证消息 ${index + 1}');`,
+    )
+  }
+  execFileSync(
+    'kubectl',
+    [
+      '-n', 'ocm', 'exec', 'mysql-0', '--', 'sh', '-c',
+      `mysql -uroot -p"$MYSQL_ROOT_PASSWORD" ocm -e "${statements.join(' ')}" 2>/dev/null`,
+    ],
+    { stdio: 'pipe' },
+  )
 }

@@ -1,6 +1,13 @@
 import { expect, test, type Page } from '@playwright/test'
 
-import { clearLoginState, forceZh, openAICCConsole, openAICCSettings, waitForAICCRuntime } from './aicc/helpers'
+import {
+  clearLoginState,
+  forceZh,
+  openAICCConsole,
+  openAICCSettings,
+  seedAICCSessionsForPagination,
+  waitForAICCRuntime,
+} from './aicc/helpers'
 import { loadE2EFixture, loginAs } from './fixtures'
 
 // AICC hidden app 需要在 k3d 中异步创建三容器 Pod，单条真实链路允许等待最多四分钟。
@@ -288,6 +295,9 @@ test('公开访客提交留资后企业管理员可查看线索和导出 CSV', a
   expect((await sessionCreated).ok()).toBeTruthy()
   expect((await submitted).ok()).toBeTruthy()
   expect((await messageSent).ok()).toBeTruthy()
+  await publicPage.reload()
+  await expect(publicPage.getByText('请先留下联系信息')).toBeHidden()
+  await expect(publicPage.getByText('请介绍一下服务内容')).toBeVisible()
   await publicPage.close()
 
   const widgetPage = await page.context().newPage()
@@ -310,9 +320,14 @@ test('公开访客提交留资后企业管理员可查看线索和导出 CSV', a
   await page.getByRole('link', { name: '线索', exact: true }).click()
   await expect(page.getByText(phone, { exact: true })).toBeVisible()
   await expect(page.getByText('未读', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '查看对话' }).click()
+  await expect(page.getByText('请介绍一下服务内容')).toBeVisible()
+  await page.getByRole('button', { name: '关闭对话' }).click()
+  await expect(page.getByRole('button', { name: '标记已读' })).toBeDisabled()
+  await expect(page.getByText('已读', { exact: true })).toBeVisible()
 
   await page.getByRole('link', { name: '分析', exact: true }).click()
-  await expect(page.locator('.metric-tile').filter({ hasText: '未读线索' }).getByText(/[1-9]\d*/)).toBeVisible()
+  await expect(page.locator('.metric-tile').filter({ hasText: '未读线索' }).getByText('0', { exact: true })).toBeVisible()
 
   const downloadPromise = page.waitForEvent('download')
   await page.getByRole('link', { name: '线索', exact: true }).click()
@@ -331,11 +346,69 @@ test('企业管理员可配置运营策略并验证公开会话续接和筛选�
 
   const publicPage = await page.context().newPage()
   await forceZh(publicPage)
-  await verifyPublicSessionRestore(publicPage, agent)
+  const firstSessionToken = await verifyPublicSessionRestore(publicPage, agent)
+
+  const unresolved = publicPage.waitForResponse(response =>
+    response.url().includes('/resolution') && response.request().method() === 'POST',
+  )
+  await publicPage.getByRole('button', { name: '未解决' }).click()
+  expect((await unresolved).ok()).toBeTruthy()
+  const resolved = publicPage.waitForResponse(response =>
+    response.url().includes('/resolution') && response.request().method() === 'POST',
+  )
+  await publicPage.getByRole('button', { name: '已解决' }).click()
+  expect((await resolved).ok()).toBeTruthy()
+
+  let eagerSessionCreated = false
+  const sessionListener = (request: { url(): string, method(): string }) => {
+    if (request.url().includes('/sessions') && request.method() === 'POST') eagerSessionCreated = true
+  }
+  publicPage.on('request', sessionListener)
+  await publicPage.getByRole('button', { name: '新建对话' }).click()
+  await publicPage.waitForTimeout(300)
+  expect(eagerSessionCreated).toBeFalsy()
+  publicPage.off('request', sessionListener)
+
+  const secondSession = publicPage.waitForResponse(response =>
+    response.url().includes(`/api/v1/public/aicc/agents/${agent.public_token}/sessions`)
+    && response.request().method() === 'POST',
+  )
+  await publicPage.getByPlaceholder('输入您的问题').fill('这是新会话消息')
+  await publicPage.getByRole('button', { name: '发送' }).click()
+  const secondSessionPayload = await (await secondSession).json() as { session: { session_token: string } }
+  expect(secondSessionPayload.session.session_token).not.toBe(firstSessionToken)
+
+  await publicPage.setViewportSize({ width: 390, height: 844 })
+  await expect(publicPage.getByRole('button', { name: '新建对话' })).toBeVisible()
+  const hasHorizontalOverflow = await publicPage.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)
+  expect(hasHorizontalOverflow).toBeFalsy()
+  const composerBox = await publicPage.locator('.composer').boundingBox()
+  expect(composerBox).not.toBeNull()
+  expect((composerBox?.x ?? 0) + (composerBox?.width ?? 0)).toBeLessThanOrEqual(390)
+
   await publicPage.close()
 
+  const englishPage = await page.context().newPage()
+  await englishPage.addInitScript(() => window.localStorage.setItem('ocm.locale', 'en'))
+  await englishPage.goto(`/aicc/${agent.public_token}`)
+  await expect(englishPage.getByRole('button', { name: 'New chat' })).toBeVisible()
+  await expect(englishPage.getByRole('button', { name: 'Resolved', exact: true })).toBeVisible()
+  await englishPage.close()
+
+  seedAICCSessionsForPagination(agent.id, loadE2EFixture().org_id, 19)
+  await page.setViewportSize({ width: 1440, height: 900 })
   await openAICCConsole(page)
   await expect(page.getByRole('region', { name: '当前智能体' })).toContainText(agent.name)
   await verifySessionFilters(page)
+  await page.goto('/aicc-console/sessions')
+  await expect(page.locator('.session-row').first()).toContainText('跟进中')
+  const pageTwo = page.waitForResponse(response => {
+    if (!response.url().includes('/sessions') || response.request().method() !== 'GET') return false
+    const url = new URL(response.url())
+    return url.searchParams.get('offset') === '20' && url.searchParams.get('limit') === '20'
+  })
+  await page.locator('.session-pagination .n-pagination-item').filter({ hasText: /^2$/ }).click()
+  expect((await pageTwo).ok()).toBeTruthy()
+  await expect(page.locator('.session-row')).toHaveCount(1)
   await verifyAnalyticsFilters(page, agent.id)
 })
