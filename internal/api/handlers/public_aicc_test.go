@@ -42,6 +42,7 @@ type publicAICCServiceStub struct {
 	lastLeadInput     service.AICCPublicLeadValuesInput
 	lastFeedbackInput service.AICCPublicFeedbackInput
 	lastResolveToken  string
+	lastResolution    service.AICCPublicResolutionInput
 }
 
 func (s *publicAICCServiceStub) PublicConfig(_ context.Context, publicToken, channel string) (service.AICCPublicConfigResult, error) {
@@ -88,6 +89,11 @@ func (s *publicAICCServiceStub) SubmitFeedback(_ context.Context, input service.
 
 func (s *publicAICCServiceStub) ResolveSession(_ context.Context, sessionToken string) (service.AICCPublicResolutionResult, error) {
 	s.lastResolveToken = sessionToken
+	return s.resolveResult, s.resolveErr
+}
+
+func (s *publicAICCServiceStub) UpdateSessionResolution(_ context.Context, input service.AICCPublicResolutionInput) (service.AICCPublicResolutionResult, error) {
+	s.lastResolution = input
 	return s.resolveResult, s.resolveErr
 }
 
@@ -222,6 +228,35 @@ func TestPublicAICCHandlerResolveSession(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), "resolved")
 	assert.Equal(t, "sess-1", svc.lastResolveToken)
+}
+
+// TestPublicAICCHandlerUpdateSessionResolution 覆盖公开会话级解决状态入口：
+// 访客可把当前会话标记为已解决或未解决，状态来自请求体而非单条消息反馈。
+func TestPublicAICCHandlerUpdateSessionResolution(t *testing.T) {
+	cases := []struct {
+		name   string // 子场景说明
+		body   string
+		status string
+	}{
+		{name: "标记已解决", body: `{"resolution_status":"resolved"}`, status: "resolved"},     // 场景：访客确认问题已解决。
+		{name: "标记未解决", body: `{"resolution_status":"unresolved"}`, status: "unresolved"}, // 场景：访客确认问题未解决。
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &publicAICCServiceStub{resolveResult: service.AICCPublicResolutionResult{ResolutionStatus: tc.status}}
+			router := newPublicAICCTestRouter(t, svc)
+
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/sessions/sess-1/resolution", bytes.NewBufferString(tc.body))
+			request.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusOK, recorder.Code)
+			assert.Contains(t, recorder.Body.String(), tc.status)
+			assert.Equal(t, "sess-1", svc.lastResolution.SessionToken)
+			assert.Equal(t, tc.status, svc.lastResolution.ResolutionStatus)
+		})
+	}
 }
 
 // TestPublicAICCHandlerMapsConversationGates 覆盖公开访客消息入口的隐私同意和留资阻断错误映射。

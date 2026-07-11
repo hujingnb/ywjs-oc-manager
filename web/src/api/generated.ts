@@ -13871,6 +13871,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/public/aicc/sessions/{sessionToken}/resolution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 更新 AICC 公开会话解决状态
+         * @description 访客通过 session token 将当前会话标记为已解决或未解决，不绑定单条助手回复
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 会话 token */
+                    sessionToken: string;
+                };
+                cookie?: never;
+            };
+            /** @description 解决状态 */
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never> | components["schemas"]["handlers.UpdateAICCSessionResolutionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: components["schemas"]["service.AICCPublicResolutionResult"];
+                        };
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/public/aicc/sessions/{sessionToken}/resolve": {
         parameters: {
             query?: never;
@@ -15796,6 +15881,10 @@ export interface components {
             sensitive_words?: string[];
             /** @description SessionResumeTTLMinutes 控制公开端刷新续接有效期。 */
             session_resume_ttl_minutes: number;
+        };
+        "handlers.UpdateAICCSessionResolutionRequest": {
+            /** @description ResolutionStatus 是访客选择的会话状态：resolved / unresolved。 */
+            resolution_status: string;
         };
         "handlers.UpdateAppLocaleRequest": {
             /** @description Locale 是 hermes bot 对终端用户说话的语言（en/zh）；取值集合由 service 层校验。 */

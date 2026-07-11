@@ -13,9 +13,13 @@
           <n-tag :type="sessionToken ? 'success' : 'default'" :bordered="false">
             {{ sessionToken ? t('aicc.publicChat.online') : t('aicc.publicChat.ready') }}
           </n-tag>
-          <n-button size="small" secondary :type="isResolved ? 'success' : 'default'" :disabled="!sessionToken || isResolved || isSending" :loading="resolveBusy" @click="markSessionResolved">
+          <n-button size="small" secondary :type="isResolved ? 'success' : 'default'" :disabled="!sessionToken || isResolved || isSending" :loading="resolutionBusy === 'resolved'" @click="markSessionResolution('resolved')">
             <template #icon><CheckCircle2 :size="14" /></template>
-            {{ isResolved ? t('aicc.publicChat.resolved') : t('aicc.publicChat.markResolved') }}
+            {{ t('aicc.publicChat.resolved') }}
+          </n-button>
+          <n-button size="small" secondary :type="isUnresolved ? 'warning' : 'default'" :disabled="!sessionToken || isUnresolved || isSending" :loading="resolutionBusy === 'unresolved'" @click="markSessionResolution('unresolved')">
+            <template #icon><CircleAlert :size="14" /></template>
+            {{ t('aicc.publicChat.unresolved') }}
           </n-button>
           <n-button size="small" secondary :disabled="isSending" @click="startNewConversation">
             <template #icon><Plus :size="14" /></template>
@@ -108,7 +112,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { NAlert, NButton, NInput, NTag } from 'naive-ui'
 import {
-  CheckCircle2, ImagePlus, MessageCircle, Plus, Send, ShieldCheck, X,
+  CheckCircle2, CircleAlert, ImagePlus, MessageCircle, Plus, Send, ShieldCheck, X,
 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
@@ -119,9 +123,9 @@ import {
   fetchAICCPublicConfig,
   fetchAICCPublicSession,
   readAICCPublicStoredSessionToken,
-  resolveAICCPublicSession,
   sendAICCPublicMessage,
   submitAICCPublicLeadValues,
+  updateAICCPublicSessionResolution,
   uploadAICCPublicImage,
 } from '@/api/hooks/useAICC'
 import type { ApiError } from '@/api/client'
@@ -152,7 +156,7 @@ const draft = ref('')
 const messages = ref<ChatMessage[]>([])
 const errorMessage = ref('')
 const isSending = ref(false)
-const resolveBusy = ref(false)
+const resolutionBusy = ref<'resolved' | 'unresolved' | ''>('')
 const consentBusy = ref(false)
 const leadBusy = ref(false)
 const leadComplete = ref(false)
@@ -173,6 +177,7 @@ const canSend = computed(() => Boolean(config.value) && !needsConsent.value && !
 const canSubmit = computed(() => canSend.value && (draft.value.trim().length > 0 || Boolean(pendingImage.value)))
 const hasVisitorMessage = computed(() => messages.value.some(message => message.role === 'visitor'))
 const isResolved = computed(() => resolutionStatus.value === 'resolved')
+const isUnresolved = computed(() => resolutionStatus.value === 'unresolved')
 // notice 模式的隐私说明只用于进入页面时告知访客，访客开始对话后隐藏以减少输入区占用。
 const showPrivacyNotice = computed(() => Boolean(privacyText.value) && !hasVisitorMessage.value)
 
@@ -307,7 +312,7 @@ function startNewConversation() {
   draft.value = ''
   errorMessage.value = ''
   isSending.value = false
-  resolveBusy.value = false
+  resolutionBusy.value = ''
   resolutionStatus.value = 'unknown'
   deferredLeadValues.value = null
   leadValues.value = Object.fromEntries(leadFields.value.map(field => [field.field_key, '']))
@@ -379,17 +384,17 @@ function isApiErrorCode(err: unknown, code: string): boolean {
   return typeof body === 'object' && body !== null && 'code' in body && (body as { code?: unknown }).code === code
 }
 
-async function markSessionResolved() {
-  if (!sessionToken.value || isResolved.value || resolveBusy.value) return
-  resolveBusy.value = true
+async function markSessionResolution(status: 'resolved' | 'unresolved') {
+  if (!sessionToken.value || resolutionStatus.value === status || resolutionBusy.value) return
+  resolutionBusy.value = status
   errorMessage.value = ''
   try {
-    const result = await resolveAICCPublicSession(sessionToken.value)
-    resolutionStatus.value = result.resolution_status || 'resolved'
+    const result = await updateAICCPublicSessionResolution(sessionToken.value, status)
+    resolutionStatus.value = result.resolution_status || status
   } catch (err) {
     errorMessage.value = friendlyAICCError(err)
   } finally {
-    resolveBusy.value = false
+    resolutionBusy.value = ''
   }
 }
 

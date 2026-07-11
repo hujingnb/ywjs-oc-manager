@@ -239,8 +239,8 @@ function roleLabel(role?: string) {
 
 function resolutionLabel(status?: string) {
   if (status === 'resolved') return t('aicc.sessions.resolved')
-  if (status === 'unresolved') return t('aicc.sessions.followUp')
-  return t('aicc.sessions.unknownResolution')
+  if (status === 'unresolved') return t('aicc.sessions.unresolved')
+  return t('aicc.sessions.followUp')
 }
 
 function resolutionTagType(status?: string) {

@@ -801,6 +801,14 @@ components:
       - message_limit_per_session
       - session_resume_ttl_minutes
       type: object
+    handlers.UpdateAICCSessionResolutionRequest:
+      properties:
+        resolution_status:
+          description: ResolutionStatus 是访客选择的会话状态：resolved / unresolved。
+          type: string
+      required:
+      - resolution_status
+      type: object
     handlers.UpdateAppLocaleRequest:
       properties:
         locale:
@@ -12305,6 +12313,63 @@ paths:
                 $ref: '#/components/schemas/handlers.ErrorResponse'
           description: Internal Server Error
       summary: 提交 AICC 回复反馈
+      tags:
+      - public-aicc
+  /public/aicc/sessions/{sessionToken}/resolution:
+    post:
+      description: 访客通过 session token 将当前会话标记为已解决或未解决，不绑定单条助手回复
+      parameters:
+      - description: 会话 token
+        in: path
+        name: sessionToken
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - type: object
+              - $ref: '#/components/schemas/handlers.UpdateAICCSessionResolutionRequest'
+                description: 解决状态
+                summary: body
+        description: 解决状态
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  $ref: '#/components/schemas/service.AICCPublicResolutionResult'
+                type: object
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      summary: 更新 AICC 公开会话解决状态
       tags:
       - public-aicc
   /public/aicc/sessions/{sessionToken}/resolve:

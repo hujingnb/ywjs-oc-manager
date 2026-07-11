@@ -806,6 +806,48 @@ func TestAICCPublicResolveSessionMarksSessionResolved(t *testing.T) {
 	assert.Empty(t, store.feedback.MessageID)
 }
 
+// TestAICCPublicUpdateSessionResolutionMarksSessionUnresolved 覆盖公开会话级未解决入口：
+// 访客只持有当前 session token 时，可将整个会话标记为未解决，且不写入单条回复反馈。
+func TestAICCPublicUpdateSessionResolutionMarksSessionUnresolved(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive},
+		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	result, err := svc.UpdateSessionResolution(context.Background(), AICCPublicResolutionInput{
+		SessionToken:     "tok",
+		ResolutionStatus: domain.AICCResolutionUnresolved,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, domain.AICCResolutionUnresolved, result.ResolutionStatus)
+	assert.Equal(t, domain.AICCResolutionUnresolved, store.resolutionStatus)
+	assert.Empty(t, store.feedback.MessageID)
+}
+
+// TestAICCPublicUpdateSessionResolutionRejectsUnknown 覆盖公开会话级状态边界：
+// 访客只能选择已解决或未解决，跟进中是未选择时的默认后台展示状态。
+func TestAICCPublicUpdateSessionResolutionRejectsUnknown(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive},
+		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	_, err := svc.UpdateSessionResolution(context.Background(), AICCPublicResolutionInput{
+		SessionToken:     "tok",
+		ResolutionStatus: domain.AICCResolutionUnknown,
+	})
+
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	assert.Equal(t, "", store.resolutionStatus)
+}
+
 // TestAICCPublicResolveSessionRejectsExpiredToken 覆盖会话级解决入口的授权边界：
 // 过期或无效 token 不能改变任何会话状态。
 func TestAICCPublicResolveSessionRejectsExpiredToken(t *testing.T) {

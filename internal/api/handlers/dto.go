@@ -227,6 +227,12 @@ type SubmitAICCFeedbackRequest struct {
 	Helpful *bool `json:"helpful" binding:"required"`
 }
 
+// UpdateAICCSessionResolutionRequest 是访客更新当前会话解决状态的请求体。
+type UpdateAICCSessionResolutionRequest struct {
+	// ResolutionStatus 是访客选择的会话状态：resolved / unresolved。
+	ResolutionStatus string `json:"resolution_status" binding:"required"`
+}
+
 // ===== 成员 members =====
 
 // CreateMemberRequest 创建企业成员的请求体。

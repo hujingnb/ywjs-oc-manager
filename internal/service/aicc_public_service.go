@@ -208,6 +208,14 @@ type AICCPublicFeedbackResult struct {
 	ResolutionStatus string `json:"resolution_status"`
 }
 
+// AICCPublicResolutionInput 是访客更新当前会话解决状态的入参。
+type AICCPublicResolutionInput struct {
+	// SessionToken 是当前公开会话 token，仅授权访问单个会话。
+	SessionToken string
+	// ResolutionStatus 只允许 resolved / unresolved；unknown 是未选择时的默认状态。
+	ResolutionStatus string
+}
+
 // AICCPublicResolutionResult 描述会话级解决操作后的状态。
 type AICCPublicResolutionResult struct {
 	ResolutionStatus string `json:"resolution_status"`
@@ -862,22 +870,36 @@ func (s *AICCPublicService) SubmitFeedback(ctx context.Context, input AICCPublic
 
 // ResolveSession 将公开访客当前会话标记为已解决。
 func (s *AICCPublicService) ResolveSession(ctx context.Context, sessionToken string) (AICCPublicResolutionResult, error) {
+	return s.UpdateSessionResolution(ctx, AICCPublicResolutionInput{
+		SessionToken:     sessionToken,
+		ResolutionStatus: domain.AICCResolutionResolved,
+	})
+}
+
+// UpdateSessionResolution 将公开访客当前会话标记为已解决或未解决。
+func (s *AICCPublicService) UpdateSessionResolution(ctx context.Context, input AICCPublicResolutionInput) (AICCPublicResolutionResult, error) {
 	if s.tx != nil {
 		var result AICCPublicResolutionResult
 		err := s.tx.WithAICCPublicTx(ctx, func(store AICCPublicStore) error {
 			next := *s
 			next.store = store
 			var runErr error
-			result, runErr = next.resolveSession(ctx, sessionToken)
+			result, runErr = next.updateSessionResolution(ctx, input)
 			return runErr
 		})
 		return result, err
 	}
-	return s.resolveSession(ctx, sessionToken)
+	return s.updateSessionResolution(ctx, input)
 }
 
-func (s *AICCPublicService) resolveSession(ctx context.Context, sessionToken string) (AICCPublicResolutionResult, error) {
-	session, err := s.store.GetAICCSessionByToken(ctx, strings.TrimSpace(sessionToken))
+func (s *AICCPublicService) updateSessionResolution(ctx context.Context, input AICCPublicResolutionInput) (AICCPublicResolutionResult, error) {
+	status := strings.TrimSpace(input.ResolutionStatus)
+	switch status {
+	case domain.AICCResolutionResolved, domain.AICCResolutionUnresolved:
+	default:
+		return AICCPublicResolutionResult{}, fmt.Errorf("%w: AICC 会话解决状态非法", ErrInvalidArgument)
+	}
+	session, err := s.store.GetAICCSessionByToken(ctx, strings.TrimSpace(input.SessionToken))
 	if err != nil || !session.ExpiresAt.After(s.now()) {
 		return AICCPublicResolutionResult{}, ErrAICCInvalidSession
 	}
@@ -886,11 +908,11 @@ func (s *AICCPublicService) resolveSession(ctx context.Context, sessionToken str
 	}
 	if err := s.store.UpdateAICCSessionResolutionStatus(ctx, sqlc.UpdateAICCSessionResolutionStatusParams{
 		ID:               session.ID,
-		ResolutionStatus: domain.AICCResolutionResolved,
+		ResolutionStatus: status,
 	}); err != nil {
 		return AICCPublicResolutionResult{}, fmt.Errorf("更新 AICC 会话解决状态失败: %w", err)
 	}
-	return AICCPublicResolutionResult{ResolutionStatus: domain.AICCResolutionResolved}, nil
+	return AICCPublicResolutionResult{ResolutionStatus: status}, nil
 }
 
 func (s *AICCPublicService) submitFeedback(ctx context.Context, input AICCPublicFeedbackInput) (AICCPublicFeedbackResult, error) {

@@ -452,11 +452,15 @@ export async function submitAICCPublicFeedback(
   })
 }
 
-// resolveAICCPublicSession 将当前公开访客会话标记为已解决，不绑定单条助手回复。
-export async function resolveAICCPublicSession(sessionToken: string): Promise<AICCPublicResolutionResult> {
-  const response = await apiRequest<{ resolution: AICCPublicResolutionResult }>(`/api/v1/public/aicc/sessions/${sessionToken}/resolve`, {
+// updateAICCPublicSessionResolution 将当前公开访客会话标记为已解决或未解决，不绑定单条助手回复。
+export async function updateAICCPublicSessionResolution(
+  sessionToken: string,
+  resolutionStatus: 'resolved' | 'unresolved',
+): Promise<AICCPublicResolutionResult> {
+  const response = await apiRequest<{ resolution: AICCPublicResolutionResult }>(`/api/v1/public/aicc/sessions/${sessionToken}/resolution`, {
     method: 'POST',
     withAuth: false,
+    body: { resolution_status: resolutionStatus },
   })
   return response.resolution
 }

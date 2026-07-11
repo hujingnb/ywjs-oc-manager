@@ -18,7 +18,7 @@ const apiState = vi.hoisted(() => ({
   consent: vi.fn(),
   submitLeadValues: vi.fn(),
   submitFeedback: vi.fn(),
-  resolveSession: vi.fn(),
+  updateResolution: vi.fn(),
   uploadImage: vi.fn(),
   readStoredSession: vi.fn(),
   clearStoredSession: vi.fn(),
@@ -38,7 +38,7 @@ vi.mock('@/api/hooks/useAICC', () => ({
   consentAICCPublicSession: apiState.consent,
   submitAICCPublicLeadValues: apiState.submitLeadValues,
   submitAICCPublicFeedback: apiState.submitFeedback,
-  resolveAICCPublicSession: apiState.resolveSession,
+  updateAICCPublicSessionResolution: apiState.updateResolution,
   uploadAICCPublicImage: apiState.uploadImage,
 }))
 
@@ -110,7 +110,7 @@ describe('PublicAICCChatPage', () => {
     apiState.consent.mockReset()
     apiState.submitLeadValues.mockReset()
     apiState.submitFeedback.mockReset()
-    apiState.resolveSession.mockReset()
+    apiState.updateResolution.mockReset()
     apiState.uploadImage.mockReset()
     apiState.readStoredSession.mockReset()
     apiState.clearStoredSession.mockReset()
@@ -126,7 +126,7 @@ describe('PublicAICCChatPage', () => {
     apiState.createSession.mockResolvedValue({ session_token: 'session-token' })
     apiState.fetchSession.mockResolvedValue({ messages: [], resolution_status: 'unknown' })
     apiState.sendMessage.mockResolvedValue({ message_id: 'message-1', text: '收到' })
-    apiState.resolveSession.mockResolvedValue({ resolution_status: 'resolved' })
+    apiState.updateResolution.mockImplementation(async (_token: string, status: string) => ({ resolution_status: status }))
   })
 
   // 场景：访客或挂件只打开公开页但没有发送消息时，不应创建 0 消息会话。
@@ -235,19 +235,29 @@ describe('PublicAICCChatPage', () => {
     expect(apiState.submitFeedback).not.toHaveBeenCalled()
   })
 
-  // 场景：访客点击顶部“已解决”时，只标记当前会话，不依赖任何 message id。
-  it('marks the current session resolved from the header action', async () => {
+  // 场景：访客点击顶部“已解决/未解决”时，只标记当前会话，不依赖任何 message id。
+  it('marks the current session resolved or unresolved from header actions', async () => {
     apiState.readStoredSession.mockReturnValue('stored-session-token')
     const wrapper = mountPublicChat()
     await flushPromises()
+
+    expect(wrapper.text()).toContain('已解决')
+    expect(wrapper.text()).toContain('未解决')
+
+    await wrapper.findAll('button').find(button => button.text().includes('未解决'))?.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(apiState.updateResolution).toHaveBeenLastCalledWith('stored-session-token', 'unresolved')
+    expect(apiState.submitFeedback).not.toHaveBeenCalled()
+    expect(wrapper.findAll('button').find(button => button.text().includes('未解决'))?.attributes('disabled')).toBeDefined()
 
     await wrapper.findAll('button').find(button => button.text().includes('已解决'))?.trigger('click')
     await flushPromises()
     await nextTick()
 
-    expect(apiState.resolveSession).toHaveBeenCalledWith('stored-session-token')
+    expect(apiState.updateResolution).toHaveBeenLastCalledWith('stored-session-token', 'resolved')
     expect(apiState.submitFeedback).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('已解决')
   })
 
   // 场景：访客主动新建对话时只清除当前会话，下一次发送才懒创建新 session，避免空会话。
