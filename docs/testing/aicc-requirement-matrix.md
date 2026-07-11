@@ -40,8 +40,8 @@
 | AICC-CHAT-03 | 提示词注入不能越过知识范围或执行操作 | 待执行 | 待执行 | BLOCKED |
 | AICC-SAFETY-01 | 消息数量和频率限制生效 | 待执行 | 待执行 | BLOCKED |
 | AICC-SAFETY-02 | 访客封禁、敏感词和余额不足路径稳定 | 待执行 | 待执行 | BLOCKED |
-| AICC-AUTH-01 | 未登录、伪造 token 和跨企业访问被拒绝 | 待执行 | 待执行 | BLOCKED |
-| AICC-AUTH-02 | 平台管理员只读边界生效 | `aicc-access-i18n.spec.ts` 已验证无新建入口 | Chromium 界面只读；写 API 拒绝待测 | BLOCKED |
+| AICC-AUTH-01 | 未登录、伪造 token 和跨企业访问被拒绝 | `aicc_service_test.go` 覆盖跨企业视图拒绝 | Chrome DevTools 真实浏览器验证未登录 401、伪造令牌 401、企业管理员跨企业读取 403 | PASS |
+| AICC-AUTH-02 | 平台管理员只读边界生效 | `aicc-access-i18n.spec.ts` 已验证无新建入口；`aicc_service_test.go` 覆盖管理权限 | Chrome DevTools 真实浏览器验证平台管理员创建智能体返回 403 | PASS |
 | AICC-I18N-01 | 工作台和公开页中英文用户文案完整 | `aicc-access-i18n.spec.ts`、`aicc.spec.ts` 已覆盖核心界面 | Chromium 已验证工作台六个子页和公开页核心文案；全量可见文案清扫待测 | BLOCKED |
 | AICC-MOBILE-01 | 移动视口无溢出、遮挡或不可操作控件 | `aicc.spec.ts` 390x844 视口断言 | Chromium 已验证公开页头部、输入区及横向溢出；工作台移动视口待测 | BLOCKED |
 | AICC-ANALYTICS-01 | 趋势、地域、来源、问题和线索统计正确 | `aicc.spec.ts` 已覆盖时间、智能体筛选和未读线索变化 | Chromium 已验证筛选及已读后计数归零；其余统计口径待测 | BLOCKED |
