@@ -265,6 +265,22 @@ export interface AICCSessionFilters {
   end_at?: string
   // 来源关键词。
   keyword?: string
+  // 分页条数。
+  limit?: number
+  // 分页偏移。
+  offset?: number
+}
+
+// AICCSessionListResult 是会话管理列表的分页响应。
+export interface AICCSessionListResult {
+  // sessions 是当前页会话摘要。
+  sessions: AICCSession[]
+  // total 是当前筛选条件下的总条数。
+  total: number
+  // limit 是后端实际采用的分页条数。
+  limit?: number
+  // offset 是后端实际采用的分页偏移。
+  offset?: number
 }
 
 // AICCMessage 是单个会话中的访客或助手消息。

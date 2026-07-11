@@ -892,9 +892,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": {
-                            [key: string]: components["schemas"]["service.AICCSessionResult"][];
-                        };
+                        "application/json": components["schemas"]["service.AICCSessionListResult"];
                     };
                 };
                 /** @description Bad Request */
@@ -16520,6 +16518,16 @@ export interface components {
             /** @description Messages 是会话消息镜像。 */
             messages?: components["schemas"]["service.AICCMessageResult"][];
             session?: components["schemas"]["service.AICCSessionResult"];
+        };
+        "service.AICCSessionListResult": {
+            /** @description Limit 是本次查询实际使用的分页条数。 */
+            limit?: number;
+            /** @description Offset 是本次查询实际使用的分页偏移。 */
+            offset?: number;
+            /** @description Sessions 是当前页会话摘要。 */
+            sessions?: components["schemas"]["service.AICCSessionResult"][];
+            /** @description Total 是符合当前筛选条件的会话总数，不受 Limit 和 Offset 影响。 */
+            total?: number;
         };
         /** @description Session 是会话摘要。 */
         "service.AICCSessionResult": {

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -52,6 +53,7 @@ type fakeAICCStore struct {
 	updateArg            sqlc.UpdateAICCAgentProfileParams
 	statusArg            sqlc.SetAICCAgentStatusParams
 	sessionArg           sqlc.ListAICCSessionsByAgentParams
+	countSessionArg      sqlc.CountAICCSessionsByAgentParams
 	analyticsArg         AICCAnalyticsOptions
 	completedLeadArg     sqlc.CountAICCCompletedLeadSessionsInRangeParams
 	topQuestionsArg      sqlc.ListAICCTopVisitorQuestionsInRangeParams
@@ -303,36 +305,72 @@ func (f *fakeAICCStore) ListAICCSessionsByAgent(_ context.Context, arg sqlc.List
 	if f.sessionsErr != nil {
 		return nil, f.sessionsErr
 	}
+	rows := f.matchAICCSessions(arg.AgentID, arg.ResolutionStatus, arg.LeadStatus, arg.Channel, arg.Region, arg.StartAt, arg.EndAt, arg.Keyword)
+	start := int(arg.Offset)
+	if start < 0 {
+		start = 0
+	}
+	if start >= len(rows) {
+		return []sqlc.ListAICCSessionsByAgentRow{}, nil
+	}
+	end := start + int(arg.Limit)
+	if arg.Limit <= 0 || end > len(rows) {
+		end = len(rows)
+	}
+	return rows[start:end], nil
+}
+
+// CountAICCSessionsByAgent 统计同一筛选条件下的可见会话总数，用于验证分页元数据。
+func (f *fakeAICCStore) CountAICCSessionsByAgent(_ context.Context, arg sqlc.CountAICCSessionsByAgentParams) (int64, error) {
+	f.countSessionArg = arg
+	if f.sessionsErr != nil {
+		return 0, f.sessionsErr
+	}
+	rows := f.matchAICCSessions(arg.AgentID, arg.ResolutionStatus, arg.LeadStatus, arg.Channel, arg.Region, arg.StartAt, arg.EndAt, arg.Keyword)
+	return int64(len(rows)), nil
+}
+
+// matchAICCSessions 复用列表和计数的筛选逻辑，确保单测 fake 与 SQL 查询语义一致。
+func (f *fakeAICCStore) matchAICCSessions(agentID string, resolutionStatus, leadStatus, channel, region null.String, startAt, endAt null.Time, keywordArg interface{}) []sqlc.ListAICCSessionsByAgentRow {
 	rows := make([]sqlc.ListAICCSessionsByAgentRow, 0, len(f.sessions))
 	for _, row := range f.sessions {
-		if row.AgentID != arg.AgentID {
+		if row.AgentID != agentID {
 			continue
 		}
-		if arg.ResolutionStatus.Valid && row.ResolutionStatus != arg.ResolutionStatus.String {
+		if resolutionStatus.Valid && row.ResolutionStatus != resolutionStatus.String {
 			continue
 		}
-		if arg.LeadStatus.Valid && row.LeadStatus != arg.LeadStatus.String {
+		if leadStatus.Valid && row.LeadStatus != leadStatus.String {
 			continue
 		}
-		if arg.Channel.Valid && row.Channel != arg.Channel.String {
+		if channel.Valid && row.Channel != channel.String {
 			continue
 		}
-		if arg.Region.Valid && strOrEmpty(row.Region) != arg.Region.String {
+		if region.Valid && strOrEmpty(row.Region) != region.String {
 			continue
 		}
-		if arg.StartAt.Valid && row.CreatedAt.Before(arg.StartAt.Time) {
+		if startAt.Valid && row.CreatedAt.Before(startAt.Time) {
 			continue
 		}
-		if arg.EndAt.Valid && !row.CreatedAt.Before(arg.EndAt.Time) {
+		if endAt.Valid && !row.CreatedAt.Before(endAt.Time) {
 			continue
 		}
-		keyword, _ := arg.Keyword.(null.String)
+		keyword, _ := keywordArg.(null.String)
 		if keyword.Valid && !strings.Contains(strOrEmpty(row.SourceUrl), keyword.String) && !strings.Contains(strOrEmpty(row.Referrer), keyword.String) {
+			continue
+		}
+		if len(f.messages[row.ID]) == 0 {
 			continue
 		}
 		rows = append(rows, f.toAICCSessionListRow(row))
 	}
-	return rows, nil
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].CreatedAt.Equal(rows[j].CreatedAt) {
+			return rows[i].ID > rows[j].ID
+		}
+		return rows[i].CreatedAt.After(rows[j].CreatedAt)
+	})
+	return rows
 }
 
 func (f *fakeAICCStore) toAICCSessionListRow(row sqlc.AiccSession) sqlc.ListAICCSessionsByAgentRow {
@@ -1129,12 +1167,15 @@ func TestAICCServiceRollsBackHiddenAppWhenAgentCreateFails(t *testing.T) {
 func TestAICCServiceListSessionsRequiresAgentViewPermission(t *testing.T) {
 	svc := NewAICCService(seededAICCStore(), &fakeAICCHiddenAppCreator{})
 
-	results, err := svc.ListSessions(context.Background(), aiccOrgAdmin(), "agent-1", AICCSessionListOptions{Limit: 0, Offset: -1})
+	result, err := svc.ListSessions(context.Background(), aiccOrgAdmin(), "agent-1", AICCSessionListOptions{Limit: 0, Offset: -1})
 
 	require.NoError(t, err)
-	require.Len(t, results, 1)
-	assert.Equal(t, "session-1", results[0].ID)
-	assert.Equal(t, domain.AICCChannelWebLink, results[0].Channel)
+	require.Len(t, result.Sessions, 1)
+	assert.Equal(t, int64(1), result.Total)
+	assert.Equal(t, int32(50), result.Limit)
+	assert.Equal(t, int32(0), result.Offset)
+	assert.Equal(t, "session-1", result.Sessions[0].ID)
+	assert.Equal(t, domain.AICCChannelWebLink, result.Sessions[0].Channel)
 }
 
 // TestAICCServiceListSessionsHidesEmptySessions 覆盖空会话过滤：
@@ -1153,12 +1194,13 @@ func TestAICCServiceListSessionsHidesEmptySessions(t *testing.T) {
 	}
 	svc := NewAICCService(store, &fakeAICCHiddenAppCreator{})
 
-	results, err := svc.ListSessions(context.Background(), aiccOrgAdmin(), "agent-1", AICCSessionListOptions{})
+	result, err := svc.ListSessions(context.Background(), aiccOrgAdmin(), "agent-1", AICCSessionListOptions{})
 
 	require.NoError(t, err)
-	require.Len(t, results, 1)
-	assert.Equal(t, "session-1", results[0].ID)
-	assert.Equal(t, int64(2), results[0].MessageCount)
+	require.Len(t, result.Sessions, 1)
+	assert.Equal(t, int64(1), result.Total)
+	assert.Equal(t, "session-1", result.Sessions[0].ID)
+	assert.Equal(t, int64(2), result.Sessions[0].MessageCount)
 }
 
 // TestAICCServiceListSessionsAppliesFilters 覆盖会话列表筛选：解决状态、留资状态、渠道和来源关键词会传入查询层。
@@ -1175,7 +1217,7 @@ func TestAICCServiceListSessionsAppliesFilters(t *testing.T) {
 	}
 	svc := NewAICCService(store, &fakeAICCHiddenAppCreator{})
 
-	results, err := svc.ListSessions(context.Background(), aiccOrgAdmin(), "agent-1", AICCSessionListOptions{
+	result, err := svc.ListSessions(context.Background(), aiccOrgAdmin(), "agent-1", AICCSessionListOptions{
 		ResolutionStatus: " unresolved ",
 		LeadStatus:       domain.AICCLeadStatusComplete,
 		Channel:          domain.AICCChannelWebWidget,
@@ -1183,11 +1225,48 @@ func TestAICCServiceListSessionsAppliesFilters(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	require.Len(t, results, 1)
+	require.Len(t, result.Sessions, 1)
+	assert.Equal(t, int64(1), result.Total)
 	assert.Equal(t, null.StringFrom(domain.AICCResolutionUnresolved), store.sessionArg.ResolutionStatus)
 	assert.Equal(t, null.StringFrom(domain.AICCLeadStatusComplete), store.sessionArg.LeadStatus)
 	assert.Equal(t, null.StringFrom(domain.AICCChannelWebWidget), store.sessionArg.Channel)
 	assert.Equal(t, null.StringFrom("pricing"), store.sessionArg.Keyword)
+}
+
+// TestAICCServiceListSessionsReturnsPaginationMeta 覆盖会话分页：
+// 列表只返回当前页，但 total 必须保留筛选后的完整数量，供前端分页器展示。
+func TestAICCServiceListSessionsReturnsPaginationMeta(t *testing.T) {
+	store := seededAICCStore()
+	store.sessions["session-2"] = sqlc.AiccSession{
+		ID:               "session-2",
+		AgentID:          "agent-1",
+		OrgID:            "org-1",
+		SessionToken:     "session-token-2",
+		Channel:          domain.AICCChannelWebWidget,
+		ResolutionStatus: domain.AICCResolutionUnknown,
+		LeadStatus:       domain.AICCLeadStatusPending,
+		CreatedAt:        time.Date(2026, 7, 9, 14, 0, 0, 0, time.UTC),
+		LastActiveAt:     time.Date(2026, 7, 9, 14, 0, 0, 0, time.UTC),
+	}
+	store.messages["session-2"] = []sqlc.AiccMessage{{
+		ID:          "msg-3",
+		SessionID:   "session-2",
+		AgentID:     "agent-1",
+		Direction:   domain.AICCMessageDirectionVisitor,
+		ContentType: domain.AICCMessageContentTypeText,
+		TextContent: null.StringFrom("第二个会话"),
+		CreatedAt:   time.Date(2026, 7, 9, 14, 0, 0, 0, time.UTC),
+	}}
+	svc := NewAICCService(store, &fakeAICCHiddenAppCreator{})
+
+	result, err := svc.ListSessions(context.Background(), aiccOrgAdmin(), "agent-1", AICCSessionListOptions{Limit: 1, Offset: 1})
+
+	require.NoError(t, err)
+	require.Len(t, result.Sessions, 1)
+	assert.Equal(t, int64(2), result.Total)
+	assert.Equal(t, int32(1), result.Limit)
+	assert.Equal(t, int32(1), result.Offset)
+	assert.Equal(t, "session-1", result.Sessions[0].ID)
 }
 
 // TestAICCServiceListSessionsRejectsInvalidFilters 覆盖会话筛选参数边界：未知状态和渠道不进入查询层。

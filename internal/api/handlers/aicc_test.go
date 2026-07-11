@@ -33,7 +33,7 @@ type aiccServiceStub struct {
 	deleteErr       error
 	settingsResult  service.AICCAgentSettingsResult
 	settingsErr     error
-	sessionsResult  []service.AICCSessionResult
+	sessionsResult  service.AICCSessionListResult
 	sessionResult   service.AICCSessionDetailResult
 	leadsResult     []service.AICCLeadResult
 	fieldsResult    []service.AICCLeadFieldResult
@@ -125,7 +125,7 @@ func (s *aiccServiceStub) UpdateAgentSettings(_ context.Context, principal auth.
 }
 
 // ListSessions 记录智能体 ID 并返回预设会话摘要。
-func (s *aiccServiceStub) ListSessions(_ context.Context, principal auth.Principal, agentID string, options service.AICCSessionListOptions) ([]service.AICCSessionResult, error) {
+func (s *aiccServiceStub) ListSessions(_ context.Context, principal auth.Principal, agentID string, options service.AICCSessionListOptions) (service.AICCSessionListResult, error) {
 	s.lastPrincipal = principal
 	s.lastAgentID = agentID
 	s.lastSessions = options
@@ -450,7 +450,7 @@ func TestAICCHandlerSettingsRoutes(t *testing.T) {
 // TestAICCHandlerSessionFiltersPassTimeAndRegion 覆盖会话列表筛选：
 // handler 必须透传时间范围、地域和解决状态，供后台运营筛选使用。
 func TestAICCHandlerSessionFiltersPassTimeAndRegion(t *testing.T) {
-	svc := &aiccServiceStub{sessionsResult: []service.AICCSessionResult{{ID: "session-1", AgentID: "agent-1"}}}
+	svc := &aiccServiceStub{sessionsResult: service.AICCSessionListResult{Sessions: []service.AICCSessionResult{{ID: "session-1", AgentID: "agent-1"}}, Total: 1, Limit: 20, Offset: 40}}
 	router := newAICCTestRouter(t, svc)
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/aicc/agents/agent-1/sessions?start_at=2026-07-01T00:00:00Z&end_at=2026-07-08T00:00:00Z&region=上海&resolution_status=unresolved", nil)
@@ -460,8 +460,11 @@ func TestAICCHandlerSessionFiltersPassTimeAndRegion(t *testing.T) {
 	assert.Equal(t, http.StatusOK, recorder.Code)
 	assert.Equal(t, "上海", svc.lastSessions.Region)
 	assert.Equal(t, "unresolved", svc.lastSessions.ResolutionStatus)
+	assert.Equal(t, int32(50), svc.lastSessions.Limit)
+	assert.Equal(t, int32(0), svc.lastSessions.Offset)
 	assert.Equal(t, time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC), svc.lastSessions.StartAt)
 	assert.Equal(t, time.Date(2026, 7, 8, 0, 0, 0, 0, time.UTC), svc.lastSessions.EndAt)
+	assert.Contains(t, recorder.Body.String(), `"total":1`)
 }
 
 // TestAICCHandlerOperationsRoutes 覆盖 AICC 会话、线索、统计和导出路由接线。
@@ -481,6 +484,7 @@ func TestAICCHandlerOperationsRoutes(t *testing.T) {
 			assert.Equal(t, "web_widget", svc.lastSessions.Channel)
 			assert.Equal(t, "pricing", svc.lastSessions.Keyword)
 			assert.Contains(t, recorder.Body.String(), "sessions")
+			assert.Contains(t, recorder.Body.String(), "total")
 		}}, // 场景：企业管理员查看某智能体会话列表。
 		{name: "会话详情路由返回 session 和 messages", method: http.MethodGet, path: "/api/v1/aicc/sessions/session-1", wantStatus: http.StatusOK, assertion: func(t *testing.T, svc *aiccServiceStub, recorder *httptest.ResponseRecorder) {
 			assert.Equal(t, "session-1", svc.lastSessionID)
@@ -507,7 +511,7 @@ func TestAICCHandlerOperationsRoutes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := &aiccServiceStub{
-				sessionsResult: []service.AICCSessionResult{{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", Channel: domain.AICCChannelWebLink, CreatedAt: now, UpdatedAt: now}},
+				sessionsResult: service.AICCSessionListResult{Sessions: []service.AICCSessionResult{{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", Channel: domain.AICCChannelWebLink, CreatedAt: now, UpdatedAt: now}}, Total: 1, Limit: 50},
 				sessionResult: service.AICCSessionDetailResult{
 					Session:  service.AICCSessionResult{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", Channel: domain.AICCChannelWebLink, CreatedAt: now, UpdatedAt: now},
 					Messages: []service.AICCMessageResult{{ID: "msg-1", Direction: domain.AICCMessageDirectionVisitor, ContentType: domain.AICCMessageContentTypeText, Text: "你好", CreatedAt: now}},

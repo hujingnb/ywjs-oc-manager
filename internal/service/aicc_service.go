@@ -69,6 +69,8 @@ type AICCStore interface {
 	SoftDeleteAICCAgent(ctx context.Context, id string) error
 	// ListAICCSessionsByAgent 列出指定智能体的访客会话。
 	ListAICCSessionsByAgent(ctx context.Context, arg sqlc.ListAICCSessionsByAgentParams) ([]sqlc.ListAICCSessionsByAgentRow, error)
+	// CountAICCSessionsByAgent 统计指定智能体在同一筛选条件下的可见会话总数。
+	CountAICCSessionsByAgent(ctx context.Context, arg sqlc.CountAICCSessionsByAgentParams) (int64, error)
 	// GetAICCSession 按 ID 读取访客会话详情。
 	GetAICCSession(ctx context.Context, id string) (sqlc.AiccSession, error)
 	// ListAICCMessagesBySession 列出会话消息镜像。
@@ -560,17 +562,17 @@ func (s *AICCService) ReplaceAgentKnowledge(ctx context.Context, principal auth.
 }
 
 // ListSessions 列出指定智能体的会话摘要；权限先通过智能体归属收敛到企业维度。
-func (s *AICCService) ListSessions(ctx context.Context, principal auth.Principal, agentID string, options AICCSessionListOptions) ([]AICCSessionResult, error) {
+func (s *AICCService) ListSessions(ctx context.Context, principal auth.Principal, agentID string, options AICCSessionListOptions) (AICCSessionListResult, error) {
 	agent, err := s.getAgentRow(ctx, agentID)
 	if err != nil {
-		return nil, err
+		return AICCSessionListResult{}, err
 	}
 	if !auth.CanViewAICC(principal, agent.OrgID) {
-		return nil, ErrForbidden
+		return AICCSessionListResult{}, ErrForbidden
 	}
 	filter, err := normalizeAICCSessionListOptions(options)
 	if err != nil {
-		return nil, err
+		return AICCSessionListResult{}, err
 	}
 	rows, err := s.store.ListAICCSessionsByAgent(ctx, sqlc.ListAICCSessionsByAgentParams{
 		AgentID:          agentID,
@@ -585,7 +587,20 @@ func (s *AICCService) ListSessions(ctx context.Context, principal auth.Principal
 		Offset:           filter.Offset,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("查询 AICC 会话列表失败: %w", err)
+		return AICCSessionListResult{}, fmt.Errorf("查询 AICC 会话列表失败: %w", err)
+	}
+	total, err := s.store.CountAICCSessionsByAgent(ctx, sqlc.CountAICCSessionsByAgentParams{
+		AgentID:          agentID,
+		ResolutionStatus: nullStr(filter.ResolutionStatus),
+		LeadStatus:       nullStr(filter.LeadStatus),
+		Channel:          nullStr(filter.Channel),
+		Region:           nullStr(filter.Region),
+		StartAt:          nullTime(filter.StartAt),
+		EndAt:            nullTime(filter.EndAt),
+		Keyword:          nullStr(filter.Keyword),
+	})
+	if err != nil {
+		return AICCSessionListResult{}, fmt.Errorf("统计 AICC 会话列表失败: %w", err)
 	}
 	results := make([]AICCSessionResult, 0, len(rows))
 	for _, row := range rows {
@@ -595,7 +610,7 @@ func (s *AICCService) ListSessions(ctx context.Context, principal auth.Principal
 		}
 		results = append(results, toAICCSessionListResult(row))
 	}
-	return results, nil
+	return AICCSessionListResult{Sessions: results, Total: total, Limit: filter.Limit, Offset: filter.Offset}, nil
 }
 
 // GetSession 读取会话详情和消息镜像；平台管理员只读，本企业管理员可读。

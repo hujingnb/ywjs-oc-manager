@@ -28,6 +28,7 @@ import type {
   AICCSession,
   AICCSessionFilters,
   AICCSessionDetail,
+  AICCSessionListResult,
 } from '@/domain/aicc'
 
 const AICC_AGENTS_KEY = ['aicc', 'agents'] as const
@@ -241,14 +242,15 @@ export function useReplaceAICCKnowledge() {
 
 // useAICCSessionsQuery 查询选中智能体的会话摘要列表；无智能体时保持禁用。
 export function useAICCSessionsQuery(agentId: Ref<string | undefined>, filters?: Ref<AICCSessionFilters | undefined>) {
-  return useQuery<AICCSession[]>({
+  return useQuery<AICCSessionListResult>({
     queryKey: computed(() => aiccSessionsKey(agentId.value, filters?.value)),
     enabled: () => Boolean(agentId.value),
     queryFn: async () => {
-      if (!agentId.value) return []
-      const response = await apiRequest<{ sessions: AICCSession[] }>(`/api/v1/aicc/agents/${agentId.value}/sessions`, {
+      if (!agentId.value) return { sessions: [], total: 0, limit: 20, offset: 0 }
+      return apiRequest<AICCSessionListResult>(`/api/v1/aicc/agents/${agentId.value}/sessions`, {
         query: {
-          limit: 100,
+          limit: filters?.value?.limit ?? 20,
+          offset: filters?.value?.offset ?? 0,
           resolution_status: filters?.value?.resolution_status || undefined,
           lead_status: filters?.value?.lead_status || undefined,
           channel: filters?.value?.channel || undefined,
@@ -258,7 +260,6 @@ export function useAICCSessionsQuery(agentId: Ref<string | undefined>, filters?:
           keyword: filters?.value?.keyword?.trim() || undefined,
         },
       })
-      return response.sessions
     },
   })
 }

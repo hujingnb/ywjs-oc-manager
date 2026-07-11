@@ -3,7 +3,7 @@ import { computed, defineComponent, h, nextTick, type Component } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { i18n } from '@/i18n'
-import type { AICCSessionFilters } from '@/domain/aicc'
+import type { AICCSession, AICCSessionFilters, AICCSessionListResult } from '@/domain/aicc'
 import AICCSessionsPage from './AICCSessionsPage.vue'
 
 const routeState = vi.hoisted(() => {
@@ -18,7 +18,7 @@ const queryState = vi.hoisted(() => {
   const { ref } = require('vue') as typeof import('vue')
   return {
     sessionFilters: undefined as { value: AICCSessionFilters } | undefined,
-    sessions: { data: ref([]), isLoading: ref(false), error: ref(null) },
+    sessions: { data: ref({ sessions: [], total: 0 } as AICCSessionListResult), isLoading: ref(false), error: ref(null) },
     detail: { data: ref(null), isLoading: ref(false), error: ref(null) },
   }
 })
@@ -72,10 +72,22 @@ vi.mock('naive-ui', () => {
       ])
     },
   })
+  const Pagination = defineComponent({
+    props: ['page', 'pageSize', 'itemCount'],
+    emits: ['update:page', 'update:pageSize'],
+    setup(props, { emit }) {
+      return () => h('nav', [
+        h('span', `total:${props.itemCount ?? 0}`),
+        h('button', { type: 'button', onClick: () => emit('update:page', Number(props.page ?? 1) + 1) }, '下一页'),
+        h('button', { type: 'button', onClick: () => emit('update:pageSize', 50) }, '每页50'),
+      ])
+    },
+  })
   return {
     NAlert: Passthrough,
     NDatePicker: Input,
     NInput: Input,
+    NPagination: Pagination,
     NSelect: Select,
     NSpin: Passthrough,
     NTag: Passthrough,
@@ -125,6 +137,18 @@ const PassthroughStub = defineComponent({
   },
 })
 
+const PaginationStub = defineComponent({
+  props: ['page', 'pageSize', 'itemCount'],
+  emits: ['update:page', 'update:pageSize'],
+  setup(props, { emit }) {
+    return () => h('nav', [
+      h('span', `total:${props.itemCount ?? 0}`),
+      h('button', { type: 'button', onClick: () => emit('update:page', Number(props.page ?? 1) + 1) }, '下一页'),
+      h('button', { type: 'button', onClick: () => emit('update:pageSize', 50) }, '每页50'),
+    ])
+  },
+})
+
 function mountSessions() {
   i18n.global.locale.value = 'zh'
   return mount(AICCSessionsPage, {
@@ -135,12 +159,14 @@ function mountSessions() {
         NAlert: PassthroughStub,
         NDatePicker: DatePickerStub,
         NInput: InputStub,
+        NPagination: PaginationStub,
         NSelect: SelectStub,
         NSpin: PassthroughStub,
         NTag: PassthroughStub,
         'n-alert': PassthroughStub,
         'n-date-picker': DatePickerStub,
         'n-input': InputStub,
+        'n-pagination': PaginationStub,
         'n-select': SelectStub,
         'n-spin': PassthroughStub,
         'n-tag': PassthroughStub,
@@ -154,7 +180,7 @@ describe('AICCSessionsPage', () => {
     routeState.route.query = {}
     routeState.replace.mockReset()
     queryState.sessionFilters = undefined
-    queryState.sessions.data.value = []
+    queryState.sessions.data.value = { sessions: [], total: 0 }
     queryState.sessions.isLoading.value = false
     queryState.sessions.error.value = null
     queryState.detail.data.value = null
@@ -181,4 +207,65 @@ describe('AICCSessionsPage', () => {
 
     expect(queryState.sessionFilters?.value.channel).toBeUndefined()
   })
+
+  // 覆盖分页默认值：列表初次查询只加载第一页，避免一次性拉取全部会话。
+  it('queries the first page with default pagination parameters', () => {
+    mountSessions()
+
+    expect(queryState.sessionFilters?.value.limit).toBe(20)
+    expect(queryState.sessionFilters?.value.offset).toBe(0)
+  })
+
+  // 覆盖分页交互：点击下一页后，查询条件中的 offset 按当前 pageSize 推进。
+  it('updates query offset when changing pages', async () => {
+    queryState.sessions.data.value = { sessions: makeSessions(25), total: 25 }
+    const wrapper = mountSessions()
+
+    await wrapper.find('nav button').trigger('click')
+    await nextTick()
+
+    expect(queryState.sessionFilters?.value.limit).toBe(20)
+    expect(queryState.sessionFilters?.value.offset).toBe(20)
+  })
+
+  // 覆盖筛选交互：用户切换筛选条件后回到第一页，避免沿用旧分页偏移导致列表为空。
+  it('resets to the first page when filters change', async () => {
+    queryState.sessions.data.value = { sessions: makeSessions(25), total: 25 }
+    const wrapper = mountSessions()
+    await wrapper.find('nav button').trigger('click')
+    await nextTick()
+
+    await wrapper.findAll('select')[0].setValue('resolved')
+    await nextTick()
+
+    expect(queryState.sessionFilters?.value.resolution_status).toBe('resolved')
+    expect(queryState.sessionFilters?.value.offset).toBe(0)
+  })
+
+  // 覆盖会话解决状态展示：未知状态显示为“跟进中”，与筛选项文案保持一致。
+  it('renders resolution labels consistently with session statuses', () => {
+    queryState.sessions.data.value = {
+      sessions: [
+        { id: 'session-resolved', agent_id: 'agent-sales', resolution_status: 'resolved', message_count: 1 },
+        { id: 'session-unresolved', agent_id: 'agent-sales', resolution_status: 'unresolved', message_count: 1 },
+        { id: 'session-unknown', agent_id: 'agent-sales', resolution_status: 'unknown', message_count: 1 },
+      ],
+      total: 3,
+    }
+
+    const wrapper = mountSessions()
+
+    expect(wrapper.text()).toContain('已解决')
+    expect(wrapper.text()).toContain('未解决')
+    expect(wrapper.text()).toContain('跟进中')
+  })
 })
+
+function makeSessions(count: number): AICCSession[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `session-${index + 1}`,
+    agent_id: 'agent-sales',
+    resolution_status: 'unknown',
+    message_count: 1,
+  }))
+}

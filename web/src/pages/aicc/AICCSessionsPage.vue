@@ -12,7 +12,7 @@
             <p class="eyebrow">Sessions</p>
             <h4>{{ t('aicc.sessions.recentSessions') }}</h4>
           </div>
-          <n-tag size="small" :bordered="false">{{ sessions.length }}</n-tag>
+          <n-tag size="small" :bordered="false">{{ sessionTotal }}</n-tag>
         </div>
         <div ref="sessionFiltersEl" class="session-filters">
           <n-select v-model:value="resolutionFilter" clearable :options="resolutionOptions" :placeholder="t('aicc.sessions.filters.resolution')" />
@@ -52,6 +52,15 @@
             </button>
           </template>
         </n-spin>
+        <n-pagination
+          v-if="sessionTotal > pageSize || page > 1"
+          v-model:page="page"
+          v-model:page-size="pageSize"
+          class="session-pagination"
+          :item-count="sessionTotal"
+          :page-sizes="[20, 50, 100]"
+          show-size-picker
+        />
       </div>
 
       <div class="session-detail">
@@ -116,7 +125,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUpdated, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NAlert, NDatePicker, NInput, NSelect, NSpin, NTag, type SelectOption } from 'naive-ui'
+import { NAlert, NDatePicker, NInput, NPagination, NSelect, NSpin, NTag, type SelectOption } from 'naive-ui'
 import { MessageSquareText } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
@@ -137,10 +146,13 @@ const channelFilter = ref<string | null>(null)
 const regionFilter = ref('')
 const dateRange = ref<[number, number] | null>(null)
 const keywordFilter = ref('')
+const page = ref(1)
+const pageSize = ref(20)
 const isApplyingRouteQuery = ref(false)
 const sessionFiltersEl = ref<HTMLElement | null>(null)
 const currentAgentId = computed(() => props.agentId)
 const supportedChannelFilters = new Set(['web_link', 'web_widget'])
+const sessionOffset = computed(() => (page.value - 1) * pageSize.value)
 const sessionFilters = computed<AICCSessionFilters>(() => ({
   resolution_status: resolutionFilter.value || undefined,
   lead_status: leadFilter.value || undefined,
@@ -149,11 +161,14 @@ const sessionFilters = computed<AICCSessionFilters>(() => ({
   start_at: dateRange.value ? new Date(dateRange.value[0]).toISOString() : undefined,
   end_at: dateRange.value ? new Date(dateRange.value[1]).toISOString() : undefined,
   keyword: keywordFilter.value.trim() || undefined,
+  limit: pageSize.value,
+  offset: sessionOffset.value,
 }))
 const sessionsQuery = useAICCSessionsQuery(currentAgentId, sessionFilters)
 const detailQuery = useAICCSessionQuery(selectedSessionId)
 
-const sessions = computed(() => sessionsQuery.data.value ?? [])
+const sessions = computed(() => sessionsQuery.data.value?.sessions ?? [])
+const sessionTotal = computed(() => sessionsQuery.data.value?.total ?? 0)
 const selectedSession = computed(() => detailQuery.data.value?.session)
 const messages = computed(() => detailQuery.data.value?.messages ?? [])
 const leadValues = computed(() => detailQuery.data.value?.lead_values ?? [])
@@ -210,6 +225,23 @@ watch(sessionFilters, (filters) => {
   if (isSameQuery(route.query, nextQuery)) return
   void router.replace({ query: nextQuery })
 }, { deep: true })
+
+watch(
+  () => [
+    currentAgentId.value,
+    resolutionFilter.value,
+    leadFilter.value,
+    channelFilter.value,
+    regionFilter.value.trim(),
+    dateRange.value?.[0] ?? null,
+    dateRange.value?.[1] ?? null,
+    keywordFilter.value.trim(),
+  ],
+  () => {
+    if (isApplyingRouteQuery.value) return
+    page.value = 1
+  },
+)
 
 watch(sessions, (items) => {
   if (!items.some(item => item.id === selectedSessionId.value)) {
@@ -330,6 +362,10 @@ function normalizeQueryValue(value: unknown): string {
 .session-filters :deep(.n-date-picker),
 .session-filters :deep(.n-input:last-child) {
   grid-column: 1 / -1;
+}
+
+.session-pagination {
+  justify-content: flex-end;
 }
 
 .panel-heading,

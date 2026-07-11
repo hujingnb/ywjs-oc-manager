@@ -134,6 +134,59 @@ func (q *Queries) CountAICCCompletedLeadSessionsInRange(ctx context.Context, arg
 	return count, err
 }
 
+const countAICCSessionsByAgent = `-- name: CountAICCSessionsByAgent :one
+SELECT COUNT(*)
+FROM aicc_sessions s
+WHERE s.agent_id = ?
+  AND EXISTS (SELECT 1 FROM aicc_messages m WHERE m.session_id = s.id)
+  AND (? IS NULL OR s.resolution_status = ?)
+  AND (? IS NULL OR s.lead_status = ?)
+  AND (? IS NULL OR s.channel = ?)
+  AND (? IS NULL OR s.region = ?)
+  AND (? IS NULL OR s.created_at >= ?)
+  AND (? IS NULL OR s.created_at < ?)
+  AND (
+      ? IS NULL
+      OR s.source_url LIKE CONCAT('%', ?, '%')
+      OR s.referrer LIKE CONCAT('%', ?, '%')
+  )
+`
+
+type CountAICCSessionsByAgentParams struct {
+	AgentID          string      `db:"agent_id" json:"agent_id"`
+	ResolutionStatus null.String `db:"resolution_status" json:"resolution_status"`
+	LeadStatus       null.String `db:"lead_status" json:"lead_status"`
+	Channel          null.String `db:"channel" json:"channel"`
+	Region           null.String `db:"region" json:"region"`
+	StartAt          null.Time   `db:"start_at" json:"start_at"`
+	EndAt            null.Time   `db:"end_at" json:"end_at"`
+	Keyword          interface{} `db:"keyword" json:"keyword"`
+}
+
+func (q *Queries) CountAICCSessionsByAgent(ctx context.Context, arg CountAICCSessionsByAgentParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countAICCSessionsByAgent,
+		arg.AgentID,
+		arg.ResolutionStatus,
+		arg.ResolutionStatus,
+		arg.LeadStatus,
+		arg.LeadStatus,
+		arg.Channel,
+		arg.Channel,
+		arg.Region,
+		arg.Region,
+		arg.StartAt,
+		arg.StartAt,
+		arg.EndAt,
+		arg.EndAt,
+		arg.Keyword,
+		arg.Keyword,
+		arg.Keyword,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countAICCSessionsByResolution = `-- name: CountAICCSessionsByResolution :one
 SELECT COUNT(*)
 FROM aicc_sessions

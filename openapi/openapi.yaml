@@ -1856,6 +1856,24 @@ components:
         session:
           $ref: '#/components/schemas/service.AICCSessionResult'
       type: object
+    service.AICCSessionListResult:
+      properties:
+        limit:
+          description: Limit 是本次查询实际使用的分页条数。
+          type: integer
+        offset:
+          description: Offset 是本次查询实际使用的分页偏移。
+          type: integer
+        sessions:
+          description: Sessions 是当前页会话摘要。
+          items:
+            $ref: '#/components/schemas/service.AICCSessionResult'
+          type: array
+          uniqueItems: false
+        total:
+          description: Total 是符合当前筛选条件的会话总数，不受 Limit 和 Offset 影响。
+          type: integer
+      type: object
     service.AICCSessionResult:
       description: Session 是会话摘要。
       properties:
@@ -3602,11 +3620,7 @@ paths:
           content:
             application/json:
               schema:
-                additionalProperties:
-                  items:
-                    $ref: '#/components/schemas/service.AICCSessionResult'
-                  type: array
-                type: object
+                $ref: '#/components/schemas/service.AICCSessionListResult'
           description: OK
         "400":
           content:

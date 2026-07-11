@@ -101,6 +101,18 @@ type AICCSessionResult struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// AICCSessionListResult 是管理端会话列表分页响应，Total 表示筛选后的总条数。
+type AICCSessionListResult struct {
+	// Sessions 是当前页会话摘要。
+	Sessions []AICCSessionResult `json:"sessions"`
+	// Total 是符合当前筛选条件的会话总数，不受 Limit 和 Offset 影响。
+	Total int64 `json:"total"`
+	// Limit 是本次查询实际使用的分页条数。
+	Limit int32 `json:"limit"`
+	// Offset 是本次查询实际使用的分页偏移。
+	Offset int32 `json:"offset"`
+}
+
 // AICCMessageResult 是管理端会话详情中的消息镜像。
 type AICCMessageResult struct {
 	// ID 是消息主键。

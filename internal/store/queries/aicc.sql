@@ -101,6 +101,23 @@ WHERE s.agent_id = ?
 ORDER BY s.created_at DESC, s.id DESC
 LIMIT ? OFFSET ?;
 
+-- name: CountAICCSessionsByAgent :one
+SELECT COUNT(*)
+FROM aicc_sessions s
+WHERE s.agent_id = ?
+  AND EXISTS (SELECT 1 FROM aicc_messages m WHERE m.session_id = s.id)
+  AND (sqlc.narg(resolution_status) IS NULL OR s.resolution_status = sqlc.narg(resolution_status))
+  AND (sqlc.narg(lead_status) IS NULL OR s.lead_status = sqlc.narg(lead_status))
+  AND (sqlc.narg(channel) IS NULL OR s.channel = sqlc.narg(channel))
+  AND (sqlc.narg(region) IS NULL OR s.region = sqlc.narg(region))
+  AND (sqlc.narg(start_at) IS NULL OR s.created_at >= sqlc.narg(start_at))
+  AND (sqlc.narg(end_at) IS NULL OR s.created_at < sqlc.narg(end_at))
+  AND (
+      sqlc.narg(keyword) IS NULL
+      OR s.source_url LIKE CONCAT('%', sqlc.narg(keyword), '%')
+      OR s.referrer LIKE CONCAT('%', sqlc.narg(keyword), '%')
+  );
+
 -- name: GetAICCSession :one
 SELECT *
 FROM aicc_sessions

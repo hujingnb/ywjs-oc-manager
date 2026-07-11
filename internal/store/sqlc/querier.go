@@ -29,6 +29,7 @@ type Querier interface {
 	CountAICCAgentsByOrg(ctx context.Context, orgID string) (int64, error)
 	CountAICCCompletedLeadSessions(ctx context.Context, orgID string) (int64, error)
 	CountAICCCompletedLeadSessionsInRange(ctx context.Context, arg CountAICCCompletedLeadSessionsInRangeParams) (int64, error)
+	CountAICCSessionsByAgent(ctx context.Context, arg CountAICCSessionsByAgentParams) (int64, error)
 	CountAICCSessionsByResolution(ctx context.Context, arg CountAICCSessionsByResolutionParams) (int64, error)
 	CountAICCSessionsByStatusInRange(ctx context.Context, arg CountAICCSessionsByStatusInRangeParams) (CountAICCSessionsByStatusInRangeRow, error)
 	CountAICCTodaySessions(ctx context.Context, orgID string) (int64, error)

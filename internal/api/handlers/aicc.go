@@ -32,7 +32,7 @@ type aiccService interface {
 	DeleteAgent(ctx context.Context, principal auth.Principal, agentID string) error
 	GetAgentSettings(ctx context.Context, principal auth.Principal, agentID string) (service.AICCAgentSettingsResult, error)
 	UpdateAgentSettings(ctx context.Context, principal auth.Principal, agentID string, input service.AICCAgentSettingsInput) (service.AICCAgentSettingsResult, error)
-	ListSessions(ctx context.Context, principal auth.Principal, agentID string, options service.AICCSessionListOptions) ([]service.AICCSessionResult, error)
+	ListSessions(ctx context.Context, principal auth.Principal, agentID string, options service.AICCSessionListOptions) (service.AICCSessionListResult, error)
 	GetSession(ctx context.Context, principal auth.Principal, sessionID string) (service.AICCSessionDetailResult, error)
 	ListLeads(ctx context.Context, principal auth.Principal, orgID string, limit, offset int32) ([]service.AICCLeadResult, error)
 	ExportLeads(ctx context.Context, principal auth.Principal, orgID string) ([]service.AICCLeadResult, error)
@@ -417,7 +417,7 @@ func (h *AICCHandler) ReplaceAgentKnowledge(c *gin.Context) {
 // @Param        keyword            query  string  false  "来源 URL 或 referrer 关键词"
 // @Param        limit    query     int     false  "每页条数（默认 50）"
 // @Param        offset   query     int     false  "分页偏移（默认 0）"
-// @Success      200      {object}  map[string][]service.AICCSessionResult
+// @Success      200      {object}  service.AICCSessionListResult
 // @Failure      400      {object}  ErrorResponse
 // @Failure      401      {object}  ErrorResponse
 // @Failure      403      {object}  ErrorResponse
@@ -433,7 +433,7 @@ func (h *AICCHandler) ListSessions(c *gin.Context) {
 	if !ok {
 		return
 	}
-	results, err := h.service.ListSessions(c.Request.Context(), principalFromCtx(c), c.Param("agentId"), service.AICCSessionListOptions{
+	result, err := h.service.ListSessions(c.Request.Context(), principalFromCtx(c), c.Param("agentId"), service.AICCSessionListOptions{
 		ResolutionStatus: c.Query("resolution_status"),
 		LeadStatus:       c.Query("lead_status"),
 		Channel:          c.Query("channel"),
@@ -448,7 +448,7 @@ func (h *AICCHandler) ListSessions(c *gin.Context) {
 		writeServiceError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"sessions": results})
+	c.JSON(http.StatusOK, result)
 }
 
 // ListLeadFields 列出 AICC 智能体公开页留资字段。
