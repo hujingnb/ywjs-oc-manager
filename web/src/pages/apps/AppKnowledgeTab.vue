@@ -24,7 +24,15 @@
           <span class="upload-limit">{{ t('knowledge.messages.uploadMaxMessage', { label: KNOWLEDGE_UPLOAD_MAX_LABEL }) }}</span>
           <label class="secondary-button file-picker" :class="{ disabled: uploading }">
             {{ t('apps.knowledge.upload') }}
-            <input type="file" multiple :accept="KNOWLEDGE_UPLOAD_ACCEPT" :disabled="uploading" @change="onUploadFile" />
+            <input
+              id="app-knowledge-upload"
+              name="app_knowledge_upload"
+              type="file"
+              multiple
+              :accept="KNOWLEDGE_UPLOAD_ACCEPT"
+              :disabled="uploading"
+              @change="onUploadFile"
+            />
           </label>
         </template>
       </div>
@@ -34,6 +42,7 @@
       <n-input
         v-model:value="keyword"
         :placeholder="t('apps.knowledge.searchPlaceholder')"
+        :input-props="{ id: 'app-knowledge-search', name: 'app_knowledge_search' }"
         clearable
         style="width: 220px"
       />

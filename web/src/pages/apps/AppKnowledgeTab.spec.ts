@@ -73,10 +73,12 @@ const InputStub = defineComponent({
   props: {
     value: { type: String, default: '' },
     placeholder: { type: String, default: '' },
+    inputProps: { type: Object as PropType<Record<string, string>>, default: () => ({}) },
   },
   emits: ['update:value'],
   setup(props, { emit }) {
     return () => h('input', {
+      ...props.inputProps,
       value: props.value,
       placeholder: props.placeholder,
       onInput: (event: Event) => emit('update:value', (event.target as HTMLInputElement).value),
@@ -277,6 +279,18 @@ describe('AppKnowledgeTab', () => {
     const wrapper = mountTab()
 
     expect(wrapper.find('input[type="file"]').attributes('multiple')).toBeDefined()
+  })
+
+  // 覆盖浏览器表单字段可识别性：上传文件和搜索框必须带稳定 id/name，避免 DevTools 表单 issue。
+  it('实例知识库表单字段带有稳定的 id 和 name', () => {
+    const wrapper = mountTab()
+    const fileInput = wrapper.find('input[type="file"]')
+    const searchInput = wrapper.find('input[placeholder="搜索文件名称"]')
+
+    expect(fileInput.attributes('id')).toBe('app-knowledge-upload')
+    expect(fileInput.attributes('name')).toBe('app_knowledge_upload')
+    expect(searchInput.attributes('id')).toBe('app-knowledge-search')
+    expect(searchInput.attributes('name')).toBe('app_knowledge_search')
   })
 
   // 覆盖实例知识库上传超限路径：前端提示上限并且不创建上传会话。
