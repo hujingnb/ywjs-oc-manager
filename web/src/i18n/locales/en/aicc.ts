@@ -107,6 +107,16 @@ export default {
       allowedDomainsPlaceholder: 'One domain per line, e.g. www.example.com or *.example.com. Leave blank to allow all.',
       reset: 'Reset',
       saveConfig: 'Save config',
+      help: {
+        name: 'The customer-care agent name shown on the public page and in the console. Use a role or service name visitors understand.',
+        retentionDays: 'How many days visitor sessions, images, and leads are retained in this system before cleanup.',
+        privacyMode: 'Controls whether visitors only see a privacy notice or must consent before starting a conversation.',
+        greeting: 'The first message visitors see when opening the public page or widget.',
+        scenario: 'Describes the audience, business questions, and service scenarios this agent should handle.',
+        answerBoundary: 'Defines what the agent must not promise or process, such as pricing commitments, refund approvals, or complaint escalation.',
+        privacyText: 'The data-use notice shown to visitors, including collected data, purpose, and retention policy.',
+        allowedDomains: 'Restricts which websites can load the widget. Leave blank to allow all domains.',
+      },
     },
     delivery: {
       eyebrow: 'Delivery and safety',
@@ -127,6 +137,12 @@ export default {
       sensitiveWords: 'Sensitive words (one per line)',
       sensitiveWordsPlaceholder: 'Matched content is blocked on the public page and visitors are asked to revise it',
       saveSettings: 'Save operations config',
+      help: {
+        messageLimit: 'Limits how many messages a single visitor session can send to prevent abusive or oversized conversations.',
+        resumeTtl: 'The time window in which a visitor can refresh or reopen the link and resume the same conversation.',
+        enableBlockedVisitors: 'When enabled, the system marks high-risk visitors based on sensitive-word hits or abnormal frequency and blocks them from sending more messages.',
+        sensitiveWords: 'Words or phrases visitors are not allowed to send. Matched messages are blocked on the public page.',
+      },
     },
     knowledge: {
       eyebrow: 'Knowledge scope',
@@ -139,6 +155,11 @@ export default {
       dedicatedDocuments: 'Dedicated docs',
       appDocsPlaceholder: 'Select documents from the hidden instance knowledge base',
       save: 'Save knowledge scope',
+      help: {
+        useOrgKnowledge: 'Allows the agent to retrieve content from the organization shared knowledge base when answering.',
+        industryKnowledge: 'Select platform-provided industry knowledge for common terminology, policies, or product context.',
+        dedicatedDocuments: 'Select documents from this agent’s dedicated hidden instance. These documents only apply to the current agent.',
+      },
     },
     leadFields: {
       eyebrow: 'Visitor leads',

@@ -107,6 +107,16 @@ export default {
       allowedDomainsPlaceholder: '每行一个域名，例如：www.example.com 或 *.example.com；留空表示不限制',
       reset: '重置',
       saveConfig: '保存配置',
+      help: {
+        name: '公开页和工作台中展示的客服智能体名称，建议使用访客能理解的岗位或服务名称。',
+        retentionDays: '访客会话、图片和线索数据在本系统内保留的天数，到期后会按保留策略清理。',
+        privacyMode: '控制访客打开公开页时是否只展示隐私提示，或必须先同意后才能开始咨询。',
+        greeting: '访客进入公开页或挂件时看到的第一句话，用于说明客服身份和可咨询范围。',
+        scenario: '描述这个智能体服务的客群、业务问题和适用场景，帮助回答更贴近业务。',
+        answerBoundary: '约束智能体不能承诺或处理的事项，例如价格承诺、退款审批或投诉升级。',
+        privacyText: '展示给访客的数据使用说明，说明会收集哪些信息、用途和保存策略。',
+        allowedDomains: '限制挂件只能被哪些网站加载。留空表示不限制，填写后非匹配域名无法正常使用挂件。',
+      },
     },
     delivery: {
       eyebrow: '投放与安全策略',
@@ -127,6 +137,12 @@ export default {
       sensitiveWords: '敏感词（一行一个）',
       sensitiveWordsPlaceholder: '命中后公开页会阻止发送并提示访客调整内容',
       saveSettings: '保存运营配置',
+      help: {
+        messageLimit: '限制单个访客会话最多可发送的消息数，避免异常刷消息或超长咨询占用资源。',
+        resumeTtl: '访客刷新页面或再次打开链接后，可继续接回原会话的时间窗口。',
+        enableBlockedVisitors: '开启后，系统会根据敏感词命中、异常频率等规则标记高风险访客，并阻止其继续发送消息。',
+        sensitiveWords: '配置不允许访客发送的词语或短语。命中后公开页会拦截消息，并提示访客调整内容。',
+      },
     },
     knowledge: {
       eyebrow: '知识库范围',
@@ -139,6 +155,11 @@ export default {
       dedicatedDocuments: '专属文档',
       appDocsPlaceholder: '选择隐藏实例知识库中的文档',
       save: '保存知识范围',
+      help: {
+        useOrgKnowledge: '开启后，智能体回答时可以检索本企业共享知识库中的内容。',
+        industryKnowledge: '选择平台预置的行业知识库，适合补充通用行业术语、政策或产品知识。',
+        dedicatedDocuments: '选择该智能体专属隐藏实例中的文档，只对当前智能体生效。',
+      },
     },
     leadFields: {
       eyebrow: '访客留资',

@@ -52,27 +52,42 @@
           <n-form v-if="isSettingsRoute" class="agent-form" :model="form" label-placement="top" @submit.prevent="submitForm">
             <div class="agent-fields">
               <div>
-                <n-form-item :label="t('aicc.manager.form.name')" required>
+                <n-form-item required>
+                  <template #label>
+                    <FieldLabel :label="t('aicc.manager.form.name')" :help="t('aicc.manager.form.help.name')" />
+                  </template>
                   <n-input v-model:value="form.name" maxlength="80" :placeholder="t('aicc.manager.form.namePlaceholder')" />
                 </n-form-item>
               </div>
               <div>
-                <n-form-item :label="t('aicc.manager.form.retentionDays')">
+                <n-form-item>
+                  <template #label>
+                    <FieldLabel :label="t('aicc.manager.form.retentionDays')" :help="t('aicc.manager.form.help.retentionDays')" />
+                  </template>
                   <n-input-number v-model:value="form.retention_days" :min="1" :max="3650" style="width: 100%" />
                 </n-form-item>
               </div>
               <div>
-                <n-form-item :label="t('aicc.manager.form.privacyMode')">
+                <n-form-item>
+                  <template #label>
+                    <FieldLabel :label="t('aicc.manager.form.privacyMode')" :help="t('aicc.manager.form.help.privacyMode')" />
+                  </template>
                   <n-select v-model:value="form.privacy_mode" :options="privacyOptions" />
                 </n-form-item>
               </div>
               <div>
-                <n-form-item :label="t('aicc.manager.form.greeting')">
+                <n-form-item>
+                  <template #label>
+                    <FieldLabel :label="t('aicc.manager.form.greeting')" :help="t('aicc.manager.form.help.greeting')" />
+                  </template>
                   <n-input v-model:value="form.greeting" maxlength="240" :placeholder="t('aicc.manager.form.greetingPlaceholder')" />
                 </n-form-item>
               </div>
               <div class="field-full">
-                <n-form-item :label="t('aicc.manager.form.scenario')">
+                <n-form-item>
+                  <template #label>
+                    <FieldLabel :label="t('aicc.manager.form.scenario')" :help="t('aicc.manager.form.help.scenario')" />
+                  </template>
                   <n-input
                     v-model:value="form.scenario"
                     type="textarea"
@@ -82,7 +97,10 @@
                 </n-form-item>
               </div>
               <div class="field-full">
-                <n-form-item :label="t('aicc.manager.form.answerBoundary')">
+                <n-form-item>
+                  <template #label>
+                    <FieldLabel :label="t('aicc.manager.form.answerBoundary')" :help="t('aicc.manager.form.help.answerBoundary')" />
+                  </template>
                   <n-input
                     v-model:value="form.answer_boundary"
                     type="textarea"
@@ -92,7 +110,10 @@
                 </n-form-item>
               </div>
               <div class="field-full">
-                <n-form-item :label="t('aicc.manager.form.privacyText')">
+                <n-form-item>
+                  <template #label>
+                    <FieldLabel :label="t('aicc.manager.form.privacyText')" :help="t('aicc.manager.form.help.privacyText')" />
+                  </template>
                   <n-input
                     v-model:value="form.privacy_text"
                     type="textarea"
@@ -102,7 +123,10 @@
                 </n-form-item>
               </div>
               <div class="field-full">
-                <n-form-item :label="t('aicc.manager.form.allowedDomains')">
+                <n-form-item>
+                  <template #label>
+                    <FieldLabel :label="t('aicc.manager.form.allowedDomains')" :help="t('aicc.manager.form.help.allowedDomains')" />
+                  </template>
                   <n-input
                     v-model:value="form.allowed_domains_text"
                     type="textarea"
@@ -165,16 +189,28 @@
 
               <n-form v-if="isSettingsRoute" class="settings-form" :model="settingsForm" label-placement="top">
                 <div class="settings-grid">
-                  <n-form-item :label="t('aicc.manager.delivery.messageLimit')">
+                  <n-form-item>
+                    <template #label>
+                      <FieldLabel :label="t('aicc.manager.delivery.messageLimit')" :help="t('aicc.manager.delivery.help.messageLimit')" />
+                    </template>
                     <n-input-number v-model:value="settingsForm.message_limit_per_session" :min="1" :max="1000" style="width: 100%" />
                   </n-form-item>
-                  <n-form-item :label="t('aicc.manager.delivery.resumeTtl')">
+                  <n-form-item>
+                    <template #label>
+                      <FieldLabel :label="t('aicc.manager.delivery.resumeTtl')" :help="t('aicc.manager.delivery.help.resumeTtl')" />
+                    </template>
                     <n-input-number v-model:value="settingsForm.session_resume_ttl_minutes" :min="1" :max="1440" style="width: 100%" />
                   </n-form-item>
-                  <n-form-item :label="t('aicc.manager.delivery.enableBlockedVisitors')">
+                  <n-form-item>
+                    <template #label>
+                      <FieldLabel :label="t('aicc.manager.delivery.enableBlockedVisitors')" :help="t('aicc.manager.delivery.help.enableBlockedVisitors')" />
+                    </template>
                     <n-switch v-model:value="settingsForm.blocked_visitor_enabled" />
                   </n-form-item>
-                  <n-form-item class="field-full" :label="t('aicc.manager.delivery.sensitiveWords')">
+                  <n-form-item class="field-full">
+                    <template #label>
+                      <FieldLabel :label="t('aicc.manager.delivery.sensitiveWords')" :help="t('aicc.manager.delivery.help.sensitiveWords')" />
+                    </template>
                     <n-input
                       v-model:value="settingsForm.sensitive_words_text"
                       type="textarea"
@@ -207,9 +243,12 @@
             <div v-if="!selectedAgent" class="state-text">{{ t('aicc.manager.knowledge.noAgent') }}</div>
             <template v-else>
               <n-checkbox v-model:checked="knowledgeForm.use_org_knowledge">
-                {{ t('aicc.manager.knowledge.useOrgKnowledge') }}
+                <FieldLabel :label="t('aicc.manager.knowledge.useOrgKnowledge')" :help="t('aicc.manager.knowledge.help.useOrgKnowledge')" />
               </n-checkbox>
-              <n-form-item :label="t('aicc.manager.knowledge.industryKnowledge')">
+              <n-form-item>
+                <template #label>
+                  <FieldLabel :label="t('aicc.manager.knowledge.industryKnowledge')" :help="t('aicc.manager.knowledge.help.industryKnowledge')" />
+                </template>
                 <n-select
                   v-model:value="knowledgeForm.industry_knowledge_base_ids"
                   multiple
@@ -220,7 +259,10 @@
                   :placeholder="t('aicc.manager.knowledge.industryPlaceholder')"
                 />
               </n-form-item>
-              <n-form-item :label="t('aicc.manager.knowledge.dedicatedDocuments')">
+              <n-form-item>
+                <template #label>
+                  <FieldLabel :label="t('aicc.manager.knowledge.dedicatedDocuments')" :help="t('aicc.manager.knowledge.help.dedicatedDocuments')" />
+                </template>
                 <n-select
                   v-model:value="knowledgeForm.app_document_ids"
                   multiple
@@ -306,15 +348,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, defineComponent, h, nextTick, reactive, ref, watch } from 'vue'
 import QRCode from 'qrcode'
 import {
   NAlert, NButton, NCheckbox, NForm, NFormItem, NInput, NInputNumber, NSelect, NSpace, NTag,
-  NSwitch, type SelectOption,
+  NSwitch, NTooltip, type SelectOption,
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
-  Copy, Download, ExternalLink, PauseCircle, PlayCircle, Plus, QrCode, Save, Trash2,
+  Copy, Download, ExternalLink, HelpCircle, PauseCircle, PlayCircle, Plus, QrCode, Save, Trash2,
 } from 'lucide-vue-next'
 
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
@@ -356,6 +398,29 @@ const props = withDefaults(defineProps<{
   initialSection?: InitialSection
 }>(), {
   initialSection: 'reception',
+})
+
+// FieldLabel 统一渲染设置页字段说明入口：label 后的问号图标只承载解释，不改变表单提交语义。
+const FieldLabel = defineComponent({
+  name: 'FieldLabel',
+  props: {
+    label: { type: String, required: true },
+    help: { type: String, required: true },
+  },
+  setup(labelProps) {
+    return () => h('span', { class: 'field-label-with-help' }, [
+      h('span', labelProps.label),
+      h(NTooltip, { trigger: 'hover', placement: 'top', width: 260 }, {
+        trigger: () => h('button', {
+          type: 'button',
+          class: 'field-help-trigger',
+          'aria-label': labelProps.help,
+          'data-test': 'field-help',
+        }, [h(HelpCircle, { size: 14 })]),
+        default: () => labelProps.help,
+      }),
+    ])
+  },
 })
 
 interface AgentForm extends AICCAgentPayload {
@@ -872,6 +937,37 @@ function openDedicatedKnowledge() {
 
 .status-tile span {
   color: var(--color-text-secondary);
+}
+
+.field-label-with-help {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  vertical-align: middle;
+}
+
+.field-help-trigger {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: help;
+}
+
+.field-help-trigger:hover,
+.field-help-trigger:focus-visible {
+  color: var(--color-primary);
+}
+
+.field-help-trigger:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 .editor-panel {

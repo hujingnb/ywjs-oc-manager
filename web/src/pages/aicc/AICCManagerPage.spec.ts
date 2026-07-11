@@ -103,7 +103,7 @@ const FormStub = defineComponent({
 const FormItemStub = defineComponent({
   props: ['label'],
   setup(props, { slots }) {
-    return () => h('label', [h('span', String(props.label ?? '')), slots.default?.()])
+    return () => h('label', [slots.label?.() ?? h('span', String(props.label ?? '')), slots.default?.()])
   },
 })
 
@@ -136,6 +136,11 @@ const CheckboxStub = defineComponent({
   },
 })
 const SwitchStub = CheckboxStub
+const TooltipStub = defineComponent({
+  setup(_, { slots }) {
+    return () => h('span', { 'data-test': 'tooltip' }, [slots.trigger?.(), slots.default?.()])
+  },
+})
 
 function mountManager(context: AICCConsoleContext, props: { initialSection?: 'reception' | 'settings' } = {}) {
   i18n.global.locale.value = 'zh'
@@ -162,6 +167,7 @@ function mountManager(context: AICCConsoleContext, props: { initialSection?: 're
         NSpace: SpaceStub,
         NTag: TagStub,
         NSwitch: SwitchStub,
+        NTooltip: TooltipStub,
         'n-alert': AlertStub,
         'n-button': ButtonStub,
         'n-checkbox': CheckboxStub,
@@ -173,6 +179,7 @@ function mountManager(context: AICCConsoleContext, props: { initialSection?: 're
         'n-space': SpaceStub,
         'n-tag': TagStub,
         'n-switch': SwitchStub,
+        'n-tooltip': TooltipStub,
       } satisfies Record<string, Component | boolean>,
     },
   })
@@ -245,6 +252,19 @@ describe('AICCManagerPage', () => {
     expect(wrapper.text()).toContain('知识库范围')
     expect(wrapper.text()).toContain('访客留资')
     expect(wrapper.text()).not.toContain('嵌入占位')
+  })
+
+  // 覆盖设置页字段说明：每个主要配置字段后都应有帮助入口，并展示业务解释文案。
+  it('shows help tooltips for settings form fields', () => {
+    const { context } = makeConsoleContext()
+    const wrapper = mountManager(context, { initialSection: 'settings' })
+
+    const helpTriggers = wrapper.findAll('[data-test="field-help"]')
+
+    expect(helpTriggers).toHaveLength(15)
+    expect(helpTriggers.some(trigger =>
+      trigger.attributes('aria-label') === '开启后，系统会根据敏感词命中、异常频率等规则标记高风险访客，并阻止其继续发送消息。',
+    )).toBe(true)
   })
 
   // 覆盖顶部新建智能体联动：顶部选择区清空智能体后，内容区表单必须进入新建态且不残留旧名称。
