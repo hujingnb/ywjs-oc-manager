@@ -412,6 +412,8 @@ func writePublicAICCError(c *gin.Context, err error) {
 		apierror.JSON(c, http.StatusForbidden, "AICC_VISITOR_BLOCKED", "当前访客暂不能继续咨询")
 	case errors.Is(err, service.ErrRateLimited):
 		apierror.JSON(c, http.StatusTooManyRequests, "RATE_LIMITED", apierror.MsgAICCRateLimited)
+	case errors.Is(err, service.ErrConversationRuntimeUnavailable):
+		apierror.JSON(c, http.StatusServiceUnavailable, "RUNTIME_NOT_AVAILABLE", apierror.MsgAICCRuntimeUnavailable)
 	case errors.Is(err, service.ErrConversationFileTooLarge):
 		apierror.JSON(c, http.StatusRequestEntityTooLarge, "CONVERSATION_FILE_TOO_LARGE", apierror.MsgConversationFileTooLarge)
 	case errors.Is(err, service.ErrInvalidArgument):

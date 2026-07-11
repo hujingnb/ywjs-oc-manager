@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"oc-manager/internal/api/apierror"
 	"oc-manager/internal/service"
 )
 
@@ -101,6 +102,18 @@ func newPublicAICCTestRouter(t *testing.T, svc publicAICCService) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
+	RegisterPublicAICCRoutes(router, NewPublicAICCHandler(svc))
+	return router
+}
+
+func newPublicAICCTestRouterWithLocale(t *testing.T, svc publicAICCService, locale string) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.ReleaseMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		apierror.SetLocale(c, locale)
+		c.Next()
+	})
 	RegisterPublicAICCRoutes(router, NewPublicAICCHandler(svc))
 	return router
 }
@@ -286,6 +299,22 @@ func TestPublicAICCHandlerMapsConversationGates(t *testing.T) {
 			assert.Contains(t, recorder.Body.String(), tc.code)
 		})
 	}
+}
+
+// TestPublicAICCHandlerMapsRuntimeUnavailableForVisitor 覆盖 AICC 公开页运行时不可用：
+// 访客侧不能暴露“运行时 tab”等管理端术语，但仍保留稳定错误码方便后端排查。
+func TestPublicAICCHandlerMapsRuntimeUnavailableForVisitor(t *testing.T) {
+	router := newPublicAICCTestRouterWithLocale(t, &publicAICCServiceStub{messageErr: service.ErrConversationRuntimeUnavailable}, "zh")
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/sessions/sess-1/messages", bytes.NewBufferString(`{"text":"你好"}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "RUNTIME_NOT_AVAILABLE")
+	assert.Contains(t, recorder.Body.String(), "客服暂时不可用，请稍后再试")
+	assert.NotContains(t, recorder.Body.String(), "运行时 tab")
 }
 
 // TestPublicAICCHandlerMapsInvalidMessage 覆盖反馈入口：不可反馈消息返回稳定 code。
