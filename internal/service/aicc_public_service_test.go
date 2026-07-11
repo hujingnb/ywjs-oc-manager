@@ -153,6 +153,8 @@ func TestAICCPublicChatStoresVisitorAndAssistantMessages(t *testing.T) {
 	assert.Equal(t, "报价多少", store.createdMessages[0].TextContent.String)
 	assert.Equal(t, "app-1", chat.appID)
 	assert.Contains(t, chat.text, "AICC（AI Contact Center）在线客服智能体")
+	assert.Contains(t, chat.text, "必须调用 oc-kb skill 的 oc-kb search")
+	assert.Contains(t, chat.text, "不要自行编写脚本或代码来检索知识库")
 	assert.Contains(t, chat.text, "官网售前咨询")
 	assert.Contains(t, chat.text, "不承诺最终成交价格")
 	assert.Contains(t, chat.text, "访客问题：\n报价多少")

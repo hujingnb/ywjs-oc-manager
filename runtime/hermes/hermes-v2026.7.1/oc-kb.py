@@ -93,14 +93,38 @@ def _config() -> tuple[str, str]:
     """读取 manager runtime API 的连接配置。
 
     runtime_base_url 与 app_token 由 oc-entrypoint 从 manifest.knowledge 解析后
-    注入进程环境（见 oc-entrypoint.py 的 _configure_knowledge_env）。
+    注入进程环境（见 oc-entrypoint.py 的 _configure_knowledge_env），同时写入
+    data_root/.env 供不继承 gateway 环境的 execute_code 子环境兜底读取。
     任一缺失视为容器尚未拿到 runtime token，CLI 立即失败而不是默默拼出错误请求。
     """
-    base_url = os.environ.get("OC_KB_RUNTIME_BASE_URL", "").rstrip("/")
-    token = os.environ.get("OC_KB_APP_TOKEN", "")
+    base_url = _runtime_env_value("OC_KB_RUNTIME_BASE_URL").rstrip("/")
+    token = _runtime_env_value("OC_KB_APP_TOKEN")
     if not base_url or not token:
         raise RuntimeError("oc-kb is not configured: missing OC_KB_RUNTIME_BASE_URL or OC_KB_APP_TOKEN")
     return base_url, token
+
+
+def _runtime_env_value(key: str) -> str:
+    """优先读进程环境，缺失时从 data_root/.env 读取单个 runtime CLI 配置。
+
+    Hermes gateway 主进程能拿到 oc-entrypoint 注入的环境变量，但 execute_code
+    启动的代码执行器可能只继承基础环境；.env 兜底让 oc-kb 在两种执行路径下行为一致。
+    """
+    value = os.environ.get(key, "")
+    if value:
+        return value
+    env_file = Path(os.environ.get("OC_DATA_DIR", "/opt/data")) / ".env"
+    try:
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            name, raw = stripped.split("=", 1)
+            if name == key:
+                return raw.strip()
+    except OSError:
+        return ""
+    return ""
 
 
 def _search(question: str, top_k: int) -> int:
