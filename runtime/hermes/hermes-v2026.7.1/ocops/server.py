@@ -10,8 +10,6 @@ kanban/login 端点在 Task 10/11 追加。"""
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
-import functools
 import json
 import os
 from pathlib import Path
@@ -26,22 +24,6 @@ from ocops import channel, conversation, cron, doctor, info, kanban, skills
 from ocops.auth import token_matches
 from ocops.errors import OpsError, code_to_http
 from ocops.kanban import KanbanError
-
-# 会话请求会同步等待同 pod Hermes api_server 完成模型回合。使用独立线程池避免阻塞
-# uvicorn 事件循环，也避免 asyncio 默认 32 worker 在百并发下形成多批排队。
-_CONVERSATION_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
-    max_workers=64,
-    thread_name_prefix="ocops-conversation",
-)
-
-
-async def _conversation_call(func, *args, **kwargs):
-    """在线程池执行阻塞式会话转发，并保留位置参数与关键字参数语义。"""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        _CONVERSATION_EXECUTOR,
-        functools.partial(func, *args, **kwargs),
-    )
 
 # ---------------------------------------------------------------------------
 # cron body 字段白名单：防止未知键透传给 run_create / run_update，
@@ -638,7 +620,7 @@ async def conversation_list(request):
     """GET /oc/conversations?source=&limit=&offset= —— 列实例下会话。"""
     try:
         q = request.query_params
-        data = await _conversation_call(
+        data = await asyncio.to_thread(
             conversation.list_sessions,
             source=q.get("source", ""),
             limit=int(q.get("limit", "50") or "50"),
@@ -652,7 +634,7 @@ async def conversation_list(request):
 async def conversation_messages(request):
     """GET /oc/conversations/{sid}/messages —— 读会话历史。"""
     try:
-        return _ok(await _conversation_call(conversation.session_messages, request.path_params["sid"]))
+        return _ok(await asyncio.to_thread(conversation.session_messages, request.path_params["sid"]))
     except OpsError as e:
         return _err(e)
 
@@ -664,7 +646,7 @@ async def conversation_create(request):
     except Exception:
         body = {}
     try:
-        return _ok(await _conversation_call(conversation.create_session, body), status=201)
+        return _ok(await asyncio.to_thread(conversation.create_session, body), status=201)
     except OpsError as e:
         return _err(e)
 
@@ -672,7 +654,7 @@ async def conversation_create(request):
 async def conversation_delete(request):
     """DELETE /oc/conversations/{sid} —— 删除会话。"""
     try:
-        await _conversation_call(conversation.delete_session, request.path_params["sid"])
+        await asyncio.to_thread(conversation.delete_session, request.path_params["sid"])
         return Response(status_code=204)
     except OpsError as e:
         return _err(e)
@@ -685,7 +667,7 @@ async def conversation_rename(request):
     except Exception:
         body = {}
     try:
-        return _ok(await _conversation_call(
+        return _ok(await asyncio.to_thread(
             conversation.update_title,
             request.path_params["sid"],
             str(body.get("title", "")),
@@ -701,7 +683,7 @@ async def conversation_chat(request):
     except Exception:
         body = {}
     try:
-        return _ok(await _conversation_call(conversation.chat, request.path_params["sid"], body))
+        return _ok(await asyncio.to_thread(conversation.chat, request.path_params["sid"], body))
     except OpsError as e:
         return _err(e)
 
