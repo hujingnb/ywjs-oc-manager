@@ -1,0 +1,743 @@
+MASTER_SHA=c270b3d06b624ca8706c651f427d2d0734a8766e
+KEFU_SHA=7663b687e9efb75c1c67f29eed3ac40347fa7e91
+
+==> 备份当前本地数据库到 /tmp/aicc-readiness-pre-drill.sql
+mysqldump: [Warning] Using a password on the command line interface can be insecure.
+
+==> 构建 master 镜像 (SHA=c270b3d06b624ca8706c651f427d2d0734a8766e, tag=aicc-readiness-c270b3d06b62)
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 6.15kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/alpine:3.22
+#2 DONE 0.0s
+
+#3 [internal] load metadata for ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/golang:1.25-alpine3.22
+#3 DONE 0.5s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 1.05kB done
+#4 DONE 0.0s
+
+#5 [stage-1 1/8] FROM ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/alpine:3.22@sha256:2039be0c5ec6ce8566809626a252c930216a92109c043f282504accb5ee3c0c6
+#5 resolve ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/alpine:3.22@sha256:2039be0c5ec6ce8566809626a252c930216a92109c043f282504accb5ee3c0c6 done
+#5 DONE 0.0s
+
+#6 [builder 1/7] FROM ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/golang:1.25-alpine3.22@sha256:e7b0e83d7046b619a32652d33384fcaf395fb601bf50d19fc221379b9c135158
+#6 resolve ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/golang:1.25-alpine3.22@sha256:e7b0e83d7046b619a32652d33384fcaf395fb601bf50d19fc221379b9c135158 done
+#6 DONE 0.0s
+
+#7 [internal] load build context
+#7 transferring context: 56.70kB 0.0s done
+#7 DONE 0.0s
+
+#8 [stage-1 4/8] COPY --from=builder /out/migrate     /usr/local/bin/migrate
+#8 CACHED
+
+#9 [stage-1 7/8] COPY --from=builder /out/site-server /usr/local/bin/site-server
+#9 CACHED
+
+#10 [builder 3/7] WORKDIR /src
+#10 CACHED
+
+#11 [builder 6/7] COPY . .
+#11 CACHED
+
+#12 [builder 4/7] COPY go.mod go.sum ./
+#12 CACHED
+
+#13 [builder 5/7] RUN go mod download
+#13 CACHED
+
+#14 [builder 7/7] RUN go build -trimpath -ldflags='-s -w' -o /out/oc-manager  ./cmd/server  && go build -trimpath -ldflags='-s -w' -o /out/migrate     ./cmd/migrate  && go build -trimpath -ldflags='-s -w' -o /out/seed-admin  ./cmd/seed-admin  && go build -trimpath -ldflags='-s -w' -o /out/seed-e2e    ./cmd/seed-e2e  && go build -trimpath -ldflags='-s -w' -o /out/site-server ./cmd/site-server
+#14 CACHED
+
+#15 [builder 2/7] RUN sed -i "s|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g" /etc/apk/repositories  && apk add --no-cache git ca-certificates
+#15 CACHED
+
+#16 [stage-1 5/8] COPY --from=builder /out/seed-admin  /usr/local/bin/seed-admin
+#16 CACHED
+
+#17 [stage-1 6/8] COPY --from=builder /out/seed-e2e    /usr/local/bin/seed-e2e
+#17 CACHED
+
+#18 [stage-1 3/8] COPY --from=builder /out/oc-manager  /usr/local/bin/oc-manager
+#18 CACHED
+
+#19 [stage-1 2/8] RUN sed -i "s|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g" /etc/apk/repositories &&     apk add --no-cache ca-certificates tzdata wget &&     mkdir -p /var/lib/oc-manager/data /etc/manager
+#19 CACHED
+
+#20 [stage-1 8/8] WORKDIR /var/lib/oc-manager
+#20 CACHED
+
+#21 exporting to image
+#21 exporting layers done
+#21 exporting manifest sha256:78b858f7185a2cdaee3165d207135f7978a6f73ac3eec3c4c53dfd046dd80b6c done
+#21 exporting config sha256:9d89e8a70c425e4b642539538be9f14c9566bba9c2dc615e192b68c8268ee604 done
+#21 exporting attestation manifest sha256:5a3ab25321366cc054b2ca28371dbcec74f814a87c32e06f0c5a5e4740994e87 done
+#21 exporting manifest list sha256:e3d88a490f7a04f579e2cb806fce5bf3e0dc8d11ca6b6d21d4f60a55232fc801 done
+#21 naming to k3d-ocm-registry.localhost:5000/oc-manager-api:aicc-readiness-c270b3d06b62 done
+#21 unpacking to k3d-ocm-registry.localhost:5000/oc-manager-api:aicc-readiness-c270b3d06b62 done
+#21 DONE 0.0s
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 2.48kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/node:22-alpine
+#2 ...
+
+#3 [internal] load metadata for ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/nginx:1.27-alpine
+#3 DONE 0.5s
+
+#2 [internal] load metadata for ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/node:22-alpine
+#2 DONE 0.5s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 363B done
+#4 DONE 0.0s
+
+#5 [builder 1/6] FROM ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/node:22-alpine@sha256:757ec364de4d37cedf30871be2988927660834e656e9aa52aad9ac194814c30c
+#5 resolve ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/node:22-alpine@sha256:757ec364de4d37cedf30871be2988927660834e656e9aa52aad9ac194814c30c done
+#5 DONE 0.0s
+
+#6 [stage-1 1/3] FROM ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/nginx:1.27-alpine@sha256:62223d644fa234c3a1cc785ee14242ec47a77364226f1c811d2f669f96dc2ac8
+#6 resolve ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/nginx:1.27-alpine@sha256:62223d644fa234c3a1cc785ee14242ec47a77364226f1c811d2f669f96dc2ac8 done
+#6 DONE 0.0s
+
+#7 [internal] load build context
+#7 transferring context: 2.59MB 0.0s done
+#7 DONE 0.0s
+
+#8 [builder 2/6] WORKDIR /src
+#8 CACHED
+
+#9 [builder 3/6] COPY package.json package-lock.json ./
+#9 CACHED
+
+#10 [builder 6/6] RUN npm run build
+#10 CACHED
+
+#11 [stage-1 2/3] COPY nginx.conf /etc/nginx/conf.d/default.conf
+#11 CACHED
+
+#12 [builder 4/6] RUN npm ci --no-audit --no-fund
+#12 CACHED
+
+#13 [builder 5/6] COPY . .
+#13 CACHED
+
+#14 [stage-1 3/3] COPY --from=builder /src/dist /usr/share/nginx/html
+#14 CACHED
+
+#15 exporting to image
+#15 exporting layers done
+#15 exporting manifest sha256:6feea5516cadb4e652e012e67ba50ca38d148100a7902b7a885004e17fedd64e done
+#15 exporting config sha256:0b97076d7fcfa2f8b92a5347c7dcdf48a9d5e96c07126b0d6471c3a6f69d25d8 done
+#15 exporting attestation manifest sha256:487ed13451f93061f612a668647128ae1298d17a812dcdf697264cfe6bc7eab7 done
+#15 exporting manifest list sha256:c15632774d9accb45bbeaa6ca9704dfcd67d67cec8f91da010a864048b0bd50c done
+#15 naming to k3d-ocm-registry.localhost:5000/oc-manager-web:aicc-readiness-c270b3d06b62 done
+#15 unpacking to k3d-ocm-registry.localhost:5000/oc-manager-web:aicc-readiness-c270b3d06b62 done
+#15 DONE 0.0s
+The push refers to repository [k3d-ocm-registry.localhost:5000/oc-manager-api]
+334a2386ee28: Layer already exists
+4f4fb700ef54: Layer already exists
+84f5eff04246: Layer already exists
+d90f1ac1b287: Layer already exists
+bb402b34620a: Pushed
+33d85c146cea: Layer already exists
+fc52a31164b1: Layer already exists
+b3231ef41e0a: Layer already exists
+b85511c837e7: Layer already exists
+aicc-readiness-c270b3d06b62: digest: sha256:e3d88a490f7a04f579e2cb806fce5bf3e0dc8d11ca6b6d21d4f60a55232fc801 size: 856
+The push refers to repository [k3d-ocm-registry.localhost:5000/oc-manager-web]
+4d7674fa9737: Layer already exists
+cfbb854f5ec6: Pushed
+f18232174bc9: Layer already exists
+f1cdcd889c29: Layer already exists
+197eb75867ef: Layer already exists
+81bd8ed7ec67: Layer already exists
+d7e507024086: Layer already exists
+34a64644b756: Layer already exists
+b464cfdf2a63: Layer already exists
+61ca4f733c80: Layer already exists
+39c2ddfd6010: Layer already exists
+aicc-readiness-c270b3d06b62: digest: sha256:c15632774d9accb45bbeaa6ca9704dfcd67d67cec8f91da010a864048b0bd50c size: 856
+
+==> 构建 kefu 镜像 (SHA=7663b687e9efb75c1c67f29eed3ac40347fa7e91, tag=aicc-readiness-7663b687e9ef)
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 6.58kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/alpine:3.22
+#2 DONE 0.0s
+
+#3 [internal] load metadata for ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/golang:1.25-alpine3.22
+#3 DONE 0.2s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 1.05kB done
+#4 DONE 0.0s
+
+#5 [builder 1/7] FROM ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/golang:1.25-alpine3.22@sha256:e7b0e83d7046b619a32652d33384fcaf395fb601bf50d19fc221379b9c135158
+#5 resolve ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/golang:1.25-alpine3.22@sha256:e7b0e83d7046b619a32652d33384fcaf395fb601bf50d19fc221379b9c135158 done
+#5 DONE 0.0s
+
+#6 [stage-1 1/8] FROM ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/alpine:3.22@sha256:2039be0c5ec6ce8566809626a252c930216a92109c043f282504accb5ee3c0c6
+#6 resolve ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/alpine:3.22@sha256:2039be0c5ec6ce8566809626a252c930216a92109c043f282504accb5ee3c0c6 done
+#6 DONE 0.0s
+
+#7 [internal] load build context
+#7 transferring context: 6.86MB 0.1s done
+#7 DONE 0.1s
+
+#8 [builder 2/7] RUN sed -i "s|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g" /etc/apk/repositories  && apk add --no-cache git ca-certificates
+#8 CACHED
+
+#9 [builder 3/7] WORKDIR /src
+#9 CACHED
+
+#10 [builder 4/7] COPY go.mod go.sum ./
+#10 CACHED
+
+#11 [builder 5/7] RUN go mod download
+#11 CACHED
+
+#12 [builder 6/7] COPY . .
+#12 DONE 0.1s
+
+#13 [builder 7/7] RUN go build -trimpath -ldflags='-s -w' -o /out/oc-manager  ./cmd/server  && go build -trimpath -ldflags='-s -w' -o /out/migrate     ./cmd/migrate  && go build -trimpath -ldflags='-s -w' -o /out/seed-admin  ./cmd/seed-admin  && go build -trimpath -ldflags='-s -w' -o /out/seed-e2e    ./cmd/seed-e2e  && go build -trimpath -ldflags='-s -w' -o /out/site-server ./cmd/site-server
+#13 DONE 17.7s
+
+#14 [stage-1 4/8] COPY --from=builder /out/migrate     /usr/local/bin/migrate
+#14 CACHED
+
+#15 [stage-1 5/8] COPY --from=builder /out/seed-admin  /usr/local/bin/seed-admin
+#15 CACHED
+
+#16 [stage-1 6/8] COPY --from=builder /out/seed-e2e    /usr/local/bin/seed-e2e
+#16 CACHED
+
+#17 [stage-1 7/8] COPY --from=builder /out/site-server /usr/local/bin/site-server
+#17 CACHED
+
+#18 [stage-1 2/8] RUN sed -i "s|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g" /etc/apk/repositories &&     apk add --no-cache ca-certificates tzdata wget unzip &&     mkdir -p /var/lib/oc-manager/data /etc/manager /usr/local/share/oc-manager/geoip &&     wget -qO /tmp/aicc-geoip.zip "https://gitee.com/lionsoul/ip2region/repository/archive/master.zip" &&     unzip -j /tmp/aicc-geoip.zip "*/data/ip2region_v4.xdb" "*/data/ip2region_v6.xdb" -d /usr/local/share/oc-manager/geoip &&     rm -f /tmp/aicc-geoip.zip
+#18 CACHED
+
+#19 [stage-1 3/8] COPY --from=builder /out/oc-manager  /usr/local/bin/oc-manager
+#19 CACHED
+
+#20 [stage-1 8/8] WORKDIR /var/lib/oc-manager
+#20 CACHED
+
+#21 exporting to image
+#21 exporting layers done
+#21 exporting manifest sha256:6f11a3d26ba1a83f0aec85d7ffac81b008048ee4aa5d524c8c37fde0d213b532 done
+#21 exporting config sha256:bf83d66c43cd9e8c3f3ceb27231d0ff70073debccb7158a624b54a3bdacae560 done
+#21 exporting attestation manifest sha256:163a2e9514b0ec72e34150f30e4d8b7cbde776eebe4d1364092c8c045ae60fb2 done
+#21 exporting manifest list sha256:853ef045408cee404171b0bc0f72d2654da60bc0a81046460014c6e6b3285120 done
+#21 naming to k3d-ocm-registry.localhost:5000/oc-manager-api:aicc-readiness-7663b687e9ef done
+#21 unpacking to k3d-ocm-registry.localhost:5000/oc-manager-api:aicc-readiness-7663b687e9ef done
+#21 DONE 0.0s
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 2.73kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/node:22-alpine
+#2 ...
+
+#3 [internal] load metadata for ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/nginx:1.27-alpine
+#3 DONE 0.3s
+
+#2 [internal] load metadata for ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/node:22-alpine
+#2 DONE 0.3s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 363B done
+#4 DONE 0.0s
+
+#5 [builder 1/6] FROM ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/node:22-alpine@sha256:757ec364de4d37cedf30871be2988927660834e656e9aa52aad9ac194814c30c
+#5 resolve ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/node:22-alpine@sha256:757ec364de4d37cedf30871be2988927660834e656e9aa52aad9ac194814c30c done
+#5 DONE 0.0s
+
+#6 [stage-1 1/3] FROM ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/nginx:1.27-alpine@sha256:62223d644fa234c3a1cc785ee14242ec47a77364226f1c811d2f669f96dc2ac8
+#6 resolve ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/nginx:1.27-alpine@sha256:62223d644fa234c3a1cc785ee14242ec47a77364226f1c811d2f669f96dc2ac8 done
+#6 DONE 0.0s
+
+#7 [internal] load build context
+#7 transferring context: 2.99MB 0.0s done
+#7 DONE 0.0s
+
+#8 [builder 5/6] COPY . .
+#8 CACHED
+
+#9 [stage-1 2/3] COPY nginx.conf /etc/nginx/conf.d/default.conf
+#9 CACHED
+
+#10 [builder 2/6] WORKDIR /src
+#10 CACHED
+
+#11 [builder 3/6] COPY package.json package-lock.json ./
+#11 CACHED
+
+#12 [builder 6/6] RUN npm run build
+#12 CACHED
+
+#13 [builder 4/6] RUN npm ci --no-audit --no-fund
+#13 CACHED
+
+#14 [stage-1 3/3] COPY --from=builder /src/dist /usr/share/nginx/html
+#14 CACHED
+
+#15 exporting to image
+#15 exporting layers done
+#15 exporting manifest sha256:26bf604f92607f8f386db1e913e17ad6745d290e69bcceab20dbd8cec23a03ed done
+#15 exporting config sha256:744b1b7eac15a65fbf0141804384a9f9ab10b363eee7217c71cbf07bf1eb1496 done
+#15 exporting attestation manifest sha256:3a521f506bf9f7107a9c2cc99b023c0c5d21a96830a8211bb0c5b05d45707d7f done
+#15 exporting manifest list sha256:c75d0ed85d72e33568e74256e49e42bb61afe867e5f55908ce6d4a0030e4f53e done
+#15 naming to k3d-ocm-registry.localhost:5000/oc-manager-web:aicc-readiness-7663b687e9ef done
+#15 unpacking to k3d-ocm-registry.localhost:5000/oc-manager-web:aicc-readiness-7663b687e9ef done
+#15 DONE 0.0s
+The push refers to repository [k3d-ocm-registry.localhost:5000/oc-manager-api]
+d088269965eb: Layer already exists
+4f4fb700ef54: Layer already exists
+84f5eff04246: Layer already exists
+a4407c9121cf: Layer already exists
+d6ff191d8ae6: Layer already exists
+a2b371826a9a: Layer already exists
+efa1a33c89a6: Layer already exists
+1877130cae54: Pushed
+3bcaa5fc9e48: Layer already exists
+aicc-readiness-7663b687e9ef: digest: sha256:853ef045408cee404171b0bc0f72d2654da60bc0a81046460014c6e6b3285120 size: 856
+The push refers to repository [k3d-ocm-registry.localhost:5000/oc-manager-web]
+ead828b09b77: Pushed
+d7e507024086: Layer already exists
+61ca4f733c80: Layer already exists
+34a64644b756: Layer already exists
+197eb75867ef: Layer already exists
+1fb8dbca4c10: Layer already exists
+f18232174bc9: Layer already exists
+b464cfdf2a63: Layer already exists
+39c2ddfd6010: Layer already exists
+4d7674fa9737: Layer already exists
+81bd8ed7ec67: Layer already exists
+aicc-readiness-7663b687e9ef: digest: sha256:c75d0ed85d72e33568e74256e49e42bb61afe867e5f55908ce6d4a0030e4f53e size: 856
+
+==> 重建本地 k3d 数据（仅本机 ocm）
+[36mINFO[0m[0000] Deleting cluster 'ocm'                       
+[36mINFO[0m[0007] Deleting cluster network 'k3d-ocm'           
+[36mINFO[0m[0007] Deleting 1 attached volumes...               
+[36mINFO[0m[0007] Removing cluster details from default kubeconfig... 
+[36mINFO[0m[0007] Removing standalone kubeconfig file (if there is one)... 
+[36mINFO[0m[0007] Successfully deleted cluster ocm!            
+make: Entering directory '/home/hujing/dir/software/ywjs/oc-manager'
+k3d cluster create ocm \
+	--registry-create ocm-registry:0.0.0.0:5000 \
+	--registry-config deploy/k8s/local/registries.yaml \
+	--volume /home/hujing/dir/software/ywjs/oc-manager/.k3d-data:/var/lib/rancher/k3s/storage@all \
+	--port "80:80@loadbalancer" \
+	--wait
+[36mINFO[0m[0000] portmapping '80:80' targets the loadbalancer: defaulting to [servers:*:proxy agents:*:proxy] 
+[36mINFO[0m[0000] Prep: Network                                
+[36mINFO[0m[0000] Created network 'k3d-ocm'                    
+[36mINFO[0m[0000] Created image volume k3d-ocm-images          
+[36mINFO[0m[0000] Creating node 'ocm-registry'                 
+[36mINFO[0m[0000] Successfully created registry 'ocm-registry' 
+[36mINFO[0m[0000] Starting new tools node...                   
+[36mINFO[0m[0000] Starting node 'k3d-ocm-tools'                
+[36mINFO[0m[0001] Creating node 'k3d-ocm-server-0'             
+[36mINFO[0m[0001] Creating LoadBalancer 'k3d-ocm-serverlb'     
+[36mINFO[0m[0001] Using the k3d-tools node to gather environment information 
+[36mINFO[0m[0001] HostIP: using network gateway 172.18.0.1 address 
+[36mINFO[0m[0001] Starting cluster 'ocm'                       
+[36mINFO[0m[0001] Starting servers...                          
+[36mINFO[0m[0001] Starting node 'k3d-ocm-server-0'             
+[36mINFO[0m[0004] All agents already running.                  
+[36mINFO[0m[0004] Starting helpers...                          
+[36mINFO[0m[0004] Starting node 'ocm-registry'                 
+[36mINFO[0m[0004] Starting node 'k3d-ocm-serverlb'             
+[36mINFO[0m[0010] Injecting records for hostAliases (incl. host.k3d.internal) and for 3 network members into CoreDNS configmap... 
+[36mINFO[0m[0013] Cluster 'ocm' created successfully!          
+[36mINFO[0m[0013] You can now use it like this:                
+kubectl cluster-info
+✅ 集群 ocm 就绪。registry=k3d-ocm-registry.localhost:5000，数据卷=/home/hujing/dir/software/ywjs/oc-manager/.k3d-data
+make: Leaving directory '/home/hujing/dir/software/ywjs/oc-manager'
+unpacking docker.io/rancher/mirrored-library-traefik:2.11.18 (sha256:d2d21f7521b589ebea94d244c7c2651e596dcd9a3efce375b945b170379e158a)...done
+unpacking docker.io/rancher/klipper-helm:v0.9.3-build20241008 (sha256:4c979fd8f671e603377934b157534603b76902d770790839a692cf3f2d9c3088)...done
+unpacking docker.io/library/busybox:1.36 (sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f)...done
+unpacking docker.io/library/mysql:8.0 (sha256:62fb722c78b24245ddff1796a0fcee4a49cc5b87e0aaaf20c92d1da9e0a2497b)...done
+unpacking docker.io/library/elasticsearch:8.11.3 (sha256:0e47a784b266b7f30d8071a25f774b10a38f3bb9bb41e23a2767ba464aafcb21)...done
+unpacking docker.io/pgsty/minio:RELEASE.2026-03-25T00-00-00Z (sha256:36382abe97cb0947728faf2c03049d4e483b9f5ba10f57c233b96962c4e29eb2)...done
+unpacking docker.io/calciumion/new-api:latest (sha256:69aef0d276a5e00fb6f6d9f11b199fd9ec42d89a0857924547ee4249ad2094a3)...done
+unpacking docker.io/infiniflow/ragflow:v0.25.6 (sha256:74595f13bb09c51b1c151ce85d9e06e42cf4371b0c8aeaef222e67253d7c7543)...done
+deployment.apps/traefik condition met
+deployment "traefik" successfully rolled out
+The push refers to repository [k3d-ocm-registry.localhost:5000/oc-manager-api]
+4f4fb700ef54: Pushed
+1877130cae54: Pushed
+84f5eff04246: Pushed
+efa1a33c89a6: Pushed
+a2b371826a9a: Pushed
+d088269965eb: Pushed
+a4407c9121cf: Pushed
+d6ff191d8ae6: Pushed
+3bcaa5fc9e48: Pushed
+aicc-readiness-7663b687e9ef: digest: sha256:853ef045408cee404171b0bc0f72d2654da60bc0a81046460014c6e6b3285120 size: 856
+The push refers to repository [k3d-ocm-registry.localhost:5000/oc-manager-web]
+81bd8ed7ec67: Pushed
+197eb75867ef: Pushed
+f18232174bc9: Pushed
+34a64644b756: Pushed
+b464cfdf2a63: Pushed
+ead828b09b77: Pushed
+d7e507024086: Pushed
+61ca4f733c80: Pushed
+4d7674fa9737: Pushed
+39c2ddfd6010: Pushed
+1fb8dbca4c10: Pushed
+aicc-readiness-7663b687e9ef: digest: sha256:c75d0ed85d72e33568e74256e49e42bb61afe867e5f55908ce6d4a0030e4f53e size: 856
+The push refers to repository [k3d-ocm-registry.localhost:5000/oc-manager-ops]
+20fd89d66532: Pushed
+08c6268bd976: Pushed
+25f1d6b1951a: Pushed
+9f883bfdf116: Pushed
+10b2b7065fbf: Pushed
+dev2: digest: sha256:3828a0f12ec65a123b8e310b143f531a58f116080d61a5bfee818077c4cbda14 size: 856
+The push refers to repository [k3d-ocm-registry.localhost:5000/oc-manager-hermes]
+ec68f0783965: Waiting
+f38961bce7ae: Waiting
+c3b499a44e47: Waiting
+e3c494f86b69: Waiting
+0e783024034b: Waiting
+32db65705373: Waiting
+6a77cceb6ea6: Waiting
+78fc8ed74a15: Waiting
+666a5309cb05: Waiting
+fc234f8152f1: Waiting
+514f7d54e0f3: Waiting
+5968ecf3cb70: Waiting
+e41292147bb8: Waiting
+9090030ef36d: Waiting
+9160525c10cc: Waiting
+a6d81bf9aae6: Waiting
+7b5ae6956454: Waiting
+8bce1877fbd9: Waiting
+1fb903dd3762: Waiting
+2c78e0c99f2d: Waiting
+3f9a263e9a91: Waiting
+8f86d7ee1ca8: Waiting
+d13ab6399691: Waiting
+668365122dd2: Waiting
+de33c30fc0e7: Waiting
+30a9e88df259: Waiting
+94935a1b8619: Waiting
+b1e8534b53a9: Waiting
+4f4fb700ef54: Mounted from oc-manager-api
+844e99e39568: Waiting
+9b02e9fcb401: Waiting
+61a3f6abd16f: Waiting
+f778f1ea6aad: Waiting
+844e99e39568: Waiting
+9b02e9fcb401: Waiting
+ec68f0783965: Waiting
+c3b499a44e47: Waiting
+e3c494f86b69: Waiting
+0e783024034b: Waiting
+78fc8ed74a15: Waiting
+666a5309cb05: Waiting
+fc234f8152f1: Waiting
+514f7d54e0f3: Waiting
+5968ecf3cb70: Waiting
+e41292147bb8: Waiting
+9090030ef36d: Waiting
+9160525c10cc: Waiting
+a6d81bf9aae6: Waiting
+1fb903dd3762: Waiting
+8f86d7ee1ca8: Waiting
+668365122dd2: Waiting
+de33c30fc0e7: Waiting
+78fc8ed74a15: Waiting
+666a5309cb05: Waiting
+fc234f8152f1: Waiting
+514f7d54e0f3: Waiting
+5968ecf3cb70: Waiting
+e41292147bb8: Waiting
+9090030ef36d: Waiting
+9160525c10cc: Waiting
+a6d81bf9aae6: Waiting
+1fb903dd3762: Waiting
+8f86d7ee1ca8: Waiting
+de33c30fc0e7: Waiting
+844e99e39568: Waiting
+9b02e9fcb401: Waiting
+ec68f0783965: Waiting
+c3b499a44e47: Waiting
+e3c494f86b69: Waiting
+0e783024034b: Waiting
+1fb903dd3762: Waiting
+8f86d7ee1ca8: Waiting
+de33c30fc0e7: Waiting
+844e99e39568: Waiting
+9b02e9fcb401: Waiting
+ec68f0783965: Waiting
+c3b499a44e47: Waiting
+e3c494f86b69: Waiting
+0e783024034b: Waiting
+78fc8ed74a15: Waiting
+666a5309cb05: Waiting
+fc234f8152f1: Waiting
+514f7d54e0f3: Waiting
+5968ecf3cb70: Waiting
+9090030ef36d: Waiting
+9160525c10cc: Waiting
+a6d81bf9aae6: Waiting
+844e99e39568: Waiting
+9b02e9fcb401: Waiting
+ec68f0783965: Waiting
+c3b499a44e47: Waiting
+e3c494f86b69: Waiting
+0e783024034b: Waiting
+78fc8ed74a15: Waiting
+fc234f8152f1: Waiting
+514f7d54e0f3: Waiting
+5968ecf3cb70: Waiting
+9090030ef36d: Waiting
+9160525c10cc: Waiting
+1fb903dd3762: Waiting
+8f86d7ee1ca8: Waiting
+de33c30fc0e7: Waiting
+c3b499a44e47: Waiting
+e3c494f86b69: Waiting
+0e783024034b: Waiting
+78fc8ed74a15: Waiting
+514f7d54e0f3: Waiting
+5968ecf3cb70: Waiting
+9090030ef36d: Waiting
+1fb903dd3762: Waiting
+8f86d7ee1ca8: Waiting
+de33c30fc0e7: Waiting
+844e99e39568: Waiting
+9b02e9fcb401: Waiting
+61a3f6abd16f: Pushed
+f778f1ea6aad: Pushed
+ec68f0783965: Pushed
+32db65705373: Pushed
+666a5309cb05: Pushed
+fc234f8152f1: Pushed
+e41292147bb8: Pushed
+9160525c10cc: Pushed
+a6d81bf9aae6: Pushed
+7b5ae6956454: Pushed
+2c78e0c99f2d: Pushed
+3f9a263e9a91: Pushed
+d13ab6399691: Pushed
+668365122dd2: Pushed
+30a9e88df259: Pushed
+94935a1b8619: Pushed
+b1e8534b53a9: Pushed
+844e99e39568: Pushed
+f38961bce7ae: Pushed
+c3b499a44e47: Pushed
+e3c494f86b69: Pushed
+0e783024034b: Pushed
+78fc8ed74a15: Pushed
+514f7d54e0f3: Pushed
+5968ecf3cb70: Pushed
+9090030ef36d: Pushed
+1fb903dd3762: Pushed
+8f86d7ee1ca8: Pushed
+de33c30fc0e7: Pushed
+9b02e9fcb401: Pushed
+8bce1877fbd9: Pushed
+6a77cceb6ea6: Pushed
+v2026.7.1-dev1: digest: sha256:a69a3da59261dd166db36fba938a1b38df7cb66be8346445f1bb451b23ea691b size: 856
+
+==> 部署镜像 api=k3d-ocm-registry.localhost:5000/oc-manager-api:aicc-readiness-c270b3d06b62 web=k3d-ocm-registry.localhost:5000/oc-manager-web:aicc-readiness-c270b3d06b62
+The push refers to repository [k3d-ocm-registry.localhost:5000/oc-manager-api]
+4f4fb700ef54: Layer already exists
+84f5eff04246: Layer already exists
+bb402b34620a: Pushed
+b85511c837e7: Pushed
+b3231ef41e0a: Pushed
+334a2386ee28: Pushed
+d90f1ac1b287: Pushed
+fc52a31164b1: Pushed
+33d85c146cea: Pushed
+aicc-readiness-c270b3d06b62: digest: sha256:e3d88a490f7a04f579e2cb806fce5bf3e0dc8d11ca6b6d21d4f60a55232fc801 size: 856
+The push refers to repository [k3d-ocm-registry.localhost:5000/oc-manager-web]
+4d7674fa9737: Layer already exists
+81bd8ed7ec67: Layer already exists
+61ca4f733c80: Layer already exists
+b464cfdf2a63: Layer already exists
+34a64644b756: Layer already exists
+cfbb854f5ec6: Pushed
+f1cdcd889c29: Pushed
+f18232174bc9: Layer already exists
+197eb75867ef: Layer already exists
+39c2ddfd6010: Layer already exists
+d7e507024086: Layer already exists
+aicc-readiness-c270b3d06b62: digest: sha256:c15632774d9accb45bbeaa6ca9704dfcd67d67cec8f91da010a864048b0bd50c size: 856
+namespace/ocm created
+namespace/oc-apps created
+secret/ocm-secrets created
+configmap/mysql-init created
+service/mysql created
+statefulset.apps/mysql created
+service/redis created
+statefulset.apps/redis created
+service/elasticsearch created
+statefulset.apps/elasticsearch created
+service/minio created
+statefulset.apps/minio created
+Waiting for 1 pods to be ready...
+partitioned roll out complete: 1 new pods have been updated...
+partitioned roll out complete: 1 new pods have been updated...
+partitioned roll out complete: 1 new pods have been updated...
+Waiting for 1 pods to be ready...
+partitioned roll out complete: 1 new pods have been updated...
+Bucket created successfully `local/oc-apps`.
+Bucket created successfully `local/ragflow`.
+serviceaccount/manager-api created
+role.rbac.authorization.k8s.io/manager-app-orchestrator created
+rolebinding.rbac.authorization.k8s.io/manager-app-orchestrator created
+service/new-api created
+deployment.apps/new-api created
+configmap/ragflow-conf created
+service/ragflow created
+deployment.apps/ragflow created
+ingress.networking.k8s.io/ocm created
+service/manager-api created
+deployment.apps/manager-api created
+service/manager-web created
+deployment.apps/manager-web created
+Waiting for deployment "new-api" rollout to finish: 0 of 1 updated replicas are available...
+deployment "new-api" successfully rolled out
+Waiting for deployment "ragflow" rollout to finish: 0 of 1 updated replicas are available...
+deployment "ragflow" successfully rolled out
+deployment "manager-api" successfully rolled out
+deployment "manager-web" successfully rolled out
+
+==> 初始化本地 new-api 与 RAGFlow（临时 Secret）
+secret/ocm-secrets configured
+deployment.apps/manager-api restarted
+Waiting for deployment "manager-api" rollout to finish: 1 old replicas are pending termination...
+Waiting for deployment "manager-api" rollout to finish: 1 old replicas are pending termination...
+deployment "manager-api" successfully rolled out
+⏳ 初始化本地 new-api / RAGFlow 模型与 token …
+  ✓ new-api：渠道 deepseek + 自用模式 + admin 令牌就绪
+  ✓ RAGFlow：embedding(bge-m3)+chat(deepseek)+默认模型+api_token 就绪
+  ✓ 已回填 secret.yaml（newapi.admin_token / ragflow.api_key）
+  ✓ secret 已下发，manager-api 已重启
+✅ 初始环境就绪：new-api(渠道+令牌) / RAGFlow(模型+默认+key) / manager 已接通
+
+==> 创建 master 基线企业、管理员、实例、知识库与可识别历史记录
+mysql: [Warning] Using a password on the command line interface can be insecure.
+mysql: [Warning] Using a password on the command line interface can be insecure.
+mysql: [Warning] Using a password on the command line interface can be insecure.
+mysql: [Warning] Using a password on the command line interface can be insecure.
+mysql: [Warning] Using a password on the command line interface can be insecure.
+master-baseline migration_version=27
+mysql: [Warning] Using a password on the command line interface can be insecure.
+master-baseline count organizations	1
+master-baseline count users	3
+master-baseline count apps	1
+master-baseline count ragflow_datasets	1
+master-baseline count ragflow_documents	0
+master-baseline count audit_logs	1
+mysql: [Warning] Using a password on the command line interface can be insecure.
+
+==> 备份 master 基线数据库到 /tmp/aicc-readiness-backup.sql
+mysqldump: [Warning] Using a password on the command line interface can be insecure.
+
+==> upgrade-to-kefu 切换应用镜像
+deployment.apps/manager-api image updated
+deployment.apps/manager-web image updated
+Waiting for deployment "manager-api" rollout to finish: 1 old replicas are pending termination...
+Waiting for deployment "manager-api" rollout to finish: 1 old replicas are pending termination...
+deployment "manager-api" successfully rolled out
+deployment "manager-web" successfully rolled out
+manager-api k3d-ocm-registry.localhost:5000/oc-manager-api:aicc-readiness-7663b687e9ef
+manager-web k3d-ocm-registry.localhost:5000/oc-manager-web:aicc-readiness-7663b687e9ef
+mysql: [Warning] Using a password on the command line interface can be insecure.
+kefu-upgrade migration_version=32
+mysql: [Warning] Using a password on the command line interface can be insecure.
+kefu-upgrade count organizations	1
+kefu-upgrade count users	3
+kefu-upgrade count apps	1
+kefu-upgrade count ragflow_datasets	1
+kefu-upgrade count ragflow_documents	0
+kefu-upgrade count audit_logs	1
+mysql: [Warning] Using a password on the command line interface can be insecure.
+mysql: [Warning] Using a password on the command line interface can be insecure.
+kefu-upgrade count aicc_agents	0
+kefu-upgrade count aicc_sessions	0
+kefu-upgrade count aicc_messages	0
+kefu-upgrade count aicc_leads	0
+mysql: [Warning] Using a password on the command line interface can be insecure.
+mysql: [Warning] Using a password on the command line interface can be insecure.
+kefu-upgrade browser_smoke=SKIPPED (AICC_READINESS_RUN_BROWSER_SMOKE=0)
+PASS upgrade MASTER_SHA=c270b3d06b624ca8706c651f427d2d0734a8766e -> KEFU_SHA=7663b687e9efb75c1c67f29eed3ac40347fa7e91
+
+==> rollback-to-master 切换应用镜像
+deployment.apps/manager-api image updated
+deployment.apps/manager-web image updated
+Waiting for deployment "manager-api" rollout to finish: 1 old replicas are pending termination...
+error: timed out waiting for the condition
+deployment "manager-web" successfully rolled out
+manager-api k3d-ocm-registry.localhost:5000/oc-manager-api:aicc-readiness-c270b3d06b62
+manager-web k3d-ocm-registry.localhost:5000/oc-manager-web:aicc-readiness-c270b3d06b62
+PASS rollback-boundary controlled failure: master cannot run on upgraded schema; restoring baseline backup=/tmp/aicc-readiness-backup.sql
+deployment.apps/manager-api scaled
+deployment "manager-api" successfully rolled out
+mysql: [Warning] Using a password on the command line interface can be insecure.
+mysql: [Warning] Using a password on the command line interface can be insecure.
+deployment.apps/manager-api scaled
+Waiting for deployment "manager-api" rollout to finish: 0 of 1 updated replicas are available...
+deployment "manager-api" successfully rolled out
+mysql: [Warning] Using a password on the command line interface can be insecure.
+master-restored-from-backup migration_version=27
+mysql: [Warning] Using a password on the command line interface can be insecure.
+master-restored-from-backup count organizations	1
+master-restored-from-backup count users	3
+master-restored-from-backup count apps	1
+master-restored-from-backup count ragflow_datasets	1
+master-restored-from-backup count ragflow_documents	0
+master-restored-from-backup count audit_logs	1
+mysql: [Warning] Using a password on the command line interface can be insecure.
+mysql: [Warning] Using a password on the command line interface can be insecure.
+mysql: [Warning] Using a password on the command line interface can be insecure.
+PASS rollback-backup-restore master baseline database restored
+
+==> restore-kefu 切换应用镜像
+deployment.apps/manager-api image updated
+deployment.apps/manager-web image updated
+Waiting for deployment "manager-api" rollout to finish: 1 old replicas are pending termination...
+Waiting for deployment "manager-api" rollout to finish: 1 old replicas are pending termination...
+deployment "manager-api" successfully rolled out
+deployment "manager-web" successfully rolled out
+manager-api k3d-ocm-registry.localhost:5000/oc-manager-api:aicc-readiness-7663b687e9ef
+manager-web k3d-ocm-registry.localhost:5000/oc-manager-web:aicc-readiness-7663b687e9ef
+mysql: [Warning] Using a password on the command line interface can be insecure.
+kefu-restored migration_version=32
+mysql: [Warning] Using a password on the command line interface can be insecure.
+kefu-restored count organizations	1
+kefu-restored count users	3
+kefu-restored count apps	1
+kefu-restored count ragflow_datasets	1
+kefu-restored count ragflow_documents	0
+kefu-restored count audit_logs	1
+mysql: [Warning] Using a password on the command line interface can be insecure.
+mysql: [Warning] Using a password on the command line interface can be insecure.
+kefu-restored count aicc_agents	0
+kefu-restored count aicc_sessions	0
+kefu-restored count aicc_messages	0
+kefu-restored count aicc_leads	0
+kefu-restored browser_smoke=SKIPPED (AICC_READINESS_RUN_BROWSER_SMOKE=0)
+PASS final-environment KEFU_SHA=7663b687e9efb75c1c67f29eed3ac40347fa7e91 api=k3d-ocm-registry.localhost:5000/oc-manager-api:aicc-readiness-7663b687e9ef web=k3d-ocm-registry.localhost:5000/oc-manager-web:aicc-readiness-7663b687e9ef backup=/tmp/aicc-readiness-backup.sql
