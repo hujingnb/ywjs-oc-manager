@@ -11,9 +11,15 @@ rg -q 'rancher/mirrored-library-traefik:2\.11\.18' "$TARGET" || {
   exit 1
 }
 
-# 原始 Docker Hub 在本地网络不可达，必须从固定国内镜像源拉取后 retag。
-rg -q 'registry\.cn-hangzhou\.aliyuncs\.com/rancher/mirrored-library-traefik:2\.11\.18' "$TARGET" || {
-  printf 'FAIL: upgrade-rollback.sh 未使用国内 Traefik 镜像源\n' >&2
+# 原始 Docker Hub 在本地网络不可达，必须从固定 DaoCloud 镜像源拉取后 retag。
+rg -q 'docker\.m\.daocloud\.io/rancher/mirrored-library-traefik:2\.11\.18' "$TARGET" || {
+  printf 'FAIL: upgrade-rollback.sh 未使用 DaoCloud Traefik 镜像源\n' >&2
+  exit 1
+}
+
+# k3s 的 Traefik Helm job 同样不能回退直连 Docker Hub。
+rg -q 'docker\.m\.daocloud\.io/rancher/klipper-helm:v0\.9\.3-build20241008' "$TARGET" || {
+  printf 'FAIL: upgrade-rollback.sh 未预加载 DaoCloud klipper-helm 镜像\n' >&2
   exit 1
 }
 

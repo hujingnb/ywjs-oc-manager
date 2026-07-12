@@ -17,7 +17,9 @@ readonly ROLLOUT_TIMEOUT="${AICC_READINESS_ROLLOUT_TIMEOUT:-900s}"
 readonly LOCAL_OPS_IMAGE="${REGISTRY_HOST}/oc-manager-ops:dev2"
 readonly LOCAL_HERMES_IMAGE="${REGISTRY_HOST}/oc-manager-hermes:v2026.7.1-dev1"
 readonly TRAEFIK_IMAGE="rancher/mirrored-library-traefik:2.11.18"
-readonly TRAEFIK_MIRROR_IMAGE="registry.cn-hangzhou.aliyuncs.com/rancher/mirrored-library-traefik:2.11.18"
+readonly TRAEFIK_MIRROR_IMAGE="docker.m.daocloud.io/rancher/mirrored-library-traefik:2.11.18"
+readonly KLIPPER_HELM_IMAGE="rancher/klipper-helm:v0.9.3-build20241008"
+readonly KLIPPER_HELM_MIRROR_IMAGE="docker.m.daocloud.io/rancher/klipper-helm:v0.9.3-build20241008"
 
 MASTER_SHA=""
 KEFU_SHA=""
@@ -150,12 +152,17 @@ preload_cluster_images() {
   local image
   # k3d image import 在本机对 OCI manifest 偶发报错却返回成功；直接交给 server 节点 ctr，
   # 让升级演练在 MySQL/RAGFlow 等基础镜像上得到可验证的预加载结果。
-  # Traefik 使用可达的阿里云固定镜像源拉取，再改回 k3s manifest 期望的原始引用。
+  # k3s 安装 Traefik 依赖 controller 与 Helm job 两个镜像，均从 DaoCloud 固定源拉取，
+  # 再改回内置 manifest 期望的原始引用，避免节点回退直连 Docker Hub。
   docker image inspect "$TRAEFIK_IMAGE" >/dev/null 2>&1 || {
     docker pull "$TRAEFIK_MIRROR_IMAGE"
     docker tag "$TRAEFIK_MIRROR_IMAGE" "$TRAEFIK_IMAGE"
   }
-  for image in "$TRAEFIK_IMAGE" busybox:1.36 mysql:8.0 elasticsearch:8.11.3 pgsty/minio:RELEASE.2026-03-25T00-00-00Z calciumion/new-api:latest infiniflow/ragflow:v0.25.6; do
+  docker image inspect "$KLIPPER_HELM_IMAGE" >/dev/null 2>&1 || {
+    docker image inspect "$KLIPPER_HELM_MIRROR_IMAGE" >/dev/null 2>&1 || docker pull "$KLIPPER_HELM_MIRROR_IMAGE"
+    docker tag "$KLIPPER_HELM_MIRROR_IMAGE" "$KLIPPER_HELM_IMAGE"
+  }
+  for image in "$TRAEFIK_IMAGE" "$KLIPPER_HELM_IMAGE" busybox:1.36 mysql:8.0 elasticsearch:8.11.3 pgsty/minio:RELEASE.2026-03-25T00-00-00Z calciumion/new-api:latest infiniflow/ragflow:v0.25.6; do
     docker image inspect "$image" >/dev/null 2>&1 || docker pull "$image"
     # Docker 本机保存的多架构 OCI 索引会让 containerd 导入缺失非当前平台 digest；只导出节点的 amd64 manifest。
     docker save --platform linux/amd64 "$image" | docker exec -i "k3d-${CLUSTER_NAME}-server-0" ctr images import -
