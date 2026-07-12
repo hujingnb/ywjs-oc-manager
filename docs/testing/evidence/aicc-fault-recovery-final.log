@@ -1,63 +1,60 @@
-23:22:08 PASS: 会话消息上限满足故障演练（100 >= 3）
-23:22:08 PASS: 智能体无必填留资字段
-23:22:09 PASS: 公开配置基线 (HTTP 200)
-23:22:09 PASS: 创建可续接的公开会话
-23:22:09 PASS: 公开会话可恢复 (HTTP 200)
-23:22:15 PASS: 基线 续聊成功且没有重复消息
-pod "app-e252a5af-2cd4-49c2-8d82-a526b9dc2adb-5ddf684868-pg87z" deleted from oc-apps namespace
-pod/app-e252a5af-2cd4-49c2-8d82-a526b9dc2adb-5ddf684868-6gg65 condition met
-23:22:46 PASS: 公开会话可恢复 (HTTP 200)
-23:22:46 Hermes runtime 重启后 等待 Hermes 恢复（第 1/60 次，HTTP 503）
-23:22:51 Hermes runtime 重启后 等待 Hermes 恢复（第 2/60 次，HTTP 503）
-23:22:56 Hermes runtime 重启后 等待 Hermes 恢复（第 3/60 次，HTTP 503）
-23:23:13 PASS: Hermes runtime 重启后 续聊成功且没有重复消息
-pod "manager-api-7d54658648-k88qv" deleted from ocm namespace
+01:49:08 PASS: 会话消息上限满足故障演练（100 >= 3）
+01:49:08 PASS: 智能体无必填留资字段
+01:49:09 PASS: 公开配置基线 (HTTP 200)
+01:49:09 PASS: 创建可续接的公开会话
+01:49:09 PASS: 公开会话可恢复 (HTTP 200)
+01:49:14 PASS: 基线 续聊成功且没有重复消息
+pod "app-5e05f0ac-6aaf-4a70-8ac1-d4effb5c3a2b-779b979c68-8psmh" deleted from oc-apps namespace
+pod/app-5e05f0ac-6aaf-4a70-8ac1-d4effb5c3a2b-779b979c68-252pv condition met
+01:49:35 PASS: 公开会话可恢复 (HTTP 200)
+01:49:35 Hermes runtime 重启后 等待 Hermes 恢复（第 1/60 次，HTTP 503）
+01:49:47 PASS: Hermes runtime 重启后 续聊成功且没有重复消息
+pod "manager-api-6977747db-9s5rz" deleted from ocm namespace
 Waiting for deployment "manager-api" rollout to finish: 0 of 1 updated replicas are available...
 deployment "manager-api" successfully rolled out
-23:23:19 PASS: 公开会话可恢复 (HTTP 200)
-23:23:19 等待公开会话返回有效消息列表（第 1/30 次，HTTP 200）
-23:23:24 PASS: manager-api 重启后 续聊成功且没有重复消息
-23:23:24 注入 RAGFlow 单点故障
+01:49:53 PASS: 公开会话可恢复 (HTTP 200)
+01:49:53 等待公开会话返回有效消息列表（第 1/30 次，HTTP 200）
+01:49:57 PASS: manager-api 重启后 续聊成功且没有重复消息
+01:49:57 注入 RAGFlow 单点故障
 deployment.apps/ragflow scaled
-pod/ragflow-65489bf9b5-dlqwx condition met
-23:23:58 PASS: RAGFlow 故障 返回安全响应且未泄露原始错误 (HTTP 200)
+pod/ragflow-65489bf9b5-p9xw6 condition met
+01:50:32 PASS: RAGFlow 故障 返回安全响应且未泄露原始错误 (HTTP 200)
 deployment.apps/ragflow scaled
 Waiting for deployment "ragflow" rollout to finish: 0 of 1 updated replicas are available...
 deployment "ragflow" successfully rolled out
-23:25:39 PASS: 公开会话可恢复 (HTTP 200)
-23:25:39 PASS: RAGFlow 恢复后公开会话可访问
-23:25:39 注入 new-api 单点故障
+01:51:02 PASS: 公开会话可恢复 (HTTP 200)
+01:51:02 PASS: RAGFlow 恢复后公开会话可访问
+01:51:02 注入 new-api 单点故障
 deployment.apps/new-api scaled
-pod/new-api-5ccfd6d495-px52v condition met
-23:26:06 PASS: new-api 故障 返回安全响应且未泄露原始错误 (HTTP 200)
+pod/new-api-5ccfd6d495-s29v4 condition met
+01:51:31 PASS: new-api 故障 返回安全响应且未泄露原始错误 (HTTP 200)
 deployment.apps/new-api scaled
 Waiting for deployment "new-api" rollout to finish: 0 of 1 updated replicas are available...
 deployment "new-api" successfully rolled out
-23:26:16 PASS: 公开会话可恢复 (HTTP 200)
-23:26:16 PASS: new-api 恢复后公开会话可访问
-23:26:16 注入 Redis 单点故障
+01:51:42 PASS: 公开会话可恢复 (HTTP 200)
+01:51:42 PASS: new-api 恢复后公开会话可访问
+01:51:42 注入 Redis 单点故障
 statefulset.apps/redis scaled
 pod/redis-0 condition met
-curl: (28) Operation timed out after 40002 milliseconds with 0 bytes received
-23:26:57 PASS: Redis 下创建会话 在故障期间不可用 (HTTP 000)
+01:52:08 PASS: Redis 下创建会话 在故障期间不可用 (HTTP 503)
 statefulset.apps/redis scaled
 Waiting for 1 pods to be ready...
 partitioned roll out complete: 1 new pods have been updated...
-23:27:08 PASS: 公开会话可恢复 (HTTP 200)
-23:27:08 PASS: Redis 恢复后公开会话可访问
-23:27:08 注入 MySQL 单点故障
+01:52:14 PASS: 公开会话可恢复 (HTTP 200)
+01:52:14 PASS: Redis 恢复后公开会话可访问
+01:52:14 注入 MySQL 单点故障
 statefulset.apps/mysql scaled
 pod/mysql-0 condition met
-23:27:12 PASS: MySQL 下读取既有会话 在故障期间不可用 (HTTP 503)
+01:52:18 PASS: MySQL 下读取既有会话 在故障期间不可用 (HTTP 503)
 statefulset.apps/mysql scaled
 Waiting for 1 pods to be ready...
 partitioned roll out complete: 1 new pods have been updated...
 curl: (28) Operation timed out after 40002 milliseconds with 0 bytes received
-23:28:03 公开会话可恢复 等待依赖连接恢复（第 1/6 次，HTTP 000）
-23:28:08 PASS: 公开会话可恢复 (HTTP 200)
-23:28:08 PASS: MySQL 恢复后公开会话可访问
-23:28:08 PASS: 所有故障注入与恢复检查完成
-23:28:08 恢复本次演练前的副本数
+01:53:08 公开会话可恢复 等待依赖连接恢复（第 1/6 次，HTTP 000）
+01:53:13 PASS: 公开会话可恢复 (HTTP 200)
+01:53:13 PASS: MySQL 恢复后公开会话可访问
+01:53:13 PASS: 所有故障注入与恢复检查完成
+01:53:13 恢复本次演练前的副本数
 deployment.apps/manager-api scaled
 deployment.apps/ragflow scaled
 deployment.apps/new-api scaled
