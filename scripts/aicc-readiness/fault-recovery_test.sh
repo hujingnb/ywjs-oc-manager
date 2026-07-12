@@ -46,4 +46,10 @@ rg -q 'upstream_attempts < 3' "$TARGET" || {
   exit 1
 }
 
+# 数据库 Pod Ready 后连接池可能仍在重建；恢复检查必须有限等待，不能单次请求误判失败。
+rg -q 'expect_eventual_success' "$TARGET" || {
+  printf 'FAIL: fault-recovery.sh 未限制依赖恢复等待次数\n' >&2
+  exit 1
+}
+
 printf 'PASS: 故障恢复脚本的本地 HTTP 请求显式绕过代理\n'

@@ -79,6 +79,23 @@ expect_success() {
   log "PASS: $label (HTTP $status)"
 }
 
+expect_eventual_success() {
+  local label="$1"
+  shift
+  local status attempts=0
+  while (( attempts < 6 )); do
+    status="$(http_status "$@")"
+    if [[ "$status" =~ ^2 ]]; then
+      log "PASS: $label (HTTP $status)"
+      return 0
+    fi
+    attempts=$((attempts + 1))
+    log "$label 等待依赖连接恢复（第 $attempts/6 次，HTTP $status）"
+    sleep 5
+  done
+  die "$label 在依赖恢复窗口后仍返回 HTTP $status，响应：$(tr '\n' ' ' </tmp/aicc-readiness-body.$$)"
+}
+
 expect_dependency_failure() {
   local label="$1"
   shift
@@ -153,6 +170,10 @@ session_url() {
 }
 
 check_session_restored() {
+  if [[ "${1:-}" == "eventual" ]]; then
+    expect_eventual_success "公开会话可恢复" "$(session_url)"
+    return
+  fi
   expect_success "公开会话可恢复" "$(session_url)"
 }
 
@@ -297,7 +318,7 @@ test_dependency() {
   fi
   run kubectl -n "$OCM_NAMESPACE" scale "$kind/$resource" --replicas="$restore_replicas"
   if [[ "$kind" == "deploy" ]]; then wait_deployment "$resource"; else wait_statefulset "$resource"; fi
-  check_session_restored
+  check_session_restored eventual
   log "PASS: $name 恢复后公开会话可访问"
 }
 
