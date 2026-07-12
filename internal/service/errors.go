@@ -24,6 +24,10 @@ var ErrQuotaExceeded = errors.New("已达到配额上限")
 // ErrRateLimited 表示匿名或高频请求超过限流阈值，handler 层映射为 429。
 var ErrRateLimited = errors.New("请求过于频繁")
 
+// ErrAICCRateLimiterUnavailable 表示 AICC 匿名入口依赖的 Redis 限流存储不可用。
+// 与真正超限不同，访客稍后重试即可，不应映射为 429 或未分类 500。
+var ErrAICCRateLimiterUnavailable = errors.New("aicc rate limiter unavailable")
+
 // ErrAICCConsentRequired 表示 AICC 公开会话要求访客先同意隐私说明。
 var ErrAICCConsentRequired = errors.New("aicc consent required")
 

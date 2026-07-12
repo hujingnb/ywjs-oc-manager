@@ -319,6 +319,21 @@ func TestPublicAICCHandlerMapsRuntimeUnavailableForVisitor(t *testing.T) {
 	assert.NotContains(t, recorder.Body.String(), "运行时 tab")
 }
 
+// TestPublicAICCHandlerMapsRateLimiterUnavailable 覆盖 Redis 限流存储故障：
+// 访客应得到可重试的稳定 503，而不是未分类的 500。
+func TestPublicAICCHandlerMapsRateLimiterUnavailable(t *testing.T) {
+	router := newPublicAICCTestRouterWithLocale(t, &publicAICCServiceStub{messageErr: service.ErrAICCRateLimiterUnavailable}, "zh")
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/sessions/sess-1/messages", bytes.NewBufferString(`{"text":"你好"}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "AICC_RATE_LIMITER_UNAVAILABLE")
+	assert.Contains(t, recorder.Body.String(), "客服暂时不可用，请稍后再试")
+}
+
 // TestPublicAICCHandlerMapsInvalidMessage 覆盖反馈入口：不可反馈消息返回稳定 code。
 func TestPublicAICCHandlerMapsInvalidMessage(t *testing.T) {
 	router := newPublicAICCTestRouter(t, &publicAICCServiceStub{feedbackErr: service.ErrAICCInvalidMessage})

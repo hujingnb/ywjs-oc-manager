@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -711,6 +712,18 @@ func TestAICCPublicCreateSessionHonorsRateLimiter(t *testing.T) {
 	assert.Contains(t, limiter.key, "agent-1")
 }
 
+// TestAICCPublicCreateSessionMapsRateLimiterUnavailable 覆盖 Redis 限流存储不可用：
+// 公开入口不能把基础设施连接错误直接泄露为未分类的内部错误。
+func TestAICCPublicCreateSessionMapsRateLimiterUnavailable(t *testing.T) {
+	store := &fakeAICCPublicStore{org: sqlc.Organization{ID: "org-1", AiccEnabled: true}, agent: sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", PublicToken: "pub", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice}}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.SetRateLimiter(&fakeAICCRateLimiter{err: errors.New("redis unavailable")})
+
+	_, err := svc.CreateSession(context.Background(), "pub", AICCPublicSessionInput{RemoteIP: "203.0.113.9"})
+
+	require.ErrorIs(t, err, ErrAICCRateLimiterUnavailable)
+}
+
 // TestAICCPublicConsentRejectsInvalidSession 覆盖隐私同意接口：无效 token 不能伪造成功响应。
 func TestAICCPublicConsentRejectsInvalidSession(t *testing.T) {
 	store := &fakeAICCPublicStore{
@@ -1199,11 +1212,12 @@ func (f *fakeAICCHermesChat) ChatAICC(_ context.Context, appID, _ string, text s
 type fakeAICCRateLimiter struct {
 	allow bool
 	key   string
+	err   error
 }
 
 func (f *fakeAICCRateLimiter) Allow(_ context.Context, key string, _ int64, _ time.Duration) (bool, error) {
 	f.key = key
-	return f.allow, nil
+	return f.allow, f.err
 }
 
 type fakeAICCImageBlob struct {

@@ -1068,7 +1068,7 @@ func (s *AICCPublicService) ensureRateAllowed(ctx context.Context, key string, l
 	}
 	allowed, err := s.limit.Allow(ctx, key, limit, window)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %v", ErrAICCRateLimiterUnavailable, err)
 	}
 	if !allowed {
 		return ErrRateLimited
