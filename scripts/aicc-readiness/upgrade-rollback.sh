@@ -135,7 +135,17 @@ reset_local_cluster() {
     sh -c 'rm -rf /data/* /data/.[!.]* 2>/dev/null' || true
   rm -rf "$REPO_ROOT/.k3d-data"
   make -C "$REPO_ROOT" cluster-create
-  make -C "$REPO_ROOT" local-preload
+  preload_cluster_images
+}
+
+preload_cluster_images() {
+  local image
+  # k3d image import 在本机对 OCI manifest 偶发报错却返回成功；直接交给 server 节点 ctr，
+  # 让升级演练在 MySQL/RAGFlow 等基础镜像上得到可验证的预加载结果。
+  for image in busybox:1.36 mysql:8.0 elasticsearch:8.11.3 calciumion/new-api:latest infiniflow/ragflow:v0.25.6; do
+    docker image inspect "$image" >/dev/null 2>&1 || docker pull "$image"
+    docker save "$image" | docker exec -i "k3d-${CLUSTER_NAME}-server-0" ctr images import -
+  done
 }
 
 apply_stack_with_images() {
