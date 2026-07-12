@@ -207,8 +207,8 @@ func runVisitor(ctx context.Context, config Config, results *metrics, workerID i
 	if !ok {
 		return
 	}
-	message := "aicc-load-" + visitorID
-	if !sendMessage(ctx, client, config, results, sessionToken, message, forwardedIP) {
+	message := loadMessageForVisitor(visitorID)
+	if !sendMessage(ctx, client, config, results, sessionToken, visitorID, message, forwardedIP) {
 		return
 	}
 	verifySession(ctx, client, config, results, sessionToken, message, forwardedIP)
@@ -227,6 +227,11 @@ func clientMessageIDForVisitor(visitorID string) string {
 	sum[8] = (sum[8] & 0x3f) | 0x80
 	encoded := hex.EncodeToString(sum[:16])
 	return fmt.Sprintf("%s-%s-%s-%s-%s", encoded[0:8], encoded[8:12], encoded[12:16], encoded[16:20], encoded[20:32])
+}
+
+// loadMessageForVisitor 使用明确的客服问候并附加唯一标识，既覆盖真实模型回复，也可检查会话隔离。
+func loadMessageForVisitor(visitorID string) string {
+	return "你好，请只回复收到。访客标识：" + visitorID
 }
 
 // newLoadHTTPClient 为本地压测创建 HTTP client，避免宿主机代理劫持 k3d 的 ocm.localhost 请求。
@@ -263,11 +268,11 @@ func createSession(ctx context.Context, client *http.Client, config Config, resu
 }
 
 // sendMessage 向当前会话发送唯一文本，确保后续读取可以识别消息归属。
-func sendMessage(ctx context.Context, client *http.Client, config Config, results *metrics, sessionToken, message, forwardedIP string) bool {
+func sendMessage(ctx context.Context, client *http.Client, config Config, results *metrics, sessionToken, visitorID, message, forwardedIP string) bool {
 	_, ok := performJSON(ctx, client, config, results, http.MethodPost,
 		fmt.Sprintf("%s/api/v1/public/aicc/sessions/%s/messages", config.BaseURL, url.PathEscape(sessionToken)), map[string]string{
 			"text":              message,
-			"client_message_id": clientMessageIDForVisitor(strings.TrimPrefix(message, "aicc-load-")),
+			"client_message_id": clientMessageIDForVisitor(visitorID),
 		}, forwardedIP)
 	return ok
 }

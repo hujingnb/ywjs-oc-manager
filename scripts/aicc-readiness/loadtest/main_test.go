@@ -36,6 +36,14 @@ func TestClientMessageIDForVisitor(t *testing.T) {
 	assert.Regexp(t, `^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`, first)
 }
 
+// TestLoadMessageForVisitor 覆盖容量场景文本：使用明确客服问候，避免随机串被智能体误判为工具任务。
+func TestLoadMessageForVisitor(t *testing.T) {
+	message := loadMessageForVisitor("visitor-a")
+
+	assert.Equal(t, "你好，请只回复收到。访客标识：visitor-a", message)
+	assert.NotEqual(t, message, loadMessageForVisitor("visitor-b"))
+}
+
 // TestNewLoadHTTPClientBypassesProxyForLocalOCM 覆盖本地压测：ocm.localhost 不得经过宿主机代理。
 func TestNewLoadHTTPClientBypassesProxyForLocalOCM(t *testing.T) {
 	client := newLoadHTTPClient(Config{BaseURL: "http://ocm.localhost", Timeout: defaultTimeout})
