@@ -81,7 +81,16 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 
 async def healthz(request):
-    """健康探针端点，返回纯文本 ok，不需要鉴权。"""
+    """健康探针端点，确认 oc-ops 与同 Pod api_server 均可服务。
+
+    仅检查轻量会话列表，不触发模型、知识库或外部渠道调用。api_server 在 Hermes
+    重启后会晚于 uvicorn 数秒恢复；此时返回 503，避免 Kubernetes 把尚不能转发会话的
+    Pod 放进 oc-ops Service endpoints。
+    """
+    try:
+        await asyncio.to_thread(conversation.list_sessions, limit=1, offset=0)
+    except Exception:
+        return Response("api_server not ready", status_code=503)
     return Response("ok")
 
 

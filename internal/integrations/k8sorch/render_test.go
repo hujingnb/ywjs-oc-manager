@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/yaml"
 )
 
@@ -119,6 +120,18 @@ func TestRenderDeploymentOcOpsPythonPath(t *testing.T) {
 		envs[e.Name] = e.Value
 	}
 	assert.Equal(t, "/usr/local/lib", envs["PYTHONPATH"], "oc-ops 必须置 PYTHONPATH=/usr/local/lib 才能 import ocops")
+}
+
+// TestRenderDeploymentOcOpsReadinessProbe 覆盖 Hermes 恢复窗口：oc-ops 仅监听 TCP
+// 并不代表同 Pod api_server 已可读会话，必须通过 healthz 将未恢复实例隔离在 Service 之外。
+func TestRenderDeploymentOcOpsReadinessProbe(t *testing.T) {
+	dep := RenderDeployment(testSpec(), "oc-apps")
+	ocOps := containerByName(dep, "oc-ops")
+	require.NotNil(t, ocOps, "渲染结果必须包含 oc-ops 容器")
+	require.NotNil(t, ocOps.ReadinessProbe, "oc-ops 必须配置就绪探针")
+	require.NotNil(t, ocOps.ReadinessProbe.HTTPGet, "oc-ops 就绪探针必须验证 api_server 可用性")
+	assert.Equal(t, "/healthz", ocOps.ReadinessProbe.HTTPGet.Path)
+	assert.Equal(t, intstr.FromInt(8080), ocOps.ReadinessProbe.HTTPGet.Port)
 }
 
 // TestRenderDeploymentHermesAPIServer 断言 hermes 容器注入 API_SERVER_ENABLED=true。

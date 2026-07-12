@@ -124,10 +124,11 @@ spec:
         - containerPort: 8080
         readinessProbe:
           failureThreshold: 6
+          httpGet:
+            path: /healthz
+            port: 8080
           initialDelaySeconds: 10
           periodSeconds: 10
-          tcpSocket:
-            port: 8080
         resources: {}
         volumeMounts:
         - mountPath: /opt/data
