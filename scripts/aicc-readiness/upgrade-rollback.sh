@@ -14,6 +14,7 @@ readonly CURRENT_BACKUP="${AICC_READINESS_CURRENT_BACKUP:-/tmp/aicc-readiness-pr
 readonly BASELINE_BACKUP="${AICC_READINESS_BACKUP:-/tmp/aicc-readiness-backup.sql}"
 readonly RUN_BROWSER_SMOKE="${AICC_READINESS_RUN_BROWSER_SMOKE:-1}"
 readonly ROLLOUT_TIMEOUT="${AICC_READINESS_ROLLOUT_TIMEOUT:-900s}"
+readonly LOCAL_OPS_IMAGE="${REGISTRY_HOST}/oc-manager-ops:dev2"
 
 MASTER_SHA=""
 KEFU_SHA=""
@@ -262,9 +263,11 @@ main() {
   build_images kefu "$KEFU_SHA" "$TEMP_DIR/kefu"
 
   reset_local_cluster
-  # registry 随 k3d 一同重建；回滚阶段和 EXIT trap 都依赖新版镜像已重新推送。
+  # registry 随 k3d 一同重建；回滚阶段、运行时实例和 EXIT trap 都依赖这些镜像已重新推送。
   docker push "$KEFU_API_IMAGE"
   docker push "$KEFU_WEB_IMAGE"
+  docker image inspect "$LOCAL_OPS_IMAGE" >/dev/null 2>&1 || fail "缺少本地运行时镜像: $LOCAL_OPS_IMAGE"
+  docker push "$LOCAL_OPS_IMAGE"
   apply_stack_with_images "$MASTER_API_IMAGE" "$MASTER_WEB_IMAGE"
   initialize_model_services_without_mutating_repo
   seed_master_history
