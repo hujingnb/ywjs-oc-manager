@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, request, test, type Page } from '@playwright/test'
 
 import {
   clearLoginState,
@@ -25,6 +25,11 @@ type AICCAgentResponse = {
 
 // enableAICCForFixtureOrg 覆盖平台管理员开通企业 AICC 的前置业务流程。
 async function enableAICCForFixtureOrg(page: Page): Promise<void> {
+  await setAICCConfigForFixtureOrg(page, true, 10)
+}
+
+// setAICCConfigForFixtureOrg 通过平台管理界面更新企业开关与配额，确保 E2E 覆盖真实配置链路。
+async function setAICCConfigForFixtureOrg(page: Page, enabled: boolean, agentLimit: number): Promise<void> {
   const fx = loadE2EFixture()
   await forceZh(page)
   await loginAs(page, 'platform_admin', fx, 'zh')
@@ -38,7 +43,8 @@ async function enableAICCForFixtureOrg(page: Page): Promise<void> {
     .locator('.n-form-item')
     .filter({ hasText: '开通 AICC' })
     .getByRole('switch')
-  if (await aiccSwitch.getAttribute('aria-checked') !== 'true') {
+  const isEnabled = await aiccSwitch.getAttribute('aria-checked') === 'true'
+  if (isEnabled !== enabled) {
     await aiccSwitch.click()
   }
 
@@ -46,7 +52,7 @@ async function enableAICCForFixtureOrg(page: Page): Promise<void> {
     .locator('.n-form-item')
     .filter({ hasText: 'AICC 智能体数量上限' })
     .locator('input')
-    .fill('10')
+    .fill(String(agentLimit))
 
   const configSaved = page.waitForResponse(response =>
     response.url().includes('/api/v1/organizations/')
@@ -257,6 +263,97 @@ test('平台开通 AICC 后企业管理员可创建客服智能体', async ({ pa
   await clearLoginState(page)
   await createAICCAgentAsOrgAdmin(page)
   await configureKnowledgeScope(page)
+})
+
+// 平台运营边界覆盖：数量上限拒绝额外智能体，关闭企业后公开链接立即离线。
+test('平台限制智能体数量并在关闭 AICC 后下线公开入口', async ({ page }) => {
+  const fx = loadE2EFixture()
+  await enableAICCForFixtureOrg(page)
+  await clearLoginState(page)
+  const agent = await createAICCAgentAsOrgAdmin(page)
+
+  await expect(page.locator('#aicc-public-link')).toHaveValue(new RegExp(`/aicc/${agent.public_token}$`))
+  await expect(page.locator('.qr-preview img')).toHaveAttribute('src', /^data:image\/png;base64,/)
+
+  await clearLoginState(page)
+  await setAICCConfigForFixtureOrg(page, true, 1)
+  await clearLoginState(page)
+  await loginAs(page, 'org_admin', fx, 'zh')
+  await openAICCConsole(page)
+  await openAICCSettings(page)
+  await page.getByRole('button', { name: '新建智能体' }).click()
+  await page.getByPlaceholder('例如：售前咨询接待员').fill('超额客服')
+  const limited = page.waitForResponse(response =>
+    response.url().includes('/api/v1/aicc/agents') && response.request().method() === 'POST',
+  )
+  await page.getByRole('button', { name: '保存配置' }).click()
+  expect((await limited).status()).toBe(409)
+  await expect(page.getByText('AICC 智能体数量已达上限')).toBeVisible()
+
+  await clearLoginState(page)
+  await setAICCConfigForFixtureOrg(page, false, 1)
+  const offline = await page.request.get(`/api/v1/public/aicc/agents/${agent.public_token}/config`)
+  expect(offline.status()).toBe(404)
+  expect((await offline.json()) as { code: string }).toMatchObject({ code: 'AICC_OFFLINE' })
+})
+
+// 挂件安全覆盖：产品预览加载真实脚本；白名单宿主可创建会话并沉淀来源页，未授权宿主不能消耗会话配额。
+test('网页挂件校验允许域名并记录授权来源页', async ({ page }) => {
+  await enableAICCForFixtureOrg(page)
+  await clearLoginState(page)
+  const agent = await createAICCAgentAsOrgAdmin(page)
+  await openAICCSettings(page)
+  await page.locator('#aicc-allowed-domains').fill('allowed.localhost')
+  const saved = page.waitForResponse(response =>
+    response.url().includes(`/api/v1/aicc/agents/${agent.id}`) && response.request().method() === 'PATCH',
+  )
+  await page.getByRole('button', { name: '保存配置' }).click()
+  expect((await saved).ok()).toBeTruthy()
+  await startAICCAgent(page)
+
+  const previewOpened = page.waitForEvent('popup')
+  await page.getByRole('button', { name: '预览挂件效果' }).click()
+  const previewPage = await previewOpened
+  await expect(previewPage.getByRole('button', { name: '在线客服' })).toBeVisible()
+  await previewPage.getByRole('button', { name: '在线客服' }).click()
+  await expect(previewPage.frameLocator('[data-aicc-widget-frame]').getByRole('heading', { name: agent.name })).toBeVisible()
+  await previewPage.close()
+
+  const allowedSourceURL = 'http://allowed.localhost/landing'
+  const allowedRequest = await request.newContext({
+    baseURL: 'http://ocm.localhost',
+    extraHTTPHeaders: { Origin: 'http://allowed.localhost', Referer: allowedSourceURL },
+  })
+  const created = await allowedRequest.post(`/api/v1/public/aicc/agents/${agent.widget_token}/sessions`, {
+    data: { channel: 'web_widget', source_url: allowedSourceURL, referrer: allowedSourceURL },
+  })
+  expect(created.status()).toBe(201)
+  const createdPayload = await created.json() as { session: { session_token: string } }
+  // 后台正式列表过滤零消息会话；发送真实访客消息后才能验证来源页是否在运营视图沉淀。
+  const messageSent = await allowedRequest.post(`/api/v1/public/aicc/sessions/${createdPayload.session.session_token}/messages`, {
+    data: { text: '记录授权来源页' },
+    timeout: 180_000,
+  })
+  expect(messageSent.ok()).toBeTruthy()
+  await allowedRequest.dispose()
+
+  const blockedSourceURL = 'http://blocked.localhost/landing'
+  const blockedRequest = await request.newContext({
+    baseURL: 'http://ocm.localhost',
+    extraHTTPHeaders: { Origin: 'http://blocked.localhost', Referer: blockedSourceURL },
+  })
+  const forbidden = await blockedRequest.post(`/api/v1/public/aicc/agents/${agent.widget_token}/sessions`, {
+    data: { channel: 'web_widget', source_url: blockedSourceURL, referrer: blockedSourceURL },
+  })
+  expect(forbidden.status()).toBe(403)
+  expect((await forbidden.json()) as { code: string }).toMatchObject({ code: 'AICC_DOMAIN_FORBIDDEN' })
+  await blockedRequest.dispose()
+
+  await openAICCConsole(page)
+  await page.getByRole('link', { name: '会话', exact: true }).click()
+  await expect(page.locator('.session-row')).toHaveCount(1)
+  await page.locator('.session-row').first().click()
+  await expect(page.locator('.session-summary')).toContainText(allowedSourceURL)
 })
 
 // AICC 线索闭环覆盖：公开访客提交留资后，企业管理员可在线索页看到未读线索、统计变化，并导出 CSV。
