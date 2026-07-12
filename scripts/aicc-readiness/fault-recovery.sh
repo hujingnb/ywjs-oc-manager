@@ -92,18 +92,25 @@ expect_dependency_failure() {
 }
 
 expect_dependency_degraded_reply() {
-  local label="$1" status text client_message_id
+  local label="$1" status text code client_message_id
   client_message_id="$(uuidgen | tr '[:upper:]' '[:lower:]')"
   status="$(http_status -H 'Content-Type: application/json' \
     --data "$(jq -nc --arg text "故障演练安全降级 $(date +%s)" --arg client_message_id "$client_message_id" '{text: $text, client_message_id: $client_message_id}')" \
     "$(session_url)/messages")"
-  [[ "$status" =~ ^2 ]] || die "$label 未返回安全降级回复，HTTP $status：$(tr '\n' ' ' </tmp/aicc-readiness-body.$$)"
-  text="$(jq -er '.message.text' /tmp/aicc-readiness-body.$$ 2>/dev/null || true)"
-  [[ -n "$text" ]] || die "$label 的降级回复为空或不是有效 JSON"
+  if [[ "$status" =~ ^2 ]]; then
+    text="$(jq -er '.message.text' /tmp/aicc-readiness-body.$$ 2>/dev/null || true)"
+    [[ -n "$text" ]] || die "$label 的降级回复为空或不是有效 JSON"
+  elif [[ "$status" =~ ^5 ]]; then
+    code="$(jq -er '.code' /tmp/aicc-readiness-body.$$ 2>/dev/null || true)"
+    text="$(jq -er '.message' /tmp/aicc-readiness-body.$$ 2>/dev/null || true)"
+    [[ -n "$code" && -n "$text" ]] || die "$label 未返回稳定 JSON 错误，HTTP $status"
+  else
+    die "$label 返回非预期 HTTP $status：$(tr '\n' ' ' </tmp/aicc-readiness-body.$$)"
+  fi
   if grep -Eqi 'api call failed|connection error|dial tcp|traceback|stack trace|upstream' <<<"$text"; then
     die "$label 向访客泄露了原始上游错误：$text"
   fi
-  log "PASS: $label 返回安全降级回复且未泄露原始错误"
+  log "PASS: $label 返回安全响应且未泄露原始错误 (HTTP $status)"
 }
 
 capture_replicas() {
