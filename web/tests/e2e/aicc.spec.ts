@@ -396,6 +396,53 @@ test('访客图片上传恢复并拒绝非法或超限文件', async ({ page }) 
   await publicPage.close()
 })
 
+// 运营安全覆盖：设置页保存敏感词和会话上限后，公开端拒绝敏感词与第二条超额消息。
+test('公开端执行敏感词和单会话消息上限', async ({ page }) => {
+  await enableAICCForFixtureOrg(page)
+  await clearLoginState(page)
+  const agent = await createAICCAgentAsOrgAdmin(page)
+  await openAICCSettings(page)
+  await page.locator('#aicc-message-limit').fill('1')
+  await page.locator('#aicc-sensitive-words').fill('违禁词')
+  const saved = page.waitForResponse(response =>
+    response.url().includes('/settings') && response.request().method() === 'PUT',
+  )
+  await page.getByRole('button', { name: '保存运营配置' }).click()
+  expect((await saved).ok()).toBeTruthy()
+  await startAICCAgent(page)
+
+  const publicPage = await page.context().newPage()
+  await forceZh(publicPage)
+  await publicPage.goto(`/aicc/${agent.public_token}`)
+  await publicPage.getByPlaceholder('输入您的问题').fill('这是一条违禁词消息')
+  const created = publicPage.waitForResponse(response =>
+    response.url().includes(`/api/v1/public/aicc/agents/${agent.public_token}/sessions`) && response.request().method() === 'POST',
+  )
+  const sensitive = publicPage.waitForResponse(response =>
+    response.url().includes('/messages') && response.request().method() === 'POST',
+  )
+  await publicPage.getByRole('button', { name: '发送' }).click()
+  expect((await created).status()).toBe(201)
+  expect((await sensitive).status()).toBe(400)
+  await expect(publicPage.getByText('这条消息包含暂不支持发送的内容，请调整后再试。')).toBeVisible()
+
+  const firstMessage = publicPage.waitForResponse(response =>
+    response.url().includes('/messages') && response.request().method() === 'POST',
+  )
+  await publicPage.getByPlaceholder('输入您的问题').fill('第一条正常消息')
+  await publicPage.getByRole('button', { name: '发送' }).click()
+  expect((await firstMessage).ok()).toBeTruthy()
+
+  const limited = publicPage.waitForResponse(response =>
+    response.url().includes('/messages') && response.request().method() === 'POST',
+  )
+  await publicPage.getByPlaceholder('输入您的问题').fill('第二条正常消息')
+  await publicPage.getByRole('button', { name: '发送' }).click()
+  expect((await limited).status()).toBe(429)
+  await expect(publicPage.getByText('本次会话消息数量已达上限，请稍后重新打开客服。')).toBeVisible()
+  await publicPage.close()
+})
+
 // AICC 线索闭环覆盖：公开访客提交留资后，企业管理员可在线索页看到未读线索、统计变化，并导出 CSV。
 test('公开访客提交留资后企业管理员可查看线索和导出 CSV', async ({ page }) => {
   await enableAICCForFixtureOrg(page)

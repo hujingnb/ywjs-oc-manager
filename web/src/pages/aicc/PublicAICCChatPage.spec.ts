@@ -337,4 +337,20 @@ describe('PublicAICCChatPage', () => {
     expect(wrapper.find('.pending-image').exists()).toBe(false)
     expect(apiState.uploadImage).not.toHaveBeenCalled()
   })
+
+  // 场景：服务端敏感词错误码必须映射为本地化提示，不能直接向访客暴露后端原始文案。
+  it('renders a localized message for the sensitive-word error code', async () => {
+    apiState.sendMessage.mockRejectedValue(Object.assign(new Error('消息包含暂不支持发送的内容'), {
+      status: 400,
+      body: { code: 'AICC_SENSITIVE_WORD' },
+    }))
+    const wrapper = mountPublicChat()
+    await flushPromises()
+
+    await wrapper.find('textarea').setValue('包含违禁词')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('这条消息包含暂不支持发送的内容，请调整后再试。')
+  })
 })

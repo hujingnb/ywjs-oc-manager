@@ -378,9 +378,9 @@ function publicMessageErrorText(err: unknown): string {
 
 function friendlyAICCError(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error || '')
-  if (text.includes('AICC_SENSITIVE_WORD')) return t('aicc.publicChat.sensitiveWord')
-  if (text.includes('AICC_MESSAGE_LIMIT_EXCEEDED')) return t('aicc.publicChat.messageLimit')
-  if (text.includes('AICC_VISITOR_BLOCKED')) return t('aicc.publicChat.visitorBlocked')
+  if (isApiErrorCode(error, 'AICC_SENSITIVE_WORD') || text.includes('AICC_SENSITIVE_WORD')) return t('aicc.publicChat.sensitiveWord')
+  if (isApiErrorCode(error, 'AICC_MESSAGE_LIMIT_EXCEEDED') || text.includes('AICC_MESSAGE_LIMIT_EXCEEDED')) return t('aicc.publicChat.messageLimit')
+  if (isApiErrorCode(error, 'AICC_VISITOR_BLOCKED') || text.includes('AICC_VISITOR_BLOCKED')) return t('aicc.publicChat.visitorBlocked')
   return text || t('aicc.publicChat.sendFailed')
 }
 
