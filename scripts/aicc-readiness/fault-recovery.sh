@@ -149,12 +149,13 @@ create_session() {
 }
 
 send_message() {
-  local label="$1" text="$2" before after status response attempts=0
+  local label="$1" text="$2" before after status response attempts=0 client_message_id
   before="$(curl_local --silent --show-error --fail "$(session_url)" | jq '.session.messages | length')"
   response="$(mktemp)"
+  client_message_id="$(uuidgen | tr '[:upper:]' '[:lower:]')"
   while :; do
     status="$(curl_local --connect-timeout 5 --max-time 90 --silent --show-error --output "$response" --write-out '%{http_code}' \
-      -H 'Content-Type: application/json' --data "$(jq -nc --arg text "$text" '{text: $text}')" \
+      -H 'Content-Type: application/json' --data "$(jq -nc --arg text "$text" --arg client_message_id "$client_message_id" '{text: $text, client_message_id: $client_message_id}')" \
       "$(session_url)/messages" || true)"
     # Kubernetes Ready 只代表三个容器已就绪；Hermes 仍可能在恢复 S3 状态。仅对明确的
     # 启动窗口错误重试，其他响应立即失败，避免把业务错误或重复写入掩盖为恢复成功。
