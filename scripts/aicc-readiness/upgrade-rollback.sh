@@ -215,12 +215,21 @@ seed_master_history() {
 
 switch_application_images() {
   local api_image="$1" web_image="$2" phase="$3"
+  local api_status=0 web_status=0
   log "$phase 切换应用镜像"
   kubectl_ocm set image deploy/manager-api manager-api="$api_image"
   kubectl_ocm set image deploy/manager-web manager-web="$web_image"
-  kubectl_ocm rollout status deploy/manager-api --timeout="$ROLLOUT_TIMEOUT"
-  kubectl_ocm rollout status deploy/manager-web --timeout="$ROLLOUT_TIMEOUT"
+  # 两个组件都要等待并记录结果，避免后一条成功命令掩盖前一个组件的滚动失败。
+  if ! kubectl_ocm rollout status deploy/manager-api --timeout="$ROLLOUT_TIMEOUT"; then
+    api_status=1
+  fi
+  if ! kubectl_ocm rollout status deploy/manager-web --timeout="$ROLLOUT_TIMEOUT"; then
+    web_status=1
+  fi
   kubectl_ocm get deploy manager-api manager-web -o jsonpath='{range .items[*]}{.metadata.name}{" "}{range .spec.template.spec.containers[*]}{.image}{"\n"}{end}{end}'
+  if ((api_status != 0 || web_status != 0)); then
+    return 1
+  fi
 }
 
 browser_smoke() {

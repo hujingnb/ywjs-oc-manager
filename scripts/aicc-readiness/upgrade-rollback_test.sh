@@ -23,4 +23,11 @@ rg -q 'rollout status deploy/traefik' "$TARGET" || {
   exit 1
 }
 
+# API 与 Web 任一组件滚动失败都必须判定整次镜像切换失败，不能由后一条成功命令覆盖返回码。
+rg -q 'local api_status=0 web_status=0' "$TARGET" &&
+  rg -q 'return 1' "$TARGET" || {
+  printf 'FAIL: upgrade-rollback.sh 未聚合 API 与 Web 的 rollout 结果\n' >&2
+  exit 1
+}
+
 printf 'PASS: 升级演练会预加载并等待 Traefik Ready\n'
