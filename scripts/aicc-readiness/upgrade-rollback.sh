@@ -70,7 +70,7 @@ mysql_restore() {
 mysql_query() {
   local sql="$1"
   kubectl_ocm exec statefulset/mysql -- sh -c \
-    "exec mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -N -e $(printf '%q' "$sql")"
+    "exec mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -D ocm -N -e $(printf '%q' "$sql")"
 }
 
 record_database_state() {
