@@ -93,6 +93,11 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 		corev1.ResourceCPU:    resource.MustParse(spec.Resources.LimitsCPU),
 		corev1.ResourceMemory: resource.MustParse(spec.Resources.LimitsMemory),
 	}
+	// 本地公开镜像不配置拉取凭证；空名称必须省略，否则 Kubernetes 会接受脏对象但拒绝后续 strategic patch。
+	var imagePullSecrets []corev1.LocalObjectReference
+	if spec.ImagePullSecret != "" {
+		imagePullSecrets = []corev1.LocalObjectReference{{Name: spec.ImagePullSecret}}
+	}
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      deploymentName(spec.AppID),
@@ -108,13 +113,13 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 				ObjectMeta: metav1.ObjectMeta{Labels: appLabels(spec.AppID)},
 				Spec: corev1.PodSpec{
 					// imagePullSecrets 用于拉取私有镜像仓库。
-					ImagePullSecrets: []corev1.LocalObjectReference{{Name: spec.ImagePullSecret}},
+					ImagePullSecrets: imagePullSecrets,
 					// initContainer restore：从 manager bootstrap 拉取运行时配置写入 oc-input。
 					InitContainers: []corev1.Container{{
-						Name:    "restore",
-						Image:   spec.OpsImage,
-						Command: []string{"oc-restore"},
-						Env:     []corev1.EnvVar{ctrlTokenEnv, bootstrapEnv},
+						Name:         "restore",
+						Image:        spec.OpsImage,
+						Command:      []string{"oc-restore"},
+						Env:          []corev1.EnvVar{ctrlTokenEnv, bootstrapEnv},
 						VolumeMounts: []corev1.VolumeMount{inputMount, dataMount},
 					}},
 					Containers: []corev1.Container{

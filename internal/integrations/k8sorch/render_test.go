@@ -51,6 +51,16 @@ func TestRenderDeployment(t *testing.T) {
 	assertGolden(t, "deployment.golden.yaml", RenderDeployment(testSpec(), "oc-apps"))
 }
 
+// TestRenderDeploymentOmitsEmptyImagePullSecret 覆盖本地公开镜像：空 secret 不能渲染为无效列表项。
+func TestRenderDeploymentOmitsEmptyImagePullSecret(t *testing.T) {
+	spec := testSpec()
+	spec.ImagePullSecret = ""
+
+	dep := RenderDeployment(spec, "oc-apps")
+
+	assert.Empty(t, dep.Spec.Template.Spec.ImagePullSecrets)
+}
+
 // TestRenderDeploymentProxy 断言：配了 Proxy 时 hermes 与 oc-ops 容器都注入
 // HTTP_PROXY/HTTPS_PROXY/NO_PROXY（hermes 微信平台 / oc-ops 渠道登录直连外网需要）；
 // 空 Proxy（生产默认）时两容器都不出现任何代理 env，保持 pod 干净。
@@ -232,8 +242,8 @@ func TestWorkWechatOptionalEnv(t *testing.T) {
 // 覆盖：未绑定时 Secret 无对应 key 也不报错（optional=true），引擎 getenv 为空 → 钉钉平台不启用。
 func TestDingtalkOptionalEnv(t *testing.T) {
 	envs := dingtalkOptionalEnv("a1")
-	require.Len(t, envs, 2)                               // 钉钉注入两条 env
-	assert.Equal(t, "DINGTALK_CLIENT_ID", envs[0].Name)  // 第一条对应 AppKey
+	require.Len(t, envs, 2)                             // 钉钉注入两条 env
+	assert.Equal(t, "DINGTALK_CLIENT_ID", envs[0].Name) // 第一条对应 AppKey
 	assert.Equal(t, "dingtalk-client-id", envs[0].ValueFrom.SecretKeyRef.Key)
 	assert.True(t, *envs[0].ValueFrom.SecretKeyRef.Optional)
 	assert.Equal(t, "DINGTALK_CLIENT_SECRET", envs[1].Name) // 第二条对应 AppSecret
@@ -249,7 +259,7 @@ func TestRenderSecret_Dingtalk(t *testing.T) {
 		DingtalkClientID:     "ding-key",
 		DingtalkClientSecret: "ding-secret",
 	}, "ns")
-	assert.Equal(t, "ding-key", sec.StringData["dingtalk-client-id"])       // Client ID 明文带出
+	assert.Equal(t, "ding-key", sec.StringData["dingtalk-client-id"])        // Client ID 明文带出
 	assert.Equal(t, "ding-secret", sec.StringData["dingtalk-client-secret"]) // Client Secret 明文带出
 }
 
