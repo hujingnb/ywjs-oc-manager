@@ -7,7 +7,10 @@ auth 模式与既有 server kanban/skills 测试一致：
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
+import time
 from pathlib import Path
 from unittest import mock
 
@@ -177,6 +180,43 @@ def test_chat_internal_error(monkeypatch, tmp_path):
         )
     assert r.status_code == 500
     assert r.json()["code"] == "INTERNAL"
+
+
+# 并发路径：同步 api_server 转发必须离开 uvicorn 事件循环，否则不同访客会话会被严格串行。
+def test_chat_route_runs_blocking_upstream_concurrently():
+    from ocops import server
+
+    class FakeRequest:
+        def __init__(self, sid):
+            self.path_params = {"sid": sid}
+
+        async def json(self):
+            return {"message": "hi"}
+
+    lock = threading.Lock()
+    active = 0
+    max_active = 0
+
+    def blocking_chat(sid, body):
+        nonlocal active, max_active
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+        time.sleep(0.05)
+        with lock:
+            active -= 1
+        return {"message": {"content": sid}}
+
+    async def exercise():
+        with mock.patch("ocops.server.conversation.chat", side_effect=blocking_chat):
+            return await asyncio.gather(
+                server.conversation_chat(FakeRequest("s1")),
+                server.conversation_chat(FakeRequest("s2")),
+            )
+
+    responses = asyncio.run(exercise())
+    assert [response.status_code for response in responses] == [200, 200]
+    assert max_active == 2
 
 
 # 重命名：PATCH /oc/conversations/{sid} 透传 title 给 conversation.update_title。

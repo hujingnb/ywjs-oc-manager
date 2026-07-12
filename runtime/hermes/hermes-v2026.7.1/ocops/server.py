@@ -9,6 +9,7 @@
 kanban/login 端点在 Task 10/11 追加。"""
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -619,7 +620,8 @@ async def conversation_list(request):
     """GET /oc/conversations?source=&limit=&offset= —— 列实例下会话。"""
     try:
         q = request.query_params
-        data = conversation.list_sessions(
+        data = await asyncio.to_thread(
+            conversation.list_sessions,
             source=q.get("source", ""),
             limit=int(q.get("limit", "50") or "50"),
             offset=int(q.get("offset", "0") or "0"),
@@ -632,7 +634,7 @@ async def conversation_list(request):
 async def conversation_messages(request):
     """GET /oc/conversations/{sid}/messages —— 读会话历史。"""
     try:
-        return _ok(conversation.session_messages(request.path_params["sid"]))
+        return _ok(await asyncio.to_thread(conversation.session_messages, request.path_params["sid"]))
     except OpsError as e:
         return _err(e)
 
@@ -644,7 +646,7 @@ async def conversation_create(request):
     except Exception:
         body = {}
     try:
-        return _ok(conversation.create_session(body), status=201)
+        return _ok(await asyncio.to_thread(conversation.create_session, body), status=201)
     except OpsError as e:
         return _err(e)
 
@@ -652,7 +654,7 @@ async def conversation_create(request):
 async def conversation_delete(request):
     """DELETE /oc/conversations/{sid} —— 删除会话。"""
     try:
-        conversation.delete_session(request.path_params["sid"])
+        await asyncio.to_thread(conversation.delete_session, request.path_params["sid"])
         return Response(status_code=204)
     except OpsError as e:
         return _err(e)
@@ -665,7 +667,11 @@ async def conversation_rename(request):
     except Exception:
         body = {}
     try:
-        return _ok(conversation.update_title(request.path_params["sid"], str(body.get("title", ""))))
+        return _ok(await asyncio.to_thread(
+            conversation.update_title,
+            request.path_params["sid"],
+            str(body.get("title", "")),
+        ))
     except OpsError as e:
         return _err(e)
 
@@ -677,7 +683,7 @@ async def conversation_chat(request):
     except Exception:
         body = {}
     try:
-        return _ok(conversation.chat(request.path_params["sid"], body))
+        return _ok(await asyncio.to_thread(conversation.chat, request.path_params["sid"], body))
     except OpsError as e:
         return _err(e)
 
