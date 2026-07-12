@@ -181,6 +181,9 @@ const isUnresolved = computed(() => resolutionStatus.value === 'unresolved')
 // notice 模式的隐私说明只用于进入页面时告知访客，访客开始对话后隐藏以减少输入区占用。
 const showPrivacyNotice = computed(() => Boolean(privacyText.value) && !hasVisitorMessage.value)
 
+// 公开端只接受与 file input accept 约束一致的图片类型，避免访客选择无效文件后再等待服务端拒绝。
+const aiccPublicImageTypes = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
+
 onMounted(() => {
   void boot()
 })
@@ -407,6 +410,10 @@ function onFileChange(event: Event) {
   const file = target.files?.[0]
   target.value = ''
   if (!file) return
+  if (!aiccPublicImageTypes.has(file.type)) {
+    errorMessage.value = t('aicc.publicChat.imageTypeInvalid')
+    return
+  }
   if (file.size > 10 * 1024 * 1024) {
     errorMessage.value = t('aicc.publicChat.imageTooLarge')
     return

@@ -356,6 +356,46 @@ test('网页挂件校验允许域名并记录授权来源页', async ({ page }) 
   await expect(page.locator('.session-summary')).toContainText(allowedSourceURL)
 })
 
+// 公开图片闭环覆盖：合法小图片可随消息发送并在刷新后恢复，非法类型与超限图片不进入消息链路。
+test('访客图片上传恢复并拒绝非法或超限文件', async ({ page }) => {
+  await enableAICCForFixtureOrg(page)
+  await clearLoginState(page)
+  const agent = await createAICCAgentAsOrgAdmin(page)
+  await startAICCAgent(page)
+
+  const publicPage = await page.context().newPage()
+  await forceZh(publicPage)
+  await publicPage.goto(`/aicc/${agent.public_token}`)
+  const sessionCreated = publicPage.waitForResponse(response =>
+    response.url().includes(`/api/v1/public/aicc/agents/${agent.public_token}/sessions`) && response.request().method() === 'POST',
+  )
+  const imageUploaded = publicPage.waitForResponse(response =>
+    response.url().includes('/images?filename=e2e.png') && response.request().method() === 'POST',
+  )
+  const messageSent = publicPage.waitForResponse(response =>
+    response.url().includes('/messages') && response.request().method() === 'POST',
+  )
+  await publicPage.locator('#aicc-public-image').setInputFiles({
+    name: 'e2e.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL3JwAAAABJRU5ErkJggg==', 'base64'),
+  })
+  await expect(publicPage.locator('.pending-image img')).toBeVisible()
+  await publicPage.getByRole('button', { name: '发送' }).click()
+  expect((await sessionCreated).status()).toBe(201)
+  expect((await imageUploaded).ok()).toBeTruthy()
+  expect((await messageSent).ok()).toBeTruthy()
+  await expect(publicPage.locator('.message-list img')).toBeVisible()
+  await publicPage.reload()
+  await expect(publicPage.locator('.message-list').getByText('访客发送了一张图片')).toHaveCount(0)
+
+  await publicPage.locator('#aicc-public-image').setInputFiles({ name: 'not-image.txt', mimeType: 'text/plain', buffer: Buffer.from('x') })
+  await expect(publicPage.getByText('请选择图片文件')).toBeVisible()
+  await publicPage.locator('#aicc-public-image').setInputFiles({ name: 'large.png', mimeType: 'image/png', buffer: Buffer.alloc(10 * 1024 * 1024 + 1) })
+  await expect(publicPage.getByText('图片不能超过 10MiB')).toBeVisible()
+  await publicPage.close()
+})
+
 // AICC 线索闭环覆盖：公开访客提交留资后，企业管理员可在线索页看到未读线索、统计变化，并导出 CSV。
 test('公开访客提交留资后企业管理员可查看线索和导出 CSV', async ({ page }) => {
   await enableAICCForFixtureOrg(page)

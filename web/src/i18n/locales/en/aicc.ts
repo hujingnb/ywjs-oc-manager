@@ -372,5 +372,6 @@ export default {
     visitorBlocked: 'This visitor cannot continue consulting right now.',
     sendFailed: 'Failed to send message. Please try again later.',
     imageTooLarge: 'Image must be 10MiB or smaller',
+    imageTypeInvalid: 'Please choose an image file',
   },
 }

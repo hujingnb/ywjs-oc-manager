@@ -319,4 +319,22 @@ describe('PublicAICCChatPage', () => {
     expect(apiState.createSession).toHaveBeenCalledTimes(1)
     expect(apiState.sendMessage).toHaveBeenLastCalledWith('session-token', { text: '新会话消息', image_file_id: undefined })
   })
+
+  // 场景：选择非图片文件时前端立即提示，不能创建图片预览或调用上传接口。
+  it('rejects non-image files before creating a pending upload', async () => {
+    const wrapper = mountPublicChat()
+    await flushPromises()
+
+    const fileInput = wrapper.find('#aicc-public-image')
+    Object.defineProperty(fileInput.element, 'files', {
+      configurable: true,
+      value: [new File(['text'], 'notes.txt', { type: 'text/plain' })],
+    })
+    await fileInput.trigger('change')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('请选择图片文件')
+    expect(wrapper.find('.pending-image').exists()).toBe(false)
+    expect(apiState.uploadImage).not.toHaveBeenCalled()
+  })
 })

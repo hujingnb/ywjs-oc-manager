@@ -372,5 +372,6 @@ export default {
     visitorBlocked: '当前访客暂不能继续咨询。',
     sendFailed: '消息发送失败，请稍后重试。',
     imageTooLarge: '图片不能超过 10MiB',
+    imageTypeInvalid: '请选择图片文件',
   },
 }
