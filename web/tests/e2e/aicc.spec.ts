@@ -265,6 +265,49 @@ test('平台开通 AICC 后企业管理员可创建客服智能体', async ({ pa
   await configureKnowledgeScope(page)
 })
 
+// 智能体管理和工作台移动端覆盖：编辑、暂停、重启和删除必须作用于顶部已选智能体；
+// 390px 视口下左侧导航与表单不能产生横向溢出，也不能让关键操作失去可点击性。
+test('企业管理员可完整管理已选智能体并在移动端操作工作台', { timeout: 480_000 }, async ({ page }) => {
+  await enableAICCForFixtureOrg(page)
+  await clearLoginState(page)
+  const agent = await createAICCAgentAsOrgAdmin(page)
+  await startAICCAgent(page)
+
+  await openAICCSettings(page)
+  const renamed = `已编辑客服 ${Date.now()}`
+  await page.locator('#aicc-agent-name').fill(renamed)
+  const updated = page.waitForResponse(response =>
+    response.url().includes(`/api/v1/aicc/agents/${agent.id}`) && response.request().method() === 'PATCH',
+  )
+  await page.getByRole('button', { name: '保存配置' }).click()
+  expect((await updated).ok()).toBeTruthy()
+  await expect(page.getByRole('region', { name: '当前智能体' })).toContainText(renamed)
+
+  await page.getByRole('link', { name: '接待台', exact: true }).click()
+  const stopped = page.waitForResponse(response => response.url().includes('/stop') && response.request().method() === 'POST')
+  await page.getByRole('button', { name: '停止接待' }).click()
+  expect((await stopped).ok()).toBeTruthy()
+  await expect(page.getByRole('button', { name: '启动接待' })).toBeVisible()
+  const restarted = page.waitForResponse(response => response.url().includes('/start') && response.request().method() === 'POST')
+  await page.getByRole('button', { name: '启动接待' }).click()
+  expect((await restarted).ok()).toBeTruthy()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByRole('link', { name: '设置', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '停止接待' })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBeFalsy()
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const deleteRequest = page.waitForResponse(response =>
+    response.url().includes(`/api/v1/aicc/agents/${agent.id}`) && response.request().method() === 'DELETE',
+  )
+  await page.getByRole('button', { name: '删除' }).click()
+  await page.getByRole('textbox').last().fill(renamed)
+  await page.getByRole('dialog').getByRole('button', { name: '删除', exact: true }).click()
+  expect((await deleteRequest).ok()).toBeTruthy()
+  await expect(page.getByRole('region', { name: '当前智能体' })).not.toContainText(renamed)
+})
+
 // 平台运营边界覆盖：数量上限拒绝额外智能体，关闭企业后公开链接立即离线。
 test('平台限制智能体数量并在关闭 AICC 后下线公开入口', async ({ page }) => {
   const fx = loadE2EFixture()
