@@ -32,6 +32,19 @@ func TestAICCPublicHermesChatCreatesHermesSessionBeforeChat(t *testing.T) {
 	assert.Equal(t, "你好", ops.lastReq.Message)
 }
 
+// TestAICCPublicHermesChatSanitizesRawProviderConnectionFailure 覆盖模型上游连接失败：
+// Hermes 可能把重试后的英文诊断当作消息返回，公开客服不得直接展示该内部错误。
+func TestAICCPublicHermesChatSanitizesRawProviderConnectionFailure(t *testing.T) {
+	ops := &fakeConversationOps{chatOut: ocops.ConversationChatResult{Message: ocops.ConversationMessage{Content: "API call failed after 3 retries: Connection error."}}}
+	loc := OcOpsAppLocation{Supported: true, Endpoint: ocops.Endpoint{BaseURL: "http://runtime"}}
+	svc := NewAICCPublicHermesChat(ops, &fakeOcOpsResolver{loc: loc})
+
+	reply, err := svc.ChatAICC(context.Background(), "app-1", "aicc-session-1", "你好")
+
+	require.NoError(t, err)
+	assert.Equal(t, "客服服务暂时不可用，请稍后再试。", reply)
+}
+
 // AICC 公开会话查找 Hermes 会话时不能按 web 过滤：Hermes 创建时接受 web，
 // 但持久化后可能回显为 api_server；按 web 过滤会查不到已有 title 并重复创建触发 400。
 func TestAICCPublicHermesChatReusesAPIServerSessionByTitle(t *testing.T) {

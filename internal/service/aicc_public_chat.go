@@ -40,7 +40,15 @@ func (c *AICCPublicHermesChat) ChatAICC(ctx context.Context, appID, sessionID, t
 	if err != nil {
 		return "", mapOcOpsConversationErr(err)
 	}
-	return conversationContentText(out.Message.Content), nil
+	return sanitizeAICCPublicRuntimeReply(conversationContentText(out.Message.Content)), nil
+}
+
+func sanitizeAICCPublicRuntimeReply(reply string) string {
+	// Hermes 在模型网关彻底连接失败后可能把内部重试诊断作为聊天文本返回；公开端只暴露可重试提示。
+	if strings.Contains(strings.ToLower(reply), "api call failed after 3 retries") {
+		return "客服服务暂时不可用，请稍后再试。"
+	}
+	return reply
 }
 
 func (c *AICCPublicHermesChat) ensureHermesSession(ctx context.Context, ep ocops.Endpoint, aiccSessionID string) (string, error) {
