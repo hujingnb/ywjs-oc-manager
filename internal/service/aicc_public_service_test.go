@@ -88,6 +88,18 @@ func TestAICCPublicGetSessionRejectsExpiredSession(t *testing.T) {
 	require.ErrorIs(t, err, ErrAICCInvalidSession)
 }
 
+// TestAICCPublicGetSessionMapsStoreUnavailable 覆盖数据库故障：不能把依赖不可用误报成访客 token 失效。
+func TestAICCPublicGetSessionMapsStoreUnavailable(t *testing.T) {
+	store := &fakeAICCPublicStore{sessionErr: errors.New("database connection refused")}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	_, err := svc.GetSession(context.Background(), "tok")
+
+	require.ErrorIs(t, err, ErrAICCSessionStoreUnavailable)
+	assert.NotErrorIs(t, err, ErrAICCInvalidSession)
+}
+
 // TestAICCPublicSubmitLeadValuesCompletesRequiredFields 覆盖留资提交闭环：
 // 必填字段写入后 session 标记完成，同时生成企业线索主记录供管理端列表和导出使用。
 func TestAICCPublicSubmitLeadValuesCompletesRequiredFields(t *testing.T) {

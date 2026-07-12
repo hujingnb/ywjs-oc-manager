@@ -162,10 +162,10 @@ type AICCPublicConfigResult struct {
 
 // AICCPublicMessageInput 是访客发送消息的入参。
 type AICCPublicMessageInput struct {
-	SessionToken string
+	SessionToken    string
 	ClientMessageID string
-	Text         string
-	ImageFileID  string
+	Text            string
+	ImageFileID     string
 }
 
 // AICCPublicMessageResult 是访客收到的助手回复。
@@ -353,7 +353,13 @@ func (s *AICCPublicService) CreateSession(ctx context.Context, publicToken strin
 // GetSession 通过公开 session token 恢复当前访客会话消息。
 func (s *AICCPublicService) GetSession(ctx context.Context, sessionToken string) (AICCPublicSessionDetailResult, error) {
 	session, err := s.store.GetAICCSessionByToken(ctx, strings.TrimSpace(sessionToken))
-	if err != nil || !session.ExpiresAt.After(s.now()) {
+	if errors.Is(err, sql.ErrNoRows) {
+		return AICCPublicSessionDetailResult{}, ErrAICCInvalidSession
+	}
+	if err != nil {
+		return AICCPublicSessionDetailResult{}, fmt.Errorf("%w: %v", ErrAICCSessionStoreUnavailable, err)
+	}
+	if !session.ExpiresAt.After(s.now()) {
 		return AICCPublicSessionDetailResult{}, ErrAICCInvalidSession
 	}
 	if _, err := s.activeAgentBySession(ctx, session); err != nil {
@@ -453,15 +459,15 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 	}
 	clientMessageID := strings.TrimSpace(input.ClientMessageID)
 	visitorMessage := sqlc.CreateAICCMessageParams{
-		ID:             newUUID(),
-		SessionID:      session.ID,
-		AgentID:        session.AgentID,
-		Direction:      domain.AICCMessageDirectionVisitor,
-		ContentType:    contentType,
-		TextContent:    nullStr(text),
-		ImageObjectKey: nullStr(image.ObjectKey),
-		ImageMime:      nullStr(image.Mime),
-		ImageSizeBytes: null.IntFromPtr(int64PtrIfValid(image.SizeBytes, imageID != "")),
+		ID:              newUUID(),
+		SessionID:       session.ID,
+		AgentID:         session.AgentID,
+		Direction:       domain.AICCMessageDirectionVisitor,
+		ContentType:     contentType,
+		TextContent:     nullStr(text),
+		ImageObjectKey:  nullStr(image.ObjectKey),
+		ImageMime:       nullStr(image.Mime),
+		ImageSizeBytes:  null.IntFromPtr(int64PtrIfValid(image.SizeBytes, imageID != "")),
 		ClientMessageID: nullStr(clientMessageID),
 	}
 	if clientMessageID != "" {
@@ -474,8 +480,12 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 		}
 		_, err = s.store.GetAICCMessageByClientMessageID(ctx, sqlc.GetAICCMessageByClientMessageIDParams{SessionID: session.ID, Direction: domain.AICCMessageDirectionVisitor, ClientMessageID: nullStr(clientMessageID)})
 		if errors.Is(err, sql.ErrNoRows) {
-			if err := s.reserveAICCVisitorMessage(ctx, session, settings.MessageLimitPerSession, visitorMessage); err != nil { return AICCPublicMessageResult{}, err }
-		} else if err != nil { return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 幂等消息失败: %w", err) }
+			if err := s.reserveAICCVisitorMessage(ctx, session, settings.MessageLimitPerSession, visitorMessage); err != nil {
+				return AICCPublicMessageResult{}, err
+			}
+		} else if err != nil {
+			return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 幂等消息失败: %w", err)
+		}
 	} else if err := s.reserveAICCVisitorMessage(ctx, session, settings.MessageLimitPerSession, visitorMessage); err != nil {
 		return AICCPublicMessageResult{}, err
 	}
@@ -490,12 +500,12 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 	}
 	replyID := newUUID()
 	assistantMessage := sqlc.CreateAICCMessageParams{
-		ID:          replyID,
-		SessionID:   session.ID,
-		AgentID:     session.AgentID,
-		Direction:   domain.AICCMessageDirectionAssistant,
-		ContentType: domain.AICCMessageContentTypeText,
-		TextContent: nullStr(reply),
+		ID:              replyID,
+		SessionID:       session.ID,
+		AgentID:         session.AgentID,
+		Direction:       domain.AICCMessageDirectionAssistant,
+		ContentType:     domain.AICCMessageContentTypeText,
+		TextContent:     nullStr(reply),
 		ClientMessageID: nullStr(clientMessageID),
 	}
 	if err := s.storeAICCAssistantMessage(ctx, session.ID, assistantMessage); err != nil {
