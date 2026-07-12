@@ -223,6 +223,37 @@ func TestAICCPublicChatReservesVisitorMessageBeforeHermes(t *testing.T) {
 	assert.Equal(t, domain.AICCMessageDirectionAssistant, store.createdMessages[1].Direction)
 }
 
+// TestAICCPublicChatRetriesClientMessageWithoutDuplicatingVisitorMessage 覆盖运行时恢复窗口：
+// 首次请求已保留访客消息但 Hermes 不可用时，同一 client_message_id 重试只能补全原消息。
+func TestAICCPublicChatRetriesClientMessageWithoutDuplicatingVisitorMessage(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:      sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:    sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		settings: sqlc.AiccAgentSetting{AgentID: "agent-1", MessageLimitPerSession: 100, SessionResumeTtlMinutes: 30},
+		session:  sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+	}
+	attempts := 0
+	chat := &fakeAICCHermesChat{reply: "恢复后的回复"}
+	chat.onChat = func() { attempts++ }
+	svc := NewAICCPublicService(store, chat)
+	svc.now = func() time.Time { return aiccPublicTestNow }
+	input := AICCPublicMessageInput{SessionToken: "tok", ClientMessageID: "b0664a26-4181-42a8-8ea3-6f886c5e4ddd", Text: "恢复后继续"}
+
+	chat.err = errors.New("runtime unavailable")
+	_, err := svc.SendMessage(context.Background(), input)
+	require.Error(t, err)
+	require.Len(t, store.createdMessages, 1)
+
+	chat.err = nil
+	result, err := svc.SendMessage(context.Background(), input)
+	require.NoError(t, err)
+	assert.Equal(t, "恢复后的回复", result.Text)
+	require.Len(t, store.createdMessages, 2)
+	assert.Equal(t, domain.AICCMessageDirectionVisitor, store.createdMessages[0].Direction)
+	assert.Equal(t, domain.AICCMessageDirectionAssistant, store.createdMessages[1].Direction)
+	assert.Equal(t, 2, attempts)
+}
+
 // TestAICCPublicChatRejectsMissingSessionOnTouch 覆盖会话刷新受影响行校验：
 // 预约消息时发现 session 已不可更新，不能继续调用 Hermes 产生模型费用。
 func TestAICCPublicChatRejectsMissingSessionOnTouch(t *testing.T) {
@@ -1083,6 +1114,20 @@ func (f *fakeAICCPublicStore) CreateAICCMessage(_ context.Context, arg sqlc.Crea
 	return nil
 }
 
+func (f *fakeAICCPublicStore) GetAICCMessageByClientMessageID(_ context.Context, arg sqlc.GetAICCMessageByClientMessageIDParams) (sqlc.AiccMessage, error) {
+	for _, message := range f.messages {
+		if message.SessionID == arg.SessionID && message.Direction == arg.Direction && message.ClientMessageID == arg.ClientMessageID {
+			return message, nil
+		}
+	}
+	for _, message := range f.createdMessages {
+		if message.SessionID == arg.SessionID && message.Direction == arg.Direction && message.ClientMessageID == arg.ClientMessageID {
+			return sqlc.AiccMessage{ID: message.ID, SessionID: message.SessionID, AgentID: message.AgentID, Direction: message.Direction, TextContent: message.TextContent, ClientMessageID: message.ClientMessageID}, nil
+		}
+	}
+	return sqlc.AiccMessage{}, sql.ErrNoRows
+}
+
 func (f *fakeAICCPublicStore) TouchAICCSessionLastActive(_ context.Context, id string) (int64, error) {
 	if f.session.ID != id || f.touchNoRows || !f.session.ExpiresAt.After(aiccPublicTestNow) {
 		return 0, nil
@@ -1210,6 +1255,7 @@ func (f *fakeAICCPublicStore) UpdateAICCSessionResolutionStatus(_ context.Contex
 
 type fakeAICCHermesChat struct {
 	reply  string
+	err    error
 	appID  string
 	text   string
 	onChat func()
@@ -1221,7 +1267,7 @@ func (f *fakeAICCHermesChat) ChatAICC(_ context.Context, appID, _ string, text s
 	if f.onChat != nil {
 		f.onChat()
 	}
-	return f.reply, nil
+	return f.reply, f.err
 }
 
 type fakeAICCRateLimiter struct {

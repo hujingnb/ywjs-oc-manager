@@ -70,6 +70,8 @@ type AICCPublicStore interface {
 	TouchAICCSessionLastActive(ctx context.Context, id string) (int64, error)
 	// CreateAICCMessage 写入访客消息或助手回复镜像。
 	CreateAICCMessage(ctx context.Context, arg sqlc.CreateAICCMessageParams) error
+	// GetAICCMessageByClientMessageID 查询同一客户端提交已保留或已完成的消息。
+	GetAICCMessageByClientMessageID(ctx context.Context, arg sqlc.GetAICCMessageByClientMessageIDParams) (sqlc.AiccMessage, error)
 	// CreateAICCImage 写入公开会话图片对象记录。
 	CreateAICCImage(ctx context.Context, arg sqlc.CreateAICCImageParams) error
 	// GetAICCImageBySession 读取当前会话内已上传图片。
@@ -161,6 +163,7 @@ type AICCPublicConfigResult struct {
 // AICCPublicMessageInput 是访客发送消息的入参。
 type AICCPublicMessageInput struct {
 	SessionToken string
+	ClientMessageID string
 	Text         string
 	ImageFileID  string
 }
@@ -448,6 +451,7 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 	} else if imageID != "" {
 		contentType = domain.AICCMessageContentTypeMixed
 	}
+	clientMessageID := strings.TrimSpace(input.ClientMessageID)
 	visitorMessage := sqlc.CreateAICCMessageParams{
 		ID:             newUUID(),
 		SessionID:      session.ID,
@@ -458,8 +462,21 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 		ImageObjectKey: nullStr(image.ObjectKey),
 		ImageMime:      nullStr(image.Mime),
 		ImageSizeBytes: null.IntFromPtr(int64PtrIfValid(image.SizeBytes, imageID != "")),
+		ClientMessageID: nullStr(clientMessageID),
 	}
-	if err := s.reserveAICCVisitorMessage(ctx, session, settings.MessageLimitPerSession, visitorMessage); err != nil {
+	if clientMessageID != "" {
+		completed, err := s.store.GetAICCMessageByClientMessageID(ctx, sqlc.GetAICCMessageByClientMessageIDParams{SessionID: session.ID, Direction: domain.AICCMessageDirectionAssistant, ClientMessageID: nullStr(clientMessageID)})
+		if err == nil {
+			return AICCPublicMessageResult{MessageID: completed.ID, Text: completed.TextContent.String}, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 幂等消息失败: %w", err)
+		}
+		_, err = s.store.GetAICCMessageByClientMessageID(ctx, sqlc.GetAICCMessageByClientMessageIDParams{SessionID: session.ID, Direction: domain.AICCMessageDirectionVisitor, ClientMessageID: nullStr(clientMessageID)})
+		if errors.Is(err, sql.ErrNoRows) {
+			if err := s.reserveAICCVisitorMessage(ctx, session, settings.MessageLimitPerSession, visitorMessage); err != nil { return AICCPublicMessageResult{}, err }
+		} else if err != nil { return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 幂等消息失败: %w", err) }
+	} else if err := s.reserveAICCVisitorMessage(ctx, session, settings.MessageLimitPerSession, visitorMessage); err != nil {
 		return AICCPublicMessageResult{}, err
 	}
 	runtimeText := text
@@ -479,6 +496,7 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 		Direction:   domain.AICCMessageDirectionAssistant,
 		ContentType: domain.AICCMessageContentTypeText,
 		TextContent: nullStr(reply),
+		ClientMessageID: nullStr(clientMessageID),
 	}
 	if err := s.storeAICCAssistantMessage(ctx, session.ID, assistantMessage); err != nil {
 		return AICCPublicMessageResult{}, err

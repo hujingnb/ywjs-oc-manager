@@ -128,6 +128,7 @@ type Querier interface {
 	GetAICCAssistantMessageForFeedback(ctx context.Context, arg GetAICCAssistantMessageForFeedbackParams) (AiccMessage, error)
 	GetAICCImageBySession(ctx context.Context, arg GetAICCImageBySessionParams) (AiccImage, error)
 	GetAICCLeadByContact(ctx context.Context, arg GetAICCLeadByContactParams) (AiccLead, error)
+	GetAICCMessageByClientMessageID(ctx context.Context, arg GetAICCMessageByClientMessageIDParams) (AiccMessage, error)
 	GetAICCSession(ctx context.Context, id string) (AiccSession, error)
 	GetAICCSessionByToken(ctx context.Context, sessionToken string) (AiccSession, error)
 	GetActiveAICCBlockedVisitor(ctx context.Context, arg GetActiveAICCBlockedVisitorParams) (AiccBlockedVisitor, error)

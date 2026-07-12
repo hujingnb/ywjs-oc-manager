@@ -144,6 +144,7 @@ type AiccMessage struct {
 	IsRefusal       bool        `db:"is_refusal" json:"is_refusal"`
 	ErrorSummary    null.String `db:"error_summary" json:"error_summary"`
 	CreatedAt       time.Time   `db:"created_at" json:"created_at"`
+	ClientMessageID null.String `db:"client_message_id" json:"client_message_id"`
 }
 
 type AiccSession struct {

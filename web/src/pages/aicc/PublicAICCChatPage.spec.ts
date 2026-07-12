@@ -152,7 +152,7 @@ describe('PublicAICCChatPage', () => {
 
     expect(apiState.createSession).toHaveBeenCalledTimes(1)
     expect(apiState.createSession).toHaveBeenCalledWith('public-token', 'web_link')
-    expect(apiState.sendMessage).toHaveBeenCalledWith('session-token', { text: '报价多少', image_file_id: undefined })
+    expect(apiState.sendMessage).toHaveBeenCalledWith('session-token', expect.objectContaining({ client_message_id: expect.any(String), text: '报价多少', image_file_id: undefined }))
     expect(wrapper.text()).toContain('收到')
   })
 
@@ -197,7 +197,7 @@ describe('PublicAICCChatPage', () => {
     await nextTick()
 
     expect(apiState.createSession).not.toHaveBeenCalled()
-    expect(apiState.sendMessage).toHaveBeenCalledWith('stored-session-token', { text: '继续刚才的问题', image_file_id: undefined })
+    expect(apiState.sendMessage).toHaveBeenCalledWith('stored-session-token', expect.objectContaining({ client_message_id: expect.any(String), text: '继续刚才的问题', image_file_id: undefined }))
   })
 
   // 场景：公开页刷新续接会话时，应拉取并渲染服务端已保存的历史消息。
@@ -317,7 +317,7 @@ describe('PublicAICCChatPage', () => {
     await nextTick()
 
     expect(apiState.createSession).toHaveBeenCalledTimes(1)
-    expect(apiState.sendMessage).toHaveBeenLastCalledWith('session-token', { text: '新会话消息', image_file_id: undefined })
+    expect(apiState.sendMessage).toHaveBeenLastCalledWith('session-token', expect.objectContaining({ client_message_id: expect.any(String), text: '新会话消息', image_file_id: undefined }))
   })
 
   // 场景：选择非图片文件时前端立即提示，不能创建图片预览或调用上传接口。

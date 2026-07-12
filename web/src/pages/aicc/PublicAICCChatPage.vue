@@ -270,6 +270,7 @@ async function submitMessage() {
     const token = await ensureSessionReadyForSend()
     const imageResult = image ? await uploadAICCPublicImage(token, image.file) : null
     const response = await sendAICCPublicMessage(token, {
+	      client_message_id: crypto.randomUUID(),
       text: text || undefined,
       image_file_id: imageResult?.image_file_id,
     })

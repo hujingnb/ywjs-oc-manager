@@ -223,6 +223,7 @@ func (h *PublicAICCHandler) SendMessage(c *gin.Context) {
 	}
 	result, err := h.service.SendMessage(c.Request.Context(), service.AICCPublicMessageInput{
 		SessionToken: c.Param("sessionToken"),
+		ClientMessageID: req.ClientMessageID,
 		Text:         req.Text,
 		ImageFileID:  req.ImageFileID,
 	})

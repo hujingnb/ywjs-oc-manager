@@ -211,6 +211,8 @@ type CreateAICCSessionRequest struct {
 
 // PublicAICCMessageRequest 是访客发送消息的请求体。
 type PublicAICCMessageRequest struct {
+	// ClientMessageID 是客户端为一次发送动作生成的稳定 UUID；网络重试必须复用该值。
+	ClientMessageID string `json:"client_message_id" binding:"omitempty,uuid4"`
 	// Text 是访客文本消息。
 	Text string `json:"text"`
 	// ImageFileID 是已上传图片文件 ID，图片能力后续扩展时使用。

@@ -421,7 +421,7 @@ export async function consentAICCPublicSession(sessionToken: string): Promise<vo
 // sendAICCPublicMessage 发送文字、图片或混合消息，并返回助手回复。
 export async function sendAICCPublicMessage(
   sessionToken: string,
-  payload: { text?: string; image_file_id?: string },
+  payload: { client_message_id: string; text?: string; image_file_id?: string },
 ): Promise<AICCPublicMessageResult> {
   const response = await apiRequest<{ message: AICCPublicMessageResult }>(`/api/v1/public/aicc/sessions/${sessionToken}/messages`, {
     method: 'POST',

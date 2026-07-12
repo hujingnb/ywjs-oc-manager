@@ -15771,6 +15771,8 @@ export interface components {
             remark?: string;
         };
         "handlers.PublicAICCMessageRequest": {
+            /** @description ClientMessageID 是客户端为一次发送动作生成的稳定 UUID；网络重试必须复用该值。 */
+            client_message_id?: string;
             /** @description ImageFileID 是已上传图片文件 ID，图片能力后续扩展时使用。 */
             image_file_id?: string;
             /** @description Text 是访客文本消息。 */

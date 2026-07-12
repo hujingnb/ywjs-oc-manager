@@ -159,9 +159,14 @@ WHERE id = ? AND expires_at > now();
 -- name: CreateAICCMessage :exec
 INSERT INTO aicc_messages (
     id, session_id, agent_id, direction, content_type, text_content,
-    image_object_key, image_mime, image_size_bytes, hermes_message_id,
+    image_object_key, image_mime, image_size_bytes, hermes_message_id, client_message_id,
     is_fallback, is_refusal, error_summary
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: GetAICCMessageByClientMessageID :one
+SELECT *
+FROM aicc_messages
+WHERE session_id = ? AND direction = ? AND client_message_id = ?;
 
 -- name: CreateAICCImage :exec
 INSERT INTO aicc_images (
