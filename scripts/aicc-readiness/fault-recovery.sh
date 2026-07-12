@@ -189,7 +189,7 @@ create_session() {
 }
 
 send_message() {
-  local label="$1" text="$2" before after status response attempts=0 client_message_id
+  local label="$1" text="$2" before after status response attempts=0 upstream_attempts=0 client_message_id
   before="$(read_session_message_count)"
   response="$(mktemp)"
   client_message_id="$(uuidgen | tr '[:upper:]' '[:lower:]')"
@@ -202,6 +202,14 @@ send_message() {
     if [[ "$status" == "503" ]] && jq -e '.code == "RUNTIME_NOT_AVAILABLE"' "$response" >/dev/null 2>&1 && (( attempts < 60 )); then
       attempts=$((attempts + 1))
       log "$label 等待 Hermes 恢复（第 $attempts/60 次，HTTP 503）"
+      sleep 5
+      continue
+    fi
+    # DeepSeek 偶发 HTTP/2 GOAWAY 或无首包会被 manager 归一为 502；同一幂等键最多
+    # 重试三次，既允许瞬时连接恢复，也不会把持续上游故障误记为健康基线通过。
+    if [[ "$status" == "502" ]] && jq -e '.code == "CONVERSATION_CLI_ERROR"' "$response" >/dev/null 2>&1 && (( upstream_attempts < 3 )); then
+      upstream_attempts=$((upstream_attempts + 1))
+      log "$label 等待模型上游恢复（第 $upstream_attempts/3 次，HTTP 502）"
       sleep 5
       continue
     fi

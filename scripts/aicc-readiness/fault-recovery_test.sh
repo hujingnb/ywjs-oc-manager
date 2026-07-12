@@ -40,4 +40,10 @@ rg -q 'expect_dependency_degraded_reply' "$TARGET" || {
   exit 1
 }
 
+# 健康模型偶发连接长尾可用同一幂等键有限重试，但不能无限吞掉持续的上游 502。
+rg -q 'upstream_attempts < 3' "$TARGET" || {
+  printf 'FAIL: fault-recovery.sh 未限制模型上游 502 重试次数\n' >&2
+  exit 1
+}
+
 printf 'PASS: 故障恢复脚本的本地 HTTP 请求显式绕过代理\n'
