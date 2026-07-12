@@ -334,6 +334,21 @@ func TestPublicAICCHandlerMapsRateLimiterUnavailable(t *testing.T) {
 	assert.Contains(t, recorder.Body.String(), "客服暂时不可用，请稍后再试")
 }
 
+// TestPublicAICCHandlerMapsSessionStoreUnavailable 覆盖 AICC 会话存储故障：
+// MySQL 不可用时应提示访客稍后重试，不能误报 session 已过期。
+func TestPublicAICCHandlerMapsSessionStoreUnavailable(t *testing.T) {
+	router := newPublicAICCTestRouterWithLocale(t, &publicAICCServiceStub{messageErr: service.ErrAICCSessionStoreUnavailable}, "zh")
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/sessions/sess-1/messages", bytes.NewBufferString(`{"text":"你好"}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "AICC_SESSION_STORE_UNAVAILABLE")
+	assert.Contains(t, recorder.Body.String(), "客服暂时不可用，请稍后再试")
+}
+
 // TestPublicAICCHandlerMapsInvalidMessage 覆盖反馈入口：不可反馈消息返回稳定 code。
 func TestPublicAICCHandlerMapsInvalidMessage(t *testing.T) {
 	router := newPublicAICCTestRouter(t, &publicAICCServiceStub{feedbackErr: service.ErrAICCInvalidMessage})

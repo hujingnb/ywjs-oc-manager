@@ -28,6 +28,9 @@ var ErrRateLimited = errors.New("请求过于频繁")
 // 与真正超限不同，访客稍后重试即可，不应映射为 429 或未分类 500。
 var ErrAICCRateLimiterUnavailable = errors.New("aicc rate limiter unavailable")
 
+// ErrAICCSessionStoreUnavailable 表示 AICC 会话存储暂时不可访问。
+var ErrAICCSessionStoreUnavailable = errors.New("aicc session store unavailable")
+
 // ErrAICCConsentRequired 表示 AICC 公开会话要求访客先同意隐私说明。
 var ErrAICCConsentRequired = errors.New("aicc consent required")
 

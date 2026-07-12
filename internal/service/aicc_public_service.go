@@ -390,6 +390,9 @@ func (s *AICCPublicService) Consent(ctx context.Context, sessionToken string) er
 func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMessageInput) (AICCPublicMessageResult, error) {
 	session, err := s.store.GetAICCSessionByToken(ctx, strings.TrimSpace(input.SessionToken))
 	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return AICCPublicMessageResult{}, fmt.Errorf("%w: %v", ErrAICCSessionStoreUnavailable, err)
+		}
 		return AICCPublicMessageResult{}, ErrAICCInvalidSession
 	}
 	if !session.ExpiresAt.After(s.now()) {

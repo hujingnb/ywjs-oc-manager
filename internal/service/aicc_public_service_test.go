@@ -724,6 +724,17 @@ func TestAICCPublicCreateSessionMapsRateLimiterUnavailable(t *testing.T) {
 	require.ErrorIs(t, err, ErrAICCRateLimiterUnavailable)
 }
 
+// TestAICCPublicSendMessageMapsSessionStoreUnavailable 覆盖会话存储连接失败：
+// 数据库异常不能被误报为访客 session 过期。
+func TestAICCPublicSendMessageMapsSessionStoreUnavailable(t *testing.T) {
+	store := &fakeAICCPublicStore{sessionErr: errors.New("mysql unavailable")}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+
+	_, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "token", Text: "你好"})
+
+	require.ErrorIs(t, err, ErrAICCSessionStoreUnavailable)
+}
+
 // TestAICCPublicConsentRejectsInvalidSession 覆盖隐私同意接口：无效 token 不能伪造成功响应。
 func TestAICCPublicConsentRejectsInvalidSession(t *testing.T) {
 	store := &fakeAICCPublicStore{
@@ -944,6 +955,7 @@ type fakeAICCPublicStore struct {
 	org                 sqlc.Organization
 	agent               sqlc.AiccAgent
 	session             sqlc.AiccSession
+	sessionErr          error
 	message             sqlc.AiccMessage
 	messages            []sqlc.AiccMessage
 	image               sqlc.AiccImage
@@ -994,6 +1006,9 @@ func (f *fakeAICCPublicStore) GetAICCAgentByWidgetToken(_ context.Context, widge
 }
 
 func (f *fakeAICCPublicStore) GetAICCSessionByToken(_ context.Context, token string) (sqlc.AiccSession, error) {
+	if f.sessionErr != nil {
+		return sqlc.AiccSession{}, f.sessionErr
+	}
 	if f.session.SessionToken != token {
 		return sqlc.AiccSession{}, sql.ErrNoRows
 	}

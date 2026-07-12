@@ -414,6 +414,8 @@ func writePublicAICCError(c *gin.Context, err error) {
 		apierror.JSON(c, http.StatusTooManyRequests, "RATE_LIMITED", apierror.MsgAICCRateLimited)
 	case errors.Is(err, service.ErrAICCRateLimiterUnavailable):
 		apierror.JSON(c, http.StatusServiceUnavailable, "AICC_RATE_LIMITER_UNAVAILABLE", "客服暂时不可用，请稍后再试")
+	case errors.Is(err, service.ErrAICCSessionStoreUnavailable):
+		apierror.JSON(c, http.StatusServiceUnavailable, "AICC_SESSION_STORE_UNAVAILABLE", "客服暂时不可用，请稍后再试")
 	case errors.Is(err, service.ErrConversationRuntimeUnavailable):
 		apierror.JSON(c, http.StatusServiceUnavailable, "RUNTIME_NOT_AVAILABLE", apierror.MsgAICCRuntimeUnavailable)
 	case errors.Is(err, service.ErrConversationFileTooLarge):
