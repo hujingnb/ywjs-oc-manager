@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -200,8 +201,8 @@ func visitorRequestContext(ctx context.Context) context.Context {
 func runVisitor(ctx context.Context, config Config, results *metrics, workerID int) {
 	visitorID := randomID()
 	client := newLoadHTTPClient(config)
-	// 以不同公网地址模拟独立访客，使本地服务端按真实访客限流而非压测机 IP 限流。
-	forwardedIP := fmt.Sprintf("11.%d.%d.%d", (workerID/65025)%250+1, (workerID/255)%255, workerID%255+1)
+	// 以每轮唯一访客标识生成来源 IP，避免同一 worker 连续创建不同访客时误触单来源限流。
+	forwardedIP := forwardedIPForVisitor(workerID, visitorID)
 	sessionToken, ok := createSession(ctx, client, config, results, visitorID, forwardedIP)
 	if !ok {
 		return
@@ -211,6 +212,12 @@ func runVisitor(ctx context.Context, config Config, results *metrics, workerID i
 		return
 	}
 	verifySession(ctx, client, config, results, sessionToken, message, forwardedIP)
+}
+
+// forwardedIPForVisitor 为每个虚拟访客生成稳定的文档用途公网 IPv4 地址。
+func forwardedIPForVisitor(workerID int, visitorID string) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%s", workerID, visitorID)))
+	return fmt.Sprintf("11.%d.%d.%d", sum[0], sum[1], sum[2])
 }
 
 // newLoadHTTPClient 为本地压测创建 HTTP client，避免宿主机代理劫持 k3d 的 ocm.localhost 请求。

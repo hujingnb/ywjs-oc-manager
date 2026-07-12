@@ -17,6 +17,15 @@ func TestVisitorRequestContextSurvivesScheduleDeadline(t *testing.T) {
 	assert.NoError(t, visitorRequestContext(ctx).Err())
 }
 
+// TestForwardedIPForVisitor 覆盖独立访客限流隔离：不同访客不能复用同一来源 IP。
+func TestForwardedIPForVisitor(t *testing.T) {
+	first := forwardedIPForVisitor(7, "visitor-a")
+	second := forwardedIPForVisitor(7, "visitor-b")
+
+	assert.NotEqual(t, first, second)
+	assert.Equal(t, first, forwardedIPForVisitor(7, "visitor-a"))
+}
+
 // TestNewLoadHTTPClientBypassesProxyForLocalOCM 覆盖本地压测：ocm.localhost 不得经过宿主机代理。
 func TestNewLoadHTTPClientBypassesProxyForLocalOCM(t *testing.T) {
 	client := newLoadHTTPClient(Config{BaseURL: "http://ocm.localhost", Timeout: defaultTimeout})
