@@ -4,6 +4,7 @@ package aicc
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,15 +32,45 @@ func TestRetentionLoopTickOnceCleansExpiredSession(t *testing.T) {
 	assert.Equal(t, locker.acquireToken, locker.releaseToken)
 }
 
+// TestRetentionLoopStartTriggersPeriodicCleanup 覆盖启动后的周期调度：首轮没有过期数据时，
+// 后续出现的过期会话仍须在下一轮扫描中被清理，避免仅验证启动时的一次性执行。
+func TestRetentionLoopStartTriggersPeriodicCleanup(t *testing.T) {
+	store := &retentionStore{
+		sessions:            []sqlc.AiccSession{{ID: "session-after-start", OrgID: "org-1"}},
+		returnSessionsAfter: 2,
+	}
+	locker := &retentionLocker{acquired: true}
+	loop := NewRetentionLoop(service.NewAICCRetentionService(store, nil), locker, "worker-1", slog.Default())
+	loop.tick = 10 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	loop.Start(ctx)
+
+	require.Eventually(t, func() bool {
+		return store.deletedCount() == 1
+	}, time.Second, 10*time.Millisecond)
+	assert.GreaterOrEqual(t, store.callCount(), 2)
+}
+
 // retentionStore 仅实现留存任务所需的数据访问面，记录清理链路的关键调用。
 type retentionStore struct {
-	sessions []sqlc.AiccSession
-	limit    int32
-	deleted  []string
+	mu                  sync.Mutex
+	sessions            []sqlc.AiccSession
+	returnSessionsAfter int
+	calls               int
+	limit               int32
+	deleted             []string
 }
 
 func (s *retentionStore) ListExpiredAICCSessions(_ context.Context, limit int32) ([]sqlc.AiccSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls++
 	s.limit = limit
+	if s.returnSessionsAfter > 0 && s.calls < s.returnSessionsAfter {
+		return nil, nil
+	}
 	return s.sessions, nil
 }
 
@@ -47,8 +78,24 @@ func (*retentionStore) ListAICCImageObjectKeysBySession(context.Context, string)
 func (*retentionStore) ClearAICCLeadLatestSession(context.Context, null.String) error { return nil }
 func (*retentionStore) DeleteOrphanAICCLeadsByOrg(context.Context, string) error { return nil }
 func (s *retentionStore) DeleteAICCSession(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.deleted = append(s.deleted, id)
 	return nil
+}
+
+// deletedCount 以锁保护异步断言读取，避免测试自身产生数据竞争。
+func (s *retentionStore) deletedCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.deleted)
+}
+
+// callCount 返回后台扫描次数，用于断言清理来自启动后的周期而非首轮。
+func (s *retentionStore) callCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls
 }
 
 // retentionLocker 模拟互斥锁，确保测试可精确比对 acquire/release 使用的 token。
