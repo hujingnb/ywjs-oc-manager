@@ -36,4 +36,10 @@ rg -q 'local api_status=0 web_status=0' "$TARGET" &&
   exit 1
 }
 
+# 基线 SQL 不能叠加导入到新版 schema；必须先重建数据库，避免残留外键或索引冲突。
+rg -q "DROP DATABASE IF EXISTS ocm; CREATE DATABASE ocm" "$TARGET" || {
+  printf 'FAIL: upgrade-rollback.sh 恢复基线前未重建 ocm 数据库\n' >&2
+  exit 1
+}
+
 printf 'PASS: 升级演练会预加载并等待 Traefik Ready\n'

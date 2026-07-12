@@ -69,6 +69,9 @@ mysql_restore() {
   # 先停 manager-api，避免旧/新应用在导入期间继续写库或启动自动迁移。
   kubectl_ocm scale deploy/manager-api --replicas=0
   kubectl_ocm rollout status deploy/manager-api --timeout="$ROLLOUT_TIMEOUT"
+  # 基线备份包含完整表定义，必须先移除新版 schema；否则新增的外键和索引会使旧表定义导入失败。
+  kubectl_ocm exec statefulset/mysql -- sh -c \
+    'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e "DROP DATABASE IF EXISTS ocm; CREATE DATABASE ocm"'
   kubectl_ocm exec -i statefulset/mysql -- sh -c \
     'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD"' <"$input"
 }
