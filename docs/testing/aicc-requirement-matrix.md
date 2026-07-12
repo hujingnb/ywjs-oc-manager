@@ -1,6 +1,6 @@
 # AICC 生产就绪需求覆盖矩阵
 
-- 基线提交：`1726141080159c3e3b8842b7b72370095a583b1e`（最终修复后必须更新并全量复跑）
+- 基线提交：`ac7817f4`（严格验证实现基线；报告结论为 NO-GO）
 - 最终镜像 digest：执行最终复跑时填写
 - 结果定义：`PASS` / `FAIL` / `BLOCKED` / `N/A`
 
@@ -49,8 +49,8 @@
 | AICC-GEOIP-01 | 镜像内置 IPv4/IPv6 XDB 可解析地域 | 待执行 | 待执行 | BLOCKED |
 | AICC-GEOIP-02 | 国内更新源可定期安装有效 XDB | 待执行 | 待执行 | BLOCKED |
 | AICC-RETENTION-01 | 过期会话、线索关联和图片按策略清理 | 待执行 | 待执行 | BLOCKED |
-| AICC-FAULT-01 | Hermes 故障恢复后可续聊且不重复消息 | 待执行 | 待执行 | BLOCKED |
-| AICC-FAULT-02 | RAGFlow/new-api/Redis/MySQL/API 故障可恢复 | 待执行 | 待执行 | BLOCKED |
-| AICC-LOAD-01 | 100 并发 30 分钟达到成功率和延迟门禁 | 待执行 | 待执行 | BLOCKED |
-| AICC-UPGRADE-01 | master 数据可升级到最终 AICC 版本 | 待执行 | 待执行 | BLOCKED |
-| AICC-ROLLBACK-01 | 应用回滚边界和数据库恢复经过验证 | 待执行 | 待执行 | BLOCKED |
+| AICC-FAULT-01 | Hermes 故障恢复后可续聊且不重复消息 | 服务层幂等测试通过 | Hermes 重启后 3 次 503 重试仅写入一组问答；最终健康基线受模型超时阻断 | BLOCKED |
+| AICC-FAULT-02 | RAGFlow/new-api/Redis/MySQL/API 故障可恢复 | 故障脚本门禁已补齐 | manager 恢复通过；模型健康基线持续 502，无法完成同轮依赖恢复 | BLOCKED |
+| AICC-LOAD-01 | 100 并发 30 分钟达到成功率和延迟门禁 | 负载工具单测通过 | 77,994 请求仅 1.274% 成功，429/网络错误严重 | FAIL |
+| AICC-UPGRADE-01 | master 数据可升级到最终 AICC 版本 | 迁移 32 当前库执行成功 | 迁移 31 旧基线演练通过；迁移 32 未重跑完整演练 | BLOCKED |
+| AICC-ROLLBACK-01 | 应用回滚边界和数据库恢复经过验证 | 升级回滚脚本通过语法与环境门禁 | 旧基线回滚通过；最终迁移 32 尚未重跑 | BLOCKED |
