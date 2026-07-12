@@ -45,7 +45,7 @@ require_local_environment() {
   [[ "$(git -C "$REPO_ROOT" branch --show-current)" == "kefu" ]] || fail "必须从 kefu 分支运行"
   [[ -z "$(git -C "$REPO_ROOT" status --porcelain)" ]] || fail "工作区必须干净，拒绝覆盖未提交改动"
   [[ "$(kubectl config current-context)" == "$KUBE_CONTEXT" ]] || fail "当前 kubectl context 必须是 $KUBE_CONTEXT"
-  kubectl_ocm get statefulset/mysql >/dev/null
+  # 演练可从上次中断后仅剩控制面的 k3d 集群恢复；已有 MySQL 时才执行原环境备份。
 }
 
 mysql_dump() {
@@ -244,8 +244,12 @@ main() {
   TEMP_DIR="$(mktemp -d /tmp/aicc-readiness-upgrade.XXXXXX)"
   trap restore_kefu_on_exit EXIT
 
-  log "备份当前本地数据库到 $CURRENT_BACKUP"
-  mysql_dump "$CURRENT_BACKUP"
+  if kubectl_ocm get statefulset/mysql >/dev/null 2>&1; then
+    log "备份当前本地数据库到 $CURRENT_BACKUP"
+    mysql_dump "$CURRENT_BACKUP"
+  else
+    log "当前集群没有 MySQL，跳过中断前环境备份"
+  fi
   archive_source "$MASTER_SHA" "$TEMP_DIR/master"
   archive_source "$KEFU_SHA" "$TEMP_DIR/kefu"
   build_images master "$MASTER_SHA" "$TEMP_DIR/master"
