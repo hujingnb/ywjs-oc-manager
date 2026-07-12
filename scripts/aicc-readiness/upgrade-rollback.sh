@@ -142,7 +142,7 @@ preload_cluster_images() {
   local image
   # k3d image import 在本机对 OCI manifest 偶发报错却返回成功；直接交给 server 节点 ctr，
   # 让升级演练在 MySQL/RAGFlow 等基础镜像上得到可验证的预加载结果。
-  for image in busybox:1.36 mysql:8.0 elasticsearch:8.11.3 calciumion/new-api:latest infiniflow/ragflow:v0.25.6; do
+  for image in busybox:1.36 mysql:8.0 elasticsearch:8.11.3 pgsty/minio:RELEASE.2026-03-25T00-00-00Z calciumion/new-api:latest infiniflow/ragflow:v0.25.6; do
     docker image inspect "$image" >/dev/null 2>&1 || docker pull "$image"
     # Docker 本机保存的多架构 OCI 索引会让 containerd 导入缺失非当前平台 digest；只导出节点的 amd64 manifest。
     docker save --platform linux/amd64 "$image" | docker exec -i "k3d-${CLUSTER_NAME}-server-0" ctr images import -
@@ -182,11 +182,11 @@ initialize_model_services_without_mutating_repo() {
   cp "$REPO_ROOT/scripts/local-init-models.py" "$temp_initializer"
   escaped_repo="${REPO_ROOT//\\/\\\\}"
   escaped_repo="${escaped_repo//\"/\\\"}"
-  escaped_secret="${TEMP_DIR/secret.yaml}"
+  escaped_secret="${TEMP_DIR}/secret.yaml"
   escaped_secret="${escaped_secret//\\/\\\\}"
   escaped_secret="${escaped_secret//\"/\\\"}"
   sed -i "s|^ROOT = .*|ROOT = \"$escaped_repo\"|; s|^SECRET_FILE = .*|SECRET_FILE = \"$escaped_secret\"|" "$temp_initializer"
-  cp "$REPO_ROOT/deploy/k8s/local/secret.yaml" "$TEMP_DIR/secret.yaml"
+  cp "$REPO_ROOT/deploy/k8s/local/secret.yaml" "${TEMP_DIR}/secret.yaml"
   log "初始化本地 new-api 与 RAGFlow（临时 Secret）"
   python3 "$temp_initializer"
 }
@@ -262,6 +262,9 @@ main() {
   build_images kefu "$KEFU_SHA" "$TEMP_DIR/kefu"
 
   reset_local_cluster
+  # registry 随 k3d 一同重建；回滚阶段和 EXIT trap 都依赖新版镜像已重新推送。
+  docker push "$KEFU_API_IMAGE"
+  docker push "$KEFU_WEB_IMAGE"
   apply_stack_with_images "$MASTER_API_IMAGE" "$MASTER_WEB_IMAGE"
   initialize_model_services_without_mutating_repo
   seed_master_history
