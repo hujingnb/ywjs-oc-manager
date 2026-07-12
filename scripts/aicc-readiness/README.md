@@ -6,14 +6,22 @@
 
 `loadtest` 模拟匿名访客的完整公开客服链路：每个虚拟访客使用独立 HTTP client、不同的 `X-Forwarded-For` 地址、独立 AICC session，以及唯一文本消息。每轮依次创建会话、发送消息、读取会话镜像；读取结果缺失该访客唯一消息时记录为 `session_mismatches`。
 
-工具默认使用 100 并发、持续 30 分钟、每个 HTTP 请求超时 30 秒。必须显式提供本地基础地址和已启用智能体的公开 token：
+工具默认使用 100 并发、持续 30 分钟、每个 HTTP 请求超时 30 秒。正式容量门禁需要让每个虚拟访客的 `X-Forwarded-For` 到达 manager；本地 Traefik 会按安全策略重写客户端伪造的代理头，因此先把 manager-api 转发到宿主机端口：
+
+```bash
+kubectl -n ocm port-forward svc/manager-api 18080:8080
+```
+
+再显式提供直连基础地址和已启用智能体的公开 token：
 
 ```bash
 go run ./scripts/aicc-readiness/loadtest \
-  -base-url http://ocm.localhost \
+  -base-url http://127.0.0.1:18080 \
   -public-token "$AICC_PUBLIC_TOKEN" \
   -output /tmp/aicc-load-report.json
 ```
+
+`ocm.localhost` 仍用于真实浏览器、Ingress、来源域名和挂件端到端验证。不要为压测放宽 Traefik 的可信代理范围；否则会让公网客户端伪造来源 IP，绕过匿名限流。
 
 先以低负载冒烟，确认公开入口与 token 有效：
 
