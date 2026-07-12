@@ -144,7 +144,8 @@ preload_cluster_images() {
   # 让升级演练在 MySQL/RAGFlow 等基础镜像上得到可验证的预加载结果。
   for image in busybox:1.36 mysql:8.0 elasticsearch:8.11.3 calciumion/new-api:latest infiniflow/ragflow:v0.25.6; do
     docker image inspect "$image" >/dev/null 2>&1 || docker pull "$image"
-    docker save "$image" | docker exec -i "k3d-${CLUSTER_NAME}-server-0" ctr images import -
+    # Docker 本机保存的多架构 OCI 索引会让 containerd 导入缺失非当前平台 digest；只导出节点的 amd64 manifest。
+    docker save --platform linux/amd64 "$image" | docker exec -i "k3d-${CLUSTER_NAME}-server-0" ctr images import -
   done
 }
 
