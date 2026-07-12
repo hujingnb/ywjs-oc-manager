@@ -153,6 +153,9 @@ apply_stack_with_images() {
   local api_image="$1" web_image="$2"
   local local_dir="$REPO_ROOT/deploy/k8s/local"
   log "部署镜像 api=$api_image web=$web_image"
+  # cluster reset 会删除本地 k3d registry；临时升级镜像必须在新 registry 就绪后重新推送。
+  docker push "$api_image"
+  docker push "$web_image"
   kubectl --context "$KUBE_CONTEXT" apply -f "$local_dir/00-namespace.yaml"
   kubectl_ocm apply -f "$local_dir/secret.yaml"
   kubectl_ocm apply -f "$local_dir/mysql.yaml" -f "$local_dir/redis.yaml" -f "$local_dir/elasticsearch.yaml" -f "$local_dir/minio.yaml"
