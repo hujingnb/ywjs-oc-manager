@@ -161,7 +161,9 @@ apply_stack_with_images() {
   kubectl_ocm rollout status statefulset/minio --timeout="$ROLLOUT_TIMEOUT"
   kubectl_ocm rollout status statefulset/elasticsearch --timeout="$ROLLOUT_TIMEOUT"
   kubectl_ocm exec statefulset/minio -- sh -c 'mc alias set local http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; mc mb -p local/oc-apps; mc mb -p local/ragflow'
-  kubectl_ocm apply -f "$local_dir/manager-rbac.yaml" -f "$local_dir/new-api.yaml" -f "$local_dir/ragflow.yaml" -f "$local_dir/ingress.yaml"
+  # manager-rbac 同时声明 ocm 与 oc-apps 资源，不能通过 kubectl_ocm 强制覆盖 namespace。
+  kubectl --context "$KUBE_CONTEXT" apply -f "$local_dir/manager-rbac.yaml"
+  kubectl_ocm apply -f "$local_dir/new-api.yaml" -f "$local_dir/ragflow.yaml" -f "$local_dir/ingress.yaml"
   # 以流方式替换 image，避免 manifest 中的 :dev 镜像在首次调度时抢先运行 kefu migration。
   sed "s#k3d-ocm-registry.localhost:5000/oc-manager-api:dev#$api_image#" "$local_dir/manager-api.yaml" | kubectl --context "$KUBE_CONTEXT" apply -f -
   sed "s#k3d-ocm-registry.localhost:5000/oc-manager-web:dev#$web_image#" "$local_dir/manager-web.yaml" | kubectl --context "$KUBE_CONTEXT" apply -f -
