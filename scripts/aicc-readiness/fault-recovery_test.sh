@@ -28,4 +28,10 @@ rg -q 'assert_no_required_lead_fields' "$TARGET" || {
   exit 1
 }
 
+# manager-api 滚动重启后 Traefik 可能短暂返回非 JSON；消息计数必须通过条件等待读取。
+rg -q 'read_session_message_count' "$TARGET" || {
+  printf 'FAIL: fault-recovery.sh 未对会话消息计数执行条件等待\n' >&2
+  exit 1
+}
+
 printf 'PASS: 故障恢复脚本的本地 HTTP 请求显式绕过代理\n'

@@ -134,6 +134,24 @@ check_session_restored() {
   expect_success "公开会话可恢复" "$(session_url)"
 }
 
+read_session_message_count() {
+  local status count attempts=0
+  while (( attempts < 30 )); do
+    status="$(http_status "$(session_url)")"
+    if [[ "$status" =~ ^2 ]]; then
+      count="$(jq -er '.session.messages | length' /tmp/aicc-readiness-body.$$ 2>/dev/null || true)"
+      if [[ "$count" =~ ^[0-9]+$ ]]; then
+        printf '%s' "$count"
+        return 0
+      fi
+    fi
+    attempts=$((attempts + 1))
+    log "等待公开会话返回有效消息列表（第 $attempts/30 次，HTTP $status）" >&2
+    sleep 1
+  done
+  die "公开会话在恢复后未返回有效消息列表"
+}
+
 create_session() {
   local response status
   response="$(mktemp)"
@@ -150,7 +168,7 @@ create_session() {
 
 send_message() {
   local label="$1" text="$2" before after status response attempts=0 client_message_id
-  before="$(curl_local --silent --show-error --fail "$(session_url)" | jq '.session.messages | length')"
+  before="$(read_session_message_count)"
   response="$(mktemp)"
   client_message_id="$(uuidgen | tr '[:upper:]' '[:lower:]')"
   while :; do
@@ -169,7 +187,7 @@ send_message() {
   done
   [[ "$status" =~ ^2 ]] || die "$label 发送消息失败，HTTP $status：$(tr '\n' ' ' <"$response")"
   rm -f "$response"
-  after="$(curl_local --silent --show-error --fail "$(session_url)" | jq '.session.messages | length')"
+  after="$(read_session_message_count)"
   [[ "$after" -eq $((before + 2)) ]] || die "$label 消息数异常：发送前=$before，发送后=$after（预期恰好增加访客和助手各一条）"
   log "PASS: $label 续聊成功且没有重复消息"
 }
