@@ -26,6 +26,16 @@ func TestForwardedIPForVisitor(t *testing.T) {
 	assert.Equal(t, first, forwardedIPForVisitor(7, "visitor-a"))
 }
 
+// TestClientMessageIDForVisitor 覆盖压测消息幂等键：同一访客重试必须复用 UUIDv4，不同访客不能碰撞。
+func TestClientMessageIDForVisitor(t *testing.T) {
+	first := clientMessageIDForVisitor("visitor-a")
+	second := clientMessageIDForVisitor("visitor-b")
+
+	assert.Equal(t, first, clientMessageIDForVisitor("visitor-a"))
+	assert.NotEqual(t, first, second)
+	assert.Regexp(t, `^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`, first)
+}
+
 // TestNewLoadHTTPClientBypassesProxyForLocalOCM 覆盖本地压测：ocm.localhost 不得经过宿主机代理。
 func TestNewLoadHTTPClientBypassesProxyForLocalOCM(t *testing.T) {
 	client := newLoadHTTPClient(Config{BaseURL: "http://ocm.localhost", Timeout: defaultTimeout})

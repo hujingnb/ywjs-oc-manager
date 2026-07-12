@@ -220,6 +220,15 @@ func forwardedIPForVisitor(workerID int, visitorID string) string {
 	return fmt.Sprintf("11.%d.%d.%d", sum[0], sum[1], sum[2])
 }
 
+// clientMessageIDForVisitor 从访客唯一标识派生稳定 UUIDv4，使网络超时后的重试仍命中服务端幂等约束。
+func clientMessageIDForVisitor(visitorID string) string {
+	sum := sha256.Sum256([]byte("aicc-load-message:" + visitorID))
+	sum[6] = (sum[6] & 0x0f) | 0x40
+	sum[8] = (sum[8] & 0x3f) | 0x80
+	encoded := hex.EncodeToString(sum[:16])
+	return fmt.Sprintf("%s-%s-%s-%s-%s", encoded[0:8], encoded[8:12], encoded[12:16], encoded[16:20], encoded[20:32])
+}
+
 // newLoadHTTPClient 为本地压测创建 HTTP client，避免宿主机代理劫持 k3d 的 ocm.localhost 请求。
 func newLoadHTTPClient(config Config) *http.Client {
 	client := &http.Client{Timeout: config.Timeout}
@@ -256,7 +265,10 @@ func createSession(ctx context.Context, client *http.Client, config Config, resu
 // sendMessage 向当前会话发送唯一文本，确保后续读取可以识别消息归属。
 func sendMessage(ctx context.Context, client *http.Client, config Config, results *metrics, sessionToken, message, forwardedIP string) bool {
 	_, ok := performJSON(ctx, client, config, results, http.MethodPost,
-		fmt.Sprintf("%s/api/v1/public/aicc/sessions/%s/messages", config.BaseURL, url.PathEscape(sessionToken)), map[string]string{"text": message}, forwardedIP)
+		fmt.Sprintf("%s/api/v1/public/aicc/sessions/%s/messages", config.BaseURL, url.PathEscape(sessionToken)), map[string]string{
+			"text":              message,
+			"client_message_id": clientMessageIDForVisitor(strings.TrimPrefix(message, "aicc-load-")),
+		}, forwardedIP)
 	return ok
 }
 
