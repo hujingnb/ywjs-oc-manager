@@ -48,7 +48,7 @@ export async function loginAs(
   if (role !== 'platform_admin') {
     await page.getByLabel(/^(企业标识|Organization Code)$/).fill(fx.org_code)
   }
-  await page.getByLabel(/^(账号|Username)$/).fill(credential.u)
+  await page.getByLabel(/^(账号|Username|Account)$/).fill(credential.u)
   await page.getByLabel(/^(密码|Password)$/).fill(credential.p)
   await page.getByRole('button', { name: /^(登录|Log in)$/ }).click()
   await page.waitForURL((url) => !url.pathname.startsWith('/login'))
