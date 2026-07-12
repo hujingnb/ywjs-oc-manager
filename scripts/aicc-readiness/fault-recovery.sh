@@ -91,6 +91,21 @@ expect_dependency_failure() {
   die "$label 在依赖故障期间仍返回 HTTP $status；拒绝把未触达依赖的检查记为通过"
 }
 
+expect_dependency_degraded_reply() {
+  local label="$1" status text client_message_id
+  client_message_id="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+  status="$(http_status -H 'Content-Type: application/json' \
+    --data "$(jq -nc --arg text "故障演练安全降级 $(date +%s)" --arg client_message_id "$client_message_id" '{text: $text, client_message_id: $client_message_id}')" \
+    "$(session_url)/messages")"
+  [[ "$status" =~ ^2 ]] || die "$label 未返回安全降级回复，HTTP $status：$(tr '\n' ' ' </tmp/aicc-readiness-body.$$)"
+  text="$(jq -er '.message.text' /tmp/aicc-readiness-body.$$ 2>/dev/null || true)"
+  [[ -n "$text" ]] || die "$label 的降级回复为空或不是有效 JSON"
+  if grep -Eqi 'api call failed|connection error|dial tcp|traceback|stack trace|upstream' <<<"$text"; then
+    die "$label 向访客泄露了原始上游错误：$text"
+  fi
+  log "PASS: $label 返回安全降级回复且未泄露原始错误"
+}
+
 capture_replicas() {
   MANAGER_REPLICAS="$(kubectl -n "$OCM_NAMESPACE" get deploy/manager-api -o jsonpath='{.spec.replicas}')"
   RAGFLOW_REPLICAS="$(kubectl -n "$OCM_NAMESPACE" get deploy/ragflow -o jsonpath='{.spec.replicas}')"
@@ -255,13 +270,13 @@ test_dependency() {
   local kind="$1" name="$2" resource="$3" restore_replicas="$4"
   log "注入 $name 单点故障"
   run kubectl -n "$OCM_NAMESPACE" scale "$kind/$resource" --replicas=0
+  run kubectl -n "$OCM_NAMESPACE" wait --for=delete pod -l "app=$resource" --timeout="$WAIT_TIMEOUT"
   # 公开创建会话必经 Redis；消息路径会经过 runtime、RAGFlow/new-api；MySQL 是会话持久层。
   if [[ "$resource" == "redis" ]]; then
     expect_dependency_failure "$name 下创建会话" -H 'Content-Type: application/json' --data '{"channel":"web_link"}' \
       "$BASE_URL/api/v1/public/aicc/agents/$PUBLIC_TOKEN/sessions"
   elif [[ "$resource" == "ragflow" || "$resource" == "new-api" ]]; then
-    expect_dependency_failure "$name 下发送消息" -H 'Content-Type: application/json' --data "$(message_request_args)" \
-      "$(session_url)/messages"
+    expect_dependency_degraded_reply "$name 故障"
   else
     expect_dependency_failure "$name 下读取既有会话" "$(session_url)"
   fi

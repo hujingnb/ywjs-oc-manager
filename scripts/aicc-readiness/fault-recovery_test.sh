@@ -34,4 +34,10 @@ rg -q 'read_session_message_count' "$TARGET" || {
   exit 1
 }
 
+# 模型与知识依赖故障采用安全降级回复，脚本必须校验回复内容而不是强制要求 5xx。
+rg -q 'expect_dependency_degraded_reply' "$TARGET" || {
+  printf 'FAIL: fault-recovery.sh 未校验模型依赖的安全降级回复\n' >&2
+  exit 1
+}
+
 printf 'PASS: 故障恢复脚本的本地 HTTP 请求显式绕过代理\n'
