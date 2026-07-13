@@ -267,7 +267,8 @@ test('平台开通 AICC 后企业管理员可创建客服智能体', async ({ pa
 
 // 智能体管理和工作台移动端覆盖：编辑、暂停、重启和删除必须作用于顶部已选智能体；
 // 390px 视口下左侧导航与表单不能产生横向溢出，也不能让关键操作失去可点击性。
-test('企业管理员可完整管理已选智能体并在移动端操作工作台', { timeout: 480_000 }, async ({ page }) => {
+test('企业管理员可完整管理已选智能体并在移动端操作工作台', async ({ page }, testInfo) => {
+  testInfo.setTimeout(480_000)
   await enableAICCForFixtureOrg(page)
   await clearLoginState(page)
   const agent = await createAICCAgentAsOrgAdmin(page)
