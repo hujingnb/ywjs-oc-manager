@@ -36,15 +36,17 @@ git log -1 --format='%H%n%ad%n%s' --date=iso-strict
 ```
 Expected: branch `kefu`; record `HEAD` as `KEFU_SHA`. Do not reset or include `docs/superpowers/verifications/l4-sweep-findings.json` in any commit.
 
-- [ ] **Step 2: Create a clean detached verification worktree**
+- [ ] **Step 2: Create a clean kefu verification clone**
 
 Run:
 ```bash
-git worktree add --detach /tmp/ocm-aicc-verify "$(git rev-parse HEAD)"
+git clone --no-local . /tmp/ocm-aicc-verify
 cd /tmp/ocm-aicc-verify
+git checkout kefu
+git reset --hard "$(git -C /home/hujing/dir/software/ywjs/oc-manager rev-parse HEAD)"
 git status --short
 ```
-Expected: clean detached worktree. Execute destructive environment scripts there.
+Expected: clean `kefu` worktree at the recorded SHA. Execute destructive environment scripts there; do not use the user's dirty primary worktree.
 
 - [ ] **Step 3: Reset and seed the local acceptance environment**
 
@@ -265,7 +267,7 @@ Run:
 bash scripts/aicc-readiness/upgrade-rollback_test.sh
 git status --short
 ```
-Expected: tests pass. Run the live drill from the clean detached worktree because it rejects a dirty worktree.
+Expected: tests pass. Run the live drill from the clean `kefu` verification clone because it rejects a dirty worktree.
 
 - [ ] **Step 2: Run the live upgrade and controlled rollback drill**
 
