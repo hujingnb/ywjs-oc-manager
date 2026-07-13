@@ -2,7 +2,7 @@
 
 - 基线提交：`6e7088bd`（知识库运行时可检索等待与会话续接回归稳定性修正）
 - 最终镜像：`k3d-ocm-registry.localhost:5000/oc-manager-api:dev`、`oc-manager-web:dev`（本地 k3d）
-- 结果定义：`PASS` / `FAIL` / `BLOCKED` / `N/A`
+- 结果定义：`PASS` / `FAIL` / `N/A`
 
 最终 Chromium 14/14、故障恢复和升级回退均已完成；其中覆盖 new-api 短暂 429 下运行时初始化恢复、行业知识库撤销授权清理和提示词注入拒绝边界。容量门禁仍失败，整体不可上线。
 
