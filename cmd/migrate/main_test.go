@@ -51,6 +51,8 @@ auth:
   csrf_secret: "csrf-secret"
 security:
   master_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+aicc:
+  runtime_image: "registry.example.com/app/oc-manager-hermes-aicc:v1.0.0-test"
 `), 0o600); err != nil {
 		t.Fatalf("写入测试配置失败: %v", err)
 	}
