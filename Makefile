@@ -75,10 +75,10 @@ ifeq ($(NO_CACHE),1)
 HERMES_BUILD_FLAGS := --no-cache
 endif
 
-# HERMES_VARIANTS_ALL：runtime/hermes/ 下全部 versioned variant 子目录名（hermes-*），
-# 供 prod-deploy-hermes-all 遍历逐个发版。用 wildcard 自动发现，新增 variant 目录即纳入，
-# 无需改 Makefile。secret.yaml 现为多版本 runtime_images 列表，需保留各版本供回退灰度。
-override HERMES_VARIANTS_ALL := $(notdir $(wildcard runtime/hermes/hermes-*))
+# HERMES_VARIANTS_ALL：runtime/hermes/ 下全部普通版本化 Hermes 变体（hermes-v*）。
+# AICC 使用独立目录和镜像仓库，不属于普通实例 runtime_images，必须通过
+# prod-deploy-aicc-runtime 单独发布，不能被该批量命令纳入。
+override HERMES_VARIANTS_ALL := $(filter hermes-v%,$(notdir $(wildcard runtime/hermes/hermes-*)))
 
 # ops runtime 镜像仓库（pod initContainer/sidecar 搬运脚本），与其余服务保持一致命名风格。
 # 生产发布用 IMAGE_TAG（时间戳 + commit），本地联调固定 :dev。
