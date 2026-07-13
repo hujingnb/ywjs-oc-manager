@@ -140,6 +140,12 @@ test('当前客服和企业知识库可解析并控制真实问答范围', async
   const agentAnswer = await askPublicKnowledgeQuestion(publicPage, agent.public_token, '当前客服唯一暗号是什么？只回复暗号。')
   expect(agentAnswer).toContain(agentCode)
   await publicPage.getByRole('button', { name: '新建对话' }).click()
+  // 无匹配知识时仍应由智能体给出稳定回复，不能把 RAGFlow 或运行时错误暴露给访客。
+  const noMatchAnswer = await askPublicKnowledgeQuestion(publicPage, agent.public_token, `不存在的知识编号 ${suffix} 是什么？`)
+  const noMatchReply = await publicPage.locator('.message-row.assistant .bubble').last().innerText()
+  expect(noMatchReply.trim()).not.toBe('')
+  expect(noMatchAnswer).not.toMatch(/api call failed|connection error|dial tcp|traceback|stack trace|upstream/i)
+  await publicPage.getByRole('button', { name: '新建对话' }).click()
   const orgAnswer = await askPublicKnowledgeQuestion(publicPage, agent.public_token, '企业共享唯一暗号是什么？只回复暗号。')
   expect(orgAnswer).toContain(orgCode)
   await publicPage.close()
