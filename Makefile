@@ -53,6 +53,14 @@ override HERMES_VERSION := $(strip $(shell if [ -f "$(HERMES_VARIANT_DIR)/versio
 HERMES_IMAGE_REPO    ?= $(PROD_REGISTRY)/$(PROD_APP_NS)/oc-manager-hermes
 # hermes tag 形如 v2026.5.16-2026-05-21-12-00-00-be70e40a，便于从镜像引用直接看出上游版本和源码提交。
 override HERMES_IMAGE := $(HERMES_IMAGE_REPO):$(HERMES_VERSION)-$(IMAGE_TAG)
+
+# AICC runtime 使用独立构建目录与仓库，生命周期不与普通实例 Hermes 版本列表耦合。
+# 版本从客服目录自身读取，tag 同样由客服版本、构建时间和源码提交组成，禁止浮动引用。
+override AICC_RUNTIME_DIR := runtime/hermes/hermes-aicc
+override AICC_RUNTIME_VERSION := $(strip $(shell if [ -f "$(AICC_RUNTIME_DIR)/version.txt" ]; then cat "$(AICC_RUNTIME_DIR)/version.txt"; fi))
+override AICC_RUNTIME_HERMES_REF := $(strip $(shell if [ -f "$(AICC_RUNTIME_DIR)/hermes-ref.txt" ]; then cat "$(AICC_RUNTIME_DIR)/hermes-ref.txt"; fi))
+AICC_RUNTIME_IMAGE_REPO ?= $(PROD_REGISTRY)/$(PROD_APP_NS)/oc-manager-hermes-aicc
+override AICC_RUNTIME_IMAGE := $(AICC_RUNTIME_IMAGE_REPO):$(AICC_RUNTIME_VERSION)-$(IMAGE_TAG)
 # HERMES_VERSION 的正则转义版（点号转义）：prod-deploy-hermes 用它把 secret.yaml 中
 # runtime_images 里「同版本」那一条 ref 精确替换为新 tag，不能误伤其它版本条目
 # （runtime_images 现为多版本列表，旧版需保留供回退灰度）。
@@ -132,6 +140,15 @@ help: ## 显示本帮助文档(make 默认 target)
 		.*|-*) echo "Hermes version 不能以 Docker tag 非法起始字符开头: $(HERMES_VERSION)" >&2; exit 1;; \
 	esac
 	@version="$(HERMES_VERSION)"; test $${#version} -le 99 || { echo "Hermes version 过长，无法为生产时间戳和提交号预留 Docker tag 长度: $(HERMES_VERSION)" >&2; exit 1; }
+
+.PHONY: .guard-aicc-runtime-version
+.guard-aicc-runtime-version:
+	@test -f "$(AICC_RUNTIME_DIR)/version.txt" || { echo "AICC runtime 缺少 version.txt: $(AICC_RUNTIME_DIR)/version.txt" >&2; exit 1; }
+	@test -f "$(AICC_RUNTIME_DIR)/hermes-ref.txt" || { echo "AICC runtime 缺少 hermes-ref.txt: $(AICC_RUNTIME_DIR)/hermes-ref.txt" >&2; exit 1; }
+	@test -n "$(AICC_RUNTIME_VERSION)" || { echo "AICC runtime version 不能为空: $(AICC_RUNTIME_DIR)/version.txt" >&2; exit 1; }
+	@test -n "$(AICC_RUNTIME_HERMES_REF)" || { echo "AICC runtime Hermes 上游 ref 不能为空: $(AICC_RUNTIME_DIR)/hermes-ref.txt" >&2; exit 1; }
+	@printf '%s\n' "$(AICC_RUNTIME_VERSION)" | grep -Eq '^v[0-9]+[.][0-9]+[.][0-9]+([._-][A-Za-z0-9_.-]+)?$$' || { echo "AICC runtime version 必须是完整版本号: $(AICC_RUNTIME_VERSION)" >&2; exit 1; }
+	@case "$(AICC_RUNTIME_VERSION)" in main|master|latest|dev|*main*) echo "AICC runtime version 不能使用浮动 tag: $(AICC_RUNTIME_VERSION)" >&2; exit 1;; esac
 
 .PHONY: .guard-image-git-state
 .guard-image-git-state:
@@ -365,6 +382,26 @@ build-hermes-runtime: hermes-inject-contract ## 本地 dev 构建 hermes runtime
 	rm -rf $(HERMES_VARIANT_DIR)/ocops-contract $(HERMES_VARIANT_DIR)/kanban-contract $(HERMES_VARIANT_DIR)/cron-contract; \
 	exit $$status
 
+.PHONY: aicc-runtime-inject-contract
+aicc-runtime-inject-contract: .guard-aicc-runtime-version ## 注入客服专用 runtime 所需的 ocops 契约工件
+	rm -rf $(AICC_RUNTIME_DIR)/ocops-contract $(AICC_RUNTIME_DIR)/kanban-contract $(AICC_RUNTIME_DIR)/cron-contract
+	cp -r runtime/hermes/ocops-contract $(AICC_RUNTIME_DIR)/ocops-contract
+
+.PHONY: build-aicc-runtime
+build-aicc-runtime: .guard-image-git-state aicc-runtime-inject-contract ## 构建并推送客服专用 Hermes runtime 镜像
+	status=0; \
+	docker build $(HERMES_BUILD_FLAGS) \
+	  -t "$(AICC_RUNTIME_IMAGE)" \
+	  --build-arg DOCKER_HUB_MIRROR=$(PROD_PUBLIC_REPO) \
+	  --build-arg "HERMES_REF=$(AICC_RUNTIME_HERMES_REF)" \
+	  --build-arg "OC_IMAGE_VARIANT=hermes-aicc" \
+	  --build-arg OC_BUILD_TS=$(IMAGE_TIMESTAMP) \
+	  $(AICC_RUNTIME_DIR) || status=$$?; \
+	rm -rf $(AICC_RUNTIME_DIR)/ocops-contract $(AICC_RUNTIME_DIR)/kanban-contract $(AICC_RUNTIME_DIR)/cron-contract; \
+	if [ $$status -ne 0 ]; then exit $$status; fi; \
+	docker push "$(AICC_RUNTIME_IMAGE)"
+	@echo "✅ AICC runtime 镜像 $(AICC_RUNTIME_IMAGE) 已构建并推送"
+
 ##@ 镜像构建发布
 
 # api 构建上下文为仓库根目录（需访问 go.mod / internal/ 等源码），
@@ -511,6 +548,13 @@ prod-deploy-hermes-all: ## 构建推送全部 hermes variant 镜像→写回 sec
 	done
 	$(MAKE) update-config
 	@echo "✅ 全部 hermes variant 已更新：$(HERMES_VARIANTS_ALL)"
+
+.PHONY: prod-deploy-aicc-runtime
+prod-deploy-aicc-runtime: build-aicc-runtime ## 构建客服专用镜像→更新 aicc.runtime_image→逐个升级隐藏应用
+	# 限定 aicc 配置段替换，避免误改普通实例 hermes.runtime_images 或 ops_image。
+	sed -i -E '/^    aicc:/,/^    [a-z_]+:/{s#^      runtime_image: "[^"]*"#      runtime_image: "$(AICC_RUNTIME_IMAGE)"#;}' deploy/k8s/prod/secret.yaml
+	@echo "✅ secret.yaml 的 AICC runtime 镜像已更新为 $(AICC_RUNTIME_IMAGE)"
+	$(MAKE) update-config
 
 .PHONY: prod-deploy-ops
 prod-deploy-ops: build-ops-runtime ## 构建推送 ops 镜像→写回 secret.yaml→update-config 生效

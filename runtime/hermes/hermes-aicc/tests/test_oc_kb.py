@@ -1,0 +1,216 @@
+"""验证 oc-kb CLI 的本地错误路径。"""
+
+import json
+import os
+import subprocess
+import sys
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+
+
+def _start_runtime_server(response: dict):
+    # 用本地 HTTP server 捕获 oc-kb 发出的真实请求，避免把 manager runtime API 调用 mock 掉。
+    records: list[dict] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            length = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(length)
+            records.append({
+                "path": self.path,
+                "token": self.headers.get("X-OC-App-Token"),
+                "content_type": self.headers.get("Content-Type", ""),
+                "body": body,
+            })
+            payload = json.dumps(response).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, _format: str, *_args) -> None:
+            return
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread, records
+
+
+def _stop_runtime_server(server: HTTPServer, thread: threading.Thread) -> None:
+    server.shutdown()
+    server.server_close()
+    thread.join(timeout=1)
+
+
+def _runtime_env(server: HTTPServer, **extra: str) -> dict[str, str]:
+    env = os.environ.copy()
+    env.update({
+        "OC_KB_RUNTIME_BASE_URL": f"http://127.0.0.1:{server.server_port}",
+        "OC_KB_APP_TOKEN": "runtime-token",
+    })
+    env.update(extra)
+    return env
+
+
+def _oc_kb_script() -> Path:
+    """定位 oc-kb 脚本路径。
+    源码目录布局下 tests/ 与 oc-kb.py 同级；
+    镜像内 tests/ 在 /usr/local/lib/oc-entrypoint/tests/，oc-kb 被装到 /usr/local/bin/oc-kb（无 .py 后缀）。
+    与 test_entrypoint_integration 中 oc-entrypoint 的探测逻辑保持一致。
+    """
+    source_script = Path(__file__).resolve().parent.parent / "oc-kb.py"
+    if source_script.exists():
+        return source_script
+    return Path("/usr/local/bin/oc-kb")
+
+
+def test_oc_kb_search_posts_to_manager_runtime_api() -> None:
+    # search 成功路径必须只调用 manager runtime API，并把后端响应包成稳定的 ok/data stdout。
+    script = _oc_kb_script()
+    server, thread, records = _start_runtime_server({"results": [{"content": "answer"}]})
+
+    try:
+        result = subprocess.run(
+            [sys.executable, str(script), "search", "退款政策", "--top-k", "3"],
+            env=_runtime_env(server),
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        _stop_runtime_server(server, thread)
+
+    assert result.returncode == 0
+    assert json.loads(result.stdout) == {"ok": True, "data": {"results": [{"content": "answer"}]}}
+    assert len(records) == 1
+    assert records[0]["path"] == "/api/v1/runtime/knowledge/search"
+    assert records[0]["token"] == "runtime-token"
+    assert json.loads(records[0]["body"].decode("utf-8")) == {"question": "退款政策", "top_k": 3}
+
+
+def test_oc_kb_search_reads_runtime_config_from_env_file(tmp_path: Path) -> None:
+    # execute_code 子环境可能拿不到 oc-entrypoint 注入的进程环境变量；
+    # oc-kb 必须能从 data_root/.env 兜底读取知识库 runtime 配置。
+    script = _oc_kb_script()
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    server, thread, records = _start_runtime_server({"results": [{"content": "env-file-answer"}]})
+    (data_root / ".env").write_text(
+        f"OC_KB_RUNTIME_BASE_URL=http://127.0.0.1:{server.server_port}\n"
+        "OC_KB_APP_TOKEN=runtime-token-from-env-file\n",
+        encoding="utf-8",
+    )
+
+    try:
+        clean_env = {k: v for k, v in os.environ.items() if not k.startswith("OC_KB_")}
+        clean_env["OC_DATA_DIR"] = str(data_root)
+        result = subprocess.run(
+            [sys.executable, str(script), "search", "退款政策"],
+            env=clean_env,
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        _stop_runtime_server(server, thread)
+
+    assert result.returncode == 0
+    assert json.loads(result.stdout)["data"]["results"][0]["content"] == "env-file-answer"
+    assert records[0]["token"] == "runtime-token-from-env-file"
+
+
+def test_oc_kb_add_posts_workspace_file_to_manager_runtime_api(tmp_path: Path) -> None:
+    # add 成功路径必须上传 workspace 内文件到 manager runtime API，并携带 app token。
+    script = _oc_kb_script()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "report.md").write_text("hello", encoding="utf-8")
+    server, thread, records = _start_runtime_server({"id": "doc-1", "name": "report.md"})
+
+    try:
+        result = subprocess.run(
+            [sys.executable, str(script), "add", "report.md"],
+            env=_runtime_env(server, OC_WORKSPACE_DIR=str(workspace)),
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        _stop_runtime_server(server, thread)
+
+    assert result.returncode == 0
+    assert json.loads(result.stdout) == {"ok": True, "data": {"id": "doc-1", "name": "report.md"}}
+    assert len(records) == 1
+    assert records[0]["path"] == "/api/v1/runtime/knowledge/files"
+    assert records[0]["token"] == "runtime-token"
+    assert records[0]["content_type"].startswith("multipart/form-data; boundary=")
+    assert b'name="file"; filename="report.md"' in records[0]["body"]
+    assert b"hello" in records[0]["body"]
+
+
+def test_oc_kb_requires_runtime_config(monkeypatch) -> None:
+    # 缺少 manager runtime API 配置时，oc-kb 应快速失败，避免 Hermes 误以为知识库为空。
+    monkeypatch.delenv("OC_KB_RUNTIME_BASE_URL", raising=False)
+    monkeypatch.delenv("OC_KB_APP_TOKEN", raising=False)
+    script = _oc_kb_script()
+
+    result = subprocess.run(
+        [sys.executable, str(script), "search", "hello"],
+        env={k: v for k, v in os.environ.items() if not k.startswith("OC_KB_")},
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "not configured" in result.stderr
+
+
+def test_oc_kb_add_rejects_path_outside_workspace(tmp_path: Path) -> None:
+    # 父目录穿越不能越过 workspace 沙箱，避免 Hermes 写入任意本地文件到实例知识库。
+    script = _oc_kb_script()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    env = os.environ.copy()
+    env.update({
+        "OC_KB_RUNTIME_BASE_URL": "http://manager-api:8080",
+        "OC_KB_APP_TOKEN": "runtime-token",
+        "OC_WORKSPACE_DIR": str(workspace),
+    })
+    result = subprocess.run(
+        [sys.executable, str(script), "add", "../secret.md"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "INVALID_PATH" in result.stderr
+    assert "workspace" in result.stderr
+
+
+def test_oc_kb_add_rejects_oversized_file_before_request(tmp_path: Path) -> None:
+    # 本地文件超过 1GB 时先在 CLI 侧拒绝，且该上限必须与 manager 后端硬上限保持一致。
+    script = _oc_kb_script()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    big = workspace / "big.md"
+    with big.open("wb") as f:
+        f.truncate(1024 * 1024 * 1024 + 1)
+
+    env = os.environ.copy()
+    env.update({
+        "OC_KB_RUNTIME_BASE_URL": "http://127.0.0.1:9",
+        "OC_KB_APP_TOKEN": "runtime-token",
+        "OC_WORKSPACE_DIR": str(workspace),
+    })
+    result = subprocess.run(
+        [sys.executable, str(script), "add", "big.md"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "FILE_TOO_LARGE" in result.stderr
+    assert "1024MB" in result.stderr

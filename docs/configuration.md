@@ -120,8 +120,7 @@ Hermes Agent runtime 容器相关配置。
 
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `runtime_image` | string | `hermes-runtime:v2026.5.16-dev` | Hermes 容器镜像引用（name:tag 或 digest）；tag 必须固定到具体 Hermes 版本，runtime 节点上必须存在该镜像，imagesync 用 `docker save / load` 分发 |
-| `system_prompt_template` | string | — | 平台级系统人设模板（SOUL.md PlatformPrompt 层），支持任意中英文 prompt 内容 |
+| `runtime_images` | array | — | 普通实例可选择的 Hermes 镜像列表；助手版本以 `image_id` 引用其中条目，AICC 不读取该列表 |
 | `workspace.archive_retention_days` | int | `14` | agent 端归档目录保留天数；`0` 表示不清理，仅适合本地调试 |
 | `llm.base_url` | string | — | Hermes 容器从 docker network 看到的 new-api OpenAI 兼容 endpoint，必须含 `/v1` 后缀；写入容器内 `config.yaml` 的 `model.base_url` |
 | `llm.default_provider` | string | `openai` | 默认 provider 名称，写入容器内 `config.yaml` 的 `model.provider`；常用 `openai`（兼容 new-api OpenAI 兼容协议） |
@@ -131,7 +130,17 @@ Hermes Agent runtime 容器相关配置。
 
 > 容器实际使用的 `OPENAI_API_KEY` 由 manager 替每个应用通过 new-api `POST /api/token/:id/key` 自动拉取后加密落库（`apps.newapi_key_ciphertext`），每个应用的 token 独立隔离，无需在此填写全局 sk-。
 
-### 1.11 `agent`
+### 1.11 `aicc`
+
+在线智能客服（AICC，AI Customer Care）专用运行时配置。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `runtime_image` | string | — | AICC 隐藏应用唯一允许使用的客服专用镜像引用。必须使用独立仓库路径以及非 `latest` 的 tag 或 digest；缺失或非法时 manager 启动 fail-fast，绝不回退到 `hermes.runtime_images`。 |
+
+客服运行时使用 `runtime/hermes/hermes-aicc` 构建上下文和 `oc-manager-hermes-aicc` 镜像仓库。生产发布使用 `make prod-deploy-aicc-runtime`：该命令构建并推送不可变镜像、更新 `aicc.runtime_image`，随后由 leader-only 协调器逐个重建镜像漂移的客服隐藏应用。回滚时将该配置恢复为上一条不可变镜像引用，协调器按相同顺序逐个回滚。
+
+### 1.12 `agent`
 
 manager 侧用于与 runtime-agent 协调的参数（非 runtime-agent 自身配置）。
 
