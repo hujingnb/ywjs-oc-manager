@@ -43,6 +43,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ARG HERMES_REF
 ARG NODE_VERSION=22.23.1
 ARG NODE_MIRROR=https://npmmirror.com/mirrors/node
+ARG GITHUB_MIRROR=https://ghfast.top/https://github.com/
 RUN set -e; \
     node_archive="node-v${NODE_VERSION}-linux-x64.tar.xz"; \
     curl -fsSL "${NODE_MIRROR}/v${NODE_VERSION}/${node_archive}" -o "/tmp/${node_archive}"; \
@@ -50,6 +51,7 @@ RUN set -e; \
     tar -xJf "/tmp/${node_archive}" --strip-components=1 -C /opt/data/node; \
     rm -f "/tmp/${node_archive}"; \
     /opt/data/node/bin/node --version; \
+    git config --global url."${GITHUB_MIRROR}".insteadOf https://github.com/; \
     curl -fsSL https://hermes-agent.nousresearch.com/install.sh \
       | bash -s -- --skip-setup --branch ${HERMES_REF}; \
     for p in \
