@@ -1019,6 +1019,44 @@ func TestAppInitialize_AppliedVersionRecorded(t *testing.T) {
 	assert.Equal(t, resolvedRef, store.lastAppliedVersion.AppliedImageRef, "applied_image_ref 应等于解析出的镜像 ref")
 }
 
+// TestAppInitialize_AICCHiddenAppUsesDedicatedRuntimeImage 验证 AICC 隐藏应用仍加载绑定版本的模型和技能，
+// 但运行时镜像必须只来自客服专用 resolver，不能回退到普通实例的版本镜像。
+func TestAppInitialize_AICCHiddenAppUsesDedicatedRuntimeImage(t *testing.T) {
+	store := newAppInitStub(t)
+	store.app.AiccHidden = true
+	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}
+	const aiccImageRef = "registry.example.com/app/oc-manager-hermes-aicc:v1.0.0-test"
+
+	handler := NewAppInitializeHandler(store, client, AppInitializeConfig{
+		Cipher:              testCipher(t),
+		ResolveRuntimeImage: testResolveRuntimeImage,
+		ResolveAICCRuntimeImage: func() (string, bool) {
+			return aiccImageRef, true
+		},
+	})
+
+	require.NoError(t, handler.Handle(context.Background(), buildJob(t, testAppID, "")))
+	require.True(t, store.appliedVersionSet)
+	assert.Equal(t, aiccImageRef, store.lastAppliedVersion.AppliedImageRef)
+}
+
+// TestAppInitialize_AICCHiddenAppFailsWithoutDedicatedRuntimeImage 验证客服专用镜像缺失时，
+// AICC 初始化应明确失败，不能使用绑定版本的普通实例镜像继续启动。
+func TestAppInitialize_AICCHiddenAppFailsWithoutDedicatedRuntimeImage(t *testing.T) {
+	store := newAppInitStub(t)
+	store.app.AiccHidden = true
+	handler := NewAppInitializeHandler(store, &fakeNewAPI{}, AppInitializeConfig{
+		Cipher:              testCipher(t),
+		ResolveRuntimeImage: testResolveRuntimeImage,
+	})
+
+	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "AICC 运行时镜像")
+	require.True(t, store.failedSet)
+	assert.Equal(t, domain.AppStatusError, store.app.Status)
+}
+
 // TestAppInitialize_PromotesToRunningWhenChannelAlreadyBound 验证切换助手版本+重启
 // 触发镜像重建后的「已绑定渠道」自愈：app_initialize 完整跑完 4 阶段进入
 // binding_waiting 后，若 AppHasBoundChannelBinding 返回 true，

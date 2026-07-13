@@ -85,9 +85,8 @@ type NewAPIClientFactory interface {
 // Cipher：把 new-api 返回的完整 sk- 加密后写入 apps.newapi_key_ciphertext，
 // 全程不入日志。
 //
-// ResolveRuntimeImage 由 cmd/server 在装配时注入，把版本 image_id 解析为
-// 完整 imageRef（含 tag），是运行时镜像的唯一来源。必需依赖：未注入时
-// Handle 直接 markFailed，不再有单值字段兜底。
+// ResolveRuntimeImage 由 cmd/server 在装配时注入，把普通实例版本 image_id 解析为
+// 完整 imageRef（含 tag）。AICC 隐藏应用不使用该 resolver，而是使用专用 resolver。
 type AppInitializeConfig struct {
 	// PlatformPrompt 保留供 restart 链路（AppInputRefresher）复用，handler 本身不再使用。
 	PlatformPrompt string
@@ -103,10 +102,12 @@ type AppInitializeConfig struct {
 	// AuditHelper 在 new-api 调用失败时写 audit_logs.target_type=newapi_call。
 	// nil 时跳过审计，不影响主流程；生产装配应注入。
 	AuditHelper *audit.NewAPIAuditHelper
-	// ResolveRuntimeImage 由 cmd/server 在装配时注入，把版本 image_id 解析为
-	// 完整 imageRef（含 tag），是运行时镜像的唯一来源。必需依赖：未注入时
-	// Handle 直接 markFailed，不再有单值字段兜底。
+	// ResolveRuntimeImage 把普通实例版本 image_id 解析为完整 imageRef（含 tag）。
+	// 普通实例未注入时直接失败，不能使用历史全局镜像字段兜底。
 	ResolveRuntimeImage func(imageID string) (ref string, ok bool)
+	// ResolveAICCRuntimeImage 返回 AICC 隐藏应用唯一允许使用的客服专用镜像。
+	// AICC 未注入或返回空值时直接失败，禁止回退到普通实例版本镜像。
+	ResolveAICCRuntimeImage func() (ref string, ok bool)
 	// ManagerRuntimeBaseURL 保留供 restart 链路复用，app_initialize 不再直接使用。
 	ManagerRuntimeBaseURL string
 }
@@ -254,17 +255,31 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage, fmt.Errorf("加载助手版本失败: %w", err))
 	}
 
-	// 解析版本镜像 ref：运行时镜像严格由绑定版本经 ResolveRuntimeImage 从
-	// runtime_images 列表解析。ResolveRuntimeImage 是必需依赖，未注入属于装配
-	// 错误，直接标记失败而非静默兜底。
-	if h.cfg.ResolveRuntimeImage == nil {
-		return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage,
-			errors.New("ResolveRuntimeImage 未注入，无法解析运行时镜像"))
-	}
-	imageRef, ok := h.cfg.ResolveRuntimeImage(version.ImageID)
-	if !ok {
-		return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage,
-			fmt.Errorf("版本镜像 %s 未在配置中", version.ImageID))
+	// AICC 仍读取绑定版本以初始化模型、技能和行为配置，但运行时镜像必须与普通实例
+	// 隔离。普通实例继续根据版本 image_id 从 hermes.runtime_images 解析镜像。
+	var imageRef string
+	if app.AiccHidden {
+		if h.cfg.ResolveAICCRuntimeImage == nil {
+			return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage,
+				errors.New("AICC 运行时镜像解析器未注入"))
+		}
+		var ok bool
+		imageRef, ok = h.cfg.ResolveAICCRuntimeImage()
+		if !ok || strings.TrimSpace(imageRef) == "" {
+			return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage,
+				errors.New("AICC 运行时镜像未配置"))
+		}
+	} else {
+		if h.cfg.ResolveRuntimeImage == nil {
+			return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage,
+				errors.New("ResolveRuntimeImage 未注入，无法解析运行时镜像"))
+		}
+		var ok bool
+		imageRef, ok = h.cfg.ResolveRuntimeImage(version.ImageID)
+		if !ok {
+			return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage,
+				fmt.Errorf("版本镜像 %s 未在配置中", version.ImageID))
+		}
 	}
 
 	// 版本 skill 种子注入：把版本 skills_json 里实例尚无的 skill 并集写入 app_skills，

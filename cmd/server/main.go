@@ -502,6 +502,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			ResolveRuntimeImage: func(imageID string) (string, bool) {
 				return config.ResolveRuntimeImage(cfg.Hermes.RuntimeImages, imageID)
 			},
+			ResolveAICCRuntimeImage: func() (string, bool) {
+				return cfg.AICC.RuntimeImage, cfg.AICC.RuntimeImage != ""
+			},
 			ManagerRuntimeBaseURL: cfg.Hermes.ManagerRuntimeBaseURL,
 		},
 	)
