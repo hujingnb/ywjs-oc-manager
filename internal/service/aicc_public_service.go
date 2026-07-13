@@ -27,6 +27,10 @@ import (
 
 const aiccImageMaxBytes int64 = 10 * 1024 * 1024
 
+// aiccPromptInjectionReply 是公开端拦截明确越权指令后的固定答复。
+// 固定文本避免模型复述攻击载荷、泄露内部提示词，且不给攻击者提供可迭代的运行时反馈。
+const aiccPromptInjectionReply = "该请求包含无法处理的指令内容，请提出产品、价格或售后相关问题。"
+
 const (
 	// aiccCreateSessionRateLimit 限制单个来源对单个智能体创建会话频率，防止刷会话。
 	aiccCreateSessionRateLimit int64 = 30
@@ -489,14 +493,17 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 	} else if err := s.reserveAICCVisitorMessage(ctx, session, settings.MessageLimitPerSession, visitorMessage); err != nil {
 		return AICCPublicMessageResult{}, err
 	}
-	runtimeText := text
-	if runtimeText == "" && imageID != "" {
-		runtimeText = "[访客发送了一张图片]"
-	}
-	runtimeText = buildAICCRuntimePrompt(agent, runtimeText)
-	reply, err := s.chat.ChatAICC(ctx, agent.AppID, session.ID, runtimeText)
-	if err != nil {
-		return AICCPublicMessageResult{}, fmt.Errorf("转发 AICC 消息失败: %w", err)
+	reply := aiccPromptInjectionReply
+	if !isAICCPromptInjection(text) {
+		runtimeText := text
+		if runtimeText == "" && imageID != "" {
+			runtimeText = "[访客发送了一张图片]"
+		}
+		runtimeText = buildAICCRuntimePrompt(agent, runtimeText)
+		reply, err = s.chat.ChatAICC(ctx, agent.AppID, session.ID, runtimeText)
+		if err != nil {
+			return AICCPublicMessageResult{}, fmt.Errorf("转发 AICC 消息失败: %w", err)
+		}
 	}
 	replyID := newUUID()
 	assistantMessage := sqlc.CreateAICCMessageParams{
@@ -574,6 +581,38 @@ func buildAICCRuntimePrompt(agent sqlc.AiccAgent, visitorText string) string {
 	}
 	lines = append(lines, "访客问题：", strings.TrimSpace(visitorText))
 	return strings.Join(lines, "\n")
+}
+
+// isAICCPromptInjection 识别公开端常见的提示词窃取与角色覆写指令。
+// 仅在“越权动作”与“内部指令目标”同时出现时拦截，避免把正常的产品咨询误判为攻击。
+func isAICCPromptInjection(text string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	if normalized == "" {
+		return false
+	}
+	hasDirective := containsAnyAICCText(normalized,
+		"忽略此前", "忽略之前", "忽略所有", "无视此前", "无视之前",
+		"ignore previous", "ignore all", "disregard previous", "system override",
+	)
+	hasInternalTarget := containsAnyAICCText(normalized,
+		"系统提示词", "系统指令", "开发者指令", "完整提示词",
+		"system prompt", "system instruction", "developer message", "developer instruction",
+	)
+	hasDisclosureAction := containsAnyAICCText(normalized,
+		"输出", "显示", "提供", "泄露", "打印", "读取",
+		"output", "show", "reveal", "disclose", "print", "read",
+	)
+	return (hasDirective && hasInternalTarget) || (hasInternalTarget && hasDisclosureAction)
+}
+
+// containsAnyAICCText 判断已归一化的访客文本是否包含任一安全规则关键词。
+func containsAnyAICCText(text string, candidates ...string) bool {
+	for _, candidate := range candidates {
+		if strings.Contains(text, candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 // loadPublicSettings 读取公开发送链路需要的运营配置；历史无配置行时使用管理端同款默认值。
