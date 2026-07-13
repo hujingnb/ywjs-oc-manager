@@ -189,6 +189,9 @@ func (c Config) Validate() error {
 	if err := ValidateRuntimeImages(c.Hermes.RuntimeImages); err != nil {
 		return err
 	}
+	if err := ValidateAICCRuntimeImage(c.AICC.RuntimeImage); err != nil {
+		return err
+	}
 	if err := c.RAGFlow.validate(); err != nil {
 		return err
 	}

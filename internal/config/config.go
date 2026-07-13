@@ -22,6 +22,8 @@ type Config struct {
 	Security SecurityConfig `yaml:"security"`
 	// Hermes 描述 Hermes runtime 镜像、LLM 和工作目录归档策略。
 	Hermes HermesConfig `yaml:"hermes"`
+	// AICC 描述在线智能客服的专用运行时配置，与普通实例 Hermes 镜像列表隔离。
+	AICC AICCConfig `yaml:"aicc"`
 	// RAGFlow 描述 manager 后端访问 RAGFlow HTTP API 所需配置。
 	RAGFlow RAGFlowConfig `yaml:"ragflow"`
 	// IndustryKnowledge 描述外部商业知识库上传行业库文件的固定鉴权配置。
@@ -144,6 +146,13 @@ type HermesConfig struct {
 	// ManagerRuntimeBaseURL 是 Hermes 容器内访问 manager runtime API 的地址。
 	// 默认使用 compose service name，避免把浏览器 public_base_url 写进容器内部。
 	ManagerRuntimeBaseURL string `yaml:"manager_runtime_base_url"`
+}
+
+// AICCConfig 描述在线智能客服的运行时配置。
+// RuntimeImage 是 AICC 隐藏应用唯一允许使用的镜像，不能回退到普通实例 Hermes 版本。
+type AICCConfig struct {
+	// RuntimeImage 必须是带 tag 或 digest 的完整客服专用镜像引用，发布时使用不可变引用。
+	RuntimeImage string `yaml:"runtime_image"`
 }
 
 // RAGFlowConfig 描述 RAGFlow HTTP API 连接信息。
