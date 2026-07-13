@@ -208,7 +208,8 @@ async function verifyPublicSessionRestore(page: Page, agent: AICCAgentResponse['
   )
   await page.reload()
   expect((await restoredSession).ok()).toBeTruthy()
-  await expect(page.getByText('请回复这条续接测试消息')).toBeVisible()
+  // 只校验访客消息行，助手回复可能引用原问题，不能用全页文本定位造成严格模式歧义。
+  await expect(page.locator('.message-row.visitor').getByText('请回复这条续接测试消息', { exact: true })).toBeVisible()
   return sessionToken
 }
 

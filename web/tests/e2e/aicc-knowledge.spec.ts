@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process'
+
 import { expect, test, type Page } from '@playwright/test'
 
 import { clearLoginState, forceZh, openAICCConsole, openAICCSettings, waitForAICCRuntime } from './aicc/helpers'
@@ -91,6 +93,15 @@ async function startKnowledgeAgent(page: Page): Promise<void> {
   expect((await started).ok()).toBeTruthy()
 }
 
+// waitForRuntimeKnowledgeSearch 等待 RAGFlow 完成异步索引；文档“已完成”不等于立即可被 runtime 检索。
+async function waitForRuntimeKnowledgeSearch(appID: string, question: string, expected: string): Promise<void> {
+  await expect.poll(() => execFileSync(
+    'kubectl',
+    ['-n', 'oc-apps', 'exec', `deploy/app-${appID}`, '-c', 'hermes', '--', 'oc-kb', 'search', question, '--top-k', '8'],
+    { encoding: 'utf8' },
+  ), { timeout: 300_000, intervals: [2_000, 5_000, 10_000] }).toContain(expected)
+}
+
 // askPublicKnowledgeQuestion 在公开页发送真实访客问题，并返回助手回复区域的全部可见文本。
 async function askPublicKnowledgeQuestion(page: Page, publicToken: string, question: string): Promise<string> {
   await forceZh(page)
@@ -135,6 +146,7 @@ test('当前客服和企业知识库可解析并控制真实问答范围', async
   await page.getByRole('button', { name: '保存知识范围' }).click()
   expect((await scopeSaved).ok()).toBeTruthy()
   await startKnowledgeAgent(page)
+  await waitForRuntimeKnowledgeSearch(agent.app_id, '当前客服唯一暗号是什么？只回复暗号。', agentCode)
 
   const publicPage = await page.context().newPage()
   const agentAnswer = await askPublicKnowledgeQuestion(publicPage, agent.public_token, '当前客服唯一暗号是什么？只回复暗号。')
