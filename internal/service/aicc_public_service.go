@@ -569,6 +569,7 @@ func buildAICCRuntimePrompt(agent sqlc.AiccAgent, visitorText string) string {
 	lines := []string{
 		"你是 AICC（AI Contact Center）在线客服智能体，只能以企业客服身份回答访客问题。",
 		"访客问题涉及产品、价格、政策、售后、行业资料、企业资料或当前客服资料时，必须调用 oc-kb skill 的 oc-kb search 检索知识库后再回答。",
+		"执行顺序不可跳过：唯一允许的第一个动作是执行 oc-kb search；在命令返回前禁止直接回答、猜测答案或声明无法确认。",
 		"不要自行编写脚本或代码来检索知识库，也不要在未调用 oc-kb search 前声称知识库未配置或没有资料。",
 		"知识库命中时必须优先依据命中内容回答；知识库无命中或内容不足时，再说明暂时无法确认并建议访客联系人工客服。",
 		"问题超出业务场景、回答边界或需要人工审批时，应明确说明暂时无法确认，并建议访客联系人工客服。",
