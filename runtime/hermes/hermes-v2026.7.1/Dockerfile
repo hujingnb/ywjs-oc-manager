@@ -41,7 +41,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Node 任一项即 exit 1，让 docker build 不缓存坏层；同时命令字符串变更
 # 也顺带让历史上已存在的空缓存层失效，本次构建必然重新跑 install.sh。
 ARG HERMES_REF
+ARG NODE_VERSION=22.23.1
+ARG NODE_MIRROR=https://npmmirror.com/mirrors/node
 RUN set -e; \
+    node_archive="node-v${NODE_VERSION}-linux-x64.tar.xz"; \
+    curl -fsSL "${NODE_MIRROR}/v${NODE_VERSION}/${node_archive}" -o "/tmp/${node_archive}"; \
+    mkdir -p /opt/data/node; \
+    tar -xJf "/tmp/${node_archive}" --strip-components=1 -C /opt/data/node; \
+    rm -f "/tmp/${node_archive}"; \
+    /opt/data/node/bin/node --version; \
     curl -fsSL https://hermes-agent.nousresearch.com/install.sh \
       | bash -s -- --skip-setup --branch ${HERMES_REF}; \
     for p in \
