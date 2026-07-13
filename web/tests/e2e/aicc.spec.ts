@@ -432,7 +432,8 @@ test('访客图片上传恢复并拒绝非法或超限文件', async ({ page }) 
   expect((await messageSent).ok()).toBeTruthy()
   await expect(publicPage.locator('.message-list img')).toBeVisible()
   await publicPage.reload()
-  await expect(publicPage.locator('.message-list').getByText('访客发送了一张图片')).toHaveCount(0)
+  // 图片消息的运行时回复可能描述图片内容；这里只校验访客消息恢复后不展示内部占位文本。
+  await expect(publicPage.locator('.message-row.visitor').getByText('访客发送了一张图片')).toHaveCount(0)
 
   await publicPage.locator('#aicc-public-image').setInputFiles({ name: 'not-image.txt', mimeType: 'text/plain', buffer: Buffer.from('x') })
   await expect(publicPage.getByText('请选择图片文件')).toBeVisible()
