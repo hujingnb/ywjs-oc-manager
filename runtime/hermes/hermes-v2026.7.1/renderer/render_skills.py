@@ -173,26 +173,6 @@ Commands:
 - `oc-kb search "<question>" --top-k 8` searches the current app knowledge base, the organization knowledge base, and any industry knowledge bases selected by the app's assistant version. App results are returned first, organization results second, and each selected industry knowledge base can contribute up to top-k hits with `scope="industry"` plus `industry_knowledge_base_id` and `industry_knowledge_base_name` when present.
 - `oc-kb add relative/path.md` uploads an existing workspace file into the current app knowledge base. Absolute paths, parent directory traversal, and directories are rejected.
 
-Execution:
-
-- If a shell or terminal command tool is available, run `oc-kb search "<question>" --top-k 8` directly.
-- If only `execute_code` is available, execute the CLI with Python standard library `subprocess.run`, for example:
-
-```python
-import subprocess
-
-result = subprocess.run(
-    ["oc-kb", "search", "<question>", "--top-k", "8"],
-    check=False,
-    capture_output=True,
-    text=True,
-)
-print(result.stdout)
-print(result.stderr)
-```
-
-Do not import helper names such as `exec_subprocess`; they may not exist in the runtime. Use `subprocess.run` unless a real shell tool is provided.
-
 Do not call RAGFlow directly and do not ask for RAGFlow credentials. The `oc-kb` command talks only to manager runtime APIs using the app-scoped token injected by the container entrypoint.
 """
 

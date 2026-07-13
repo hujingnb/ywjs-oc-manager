@@ -75,7 +75,7 @@ def main() -> int:
     outputs: list[str] = []
     try:
         outputs.append(render_config_yaml.render(manifest, data_root))
-        outputs.append(render_env.render(data_root, _runtime_cli_env()))
+        outputs.append(render_env.render(data_root))
         outputs.append(render_soul_md.render(manifest, input_root, data_root))
         outputs.extend(render_skills.render(manifest, input_root, data_root))
     except Exception as e:  # noqa: BLE001
@@ -115,21 +115,6 @@ def _configure_knowledge_env(manifest) -> None:
         return
     os.environ.pop("OC_KB_RUNTIME_BASE_URL", None)
     os.environ.pop("OC_KB_APP_TOKEN", None)
-
-
-def _runtime_cli_env() -> dict[str, str]:
-    """返回需要写入 .env 的 runtime CLI 配置。
-
-    这些值已经由 _configure_*_env 从 manifest 解析到进程环境；这里再取一遍，
-    让 execute_code 等不继承 gateway 环境的子执行器也能通过 CLI 兜底读取。
-    """
-    keys = (
-        "OC_KB_RUNTIME_BASE_URL",
-        "OC_KB_APP_TOKEN",
-        "OC_PUBLISH_RUNTIME_BASE_URL",
-        "OC_PUBLISH_APP_TOKEN",
-    )
-    return {key: os.environ.get(key, "") for key in keys if os.environ.get(key, "")}
 
 
 def _configure_web_publish_env(manifest) -> None:

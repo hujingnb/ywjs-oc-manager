@@ -38,31 +38,15 @@ WEIXIN_DM_POLICY=open
 """
 
 
-def render(data_root: Path, runtime_env: Optional[dict[str, str]] = None) -> str:
+def render(data_root: Path) -> str:
     """渲染 .env 到 data_root/.env，返回相对路径。"""
     data_root.mkdir(parents=True, exist_ok=True)
     body = BEHAVIOR_FLAGS
-    if runtime_env:
-        body += _render_runtime_env(runtime_env)
     weixin = _load_weixin_account(data_root)
     if weixin:
         body += _render_weixin_env(weixin)
     write_text(data_root / ".env", body)
     return ".env"
-
-
-def _render_runtime_env(runtime_env: dict[str, str]) -> str:
-    """把 oc-entrypoint 已解析出的 runtime CLI 配置写入 .env。
-
-    Hermes 的 execute_code 子环境不一定继承 gateway 主进程环境；把 oc-kb
-    这类运行时 CLI 所需配置同时落到 .env，CLI 可在环境变量缺失时兜底读取。
-    """
-    lines = ["", "# Runtime CLI 配置 - 由 oc-entrypoint 从 manifest 写入。"]
-    for key in sorted(runtime_env):
-        value = runtime_env[key]
-        if value:
-            lines.append(f"{key}={value}")
-    return "\n".join(lines) + "\n"
 
 
 def _load_weixin_account(data_root: Path) -> Optional[dict]:

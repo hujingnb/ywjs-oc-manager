@@ -9,7 +9,6 @@
 kanban/login 端点在 Task 10/11 追加。"""
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 from pathlib import Path
@@ -81,16 +80,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 
 async def healthz(request):
-    """健康探针端点，确认 oc-ops 与同 Pod api_server 均可服务。
-
-    仅检查轻量会话列表，不触发模型、知识库或外部渠道调用。api_server 在 Hermes
-    重启后会晚于 uvicorn 数秒恢复；此时返回 503，避免 Kubernetes 把尚不能转发会话的
-    Pod 放进 oc-ops Service endpoints。
-    """
-    try:
-        await asyncio.to_thread(conversation.list_sessions, limit=1, offset=0)
-    except Exception:
-        return Response("api_server not ready", status_code=503)
+    """健康探针端点，返回纯文本 ok，不需要鉴权。"""
     return Response("ok")
 
 
@@ -629,8 +619,7 @@ async def conversation_list(request):
     """GET /oc/conversations?source=&limit=&offset= —— 列实例下会话。"""
     try:
         q = request.query_params
-        data = await asyncio.to_thread(
-            conversation.list_sessions,
+        data = conversation.list_sessions(
             source=q.get("source", ""),
             limit=int(q.get("limit", "50") or "50"),
             offset=int(q.get("offset", "0") or "0"),
@@ -643,7 +632,7 @@ async def conversation_list(request):
 async def conversation_messages(request):
     """GET /oc/conversations/{sid}/messages —— 读会话历史。"""
     try:
-        return _ok(await asyncio.to_thread(conversation.session_messages, request.path_params["sid"]))
+        return _ok(conversation.session_messages(request.path_params["sid"]))
     except OpsError as e:
         return _err(e)
 
@@ -655,7 +644,7 @@ async def conversation_create(request):
     except Exception:
         body = {}
     try:
-        return _ok(await asyncio.to_thread(conversation.create_session, body), status=201)
+        return _ok(conversation.create_session(body), status=201)
     except OpsError as e:
         return _err(e)
 
@@ -663,7 +652,7 @@ async def conversation_create(request):
 async def conversation_delete(request):
     """DELETE /oc/conversations/{sid} —— 删除会话。"""
     try:
-        await asyncio.to_thread(conversation.delete_session, request.path_params["sid"])
+        conversation.delete_session(request.path_params["sid"])
         return Response(status_code=204)
     except OpsError as e:
         return _err(e)
@@ -676,11 +665,7 @@ async def conversation_rename(request):
     except Exception:
         body = {}
     try:
-        return _ok(await asyncio.to_thread(
-            conversation.update_title,
-            request.path_params["sid"],
-            str(body.get("title", "")),
-        ))
+        return _ok(conversation.update_title(request.path_params["sid"], str(body.get("title", ""))))
     except OpsError as e:
         return _err(e)
 
@@ -692,7 +677,7 @@ async def conversation_chat(request):
     except Exception:
         body = {}
     try:
-        return _ok(await asyncio.to_thread(conversation.chat, request.path_params["sid"], body))
+        return _ok(conversation.chat(request.path_params["sid"], body))
     except OpsError as e:
         return _err(e)
 

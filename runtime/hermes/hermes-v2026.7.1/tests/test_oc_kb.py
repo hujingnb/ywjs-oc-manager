@@ -90,36 +90,6 @@ def test_oc_kb_search_posts_to_manager_runtime_api() -> None:
     assert json.loads(records[0]["body"].decode("utf-8")) == {"question": "退款政策", "top_k": 3}
 
 
-def test_oc_kb_search_reads_runtime_config_from_env_file(tmp_path: Path) -> None:
-    # execute_code 子环境可能拿不到 oc-entrypoint 注入的进程环境变量；
-    # oc-kb 必须能从 data_root/.env 兜底读取知识库 runtime 配置。
-    script = _oc_kb_script()
-    data_root = tmp_path / "data"
-    data_root.mkdir()
-    server, thread, records = _start_runtime_server({"results": [{"content": "env-file-answer"}]})
-    (data_root / ".env").write_text(
-        f"OC_KB_RUNTIME_BASE_URL=http://127.0.0.1:{server.server_port}\n"
-        "OC_KB_APP_TOKEN=runtime-token-from-env-file\n",
-        encoding="utf-8",
-    )
-
-    try:
-        clean_env = {k: v for k, v in os.environ.items() if not k.startswith("OC_KB_")}
-        clean_env["OC_DATA_DIR"] = str(data_root)
-        result = subprocess.run(
-            [sys.executable, str(script), "search", "退款政策"],
-            env=clean_env,
-            capture_output=True,
-            text=True,
-        )
-    finally:
-        _stop_runtime_server(server, thread)
-
-    assert result.returncode == 0
-    assert json.loads(result.stdout)["data"]["results"][0]["content"] == "env-file-answer"
-    assert records[0]["token"] == "runtime-token-from-env-file"
-
-
 def test_oc_kb_add_posts_workspace_file_to_manager_runtime_api(tmp_path: Path) -> None:
     # add 成功路径必须上传 workspace 内文件到 manager runtime API，并携带 app token。
     script = _oc_kb_script()

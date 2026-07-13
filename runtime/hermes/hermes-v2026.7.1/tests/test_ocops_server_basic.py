@@ -27,25 +27,6 @@ def test_requires_bearer_token(monkeypatch, tmp_path, ocops_schema):
     validate(r.json(), ocops_schema("common/error.schema.json"))
 
 
-def test_healthz_requires_api_server_ready(monkeypatch, tmp_path):
-    # 就绪边界：oc-ops 已监听端口但 api_server 未恢复时，healthz 必须返回 503，
-    # 防止 Kubernetes 过早将 pod 放入 Service endpoints。
-    from unittest import mock
-
-    with mock.patch("ocops.server.conversation.list_sessions", side_effect=Exception("api_server starting")):
-        r = _client(monkeypatch, tmp_path).get("/healthz")
-    assert r.status_code == 503
-
-
-def test_healthz_accepts_ready_api_server(monkeypatch, tmp_path):
-    # 正常路径：api_server 能读取轻量会话列表时，healthz 返回 200 允许 pod 接流量。
-    from unittest import mock
-
-    with mock.patch("ocops.server.conversation.list_sessions", return_value=[]):
-        r = _client(monkeypatch, tmp_path).get("/healthz")
-    assert r.status_code == 200
-
-
 def test_info_ok(monkeypatch, tmp_path, ocops_schema):
     # 正常：带正确 token → 200，返回镜像身份字段 variant
     c = _client(monkeypatch, tmp_path)

@@ -57,9 +57,6 @@ def test_entrypoint_first_boot(tmp_path: Path) -> None:
     assert (data_root / "SOUL.md").exists()
     assert (data_root / ".env").exists()
     assert (data_root / "skills" / "oc-kb" / "SKILL.md").exists()
-    env_body = (data_root / ".env").read_text()
-    assert "OC_KB_RUNTIME_BASE_URL=http://manager-api:8080" in env_body
-    assert "OC_KB_APP_TOKEN=runtime-token" in env_body
 
     # phase 5 写下 .oc-state.json
     state = json.loads((data_root / ".oc-state.json").read_text())

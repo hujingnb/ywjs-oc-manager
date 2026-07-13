@@ -51,8 +51,6 @@ def test_render_creates_runtime_knowledge_skill(tmp_input: Path, tmp_data: Path)
     body = skill_path.read_text()
     assert "oc-kb search" in body
     assert "oc-kb add" in body
-    assert "subprocess.run" in body
-    assert "execute_code" in body
     assert "runtime-token" not in body
     assert outputs == ["skills/oc-kb/SKILL.md"]
     marker = tmp_data / "skills" / "oc-kb" / ".oc-managed"
