@@ -203,7 +203,8 @@ func TestCreateHiddenAICCAppCreatesHiddenAppAndInitializeJob(t *testing.T) {
 	assert.Empty(t, notifier.lastJobID, "AICC agent 写入前不应即时唤醒 worker")
 }
 
-// TestCreateHiddenAICCAppRejectsMissingVersionAllowlist 覆盖异常路径：企业未配置助手版本时拒绝创建隐藏 app，避免初始化必然失败。
+// TestCreateHiddenAICCAppRejectsMissingVersionAllowlist 覆盖异常路径：企业未配置模型和技能初始化版本时拒绝创建隐藏 app；
+// 客服镜像来自独立配置，不影响该版本依赖。
 func TestCreateHiddenAICCAppRejectsMissingVersionAllowlist(t *testing.T) {
 	svc, store := newAppServiceWithStore(t)
 

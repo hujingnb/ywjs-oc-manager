@@ -236,7 +236,8 @@ func (s *AppService) ListByOrg(ctx context.Context, principal auth.Principal, or
 //
 // 取舍说明：成员 onboarding 会同时创建成员、渠道绑定和审计，AICC 只需要一个 hermes runtime，
 // 因此这里保留最小共享边界：创建 apps 行、创建 app_initialize job、标记 aicc_hidden。
-// new-api token、runtime token、k8s Deployment、知识注入等细节继续由 app_initialize worker 统一处理。
+// 隐藏 app 绑定的助手版本仅提供模型、技能和行为初始化配置；客服镜像由 worker 从
+// aicc.runtime_image 单独选择。new-api token、runtime token、k8s Deployment、知识注入等细节继续由 app_initialize worker 统一处理。
 func (s *AppService) CreateHiddenAICCApp(ctx context.Context, principal auth.Principal, input AICCHiddenAppInput) (string, error) {
 	if input.AppID == "" || input.OrgID == "" || input.UserID == "" || strings.TrimSpace(input.Name) == "" {
 		return "", fmt.Errorf("%w: AICC 隐藏 app 缺少必要参数", ErrInvalidArgument)

@@ -495,8 +495,9 @@ func versionInOrgAllowlist(org sqlc.Organization, versionID string) bool {
 }
 
 // firstAssistantVersionID 返回企业 allowlist 中的第一个助手版本。
-// AICC 隐藏 app 没有独立版本选择 UI，本阶段使用企业已授权版本的第一个作为初始化版本；
-// 未配置 allowlist 时拒绝创建，避免 app_initialize 因 version_id 为空进入失败态。
+// AICC 隐藏 app 没有独立版本选择 UI，因此用第一个授权版本提供模型、技能与行为配置；
+// 其运行时镜像由 aicc.runtime_image 独立决定，未配置 allowlist 时仍拒绝创建，
+// 避免 app_initialize 因 version_id 为空无法加载初始化配置。
 func firstAssistantVersionID(org sqlc.Organization) (string, error) {
 	ids, err := assistantVersionIDsFromOrg(org)
 	if err != nil {
