@@ -122,6 +122,9 @@ build_images() {
   local api_image="$REGISTRY_HOST/oc-manager-api:$tag"
   local web_image="$REGISTRY_HOST/oc-manager-web:$tag"
   log "构建 $label 镜像 (SHA=$sha, tag=$tag)"
+  # 历史 Web Dockerfile 未禁用 onnxruntime-node 的 CUDA 下载，安装阶段会直连 GitHub。
+  # 管理端前端不使用 CUDA，临时归档源码统一跳过该可选依赖，确保升级演练可在国内网络完成。
+  sed -i '/^WORKDIR \/src$/a ENV ONNXRUNTIME_NODE_INSTALL_CUDA=skip' "$source_dir/web/Dockerfile"
   docker build -t "$api_image" -f "$source_dir/cmd/server/Dockerfile" "$source_dir"
   docker build -t "$web_image" -f "$source_dir/web/Dockerfile" "$source_dir/web"
   docker push "$api_image"

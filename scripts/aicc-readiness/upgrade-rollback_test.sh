@@ -23,6 +23,12 @@ rg -q 'docker\.m\.daocloud\.io/rancher/klipper-helm:v0\.9\.3-build20241008' "$TA
   exit 1
 }
 
+# onnxruntime-node 默认下载 CUDA 依赖时会直连 GitHub；Web 不使用 CUDA，演练必须显式跳过。
+rg -q 'ONNXRUNTIME_NODE_INSTALL_CUDA=skip' "$TARGET" || {
+  printf 'FAIL: upgrade-rollback.sh 未跳过 onnxruntime CUDA 下载\n' >&2
+  exit 1
+}
+
 # newapi.localhost/RAGFlow 初始化依赖 Ingress，不能只等待业务 Deployment Ready。
 rg -q 'rollout status deploy/traefik' "$TARGET" || {
   printf 'FAIL: upgrade-rollback.sh 未等待 Traefik Ready\n' >&2
