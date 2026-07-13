@@ -42,6 +42,19 @@ SET aicc_hidden = TRUE,
     updated_at = now()
 WHERE id = ? AND deleted_at IS NULL;
 
+-- name: ListStaleAICCRuntimeApps :many
+-- 逐个找出已应用镜像与当前客服专用镜像不一致的隐藏 app。
+-- 初始化阶段中的 app 由既有 worker 接管，不能重复入队；每轮 limit=1，避免客服镜像升级时
+-- 同时重建全部接待运行时。applied_image_ref 为 NULL 或空值表示历史客服尚未记录专用镜像，也需要升级。
+SELECT id
+FROM apps
+WHERE aicc_hidden = TRUE
+  AND deleted_at IS NULL
+  AND (applied_image_ref IS NULL OR applied_image_ref <> sqlc.arg(target_image_ref))
+  AND status NOT IN ('pulling_runtime_image', 'preparing_runtime', 'creating_container', 'starting')
+ORDER BY updated_at ASC, id ASC
+LIMIT ?;
+
 -- name: SetAppStatus :exec
 UPDATE apps
 SET status = ?, updated_at = now()

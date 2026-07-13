@@ -776,9 +776,12 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// reconciler 对象在此构造,但 PeriodicReconciler 任务装配下移到 leaderElector 就绪后,
 	// 以便用 onlyLeader 把 tick gate 到 leader 副本。
 	var appStatusReconciler *service.AppStatusReconciler
+	var aiccRuntimeUpgradeReconciler *service.AICCRuntimeUpgradeReconciler
 	if orch != nil {
 		// redisQueue 作 jobEnqueuer：reconciler 兜底恢复（error 但 pod 已 Ready）重新入队 init job 后通知 scheduler。
 		appStatusReconciler = service.NewAppStatusReconciler(dbStore.Queries, orch, redisQueue)
+		// AICC 客服专用镜像变更后，协调器逐个入队隐藏应用重建，避免所有接待同时中断。
+		aiccRuntimeUpgradeReconciler = service.NewAICCRuntimeUpgradeReconciler(dbStore.Queries, redisQueue, cfg.AICC.RuntimeImage)
 	}
 	// spec-A2b：node_resource_samples / instance_resource_samples 已删，ResourceSampleCleanup 不再装配。
 
@@ -814,6 +817,11 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	var appStatusTask *service.PeriodicReconciler
 	if appStatusReconciler != nil {
 		appStatusTask = service.NewPeriodicReconciler("app_status_reconcile", 15*time.Second, onlyLeader(appStatusReconciler.Tick))
+	}
+	// AICC 运行时升级任务仅在启用 k8s 时运行；每次 Tick 只推进一个客服隐藏应用。
+	var aiccRuntimeUpgradeTask *service.PeriodicReconciler
+	if aiccRuntimeUpgradeReconciler != nil {
+		aiccRuntimeUpgradeTask = service.NewPeriodicReconciler("aicc_runtime_upgrade_reconcile", 15*time.Second, onlyLeader(aiccRuntimeUpgradeReconciler.Tick))
 	}
 	// RAGFlow 解析状态回写任务仅在 RAGFlow 已配置(ragflowParseStatusRefresher != nil)时装配。
 	var ragflowParseStatusTask *service.PeriodicReconciler
@@ -889,6 +897,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 
 	if appStatusTask != nil {
 		eg.Go(func() error { return appStatusTask.Run(gctx, logger) })
+	}
+	if aiccRuntimeUpgradeTask != nil {
+		eg.Go(func() error { return aiccRuntimeUpgradeTask.Run(gctx, logger) })
 	}
 	if ragflowParseStatusTask != nil {
 		eg.Go(func() error { return ragflowParseStatusTask.Run(gctx, logger) })

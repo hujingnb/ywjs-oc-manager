@@ -287,6 +287,10 @@ type Querier interface {
 	ListSitesByOrg(ctx context.Context, orgID string) ([]ListSitesByOrgRow, error)
 	ListSkillTicketMessages(ctx context.Context, ticketID string) ([]SkillTicketMessage, error)
 	ListSkillTicketsByRequester(ctx context.Context, requesterUserID string) ([]SkillTicket, error)
+	// 逐个找出已应用镜像与当前客服专用镜像不一致的隐藏 app。
+	// 初始化阶段中的 app 由既有 worker 接管，不能重复入队；每轮 limit=1，避免客服镜像升级时
+	// 同时重建全部接待运行时。applied_image_ref 为 NULL 或空值表示历史客服尚未记录专用镜像，也需要升级。
+	ListStaleAICCRuntimeApps(ctx context.Context, arg ListStaleAICCRuntimeAppsParams) ([]string, error)
 	// reaper 扫描 init 子状态下「连续 N 秒无更新」的孤儿；N 由调用方按秒传入。
 	// 包含新旧两套 init 状态，确保历史孤儿也能被正确清理。
 	// spec-A2b：去掉 runtime_node_id（k8s 路径不再写该列），reaper 仅需 id / status 重置孤儿。

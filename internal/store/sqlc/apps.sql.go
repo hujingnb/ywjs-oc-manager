@@ -564,6 +564,48 @@ func (q *Queries) ListRunningApps(ctx context.Context) ([]string, error) {
 	return items, nil
 }
 
+const listStaleAICCRuntimeApps = `-- name: ListStaleAICCRuntimeApps :many
+SELECT id
+FROM apps
+WHERE aicc_hidden = TRUE
+  AND deleted_at IS NULL
+  AND (applied_image_ref IS NULL OR applied_image_ref <> ?)
+  AND status NOT IN ('pulling_runtime_image', 'preparing_runtime', 'creating_container', 'starting')
+ORDER BY updated_at ASC, id ASC
+LIMIT ?
+`
+
+type ListStaleAICCRuntimeAppsParams struct {
+	TargetImageRef string `db:"target_image_ref" json:"target_image_ref"`
+	Limit          int32  `db:"limit" json:"limit"`
+}
+
+// 逐个找出已应用镜像与当前客服专用镜像不一致的隐藏 app。
+// 初始化阶段中的 app 由既有 worker 接管，不能重复入队；每轮 limit=1，避免客服镜像升级时
+// 同时重建全部接待运行时。applied_image_ref 为 NULL 或空值表示历史客服尚未记录专用镜像，也需要升级。
+func (q *Queries) ListStaleAICCRuntimeApps(ctx context.Context, arg ListStaleAICCRuntimeAppsParams) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listStaleAICCRuntimeApps, arg.TargetImageRef, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listStaleInits = `-- name: ListStaleInits :many
 SELECT id, status
 FROM apps
