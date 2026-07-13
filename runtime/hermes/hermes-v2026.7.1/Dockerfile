@@ -24,7 +24,8 @@ RUN set -eux; for f in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sour
 # 避免直连 pypi.org 慢/超时（本次「验证连接中」根因即出网慢导致 lazy 安装阻塞数分钟）。
 ARG PYPI_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
 ENV PIP_INDEX_URL=${PYPI_INDEX_URL} \
-    UV_INDEX_URL=${PYPI_INDEX_URL}
+    UV_INDEX_URL=${PYPI_INDEX_URL} \
+    NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
 
 # 系统依赖：hermes install.sh 需要 curl + git；运行时需要 ripgrep + ffmpeg；tini 用作 PID 1；xz-utils 用来解压 node tarball。
 RUN apt-get update && apt-get install -y --no-install-recommends \
