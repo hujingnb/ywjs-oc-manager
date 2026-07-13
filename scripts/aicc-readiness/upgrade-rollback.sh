@@ -253,6 +253,8 @@ browser_smoke() {
   fi
   log "$phase 真实浏览器核心冒烟"
   # 使用既有 Playwright 场景覆盖平台入口、企业入口、公开消息、知识范围、会话和线索闭环。
+  # 临时验证副本不保留 node_modules；跳过 onnxruntime 的 CUDA 可选下载，避免安装时直连 GitHub。
+  ONNXRUNTIME_NODE_INSTALL_CUDA=skip npm --prefix "$REPO_ROOT/web" ci --no-audit --no-fund
   npm --prefix "$REPO_ROOT/web" run test:e2e -- aicc.spec.ts
 }
 

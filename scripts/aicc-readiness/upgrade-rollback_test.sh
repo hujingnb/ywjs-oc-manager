@@ -29,6 +29,12 @@ rg -q 'ONNXRUNTIME_NODE_INSTALL_CUDA=skip' "$TARGET" || {
   exit 1
 }
 
+# 临时验证副本不携带 node_modules，浏览器冒烟前必须自行安装 Playwright 及前端依赖。
+rg -q 'npm --prefix "\$REPO_ROOT/web" ci --no-audit --no-fund' "$TARGET" || {
+  printf 'FAIL: upgrade-rollback.sh 未为浏览器冒烟安装前端依赖\n' >&2
+  exit 1
+}
+
 # newapi.localhost/RAGFlow 初始化依赖 Ingress，不能只等待业务 Deployment Ready。
 rg -q 'rollout status deploy/traefik' "$TARGET" || {
   printf 'FAIL: upgrade-rollback.sh 未等待 Traefik Ready\n' >&2
