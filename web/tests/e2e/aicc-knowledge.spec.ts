@@ -198,3 +198,76 @@ test('公开客服拒绝提示词注入且不泄露系统指令', async ({ page 
   expect(assistantReply).not.toContain('完整系统提示词')
   await publicPage.close()
 })
+
+// 平台行业库必须先授权给企业，企业管理员才可为当前客服选择；撤销授权后旧关联和候选项均应消失。
+test('行业知识库授权后可选择，撤销授权后自动清理', async ({ page }) => {
+  const fx = loadE2EFixture()
+  const baseName = `E2E 行业库 ${Date.now()}`
+
+  await forceZh(page)
+  await loginAs(page, 'platform_admin', fx, 'zh')
+  await page.goto('/platform/industry-knowledge')
+  await page.getByRole('button', { name: '新建行业库' }).click()
+  await page.getByPlaceholder('请输入行业名称').fill(baseName)
+  const created = page.waitForResponse(response =>
+    response.url().includes('/industry-knowledge-bases') && response.request().method() === 'POST',
+  )
+  await page.getByRole('button', { name: '确认创建' }).click()
+  expect((await created).ok()).toBeTruthy()
+
+  await page.goto('/organizations')
+  const row = page.getByRole('row', { name: new RegExp(fx.org_code) })
+  await row.getByRole('button', { name: '编辑' }).click()
+  const enabled = page.locator('.n-form-item').filter({ hasText: '开通 AICC' }).getByRole('switch')
+  if (await enabled.getAttribute('aria-checked') !== 'true') await enabled.click()
+  const industryField = page.locator('.n-form-item').filter({ hasText: '授权行业知识库' })
+  await industryField.locator('.n-base-selection').click()
+  await page.getByText(baseName, { exact: true }).last().click()
+  const granted = page.waitForResponse(response =>
+    response.url().includes('/aicc-config') && response.request().method() === 'PATCH',
+  )
+  await page.getByRole('button', { name: '保存 AICC 配置' }).click()
+  expect((await granted).ok()).toBeTruthy()
+
+  await clearLoginState(page)
+  await loginAs(page, 'org_admin', fx, 'zh')
+  await openAICCConsole(page)
+  await openAICCSettings(page)
+  await page.getByRole('button', { name: '新建智能体' }).click()
+  await page.getByPlaceholder('例如：售前咨询接待员').fill(`E2E 行业客服 ${Date.now()}`)
+  const agentCreated = page.waitForResponse(response =>
+    response.url().includes('/api/v1/aicc/agents') && response.request().method() === 'POST',
+  )
+  await page.getByRole('button', { name: '保存配置' }).click()
+  expect((await agentCreated).ok()).toBeTruthy()
+  const industrySelect = page.locator('.knowledge-panel .n-form-item').filter({ hasText: '行业知识库' }).locator('.n-base-selection')
+  await industrySelect.click({ timeout: 15_000 })
+  await expect(page.getByText(baseName, { exact: true })).toBeVisible()
+  await page.getByText(baseName, { exact: true }).last().click()
+  const selected = page.waitForResponse(response =>
+    response.url().includes('/knowledge') && response.request().method() === 'PUT',
+  )
+  await page.getByRole('button', { name: '保存知识范围' }).click()
+  expect((await selected).ok()).toBeTruthy()
+
+  await clearLoginState(page)
+  await loginAs(page, 'platform_admin', fx, 'zh')
+  await page.goto('/organizations')
+  const updatedRow = page.getByRole('row', { name: new RegExp(fx.org_code) })
+  await updatedRow.getByRole('button', { name: '编辑' }).click()
+  const revokeField = page.locator('.n-form-item').filter({ hasText: '授权行业知识库' })
+  await revokeField.locator('.n-base-selection').click()
+  await page.getByText(baseName, { exact: true }).last().click()
+  const revoked = page.waitForResponse(response =>
+    response.url().includes('/aicc-config') && response.request().method() === 'PATCH',
+  )
+  await page.getByRole('button', { name: '保存 AICC 配置' }).click()
+  expect((await revoked).ok()).toBeTruthy()
+
+  await clearLoginState(page)
+  await loginAs(page, 'org_admin', fx, 'zh')
+  await openAICCConsole(page)
+  await openAICCSettings(page)
+  await page.locator('.knowledge-panel .n-form-item').filter({ hasText: '行业知识库' }).locator('.n-base-selection').click({ timeout: 15_000 })
+  await expect(page.getByText(baseName, { exact: true })).toHaveCount(0)
+})
