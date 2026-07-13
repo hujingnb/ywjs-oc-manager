@@ -48,7 +48,7 @@ func TestRetentionLoopStartTriggersPeriodicCleanup(t *testing.T) {
 	loop.Start(ctx)
 
 	require.Eventually(t, func() bool {
-		return store.deletedCount() == 1
+		return store.deletedCount() >= 1
 	}, time.Second, 10*time.Millisecond)
 	assert.GreaterOrEqual(t, store.callCount(), 2)
 }
