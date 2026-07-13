@@ -221,6 +221,8 @@ local-build-aicc-runtime: aicc-runtime-inject-contract ## 构建客服专用 run
 	rm -rf $(AICC_RUNTIME_DIR)/ocops-contract $(AICC_RUNTIME_DIR)/kanban-contract $(AICC_RUNTIME_DIR)/cron-contract; \
 	if [ $$status -ne 0 ]; then exit $$status; fi
 	docker push $(K3D_REGISTRY_HOST)/oc-manager-hermes-aicc:dev
+	# 本地 k3d 节点使用固定 :dev 标签时，直接导入节点以避免 registry 临时不可达导致旧镜像继续运行。
+	docker save --platform linux/amd64 $(K3D_REGISTRY_HOST)/oc-manager-hermes-aicc:dev | docker exec -i k3d-$(K3D_CLUSTER)-server-0 ctr images import -
 
 # LOCAL_PRELOAD_IMAGES：local-up 需要的 docker.io 重镜像。节点 containerd 经镜像源拉这些镜像
 # 时快时卡（mysql/es 曾致 rollout 超时，ragflow 几 GB 更易卡），故改为宿主 docker 拉取（走宿主
