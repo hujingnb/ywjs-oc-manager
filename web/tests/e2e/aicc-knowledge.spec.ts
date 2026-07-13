@@ -262,13 +262,15 @@ test('行业知识库授权后可选择，撤销授权后自动清理', async ({
   const updatedRow = page.getByRole('row', { name: new RegExp(fx.org_code) })
   await updatedRow.getByRole('button', { name: '编辑' }).click()
   const revokeField = page.locator('.n-form-item').filter({ hasText: '授权行业知识库' })
-  await revokeField.locator('.n-base-selection').click()
-  await page.getByText(baseName, { exact: true }).last().click()
+  await revokeField.getByRole('button', { name: 'close' }).click()
   const revoked = page.waitForResponse(response =>
     response.url().includes('/aicc-config') && response.request().method() === 'PATCH',
   )
   await page.getByRole('button', { name: '保存 AICC 配置' }).click()
-  expect((await revoked).ok()).toBeTruthy()
+  const revokedResponse = await revoked
+  expect(revokedResponse.ok()).toBeTruthy()
+  expect((await revokedResponse.request().postDataJSON()) as { industry_knowledge_base_ids: string[] })
+    .toMatchObject({ industry_knowledge_base_ids: [] })
 
   await clearLoginState(page)
   await loginAs(page, 'org_admin', fx, 'zh')

@@ -198,6 +198,7 @@ func TestCreateHiddenAICCAppCreatesHiddenAppAndInitializeJob(t *testing.T) {
 	assert.Equal(t, "zh", store.app.Locale.String)
 	require.Len(t, store.jobs, 1)
 	assert.Equal(t, domain.JobTypeAppInitialize, store.jobs[0].Type)
+	assert.EqualValues(t, 20, store.jobs[0].MaxAttempts, "AICC 运行时初始化应覆盖 new-api 短暂限流的恢复窗口")
 	assert.JSONEq(t, `{"app_id":"app-aicc-hidden-1"}`, string(store.jobs[0].PayloadJson))
 	assert.Empty(t, notifier.lastJobID, "AICC agent 写入前不应即时唤醒 worker")
 }

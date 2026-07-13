@@ -39,7 +39,7 @@ export async function waitForAICCRuntime(appId: string): Promise<void> {
     'kubectl',
     ['-n', 'oc-apps', 'get', 'pods', '-l', `app=${appId}`, '-o', 'name'],
     { encoding: 'utf8' },
-  ).trim(), { timeout: 60_000 }).not.toBe('')
+  ).trim(), { timeout: 180_000 }).not.toBe('')
 
   execFileSync(
     'kubectl',

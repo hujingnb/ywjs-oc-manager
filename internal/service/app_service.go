@@ -290,7 +290,9 @@ func (s *AppService) CreateHiddenAICCApp(ctx context.Context, principal auth.Pri
 		Type:        domain.JobTypeAppInitialize,
 		Priority:    100,
 		RunAfter:    time.Now(),
-		MaxAttempts: 5,
+		// new-api 获取完整 token 使用严格限流端点；AICC 公开入口不能因短暂 429 永久失效，
+		// 因此使用高频异步任务一致的重试预算，由 worker 指数退避避免继续放大上游压力。
+		MaxAttempts: 20,
 		PayloadJson: payload,
 	}); err != nil {
 		return "", rollbackCreatedApp(fmt.Errorf("创建 AICC 隐藏 app 初始化任务失败: %w", err))
