@@ -7,6 +7,14 @@ const (
 	AICCAgentStatusPaused  = "paused"
 	AICCAgentStatusDeleted = "deleted"
 
+	// AICCRuntimeStatus* 是管理端展示状态，由隐藏 App 运行时事实和接待意图共同推导，不写入数据库。
+	AICCRuntimeStatusStarting  = "starting"
+	AICCRuntimeStatusReady     = "ready"
+	AICCRuntimeStatusReceiving = "receiving"
+	AICCRuntimeStatusPaused    = "paused"
+	AICCRuntimeStatusError     = "error"
+	AICCRuntimeStatusDeleted   = "deleted"
+
 	// AICCPrivacyMode* 控制访客会话是否只展示隐私说明，还是必须先同意。
 	AICCPrivacyModeNotice          = "notice"
 	AICCPrivacyModeConsentRequired = "consent_required"

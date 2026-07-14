@@ -50,6 +50,10 @@ type AICCAgentResult struct {
 	Name string `json:"name"`
 	// Status 是智能体生命周期状态：draft / active / paused / deleted。
 	Status string `json:"status"`
+	// RuntimeStatus 是隐藏运行时就绪事实与接待意图共同计算的管理端展示状态。
+	RuntimeStatus string `json:"runtime_status"`
+	// RuntimeMessage 是异常或启动等待时可安全展示的摘要，不包含运行时坐标和凭证。
+	RuntimeMessage string `json:"runtime_message,omitempty"`
 	// Scenario 是业务场景说明。
 	Scenario string `json:"scenario,omitempty"`
 	// Greeting 是欢迎语。

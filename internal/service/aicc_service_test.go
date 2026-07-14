@@ -24,6 +24,7 @@ type fakeAICCStore struct {
 	org                       sqlc.Organization
 	count                     int64
 	agents                    map[string]sqlc.AiccAgent
+	runtimeApps               map[string]sqlc.GetAppWithVersionRow
 	settings                  map[string]sqlc.AiccAgentSetting
 	knowledge                 map[string][]sqlc.AiccAgentKnowledge
 	organizationIndustryBases map[string][]sqlc.IndustryKnowledgeBasis
@@ -135,6 +136,15 @@ func (f *fakeAICCStore) GetAICCAgent(_ context.Context, id string) (sqlc.AiccAge
 	row, ok := f.agents[id]
 	if !ok {
 		return sqlc.AiccAgent{}, sql.ErrNoRows
+	}
+	return row, nil
+}
+
+// GetAppWithVersion 返回 AICC 绑定隐藏 app 的运行时状态，供管理端计算展示状态。
+func (f *fakeAICCStore) GetAppWithVersion(_ context.Context, id string) (sqlc.GetAppWithVersionRow, error) {
+	row, ok := f.runtimeApps[id]
+	if !ok {
+		return sqlc.GetAppWithVersionRow{}, sql.ErrNoRows
 	}
 	return row, nil
 }
@@ -801,6 +811,39 @@ func TestAICCServiceCreateAgentCreatesHiddenApp(t *testing.T) {
 	assert.Equal(t, "aicc_agent", store.audits[0].TargetType)
 	assert.Equal(t, "create", store.audits[0].Action)
 	assert.Equal(t, result.ID, store.audits[0].TargetID)
+}
+
+// TestAICCServiceRuntimeDisplayStatus 覆盖隐藏运行时与接待意图组合后的管理端展示状态。
+func TestAICCServiceRuntimeDisplayStatus(t *testing.T) {
+	cases := []struct {
+		name        string
+		agentStatus string
+		appStatus   string
+		phase       string
+		want        string
+	}{
+		{name: "Pod 启动中", agentStatus: domain.AICCAgentStatusDraft, appStatus: domain.AppStatusStarting, phase: domain.RuntimePhaseStarting, want: "starting"}, // 隐藏 app 未就绪时不可开始接待。
+		{name: "Pod 就绪待接待", agentStatus: domain.AICCAgentStatusDraft, appStatus: domain.AppStatusBindingWaiting, phase: domain.RuntimePhaseReady, want: "ready"}, // 运行时可用但尚未接待。
+		{name: "Pod 就绪接待中", agentStatus: domain.AICCAgentStatusActive, appStatus: domain.AppStatusBindingWaiting, phase: domain.RuntimePhaseReady, want: "receiving"}, // 公开入口已开始接待。
+		{name: "Pod 就绪已暂停", agentStatus: domain.AICCAgentStatusPaused, appStatus: domain.AppStatusBindingWaiting, phase: domain.RuntimePhaseReady, want: "paused"}, // 管理员暂停后保留运行时。
+		{name: "隐藏 app 异常", agentStatus: domain.AICCAgentStatusDraft, appStatus: domain.AppStatusError, phase: domain.RuntimePhaseUnknown, want: "error"}, // 初始化或运行失败优先展示异常。
+	}
+
+	for _, tc := range cases {
+		// 每个子测试验证一组运行时事实和接待意图的展示映射。
+		t.Run(tc.name, func(t *testing.T) {
+			store := seededAICCStore()
+			store.agents["agent-1"] = sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-hidden-1", Name: "官网售前", Status: tc.agentStatus, PrivacyMode: domain.AICCPrivacyModeNotice, RetentionDays: 180}
+			store.runtimeApps = map[string]sqlc.GetAppWithVersionRow{
+				"app-hidden-1": {App: sqlc.App{ID: "app-hidden-1", Status: tc.appStatus, RuntimePhase: tc.phase}},
+			}
+
+			result, err := NewAICCService(store, &fakeAICCHiddenAppCreator{}).GetAgent(context.Background(), aiccOrgAdmin(), "agent-1")
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, result.RuntimeStatus)
+		})
+	}
 }
 
 // TestAICCServiceCreateAgentValidation 覆盖创建智能体的权限、开通状态、数量上限和参数边界。

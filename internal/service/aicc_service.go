@@ -43,6 +43,8 @@ type AICCStore interface {
 	CreateAICCAgent(ctx context.Context, arg sqlc.CreateAICCAgentParams) error
 	// GetAICCAgent 按 ID 读取未删除智能体。
 	GetAICCAgent(ctx context.Context, id string) (sqlc.AiccAgent, error)
+	// GetAppWithVersion 读取 AICC 绑定隐藏 app 的运行时状态；版本字段由 sqlc 行一并返回。
+	GetAppWithVersion(ctx context.Context, id string) (sqlc.GetAppWithVersionRow, error)
 	// GetAICCAgentSettings 读取智能体运营配置；历史智能体可能没有配置行。
 	GetAICCAgentSettings(ctx context.Context, agentID string) (sqlc.AiccAgentSetting, error)
 	// UpsertAICCAgentSettings 保存智能体运营配置快照。
@@ -248,7 +250,7 @@ func (s *AICCService) CreateAgent(ctx context.Context, principal auth.Principal,
 	}); err != nil {
 		return AICCAgentResult{}, err
 	}
-	return toAICCAgentResult(row), nil
+	return s.toAICCAgentResult(ctx, row)
 }
 
 func (s *AICCService) rollbackHiddenApp(ctx context.Context, principal auth.Principal, appID string) error {
@@ -285,7 +287,11 @@ func (s *AICCService) ListAgents(ctx context.Context, principal auth.Principal, 
 	}
 	results := make([]AICCAgentResult, 0, len(rows))
 	for _, row := range rows {
-		results = append(results, toAICCAgentResult(row))
+		result, err := s.toAICCAgentResult(ctx, row)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, result)
 	}
 	return results, nil
 }
@@ -299,7 +305,7 @@ func (s *AICCService) GetAgent(ctx context.Context, principal auth.Principal, ag
 	if !auth.CanViewAICC(principal, row.OrgID) {
 		return AICCAgentResult{}, ErrForbidden
 	}
-	return toAICCAgentResult(row), nil
+	return s.toAICCAgentResult(ctx, row)
 }
 
 // GetAgentSettings 读取智能体运营配置；历史智能体没有配置行时返回默认值。
@@ -412,7 +418,7 @@ func (s *AICCService) UpdateAgent(ctx context.Context, principal auth.Principal,
 	}); err != nil {
 		return AICCAgentResult{}, err
 	}
-	return toAICCAgentResult(row), nil
+	return s.toAICCAgentResult(ctx, row)
 }
 
 // SetAgentStatus 启动或停止智能体。action 只接受 start / stop，避免 handler 暴露数据库状态细节。
@@ -442,7 +448,7 @@ func (s *AICCService) SetAgentStatus(ctx context.Context, principal auth.Princip
 	}); err != nil {
 		return AICCAgentResult{}, err
 	}
-	return toAICCAgentResult(row), nil
+	return s.toAICCAgentResult(ctx, row)
 }
 
 // DeleteAgent 软删除智能体；隐藏 app 保留给后续清理任务或审计排查，不在本管理接口直接硬删。
@@ -1230,6 +1236,41 @@ func toAICCAgentResult(row sqlc.AiccAgent) AICCAgentResult {
 		CreatedAt:      row.CreatedAt,
 		UpdatedAt:      row.UpdatedAt,
 	}
+}
+
+// toAICCAgentResult 补充隐藏 app 的只读运行时展示状态，避免前端拼接两个生命周期维度。
+func (s *AICCService) toAICCAgentResult(ctx context.Context, row sqlc.AiccAgent) (AICCAgentResult, error) {
+	result := toAICCAgentResult(row)
+	if row.Status == domain.AICCAgentStatusDeleted {
+		result.RuntimeStatus = domain.AICCRuntimeStatusDeleted
+		return result, nil
+	}
+	appRow, err := s.store.GetAppWithVersion(ctx, row.AppID)
+	if errors.Is(err, sql.ErrNoRows) {
+		result.RuntimeStatus = domain.AICCRuntimeStatusStarting
+		return result, nil
+	}
+	if err != nil {
+		return AICCAgentResult{}, fmt.Errorf("查询 AICC 隐藏运行时失败: %w", err)
+	}
+	if appRow.App.Status == domain.AppStatusError {
+		result.RuntimeStatus = domain.AICCRuntimeStatusError
+		result.RuntimeMessage = strOrEmpty(appRow.App.LastErrorMessage)
+		return result, nil
+	}
+	if appRow.App.RuntimePhase != domain.RuntimePhaseReady {
+		result.RuntimeStatus = domain.AICCRuntimeStatusStarting
+		return result, nil
+	}
+	switch row.Status {
+	case domain.AICCAgentStatusActive:
+		result.RuntimeStatus = domain.AICCRuntimeStatusReceiving
+	case domain.AICCAgentStatusPaused:
+		result.RuntimeStatus = domain.AICCRuntimeStatusPaused
+	default:
+		result.RuntimeStatus = domain.AICCRuntimeStatusReady
+	}
+	return result, nil
 }
 
 // defaultAICCAgentSettingsResult 为历史无配置行智能体提供管理端可直接渲染的默认运营配置。
