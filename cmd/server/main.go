@@ -279,7 +279,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// dispatcher 负责领取持久化任务租约并写回助手回复；Redis 只用于唤醒，MySQL 仍是事实来源。
 	aiccMessageDispatcher := service.NewAICCDispatcher(dbStore.Queries, store.NewAICCDispatcherRunner(dbStore), aiccPublicChat, nil)
 	// 复用项目既有结构化日志记录异步消息状态，不额外引入尚未部署的指标系统。
-	aiccMessageDispatcher.SetObserver(service.NewSlogAICCDispatchObserver(logger))
+	aiccMessageObserver := service.NewSlogAICCDispatchObserver(logger)
+	aiccMessageDispatcher.SetObserver(aiccMessageObserver)
 
 	channelRegistry := channel.NewRegistry()
 	channelService := service.NewChannelService(dbStore.Queries, channelRegistry, redisQueue)
@@ -799,6 +800,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	loop.SetLogger(logger)
 	// AICC 公开消息每秒扫库并消费独立 Redis 信号；Redis 故障后下轮扫描会重新补发信号。
 	aiccMessageLoop := aiccworker.NewMessageDispatchLoop(dbStore.Queries, aiccMessageQueue, aiccMessageDispatcher, logger)
+	// 循环与 dispatcher 共用同一观测器，排队、恢复和执行结果可在同一日志流关联。
+	aiccMessageLoop.SetObserver(aiccMessageObserver)
 
 	// app 状态 poll reconciler：周期对运行中 app 调 Orchestrator.Status 同步 pod 状态到 DB，
 	// 取代 docker inspect 健康自愈（manager 不自愈，崩溃重启交 Deployment 控制器）。

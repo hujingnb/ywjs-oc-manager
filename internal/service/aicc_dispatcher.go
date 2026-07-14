@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -196,14 +197,8 @@ func (d *AICCDispatcher) observe(ctx context.Context, task sqlc.AiccMessageTask,
 
 // aiccResultLabel 将上游错误归并为稳定结果枚举，避免日志标签携带动态错误文本。
 func aiccResultLabel(err error, prefix string) string {
-	var status *AICCUpstreamStatusError
-	if errors.As(err, &status) {
-		return fmt.Sprintf("%s_http_%d", prefix, status.StatusCode)
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return prefix + "_timeout"
-	}
-	return prefix + "_runtime_error"
+	// 与 worker 共用错误分类，dispatcher 仅替换结果前缀以保留 retry/failed 生命周期语义。
+	return prefix + "_" + strings.TrimPrefix(AICCSafeDispatchResult(err), "dispatch_")
 }
 
 // startLeaseHeartbeat 在 ChatAICC 执行期间使用同一 lease token 续租；续租失败会取消聊天请求，

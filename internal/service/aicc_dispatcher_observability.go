@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 
 	managerlog "oc-manager/internal/log"
@@ -20,6 +22,10 @@ type AICCDispatchObservation struct {
 	Upstream string
 	// Result 是固定结果枚举，不承载动态错误文本。
 	Result string
+	// QueueWaitMS 是任务从创建到本轮扫描的等待时长，仅作为数值观测值输出。
+	QueueWaitMS int64
+	// Inflight 是当前循环已占用的并发槽位数，仅作为数值观测值输出。
+	Inflight int
 }
 
 // AICCDispatchObserver 接收 dispatcher 生命周期事件，便于接入项目既有 slog 或测试接收端。
@@ -52,5 +58,19 @@ func (o *SlogAICCDispatchObserver) Observe(ctx context.Context, event AICCDispat
 		slog.String(managerlog.KeyOrgID, event.OrgID),
 		slog.String("upstream", event.Upstream),
 		slog.String("result", event.Result),
+		slog.Int64("queue_wait_ms", event.QueueWaitMS),
+		slog.Int("inflight", event.Inflight),
 	)
+}
+
+// AICCSafeDispatchResult 将可能含有请求上下文的错误归并为低基数结果码，供 worker 安全记录。
+func AICCSafeDispatchResult(err error) string {
+	var status *AICCUpstreamStatusError
+	if errors.As(err, &status) {
+		return fmt.Sprintf("dispatch_http_%d", status.StatusCode)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "dispatch_timeout"
+	}
+	return "dispatch_runtime_error"
 }

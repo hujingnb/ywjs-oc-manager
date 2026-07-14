@@ -1,8 +1,11 @@
 package aicc
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -11,8 +14,60 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"oc-manager/internal/redis"
+	"oc-manager/internal/service"
 	"oc-manager/internal/store/sqlc"
 )
+
+// TestMessageDispatchLoopTelemetryCoversQueueConcurrencyAndRecovery 覆盖真实 Tick 路径：
+// 队列等待、并发已满和重启租约回收必须经同一 observer 输出，且不能携带访客内容。
+func TestMessageDispatchLoopTelemetryCoversQueueConcurrencyAndRecovery(t *testing.T) {
+	var output bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&output, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	queue := redis.NewMemoryQueue()
+	store := &messageTaskStoreStub{ready: []sqlc.AiccMessageTask{
+		{ID: "task-1", AgentID: "agent-1", OrgID: "org-1", CreatedAt: time.Now().Add(-time.Second)}, // 首个在飞任务。
+		{ID: "task-2", AgentID: "agent-1", OrgID: "org-1", CreatedAt: time.Now().Add(-time.Second)}, // 第二个在飞任务。
+		{ID: "task-3", AgentID: "agent-1", OrgID: "org-1", CreatedAt: time.Now().Add(-time.Second)}, // 第三个在飞任务。
+		{ID: "task-4", AgentID: "agent-1", OrgID: "org-1", CreatedAt: time.Now().Add(-time.Second)}, // 第四个在飞任务。
+		{ID: "task-5", AgentID: "agent-1", OrgID: "org-1", CreatedAt: time.Now().Add(-time.Second)}, // 并发满后等待下轮。
+	}}
+	dispatcher := &concurrentMessageTaskDispatcher{release: make(chan struct{})}
+	loop := NewMessageDispatchLoop(store, queue, dispatcher, logger)
+	loop.SetObserver(service.NewSlogAICCDispatchObserver(logger))
+
+	require.NoError(t, loop.Tick(context.Background()))
+	require.Eventually(t, func() bool { return dispatcher.activeCount() == aiccMessageDispatchConcurrency }, time.Second, 10*time.Millisecond)
+
+	logs := output.String()
+	assert.Contains(t, logs, `"aicc_event":"queued"`)
+	assert.Contains(t, logs, `"aicc_event":"lease_recovered"`)
+	assert.Contains(t, logs, `"queue_wait_ms":`)
+	assert.Contains(t, logs, `"inflight":4`)
+	assert.NotContains(t, logs, "visitor-content")
+	assert.NotContains(t, logs, "token")
+	close(dispatcher.release)
+	loop.Wait()
+}
+
+// TestMessageDispatchLoopTelemetryClassifiesDispatchError 覆盖分派失败日志：
+// 运行时错误即使包含访客内容或令牌字样，也只能输出固定错误分类，不得直接写出错误文本。
+func TestMessageDispatchLoopTelemetryClassifiesDispatchError(t *testing.T) {
+	var output bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&output, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	queue := redis.NewMemoryQueue()
+	store := &messageTaskStoreStub{ready: []sqlc.AiccMessageTask{{ID: "task-1", AgentID: "agent-1", OrgID: "org-1", CreatedAt: time.Now()}}}
+	loop := NewMessageDispatchLoop(store, queue, errorMessageTaskDispatcher{err: errors.New("visitor-content token=secret")}, logger)
+	loop.SetObserver(service.NewSlogAICCDispatchObserver(logger))
+
+	require.NoError(t, loop.Tick(context.Background()))
+	loop.Wait()
+
+	logs := output.String()
+	assert.Contains(t, logs, `"result":"dispatch_runtime_error"`)
+	assert.NotContains(t, logs, "visitor-content")
+	assert.NotContains(t, logs, "secret")
+	assert.False(t, strings.Contains(logs, `"error"`))
+}
 
 // TestMessageDispatchLoopTickSweepsReservesAndDispatches 覆盖任务运行循环：
 // MySQL 就绪任务先补入 Redis 信号队列，再按批量领取并交给 dispatcher 执行。
@@ -26,7 +81,7 @@ func TestMessageDispatchLoopTickSweepsReservesAndDispatches(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, int32(32), store.limit)
-	assert.Equal(t, int64(1), store.recoverCalls)
+	assert.Equal(t, int64(1), dispatcher.recoveryCount())
 	require.Eventually(t, func() bool { return len(dispatcher.dispatchedIDs()) == 2 }, time.Second, 10*time.Millisecond)
 	assert.ElementsMatch(t, []string{"task-1", "task-2"}, dispatcher.dispatchedIDs())
 	loop.Wait()
@@ -43,7 +98,6 @@ func TestMessageDispatchLoopTickRetainsMySQLTaskWhenRedisFails(t *testing.T) {
 
 	require.ErrorIs(t, err, assert.AnError)
 	assert.Equal(t, int32(32), store.limit)
-	assert.Equal(t, int64(1), store.recoverCalls)
 }
 
 // TestMessageDispatchLoopTickDoesNotBlockScanOnSlowDispatch 覆盖慢速运行时调用：
@@ -67,7 +121,7 @@ func TestMessageDispatchLoopTickDoesNotBlockScanOnSlowDispatch(t *testing.T) {
 	start := time.Now()
 	require.NoError(t, loop.Tick(context.Background()))
 	assert.Less(t, time.Since(start), 100*time.Millisecond)
-	assert.Equal(t, int64(2), store.recoverCalls)
+	assert.Equal(t, int64(2), dispatcher.recoveryCount())
 
 	close(dispatcher.release)
 	loop.Wait()
@@ -121,9 +175,8 @@ func TestMessageDispatchLoopRunWaitsForSubmittedDispatchOnShutdown(t *testing.T)
 
 // messageTaskStoreStub 记录运行循环对 MySQL 就绪任务扫描和租约回收的调用。
 type messageTaskStoreStub struct {
-	ready        []sqlc.AiccMessageTask
-	limit        int32
-	recoverCalls int64
+	ready []sqlc.AiccMessageTask
+	limit int32
 }
 
 func (s *messageTaskStoreStub) ListReadyAICCMessageTasks(_ context.Context, limit int32) ([]sqlc.AiccMessageTask, error) {
@@ -131,15 +184,19 @@ func (s *messageTaskStoreStub) ListReadyAICCMessageTasks(_ context.Context, limi
 	return s.ready, nil
 }
 
-func (s *messageTaskStoreStub) RecoverExpiredAICCMessageTaskLeases(context.Context) (int64, error) {
-	s.recoverCalls++
-	return 0, nil
+// errorMessageTaskDispatcher 模拟包含敏感上下文的运行时错误，验证循环不会原样记录。
+type errorMessageTaskDispatcher struct{ err error }
+
+func (d errorMessageTaskDispatcher) Dispatch(context.Context, sqlc.AiccMessageTask) error {
+	return d.err
 }
+func (errorMessageTaskDispatcher) RecoverExpiredLeases(context.Context) (int64, error) { return 0, nil }
 
 // messageTaskDispatcherStub 捕获实际被循环分派的任务，不依赖运行时或数据库。
 type messageTaskDispatcherStub struct {
-	mu    sync.Mutex
-	tasks []sqlc.AiccMessageTask
+	mu           sync.Mutex
+	tasks        []sqlc.AiccMessageTask
+	recoverCalls int64
 }
 
 func (d *messageTaskDispatcherStub) Dispatch(_ context.Context, task sqlc.AiccMessageTask) error {
@@ -149,10 +206,24 @@ func (d *messageTaskDispatcherStub) Dispatch(_ context.Context, task sqlc.AiccMe
 	return nil
 }
 
+func (d *messageTaskDispatcherStub) RecoverExpiredLeases(context.Context) (int64, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.recoverCalls++
+	return 0, nil
+}
+
+func (d *messageTaskDispatcherStub) recoveryCount() int64 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.recoverCalls
+}
+
 // blockingMessageTaskDispatcher 模拟被上游运行时长时间占用的单条消息分派。
 type blockingMessageTaskDispatcher struct {
-	started chan struct{}
-	release chan struct{}
+	started      chan struct{}
+	release      chan struct{}
+	recoverCalls int64
 }
 
 // concurrentMessageTaskDispatcher 记录同时阻塞的调用数量，用于验证循环并发上限。
@@ -177,6 +248,10 @@ func (d *concurrentMessageTaskDispatcher) Dispatch(context.Context, sqlc.AiccMes
 	return nil
 }
 
+func (*concurrentMessageTaskDispatcher) RecoverExpiredLeases(context.Context) (int64, error) {
+	return 1, nil
+}
+
 func (d *concurrentMessageTaskDispatcher) activeCount() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -198,6 +273,13 @@ func (d *blockingMessageTaskDispatcher) Dispatch(context.Context, sqlc.AiccMessa
 	<-d.release
 	return nil
 }
+
+func (d *blockingMessageTaskDispatcher) RecoverExpiredLeases(context.Context) (int64, error) {
+	d.recoverCalls++
+	return 0, nil
+}
+
+func (d *blockingMessageTaskDispatcher) recoveryCount() int64 { return d.recoverCalls }
 
 func (d *messageTaskDispatcherStub) dispatchedIDs() []string {
 	d.mu.Lock()

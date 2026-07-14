@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"oc-manager/internal/redis"
+	"oc-manager/internal/service"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -19,12 +20,12 @@ const aiccMessageDispatchConcurrency = 4
 // MySQL 保存任务事实与租约，Redis 只提供低延迟的唤醒信号。
 type messageTaskStore interface {
 	ListReadyAICCMessageTasks(context.Context, int32) ([]sqlc.AiccMessageTask, error)
-	RecoverExpiredAICCMessageTaskLeases(context.Context) (int64, error)
 }
 
 // messageTaskDispatcher 抽象单条任务执行，便于循环独立测试调度顺序和故障降级。
 type messageTaskDispatcher interface {
 	Dispatch(context.Context, sqlc.AiccMessageTask) error
+	RecoverExpiredLeases(context.Context) (int64, error)
 }
 
 // MessageDispatchLoop 周期扫描并执行 AICC 公开消息的异步任务。
@@ -33,8 +34,10 @@ type MessageDispatchLoop struct {
 	queue      redis.Queue
 	dispatcher messageTaskDispatcher
 	logger     *slog.Logger
-	interval   time.Duration
-	batchSize  int32
+	// observer 与 dispatcher 共用同一安全事件出口，确保循环级排队/恢复事件不绕过脱敏规则。
+	observer  service.AICCDispatchObserver
+	interval  time.Duration
+	batchSize int32
 	// slots 控制同时调用运行时的数量，避免慢请求无限堆积或阻塞扫描循环。
 	slots chan struct{}
 	// dispatchWG 让 shutdown 等待已启动任务退出，避免主进程提前关闭依赖连接。
@@ -49,7 +52,15 @@ func NewMessageDispatchLoop(store messageTaskStore, queue redis.Queue, dispatche
 	return &MessageDispatchLoop{
 		store: store, queue: queue, dispatcher: dispatcher, logger: logger,
 		interval: time.Second, batchSize: aiccMessageDispatchBatchSize,
-		slots: make(chan struct{}, aiccMessageDispatchConcurrency),
+		slots:    make(chan struct{}, aiccMessageDispatchConcurrency),
+		observer: service.NewSlogAICCDispatchObserver(logger),
+	}
+}
+
+// SetObserver 注入与 dispatcher 共享的安全观测器；用于保证同一任务生命周期在同一出口记录。
+func (l *MessageDispatchLoop) SetObserver(observer service.AICCDispatchObserver) {
+	if l != nil && observer != nil {
+		l.observer = observer
 	}
 }
 
@@ -79,13 +90,14 @@ func (l *MessageDispatchLoop) Tick(ctx context.Context) error {
 	if l == nil || l.store == nil || l.queue == nil || l.dispatcher == nil {
 		return fmt.Errorf("AICC 消息运行循环未配置")
 	}
-	recovered, err := l.store.RecoverExpiredAICCMessageTaskLeases(ctx)
+	// 必须经 dispatcher 的恢复入口执行，避免循环绕过其观测与未来的恢复策略。
+	recovered, err := l.dispatcher.RecoverExpiredLeases(ctx)
 	if err != nil {
 		return fmt.Errorf("回收过期 AICC 消息租约失败: %w", err)
 	}
 	if recovered > 0 {
 		// 租约回收为聚合事件，不带任务或会话标识；MySQL 状态仍是重启恢复的唯一事实来源。
-		l.logger.InfoContext(ctx, "AICC 异步消息任务事件", "aicc_event", "lease_recovered", "upstream", "hermes", "result", "recovered", "recovered", recovered)
+		l.observe(ctx, service.AICCDispatchObservation{Event: "lease_recovered", Upstream: "hermes", Result: "recovered"})
 	}
 	ready, err := l.store.ListReadyAICCMessageTasks(ctx, l.batchSize)
 	if err != nil {
@@ -99,7 +111,7 @@ func (l *MessageDispatchLoop) Tick(ctx context.Context) error {
 			queueWait = time.Since(task.CreatedAt)
 		}
 		// queued 事件只记录稳定任务归属和等待时长，不记录访客输入、session 或 Redis 信号 ID。
-		l.logger.InfoContext(ctx, "AICC 异步消息任务事件", "aicc_event", "queued", "agent_id", task.AgentID, "org_id", task.OrgID, "upstream", "hermes", "result", "queued", "queue_wait_ms", queueWait.Milliseconds())
+		l.observe(ctx, service.AICCDispatchObservation{Event: "queued", AgentID: task.AgentID, OrgID: task.OrgID, Upstream: "hermes", Result: "queued", QueueWaitMS: queueWait.Milliseconds()})
 		if err := l.queue.Enqueue(ctx, task.ID); err != nil {
 			return fmt.Errorf("写入 AICC 消息 Redis 信号失败: %w", err)
 		}
@@ -116,7 +128,7 @@ func (l *MessageDispatchLoop) Tick(ctx context.Context) error {
 		}
 		if !l.tryDispatch(ctx, task) {
 			// 有界并发已满时不阻塞扫描；该任务仍是 MySQL 就绪任务，下轮会重新入队。
-			l.logger.DebugContext(ctx, "AICC 异步消息任务事件", "aicc_event", "queued", "agent_id", task.AgentID, "org_id", task.OrgID, "upstream", "hermes", "result", "concurrency_limited", "inflight", len(l.slots))
+			l.observe(ctx, service.AICCDispatchObservation{Event: "queued", AgentID: task.AgentID, OrgID: task.OrgID, Upstream: "hermes", Result: "concurrency_limited", Inflight: len(l.slots)})
 		}
 	}
 	return nil
@@ -134,12 +146,19 @@ func (l *MessageDispatchLoop) tryDispatch(ctx context.Context, task sqlc.AiccMes
 			}()
 			if err := l.dispatcher.Dispatch(ctx, task); err != nil {
 				// 单个任务失败由 dispatcher 写入重试或失败状态，不能阻塞同批其他会话。
-				l.logger.ErrorContext(ctx, "AICC 消息任务分派失败", "agent_id", task.AgentID, "org_id", task.OrgID, "upstream", "hermes", "result", "dispatch_error", "inflight", len(l.slots), "error", err)
+				l.observe(ctx, service.AICCDispatchObservation{Event: "dispatch_error", AgentID: task.AgentID, OrgID: task.OrgID, Upstream: "hermes", Result: service.AICCSafeDispatchResult(err), Inflight: len(l.slots)})
 			}
 		}()
 		return true
 	default:
 		return false
+	}
+}
+
+// observe 统一把循环事件交给安全观测器；任何任务文本、会话 ID、租约 token 和原始错误均不得传入。
+func (l *MessageDispatchLoop) observe(ctx context.Context, event service.AICCDispatchObservation) {
+	if l != nil && l.observer != nil {
+		l.observer.Observe(ctx, event)
 	}
 }
 

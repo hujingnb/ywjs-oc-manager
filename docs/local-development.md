@@ -79,12 +79,14 @@ make local-logs svc=manager-api
 凭证或地址到本地；也不要通过删除 MySQL/Redis 数据来制造恢复场景。需要验证重启恢复时，
 只滚动重启本地 `manager-api`，随后观察 `lease_recovered` 和任务最终状态。
 
-本地 HPA 观察使用当前 kubeconfig 的本地集群上下文，并限定 AICC 命名空间：
+HPA 不是静态部署清单：manager 的 AICC Kubernetes adapter 在创建或启动隐藏应用时，
+通过 `internal/integrations/k8sorch/adapter.go` 动态渲染并收敛对应 HPA；停止或删除应用时会移除它。
+因此先在本地创建并启动一个 AICC 智能体，再使用当前 kubeconfig 的本地集群上下文观察其资源：
 
 ```bash
 kubectl config current-context
 kubectl -n oc-aicc get hpa,pods
-kubectl -n oc-aicc describe hpa
+kubectl -n oc-aicc describe hpa app-<本地隐藏应用ID>
 ```
 
 HPA 依据 CPU（70%）和内存（75%）目标扩缩；异步任务日志用于判断排队等待和在飞调用，
