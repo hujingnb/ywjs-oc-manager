@@ -278,6 +278,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	aiccPublicService.SetGeoIPResolver(aiccGeoIPResolver)
 	// dispatcher 负责领取持久化任务租约并写回助手回复；Redis 只用于唤醒，MySQL 仍是事实来源。
 	aiccMessageDispatcher := service.NewAICCDispatcher(dbStore.Queries, store.NewAICCDispatcherRunner(dbStore), aiccPublicChat, nil)
+	// 复用项目既有结构化日志记录异步消息状态，不额外引入尚未部署的指标系统。
+	aiccMessageDispatcher.SetObserver(service.NewSlogAICCDispatchObserver(logger))
 
 	channelRegistry := channel.NewRegistry()
 	channelService := service.NewChannelService(dbStore.Queries, channelRegistry, redisQueue)

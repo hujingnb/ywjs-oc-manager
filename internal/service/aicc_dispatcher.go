@@ -54,10 +54,12 @@ type AICCDispatcherTxRunner interface {
 
 // AICCDispatcher 处理单个已入队客服任务；任务表的租约和会话约束仍是跨进程真相。
 type AICCDispatcher struct {
-	store        AICCDispatcherStore
-	tx           AICCDispatcherTxRunner
-	chat         AICCHermesChat
-	limiter      AICCConcurrencyLimiter
+	store   AICCDispatcherStore
+	tx      AICCDispatcherTxRunner
+	chat    AICCHermesChat
+	limiter AICCConcurrencyLimiter
+	// observer 只接收固定的安全观测字段，避免 dispatcher 将访客原文写出服务边界。
+	observer     AICCDispatchObserver
 	now          func() time.Time
 	mu           sync.Mutex
 	overloads    int
@@ -70,12 +72,20 @@ func NewAICCDispatcher(store AICCDispatcherStore, tx AICCDispatcherTxRunner, cha
 	return &AICCDispatcher{store: store, tx: tx, chat: chat, limiter: limiter, now: time.Now}
 }
 
+// SetObserver 注入可选的安全观测器；生产入口使用 slog，测试可替换为内存接收端。
+func (d *AICCDispatcher) SetObserver(observer AICCDispatchObserver) {
+	if d != nil {
+		d.observer = observer
+	}
+}
+
 // Dispatch 领取 taskID 的租约并执行；未领取到租约表示已被其他 worker 接管，不视为错误。
 func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask) error {
 	if d == nil || d.store == nil || d.chat == nil || d.tx == nil {
 		return errors.New("aicc dispatcher unavailable")
 	}
 	if !d.allow(d.now()) {
+		d.observe(ctx, task, "circuit_open", "circuit_open")
 		return nil
 	}
 	token := newUUID()
@@ -132,12 +142,17 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 		return txErr
 	}
 	d.recordSuccess()
+	d.observe(ctx, task, "completed", "completed")
 	return nil
 }
 
 // RecoverExpiredLeases 由扫库 worker 定期调用，使宕机 worker 的任务重新可领取。
 func (d *AICCDispatcher) RecoverExpiredLeases(ctx context.Context) (int64, error) {
-	return d.store.RecoverExpiredAICCMessageTaskLeases(ctx)
+	recovered, err := d.store.RecoverExpiredAICCMessageTaskLeases(ctx)
+	if err == nil && recovered > 0 {
+		d.observe(ctx, sqlc.AiccMessageTask{}, "lease_recovered", "recovered")
+	}
+	return recovered, err
 }
 
 func (d *AICCDispatcher) finishError(ctx context.Context, task sqlc.AiccMessageTask, token string, err error) error {
@@ -153,6 +168,12 @@ func (d *AICCDispatcher) finishError(ctx context.Context, task sqlc.AiccMessageT
 			return ErrAICCLeaseLost
 		}
 		d.recordOverload(d.now())
+		if attempts >= task.MaxAttempts {
+			// SQL 会将耗尽重试配额的任务原子转为 failed，观测结果必须与持久化终态一致。
+			d.observe(ctx, task, "failed", aiccResultLabel(err, "failed"))
+			return nil
+		}
+		d.observe(ctx, task, "retry", aiccResultLabel(err, "retry"))
 		return nil
 	}
 	rows, updateErr := d.store.FailAICCMessageTask(ctx, sqlc.FailAICCMessageTaskParams{ID: task.ID, LeaseToken: null.StringFrom(token), LastError: null.StringFrom(aiccErrorSummary(err))})
@@ -162,7 +183,27 @@ func (d *AICCDispatcher) finishError(ctx context.Context, task sqlc.AiccMessageT
 	if rows != 1 {
 		return ErrAICCLeaseLost
 	}
+	d.observe(ctx, task, "failed", aiccResultLabel(err, "failed"))
 	return nil
+}
+
+// observe 统一构造受限标签集，任何调用点都不能将访客文本或租约 token 写入观测系统。
+func (d *AICCDispatcher) observe(ctx context.Context, task sqlc.AiccMessageTask, event, result string) {
+	if d != nil && d.observer != nil {
+		d.observer.Observe(ctx, AICCDispatchObservation{Event: event, AgentID: task.AgentID, OrgID: task.OrgID, Upstream: "hermes", Result: result})
+	}
+}
+
+// aiccResultLabel 将上游错误归并为稳定结果枚举，避免日志标签携带动态错误文本。
+func aiccResultLabel(err error, prefix string) string {
+	var status *AICCUpstreamStatusError
+	if errors.As(err, &status) {
+		return fmt.Sprintf("%s_http_%d", prefix, status.StatusCode)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return prefix + "_timeout"
+	}
+	return prefix + "_runtime_error"
 }
 
 // startLeaseHeartbeat 在 ChatAICC 执行期间使用同一 lease token 续租；续租失败会取消聊天请求，

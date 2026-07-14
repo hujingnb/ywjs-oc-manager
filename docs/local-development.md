@@ -61,6 +61,35 @@ make local-reset   # 删集群并清空 .k3d-data，干净重建（随后再 mak
   root 运行可直接写入。
 - 旧 compose 的 `.local/` 数据已不再使用，但暂时保留未删（过渡期安全网）。
 
+## AICC 异步消息观测（仅本地 k3d）
+
+AICC 公开消息任务以 MySQL 的 `aicc_message_tasks` 为事实来源，Redis 只负责低延迟唤醒。
+本地可在发送一条公开客服消息后查看 manager-api 日志，确认 `aicc_event` 依次出现
+`queued`、`completed`；上游 429、503 或超时会记录 `retry`，连续过载会记录
+`circuit_open`，进程重启后回收过期租约会记录 `lease_recovered`。日志只含 `agent_id`、
+`org_id`、`upstream`、`result` 标签及 `queue_wait_ms`、`inflight` 等数值，绝不应包含访客
+原文、会话标识或令牌。
+
+```bash
+make local-logs svc=manager-api
+```
+
+安全模拟只在本地 k3d 进行：先用本地公开客服页发送消息，再临时让本地 Hermes 服务返回
+429、503 或延迟超过请求超时，观察任务进入重试并在依赖恢复后完成。不要复制生产配置、
+凭证或地址到本地；也不要通过删除 MySQL/Redis 数据来制造恢复场景。需要验证重启恢复时，
+只滚动重启本地 `manager-api`，随后观察 `lease_recovered` 和任务最终状态。
+
+本地 HPA 观察使用当前 kubeconfig 的本地集群上下文，并限定 AICC 命名空间：
+
+```bash
+kubectl config current-context
+kubectl -n oc-aicc get hpa,pods
+kubectl -n oc-aicc describe hpa
+```
+
+HPA 依据 CPU（70%）和内存（75%）目标扩缩；异步任务日志用于判断排队等待和在飞调用，
+不把访客负载指标写入 HPA 标签。若当前上下文不是本地 k3d 集群，停止执行这些命令。
+
 ## 已知限制（依赖 spec-A/B/E）
 
 - 创建真实 app 实例、渠道绑定等依赖 k8s 编排 / oc-ops 的路径，在 spec-A/B/E

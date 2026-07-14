@@ -79,8 +79,13 @@ func (l *MessageDispatchLoop) Tick(ctx context.Context) error {
 	if l == nil || l.store == nil || l.queue == nil || l.dispatcher == nil {
 		return fmt.Errorf("AICC 消息运行循环未配置")
 	}
-	if _, err := l.store.RecoverExpiredAICCMessageTaskLeases(ctx); err != nil {
+	recovered, err := l.store.RecoverExpiredAICCMessageTaskLeases(ctx)
+	if err != nil {
 		return fmt.Errorf("回收过期 AICC 消息租约失败: %w", err)
+	}
+	if recovered > 0 {
+		// 租约回收为聚合事件，不带任务或会话标识；MySQL 状态仍是重启恢复的唯一事实来源。
+		l.logger.InfoContext(ctx, "AICC 异步消息任务事件", "aicc_event", "lease_recovered", "upstream", "hermes", "result", "recovered", "recovered", recovered)
 	}
 	ready, err := l.store.ListReadyAICCMessageTasks(ctx, l.batchSize)
 	if err != nil {
@@ -89,6 +94,12 @@ func (l *MessageDispatchLoop) Tick(ctx context.Context) error {
 	byID := make(map[string]sqlc.AiccMessageTask, len(ready))
 	for _, task := range ready {
 		byID[task.ID] = task
+		queueWait := time.Duration(0)
+		if !task.CreatedAt.IsZero() {
+			queueWait = time.Since(task.CreatedAt)
+		}
+		// queued 事件只记录稳定任务归属和等待时长，不记录访客输入、session 或 Redis 信号 ID。
+		l.logger.InfoContext(ctx, "AICC 异步消息任务事件", "aicc_event", "queued", "agent_id", task.AgentID, "org_id", task.OrgID, "upstream", "hermes", "result", "queued", "queue_wait_ms", queueWait.Milliseconds())
 		if err := l.queue.Enqueue(ctx, task.ID); err != nil {
 			return fmt.Errorf("写入 AICC 消息 Redis 信号失败: %w", err)
 		}
@@ -105,7 +116,7 @@ func (l *MessageDispatchLoop) Tick(ctx context.Context) error {
 		}
 		if !l.tryDispatch(ctx, task) {
 			// 有界并发已满时不阻塞扫描；该任务仍是 MySQL 就绪任务，下轮会重新入队。
-			l.logger.DebugContext(ctx, "AICC 消息任务等待下轮分派", "task_id", task.ID)
+			l.logger.DebugContext(ctx, "AICC 异步消息任务事件", "aicc_event", "queued", "agent_id", task.AgentID, "org_id", task.OrgID, "upstream", "hermes", "result", "concurrency_limited", "inflight", len(l.slots))
 		}
 	}
 	return nil
@@ -123,7 +134,7 @@ func (l *MessageDispatchLoop) tryDispatch(ctx context.Context, task sqlc.AiccMes
 			}()
 			if err := l.dispatcher.Dispatch(ctx, task); err != nil {
 				// 单个任务失败由 dispatcher 写入重试或失败状态，不能阻塞同批其他会话。
-				l.logger.ErrorContext(ctx, "AICC 消息任务分派失败", "task_id", task.ID, "error", err)
+				l.logger.ErrorContext(ctx, "AICC 消息任务分派失败", "agent_id", task.AgentID, "org_id", task.OrgID, "upstream", "hermes", "result", "dispatch_error", "inflight", len(l.slots), "error", err)
 			}
 		}()
 		return true
