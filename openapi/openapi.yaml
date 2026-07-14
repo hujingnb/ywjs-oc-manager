@@ -1517,6 +1517,12 @@ components:
         retention_days:
           description: RetentionDays 是数据保留天数。
           type: integer
+        runtime_message:
+          description: RuntimeMessage 是异常或启动等待时可安全展示的摘要，不包含运行时坐标和凭证。
+          type: string
+        runtime_status:
+          description: RuntimeStatus 是隐藏运行时就绪事实与接待意图共同计算的管理端展示状态。
+          type: string
         scenario:
           description: Scenario 是业务场景说明。
           type: string

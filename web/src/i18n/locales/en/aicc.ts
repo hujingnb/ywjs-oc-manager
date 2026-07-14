@@ -90,6 +90,10 @@ export default {
       paused: 'Paused',
       deleted: 'Deleted',
       draft: 'Draft',
+      starting: 'Starting',
+      ready: 'Ready to receive',
+      receiving: 'Receiving',
+      error: 'Error',
     },
     form: {
       name: 'Agent name',

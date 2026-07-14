@@ -2,6 +2,7 @@
 
 // AICCAgentStatus 是智能体生命周期状态。
 export type AICCAgentStatus = 'draft' | 'active' | 'paused' | 'deleted'
+export type AICCRuntimeStatus = 'starting' | 'ready' | 'receiving' | 'paused' | 'error' | 'deleted'
 
 // AICCPrivacyMode 是访客隐私提示模式。
 export type AICCPrivacyMode = 'notice' | 'consent_required'
@@ -21,6 +22,10 @@ export interface AICCAgent {
   name: string
   // 智能体状态。
   status: AICCAgentStatus
+  // 运行时展示状态由服务端根据隐藏 app 就绪事实和接待意图计算。
+  runtime_status?: AICCRuntimeStatus
+  // 运行时异常的安全摘要。
+  runtime_message?: string
   // 业务场景说明。
   scenario?: string
   // 访客欢迎语。

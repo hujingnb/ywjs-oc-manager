@@ -185,6 +185,14 @@ const activeKey = computed(() => {
 })
 
 const selectedAgentStatusText = computed(() => {
+  switch (selectedAgent.value?.runtime_status) {
+    case 'starting': return t('aicc.manager.status.starting')
+    case 'ready': return t('aicc.manager.status.ready')
+    case 'receiving': return t('aicc.manager.status.receiving')
+    case 'paused': return t('aicc.manager.status.paused')
+    case 'error': return t('aicc.manager.status.error')
+    case 'deleted': return t('aicc.manager.status.deleted')
+  }
   switch (selectedAgent.value?.status) {
     case 'active':
       return t('aicc.manager.status.active')
@@ -200,6 +208,9 @@ const selectedAgentStatusText = computed(() => {
 })
 
 const selectedAgentStatusType = computed(() => {
+  if (selectedAgent.value?.runtime_status === 'receiving') return 'success'
+  if (selectedAgent.value?.runtime_status === 'paused' || selectedAgent.value?.runtime_status === 'starting') return 'warning'
+  if (selectedAgent.value?.runtime_status === 'error' || selectedAgent.value?.runtime_status === 'deleted') return 'error'
   if (selectedAgent.value?.status === 'active') return 'success'
   if (selectedAgent.value?.status === 'paused') return 'warning'
   if (selectedAgent.value?.status === 'deleted') return 'error'

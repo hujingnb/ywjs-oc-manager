@@ -90,6 +90,10 @@ export default {
       paused: '已暂停',
       deleted: '已删除',
       draft: '草稿',
+      starting: '启动中',
+      ready: '待接待',
+      receiving: '接待中',
+      error: '异常',
     },
     form: {
       name: '智能体名称',

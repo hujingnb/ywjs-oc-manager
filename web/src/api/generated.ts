@@ -16327,6 +16327,10 @@ export interface components {
             public_token?: string;
             /** @description RetentionDays 是数据保留天数。 */
             retention_days?: number;
+            /** @description RuntimeMessage 是异常或启动等待时可安全展示的摘要，不包含运行时坐标和凭证。 */
+            runtime_message?: string;
+            /** @description RuntimeStatus 是隐藏运行时就绪事实与接待意图共同计算的管理端展示状态。 */
+            runtime_status?: string;
             /** @description Scenario 是业务场景说明。 */
             scenario?: string;
             /** @description Status 是智能体生命周期状态：draft / active / paused / deleted。 */

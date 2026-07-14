@@ -16,7 +16,7 @@
             <h3>{{ form.name || t('aicc.manager.unnamedAgent') }}</h3>
           </div>
           <n-space>
-            <n-button v-if="selectedAgent" :disabled="statusBusy || !canManageAICC" @click="toggleStatus">
+            <n-button v-if="selectedAgent" :disabled="statusBusy || !canManageAICC || !canToggleReception" @click="toggleStatus">
               <template #icon>
                 <component :is="isSelectedRunning ? PauseCircle : PlayCircle" :size="16" />
               </template>
@@ -37,7 +37,7 @@
           <div v-if="isReceptionRoute" class="status-grid">
             <div class="status-tile">
               <span>{{ t('aicc.manager.status.runtime') }}</span>
-              <strong>{{ selectedAgent ? statusMeta(selectedAgent.status).label : t('aicc.manager.status.draft') }}</strong>
+              <strong>{{ selectedAgent ? statusMeta(selectedAgent.runtime_status, selectedAgent.status).label : t('aicc.manager.status.ready') }}</strong>
             </div>
             <div class="status-tile">
               <span>{{ t('aicc.manager.status.retention') }}</span>
@@ -529,7 +529,10 @@ const statusMutation = useSetAICCAgentStatus()
 const deleteMutation = useDeleteAICCAgent()
 
 const selectedKnowledgeAppId = computed(() => knowledgeQuery.data.value?.app_id || selectedAgent.value?.app_id)
-const isSelectedRunning = computed(() => selectedAgent.value ? isAICCAgentRunning(selectedAgent.value) : false)
+const isSelectedRunning = computed(() => selectedAgent.value?.runtime_status
+  ? selectedAgent.value.runtime_status === 'receiving'
+  : selectedAgent.value ? isAICCAgentRunning(selectedAgent.value) : false)
+const canToggleReception = computed(() => ['ready', 'receiving', 'paused'].includes(selectedAgent.value?.runtime_status ?? 'ready'))
 // 平台管理员从企业列表进入时已带 selectedOrgId，可代企业管理员维护该企业 AICC。
 // 未选择企业的全局平台视图仍保持只读，避免没有归属上下文时误创建智能体。
 const canManageAICC = computed(() => !consoleContext.isPlatformAdmin.value || Boolean(consoleContext.selectedOrgId.value))
@@ -846,7 +849,12 @@ async function saveSettings() {
   }
 }
 
-function statusMeta(status?: AICCAgentStatus): { label: string; type: 'success' | 'warning' | 'default' | 'error' } {
+function statusMeta(runtimeStatus?: string, status?: AICCAgentStatus): { label: string; type: 'success' | 'warning' | 'default' | 'error' } {
+  if (runtimeStatus === 'starting') return { label: t('aicc.manager.status.starting'), type: 'warning' }
+  if (runtimeStatus === 'ready') return { label: t('aicc.manager.status.ready'), type: 'default' }
+  if (runtimeStatus === 'receiving') return { label: t('aicc.manager.status.receiving'), type: 'success' }
+  if (runtimeStatus === 'error') return { label: t('aicc.manager.status.error'), type: 'error' }
+  if (runtimeStatus === 'paused') return { label: t('aicc.manager.status.paused'), type: 'warning' }
   if (status === 'active') return { label: t('aicc.manager.status.active'), type: 'success' }
   if (status === 'paused') return { label: t('aicc.manager.status.paused'), type: 'warning' }
   if (status === 'deleted') return { label: t('aicc.manager.status.deleted'), type: 'error' }
