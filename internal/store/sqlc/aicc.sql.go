@@ -338,6 +338,7 @@ SELECT task.app_id, COUNT(*) AS queue_depth
 FROM aicc_message_tasks AS task
 JOIN aicc_messages AS task_message ON task_message.id = task.message_id
 WHERE task.status IN ('queued', 'retry_wait')
+  AND task.attempts < task.max_attempts
   AND task.run_after <= NOW(6)
   AND NOT EXISTS (
       SELECT 1
@@ -2219,6 +2220,7 @@ SELECT task.id, task.message_id, task.session_id, task.agent_id, task.org_id, ta
 FROM aicc_message_tasks AS task
 JOIN aicc_messages AS task_message ON task_message.id = task.message_id
 WHERE task.status IN ('queued', 'retry_wait')
+  AND task.attempts < task.max_attempts
   AND task.run_after <= NOW(6)
   AND NOT EXISTS (
       SELECT 1

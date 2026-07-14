@@ -26,6 +26,13 @@ func TestAICCMessageTaskLeaseRequiresEarliestSessionMessage(t *testing.T) {
 	assert.Contains(t, query, "earlier_message.created_at < task_message.created_at")
 }
 
+// TestCountReadyAICCMessageTasksByAppExcludesExhaustedTasks 验证 HPA queue gauge 与实际
+// 租约边界一致：queued/retry_wait 状态但已耗尽尝试次数的任务不能再计入任何应用积压。
+func TestCountReadyAICCMessageTasksByAppExcludesExhaustedTasks(t *testing.T) {
+	query := normalizedSQL(countReadyAICCMessageTasksByApp)
+	assert.Contains(t, query, "task.attempts < task.max_attempts")
+}
+
 // TestRequeueFailedAICCMessageTaskOnlyResetsTerminalFailure 验证访客手动重试只恢复 failed 任务，
 // 并清空已耗尽的尝试计数和错误摘要，让 dispatcher 可按原有领取规则重新执行。
 func TestRequeueFailedAICCMessageTaskOnlyResetsTerminalFailure(t *testing.T) {

@@ -164,7 +164,7 @@ k8s:
 `app_id=<隐藏 app ID>` selector 查询。`app_label` 目前必须固定为 `app_id`：受控桥接器读取
 `queue_depth_by_app` 与 `inflight_by_app` 安全快照的 map key，并分别导出
 `aicc_message_queue_depth{app_id="..."}`、`aicc_dispatch_inflight{app_id="..."}`。
-`queue_depth_by_app` 由 MySQL 对全部当前可领取任务分组计数，不受每轮 32 条分派候选 LIMIT 影响；
+`queue_depth_by_app` 由 MySQL 对全部当前可领取且未耗尽重试次数的任务分组计数，不受每轮 32 条分派候选 LIMIT 影响；
 因此高负载下首个应用占满候选集时，其余应用仍会向各自 HPA 暴露真实积压。
 
 多个 manager 副本下，队列 gauge 是每个副本从同一 MySQL 事实表扫描得到的全局就绪任务数，
