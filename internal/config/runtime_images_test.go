@@ -64,7 +64,7 @@ func TestValidateAICCRuntimeImageRejectsInvalid(t *testing.T) {
 		// 仅镜像名没有仓库路径，无法满足客服镜像必须独立仓库管理的约束。
 		{name: "缺少仓库路径", ref: "oc-manager-hermes-aicc:v1"},
 		// latest 是可变 tag，无法追溯客服运行时实际发布版本。
-		{name: "使用浮动 latest 标签", ref: "registry.example.com/app/oc-manager-hermes-aicc:latest"},
+		{name: "使用浮动 latest 标签", ref: "registry.example.com/app/oc-manager-aigowork-aicc:latest"},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -77,6 +77,6 @@ func TestValidateAICCRuntimeImageRejectsInvalid(t *testing.T) {
 
 // TestValidateAICCRuntimeImageAcceptsImmutableTag 验证带独立仓库与不可变版本 tag 的客服镜像可用。
 func TestValidateAICCRuntimeImageAcceptsImmutableTag(t *testing.T) {
-	err := ValidateAICCRuntimeImage("registry.example.com/app/oc-manager-hermes-aicc:v1.0.0-2026-07-13-abcdef12")
+	err := ValidateAICCRuntimeImage("registry.example.com/app/oc-manager-aigowork-aicc:v1.0.0-2026-07-13-abcdef12")
 	require.NoError(t, err)
 }

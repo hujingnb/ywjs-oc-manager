@@ -17,7 +17,7 @@ import (
 func TestAICCRuntimeUpgradeReconcilerQueuesOneStaleApp(t *testing.T) {
 	store := &aiccRuntimeUpgradeStoreStub{staleAppIDs: []string{"aicc-app-1"}}
 	notifier := &aiccRuntimeUpgradeNotifierStub{}
-	reconciler := NewAICCRuntimeUpgradeReconciler(store, notifier, "registry.example.com/app/oc-manager-hermes-aicc:v1.0.0-test")
+	reconciler := NewAICCRuntimeUpgradeReconciler(store, notifier, "registry.example.com/app/oc-manager-aigowork-aicc:v1.0.0-test")
 
 	require.NoError(t, reconciler.Tick(context.Background()))
 	require.Len(t, store.createdJobs, 1)
@@ -25,14 +25,14 @@ func TestAICCRuntimeUpgradeReconcilerQueuesOneStaleApp(t *testing.T) {
 	assert.Equal(t, "aicc-app-1", payloadAppID(t, store.createdJobs[0].PayloadJson))
 	assert.Equal(t, []string{store.createdJobs[0].ID}, notifier.jobIDs)
 	assert.Equal(t, int32(1), store.lastListArg.Limit)
-	assert.Equal(t, "registry.example.com/app/oc-manager-hermes-aicc:v1.0.0-test", store.lastListArg.TargetImageRef)
+	assert.Equal(t, "registry.example.com/app/oc-manager-aigowork-aicc:v1.0.0-test", store.lastListArg.TargetImageRef)
 }
 
 // TestAICCRuntimeUpgradeReconcilerSkipsConvergedApps 验证没有镜像漂移客服时不会创建或通知初始化任务。
 func TestAICCRuntimeUpgradeReconcilerSkipsConvergedApps(t *testing.T) {
 	store := &aiccRuntimeUpgradeStoreStub{}
 	notifier := &aiccRuntimeUpgradeNotifierStub{}
-	reconciler := NewAICCRuntimeUpgradeReconciler(store, notifier, "registry.example.com/app/oc-manager-hermes-aicc:v1.0.0-test")
+	reconciler := NewAICCRuntimeUpgradeReconciler(store, notifier, "registry.example.com/app/oc-manager-aigowork-aicc:v1.0.0-test")
 
 	require.NoError(t, reconciler.Tick(context.Background()))
 	assert.Empty(t, store.createdJobs)

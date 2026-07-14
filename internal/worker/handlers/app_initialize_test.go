@@ -1025,7 +1025,7 @@ func TestAppInitialize_AICCHiddenAppUsesDedicatedRuntimeImage(t *testing.T) {
 	store := newAppInitStub(t)
 	store.app.AiccHidden = true
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}
-	const aiccImageRef = "registry.example.com/app/oc-manager-hermes-aicc:v1.0.0-test"
+	const aiccImageRef = "registry.example.com/app/oc-manager-aigowork-aicc:v1.0.0-test"
 
 	handler := NewAppInitializeHandler(store, client, AppInitializeConfig{
 		Cipher:              testCipher(t),

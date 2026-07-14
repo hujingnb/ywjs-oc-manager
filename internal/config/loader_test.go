@@ -45,7 +45,7 @@ hermes:
   workspace:
     archive_retention_days: 14
 aicc:
-  runtime_image: "registry.example.com/app/oc-manager-hermes-aicc:v1.0.0-test"
+  runtime_image: "registry.example.com/app/oc-manager-aigowork-aicc:v1.0.0-test"
 `
 }
 
@@ -159,7 +159,7 @@ func TestLoad_AcceptsValidConfig(t *testing.T) {
 // TestLoad_RejectsMissingAICCRuntimeImage 验证客服运行时镜像缺失会在加载阶段失败，
 // 防止服务启动后创建 AICC 隐藏应用时才发现运行时没有独立镜像。
 func TestLoad_RejectsMissingAICCRuntimeImage(t *testing.T) {
-	yaml := strings.Replace(fullValidYAML(), "aicc:\n  runtime_image: \"registry.example.com/app/oc-manager-hermes-aicc:v1.0.0-test\"\n", "", 1)
+	yaml := strings.Replace(fullValidYAML(), "aicc:\n  runtime_image: \"registry.example.com/app/oc-manager-aigowork-aicc:v1.0.0-test\"\n", "", 1)
 	_, err := loadConfigFromStringErr(t, yaml)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "aicc.runtime_image")
@@ -535,7 +535,7 @@ func validBaseConfig() Config {
 	c.Auth.JWTRefreshSecret = "b"
 	c.Auth.CSRFSecret = "c"
 	c.Security.MasterKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEE=" // 32 字节 base64
-	c.AICC.RuntimeImage = "registry.example.com/app/oc-manager-hermes-aicc:v1.0.0-test"
+	c.AICC.RuntimeImage = "registry.example.com/app/oc-manager-aigowork-aicc:v1.0.0-test"
 	return c
 }
 
