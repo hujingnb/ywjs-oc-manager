@@ -21,6 +21,11 @@ type aiccRunner struct {
 	store *Store
 }
 
+// aiccDispatcherRunner 为异步客服调度器提供事务边界，确保助手消息与任务完成同步提交。
+type aiccDispatcherRunner struct {
+	store *Store
+}
+
 // NewAICCRunner 创建 AICC 管理 service 使用的事务 runner。
 func NewAICCRunner(store *Store) *aiccRunner {
 	return &aiccRunner{store: store}
@@ -37,6 +42,16 @@ func (r *aiccRunner) WithAICCTx(ctx context.Context, fn func(service.AICCStore) 
 // NewAICCPublicRunner 创建 AICC 公开 service 使用的事务 runner。
 func NewAICCPublicRunner(store *Store) *aiccPublicRunner {
 	return &aiccPublicRunner{store: store}
+}
+
+// NewAICCDispatcherRunner 创建 dispatcher 使用的事务 runner。
+func NewAICCDispatcherRunner(store *Store) *aiccDispatcherRunner {
+	return &aiccDispatcherRunner{store: store}
+}
+
+// WithAICCDispatcherTx 在一个事务内保存助手消息并完成持久化任务。
+func (r *aiccDispatcherRunner) WithAICCDispatcherTx(ctx context.Context, fn func(service.AICCDispatcherStore) error) error {
+	return r.store.WithTx(ctx, func(q *sqlc.Queries) error { return fn(q) })
 }
 
 // WithAICCPublicTx 在数据库事务中执行 AICC 公开写操作。

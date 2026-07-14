@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"oc-manager/internal/integrations/ocops"
@@ -40,15 +41,29 @@ func (c *AICCPublicHermesChat) ChatAICC(ctx context.Context, appID, sessionID, t
 	if err != nil {
 		return "", mapOcOpsConversationErr(err)
 	}
-	return sanitizeAICCPublicRuntimeReply(conversationContentText(out.Message.Content)), nil
+	// Hermes 有时把模型网关失败诊断包装进成功响应；这不是可展示的客服答复，
+	// 必须转成可分类错误交给 dispatcher 写入 retry_wait / failed 状态。
+	if err := aiccRuntimeDiagnosticError(conversationContentText(out.Message.Content)); err != nil {
+		return "", err
+	}
+	return conversationContentText(out.Message.Content), nil
 }
 
-func sanitizeAICCPublicRuntimeReply(reply string) string {
-	// Hermes 在模型网关彻底连接失败后可能把内部重试诊断作为聊天文本返回；公开端只暴露可重试提示。
-	if strings.Contains(strings.ToLower(reply), "api call failed after 3 retries") {
-		return "客服服务暂时不可用，请稍后再试。"
+var aiccRuntimeStatusPattern = regexp.MustCompile(`(?i)\b(429|503|529)\b`)
+
+// aiccRuntimeDiagnosticError 识别 Hermes 错误文本中的上游状态；未知诊断保留确定性失败语义，
+// 避免错误地把内部信息伪装成正常客服回复。
+func aiccRuntimeDiagnosticError(reply string) error {
+	lower := strings.ToLower(reply)
+	if !strings.Contains(lower, "api call failed after") {
+		return nil
 	}
-	return reply
+	if match := aiccRuntimeStatusPattern.FindStringSubmatch(reply); len(match) == 2 {
+		var status int
+		_, _ = fmt.Sscanf(match[1], "%d", &status)
+		return &AICCUpstreamStatusError{StatusCode: status}
+	}
+	return fmt.Errorf("aicc runtime diagnostic: %s", reply)
 }
 
 func (c *AICCPublicHermesChat) ensureHermesSession(ctx context.Context, ep ocops.Endpoint, aiccSessionID string) (string, error) {

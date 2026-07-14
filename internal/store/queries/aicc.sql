@@ -168,6 +168,12 @@ SELECT *
 FROM aicc_messages
 WHERE session_id = ? AND direction = ? AND client_message_id = ?;
 
+-- name: GetAICCMessageByID :one
+-- dispatcher 仅按任务关联的访客消息读取原文，避免重新按客户端幂等键查询。
+SELECT *
+FROM aicc_messages
+WHERE id = ?;
+
 -- name: CreateAICCMessageTask :exec
 INSERT INTO aicc_message_tasks (
     id, message_id, session_id, agent_id, org_id, app_id, run_after

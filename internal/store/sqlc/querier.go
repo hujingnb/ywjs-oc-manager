@@ -132,6 +132,8 @@ type Querier interface {
 	GetAICCImageBySession(ctx context.Context, arg GetAICCImageBySessionParams) (AiccImage, error)
 	GetAICCLeadByContact(ctx context.Context, arg GetAICCLeadByContactParams) (AiccLead, error)
 	GetAICCMessageByClientMessageID(ctx context.Context, arg GetAICCMessageByClientMessageIDParams) (AiccMessage, error)
+	// dispatcher 仅按任务关联的访客消息读取原文，避免重新按客户端幂等键查询。
+	GetAICCMessageByID(ctx context.Context, id string) (AiccMessage, error)
 	GetAICCMessageTaskByMessageID(ctx context.Context, messageID string) (AiccMessageTask, error)
 	GetAICCSession(ctx context.Context, id string) (AiccSession, error)
 	GetAICCSessionByToken(ctx context.Context, sessionToken string) (AiccSession, error)

@@ -902,6 +902,36 @@ func (q *Queries) GetAICCMessageByClientMessageID(ctx context.Context, arg GetAI
 	return i, err
 }
 
+const getAICCMessageByID = `-- name: GetAICCMessageByID :one
+SELECT id, session_id, agent_id, direction, content_type, text_content, image_object_key, image_mime, image_size_bytes, hermes_message_id, is_fallback, is_refusal, error_summary, created_at, client_message_id
+FROM aicc_messages
+WHERE id = ?
+`
+
+// dispatcher 仅按任务关联的访客消息读取原文，避免重新按客户端幂等键查询。
+func (q *Queries) GetAICCMessageByID(ctx context.Context, id string) (AiccMessage, error) {
+	row := q.db.QueryRowContext(ctx, getAICCMessageByID, id)
+	var i AiccMessage
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.AgentID,
+		&i.Direction,
+		&i.ContentType,
+		&i.TextContent,
+		&i.ImageObjectKey,
+		&i.ImageMime,
+		&i.ImageSizeBytes,
+		&i.HermesMessageID,
+		&i.IsFallback,
+		&i.IsRefusal,
+		&i.ErrorSummary,
+		&i.CreatedAt,
+		&i.ClientMessageID,
+	)
+	return i, err
+}
+
 const getAICCMessageTaskByMessageID = `-- name: GetAICCMessageTaskByMessageID :one
 SELECT id, message_id, session_id, agent_id, org_id, app_id, status, attempts, max_attempts, run_after, lease_token, lease_expires_at, last_error, processing_session_key, created_at, updated_at
 FROM aicc_message_tasks

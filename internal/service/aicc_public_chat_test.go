@@ -32,17 +32,18 @@ func TestAICCPublicHermesChatCreatesHermesSessionBeforeChat(t *testing.T) {
 	assert.Equal(t, "你好", ops.lastReq.Message)
 }
 
-// TestAICCPublicHermesChatSanitizesRawProviderConnectionFailure 覆盖模型上游连接失败：
-// Hermes 可能把重试后的英文诊断当作消息返回，公开客服不得直接展示该内部错误。
-func TestAICCPublicHermesChatSanitizesRawProviderConnectionFailure(t *testing.T) {
-	ops := &fakeConversationOps{chatOut: ocops.ConversationChatResult{Message: ocops.ConversationMessage{Content: "API call failed after 3 retries: Connection error."}}}
+// TestAICCPublicHermesChatReturnsTypedOverloadError 覆盖模型上游过载诊断：
+// Hermes 可能把失败诊断放进成功响应，公开端必须返回可被 dispatcher 重试的状态错误。
+func TestAICCPublicHermesChatReturnsTypedOverloadError(t *testing.T) {
+	ops := &fakeConversationOps{chatOut: ocops.ConversationChatResult{Message: ocops.ConversationMessage{Content: "API call failed after 3 retries: HTTP 529."}}}
 	loc := OcOpsAppLocation{Supported: true, Endpoint: ocops.Endpoint{BaseURL: "http://runtime"}}
 	svc := NewAICCPublicHermesChat(ops, &fakeOcOpsResolver{loc: loc})
 
 	reply, err := svc.ChatAICC(context.Background(), "app-1", "aicc-session-1", "你好")
 
-	require.NoError(t, err)
-	assert.Equal(t, "客服服务暂时不可用，请稍后再试。", reply)
+	require.Error(t, err)
+	assert.Empty(t, reply)
+	assert.True(t, isAICCRetryable(err))
 }
 
 // AICC 公开会话查找 Hermes 会话时不能按 web 过滤：Hermes 创建时接受 web，
