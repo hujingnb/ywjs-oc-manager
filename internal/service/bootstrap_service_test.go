@@ -13,6 +13,7 @@ import (
 	"oc-manager/internal/auth"
 	"oc-manager/internal/config"
 	"oc-manager/internal/domain"
+	"oc-manager/internal/integrations/hermes"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -94,6 +95,18 @@ func (fakeSkills) PresignSkill(_ context.Context, relPath string, _ time.Duratio
 	return "https://presigned/" + relPath, nil
 }
 
+// captureBootstrapRenderer 实现 bootstrapManifestRenderer，记录 Build 传入的渲染参数，
+// 用于校验不同类型应用在进入 Hermes 前已选择正确的平台规则。
+type captureBootstrapRenderer struct {
+	input hermes.AppInputData
+}
+
+// Render 只保存输入并返回空渲染结果，避免测试依赖模板序列化细节。
+func (r *captureBootstrapRenderer) Render(in hermes.AppInputData) (string, string, string, error) {
+	r.input = in
+	return "", "", "", nil
+}
+
 // newBootstrapApp 构造一个带 NewapiKeyCiphertext、RuntimeTokenCiphertext 与 VersionID 的完整 app。
 // 密文由传入 cipher 生成，确保 Build 能正常解密。
 func newBootstrapApp(t *testing.T, cipher *auth.Cipher) sqlc.App {
@@ -140,7 +153,6 @@ func TestBootstrapBuildHappyPath(t *testing.T) {
 		SecretAccessKey:  "manager-sk",
 		NewAPIBaseURL:    "http://new-api:3000",
 		KnowledgeBaseURL: "http://manager/runtime",
-		PlatformPrompt:   "platform rule",
 		PresignTTL:       time.Minute,
 	})
 
@@ -165,7 +177,54 @@ func TestBootstrapBuildHappyPath(t *testing.T) {
 	assert.Empty(t, res.Restore.StateDBURL)
 	assert.Empty(t, res.Restore.SessionsURL)
 	// bootstrap 应把当前平台 prompt 常量 hash stamp 进 apps，供概览需重启检测。
-	assert.Equal(t, config.PlatformPromptHash(), store.capturedPlatformPromptHash)
+	assert.Equal(t, config.PlatformPromptHash(false), store.capturedPlatformPromptHash)
+}
+
+// TestBootstrapBuildSelectsPlatformPromptByAICCHidden 验证 bootstrap 按应用类型选择平台规则，
+// 并将相同类型的平台规则 hash 记录为已应用版本，供概览页判定是否需要重启。
+func TestBootstrapBuildSelectsPlatformPromptByAICCHidden(t *testing.T) {
+	cipher := newRuntimeTokenTestCipher(t)
+
+	// 普通实例必须使用普通实例平台规则及其 hash，不能误用 AICC 客服规则。
+	t.Run("普通实例使用普通平台规则和 hash", func(t *testing.T) {
+		app := newBootstrapApp(t, cipher)
+		store := &fakeBootstrapStore{
+			app:     app,
+			org:     sqlc.Organization{ID: "o1", Name: "Org"},
+			owner:   sqlc.User{ID: "u1", DisplayName: "Owner"},
+			version: sqlc.AssistantVersion{ID: "v1", MainModel: "gpt-x"},
+		}
+		renderer := &captureBootstrapRenderer{}
+		svc := NewBootstrapService(store, cipher, newFakeObjectStore(), fakeSkills{}, BootstrapConfig{PresignTTL: time.Minute})
+		svc.renderer = renderer
+
+		_, err := svc.Build(context.Background(), app)
+
+		require.NoError(t, err)
+		assert.Equal(t, config.DefaultInstanceSystemPromptTemplate, renderer.input.PlatformRule)
+		assert.Equal(t, config.PlatformPromptHash(false), store.capturedPlatformPromptHash)
+	})
+
+	// AICC 隐藏实例必须使用客服平台规则及其 hash，避免将普通实例工作目录约束下发给外部访客。
+	t.Run("AICC 隐藏实例使用客服平台规则和 hash", func(t *testing.T) {
+		app := newBootstrapApp(t, cipher)
+		app.AiccHidden = true
+		store := &fakeBootstrapStore{
+			app:     app,
+			org:     sqlc.Organization{ID: "o1", Name: "Org"},
+			owner:   sqlc.User{ID: "u1", DisplayName: "Owner"},
+			version: sqlc.AssistantVersion{ID: "v1", MainModel: "gpt-x"},
+		}
+		renderer := &captureBootstrapRenderer{}
+		svc := NewBootstrapService(store, cipher, newFakeObjectStore(), fakeSkills{}, BootstrapConfig{PresignTTL: time.Minute})
+		svc.renderer = renderer
+
+		_, err := svc.Build(context.Background(), app)
+
+		require.NoError(t, err)
+		assert.Equal(t, config.DefaultAICCSystemPromptTemplate, renderer.input.PlatformRule)
+		assert.Equal(t, config.PlatformPromptHash(true), store.capturedPlatformPromptHash)
+	})
 }
 
 // TestBootstrapSkillsFromAppSkills 验证 skill 来源已切换为 app_skills（运行时只看实例 skill）：
@@ -313,7 +372,6 @@ func TestBuildAppInputInjectsWebPublishWhenReady(t *testing.T) {
 		SecretAccessKey:  "sk",
 		NewAPIBaseURL:    "http://new-api:3000",
 		KnowledgeBaseURL: "http://manager/runtime",
-		PlatformPrompt:   "rule",
 		PresignTTL:       time.Minute,
 	})
 

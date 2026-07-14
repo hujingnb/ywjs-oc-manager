@@ -152,8 +152,6 @@ type BootstrapConfig struct {
 	NewAPIBaseURL string
 	// KnowledgeBaseURL 是 manifest.knowledge.runtime_base_url，pod 内访问 manager runtime 知识库 API 的地址。
 	KnowledgeBaseURL string
-	// PlatformPrompt 是平台层规则模板（platform-rules.md 内容），可含 {var} 占位符。
-	PlatformPrompt string
 	// PresignTTL 是预签名读 URL 的有效期。
 	PresignTTL time.Duration
 }
@@ -260,6 +258,9 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 	if app.Locale.Valid {
 		appLanguage = app.Locale.String
 	}
+	// AICC 隐藏应用面向外部访客，必须使用专用客服规则；普通应用沿用实例工作目录等规则。
+	// 平台规则直接由应用类型映射，避免可变启动配置与已应用 hash 的版本语义脱节。
+	platformPrompt := config.PlatformPromptForApp(app.AiccHidden)
 	in := hermes.AppInputData{
 		AppID:                   app.ID,
 		AppName:                 app.Name,
@@ -269,7 +270,7 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 		KnowledgeRuntimeBaseURL: s.cfg.KnowledgeBaseURL,
 		KnowledgeAppToken:       string(controlToken),
 		PersonaText:             version.SystemPrompt,
-		PlatformRule:            s.cfg.PlatformPrompt,
+		PlatformRule:            platformPrompt,
 		Routing:                 routing,
 		SkillRelPaths:           skillRelPaths,
 		OrgName:                 org.Name,
@@ -300,7 +301,7 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 	// 故单点即覆盖 bootstrap 与 restart 两条路径（与 SetAppWebPublishApplied 单点同理）。
 	// best-effort：写失败只 warn，不阻断实例启动（仅影响 needs-restart 提示）。
 	if err := s.store.SetAppAppliedPlatformPromptHash(ctx, sqlc.SetAppAppliedPlatformPromptHashParams{
-		AppliedPlatformPromptHash: config.PlatformPromptHash(),
+		AppliedPlatformPromptHash: config.PlatformPromptHash(app.AiccHidden),
 		ID:                        app.ID,
 	}); err != nil {
 		slog.WarnContext(ctx, "记录 applied_platform_prompt_hash 失败", "app_id", app.ID, mlog.Err(err))

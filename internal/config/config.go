@@ -132,7 +132,7 @@ type HermesConfig struct {
 	// RuntimeImages 是平台可选的 Hermes 镜像列表，助手版本的 image_id 引用其中的 id。
 	// 实例初始化/重启的运行时镜像严格由绑定的助手版本经 ResolveRuntimeImage 从此列表解析。
 	RuntimeImages []RuntimeImageConfig `yaml:"runtime_images"`
-	// 平台层 prompt 已固化为代码常量 DefaultSystemPromptTemplate，不再由配置提供；
+	// 平台层 prompt 已固化为代码常量 DefaultInstanceSystemPromptTemplate（AICC 使用独立常量），不再由配置提供；
 	// 原 system_prompt_template 字段已移除。因 loader 用 KnownFields(true) 严格解码，
 	// 任何仍残留该 key 的配置文件都必须同步删除，否则加载即报未知字段错误。
 	// Workspace 仅保留同名段（WorkspaceConfig 是通用类型，不绑 Hermes）。

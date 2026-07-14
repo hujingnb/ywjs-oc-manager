@@ -399,7 +399,7 @@ func (s *AppService) computeWebPublishPendingRestart(ctx context.Context, app sq
 // 上次 bootstrap stamp 的 applied_platform_prompt_hash 与当前常量 hash 不等即为真
 // （空 hash 的存量实例天然不等，一律判为需重启）。
 func computePlatformPromptPendingRestart(app sqlc.App) bool {
-	return app.AppliedPlatformPromptHash != config.PlatformPromptHash()
+	return app.AppliedPlatformPromptHash != config.PlatformPromptHash(app.AiccHidden)
 }
 
 // SwitchAppVersion 切换实例绑定的助手版本。

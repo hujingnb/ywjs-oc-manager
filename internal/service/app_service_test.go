@@ -27,14 +27,28 @@ const (
 )
 
 // TestComputePlatformPromptPendingRestart 校验「平台 prompt 需重启」判定：
-// applied hash 等于当前常量 hash→不需；不等或为空（存量实例）→需重启。
+// 每个应用只与自身类型的当前规则 hash 比较；另一类型 hash 或空值均需重启。
 func TestComputePlatformPromptPendingRestart(t *testing.T) {
-	// 与当前常量 hash 一致：实例已是最新平台 prompt，不提示。
-	assert.False(t, computePlatformPromptPendingRestart(sqlc.App{AppliedPlatformPromptHash: config.PlatformPromptHash()}))
-	// hash 不同（旧文本）：需重启。
-	assert.True(t, computePlatformPromptPendingRestart(sqlc.App{AppliedPlatformPromptHash: "deadbeef"}))
-	// 空 hash（migration 默认，存量/未 bootstrap 实例）：需重启。
-	assert.True(t, computePlatformPromptPendingRestart(sqlc.App{AppliedPlatformPromptHash: ""}))
+	// 普通实例匹配普通规则 hash 时已是最新版本，不提示重启。
+	assert.False(t, computePlatformPromptPendingRestart(sqlc.App{
+		AiccHidden:                false,
+		AppliedPlatformPromptHash: config.PlatformPromptHash(false),
+	}))
+	// 普通实例持有 AICC 规则 hash 时属于错误规则版本，必须提示重启。
+	assert.True(t, computePlatformPromptPendingRestart(sqlc.App{
+		AiccHidden:                false,
+		AppliedPlatformPromptHash: config.PlatformPromptHash(true),
+	}))
+	// AICC 隐藏实例匹配客服规则 hash 时已是最新版本，不提示重启。
+	assert.False(t, computePlatformPromptPendingRestart(sqlc.App{
+		AiccHidden:                true,
+		AppliedPlatformPromptHash: config.PlatformPromptHash(true),
+	}))
+	// AICC 隐藏实例持有普通规则 hash 时属于错误规则版本，必须提示重启。
+	assert.True(t, computePlatformPromptPendingRestart(sqlc.App{
+		AiccHidden:                true,
+		AppliedPlatformPromptHash: config.PlatformPromptHash(false),
+	}))
 }
 
 // TestGetAppExposeRuntimeImageOnlyToPlatformAdmin 验证 RuntimeImageRef 和 RuntimeImageSha256
