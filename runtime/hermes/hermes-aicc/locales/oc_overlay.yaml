@@ -352,28 +352,28 @@ oc:
     # --- Hermes 自更新通知 ---
     # 更新完成（L15250 整条；L15442 作 f-string 前缀，输出代码块由调用点保留）。
     update_finished:
-      en: "✅ Hermes update finished."
-      zh: "✅ Hermes 更新已完成。"
+      en: "✅ AiGoWork update finished."
+      zh: "✅ AiGoWork 更新已完成。"
     # 更新失败（带退出码）；{exit_code} 为进程退出码。
     update_failed_exit:
-      en: "❌ Hermes update failed (exit code {exit_code})."
-      zh: "❌ Hermes 更新失败(退出码 {exit_code})。"
+      en: "❌ AiGoWork update failed (exit code {exit_code})."
+      zh: "❌ AiGoWork 更新失败(退出码 {exit_code})。"
     # 更新超过 30 分钟超时。
     update_timed_out:
-      en: "❌ Hermes update timed out after 30 minutes."
-      zh: "❌ Hermes 更新超过 30 分钟超时。"
+      en: "❌ AiGoWork update timed out after 30 minutes."
+      zh: "❌ AiGoWork 更新超过 30 分钟超时。"
     # 更新失败前缀（其后输出代码块由调用点保留，换行为字面 \n）。
     update_failed_output:
-      en: "❌ Hermes update failed.\n\n"
-      zh: "❌ Hermes 更新失败。\n\n"
+      en: "❌ AiGoWork update failed.\n\n"
+      zh: "❌ AiGoWork 更新失败。\n\n"
     # 更新成功完成（无输出代码块时）。
     update_finished_ok:
-      en: "✅ Hermes update finished successfully."
-      zh: "✅ Hermes 更新成功完成。"
+      en: "✅ AiGoWork update finished successfully."
+      zh: "✅ AiGoWork 更新成功完成。"
     # 更新失败、提示查日志或手动重试。
     update_failed_logs:
-      en: "❌ Hermes update failed. Check the gateway logs or run `hermes update` manually for details."
-      zh: "❌ Hermes 更新失败。详情见 gateway 日志,或手动运行 `hermes update` 查看。"
+      en: "❌ AiGoWork update failed. Check the gateway logs or run `hermes update` manually for details."
+      zh: "❌ AiGoWork 更新失败。详情见 gateway 日志,或手动运行 `hermes update` 查看。"
     # 网关重启成功、会话继续。
     gateway_restarted:
       en: "♻ Gateway restarted successfully. Your session continues."
@@ -510,8 +510,8 @@ oc:
     # --- 未设置 home channel 一次性提示（5 段隐式拼接合为一条）---
     # {platform_name} 由调用点 platform_name.title() 传入；{sethome_cmd} 由调用点传入。
     no_home_channel:
-      en: "📬 No home channel is set for {platform_name}. A home channel is where Hermes delivers cron job results and cross-platform messages.\n\nType {sethome_cmd} to make this chat your home channel, or ignore to skip."
-      zh: "📬 尚未为 {platform_name} 设置主频道。主频道是 Hermes 投递定时任务结果和跨平台消息的地方。\n\n输入 {sethome_cmd} 即可将本聊天设为主频道,或忽略以跳过。"
+      en: "📬 No home channel is set for {platform_name}. A home channel is where AiGoWork delivers cron job results and cross-platform messages.\n\nType {sethome_cmd} to make this chat your home channel, or ignore to skip."
+      zh: "📬 尚未为 {platform_name} 设置主频道。主频道是 AiGoWork 投递定时任务结果和跨平台消息的地方。\n\n输入 {sethome_cmd} 即可将本聊天设为主频道,或忽略以跳过。"
     # --- 推理过程展示 ---
     # 推理折叠省略行（{more} 由调用点 len(lines) - 15 传入）。
     reasoning_more_lines:
@@ -654,8 +654,8 @@ oc:
       zh: "出错: {error}"
     # 网关恢复就绪后的上线广播。
     gateway_online:
-      en: "♻️ Gateway online — Hermes is back and ready."
-      zh: "♻️ 网关已上线 —— Hermes 已恢复就绪。"
+      en: "♻️ Gateway online — AiGoWork is back and ready."
+      zh: "♻️ 网关已上线 —— AiGoWork 已恢复就绪。"
     # 长任务心跳（6.5 文案；{elapsed_mins} 已运行分钟数，{status_detail} 动态明细在调用点拼接）。
     working_heartbeat:
       en: "⏳ Working — {elapsed_mins} min"
