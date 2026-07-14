@@ -226,6 +226,38 @@ func TestAICCPublicSendMessageQueuesVisitorMessage(t *testing.T) {
 	assert.Empty(t, chat.text)
 }
 
+// TestAICCPublicGetMessageStatusRejectsMessageFromAnotherSession 覆盖公开状态查询的会话隔离：
+// 即便访客猜中其他会话的消息 ID，也不能读取其任务状态或助手回复。
+func TestAICCPublicGetMessageStatusRejectsMessageFromAnotherSession(t *testing.T) {
+	store := newAICCPublicMessageStore()
+	store.message = sqlc.AiccMessage{ID: "message-other", SessionID: "session-other", Direction: domain.AICCMessageDirectionVisitor}
+	service := NewAICCPublicService(store, nil)
+	service.now = func() time.Time { return aiccPublicTestNow }
+
+	_, err := service.GetMessageStatus(context.Background(), "tok", "message-other")
+
+	require.ErrorIs(t, err, ErrAICCInvalidMessage)
+}
+
+// TestAICCPublicGetMessageStatusReturnsCompletedText 覆盖已完成异步消息的轮询：
+// 当前会话内的任务完成后必须返回对应助手回复，避免客户端额外扫描整段会话。
+func TestAICCPublicGetMessageStatusReturnsCompletedText(t *testing.T) {
+	store := newAICCPublicMessageStore()
+	store.message = sqlc.AiccMessage{ID: "message-1", SessionID: "session-1", Direction: domain.AICCMessageDirectionVisitor, ClientMessageID: null.StringFrom("client-1")}
+	store.createdTasks = []sqlc.CreateAICCMessageTaskParams{{ID: "task-1", MessageID: "message-1", SessionID: "session-1", AgentID: "agent-1", OrgID: "org-1", AppID: "app-1", RunAfter: aiccPublicTestNow}}
+	store.taskStatus = "completed"
+	store.messages = []sqlc.AiccMessage{{ID: "assistant-1", SessionID: "session-1", Direction: domain.AICCMessageDirectionAssistant, ClientMessageID: null.StringFrom("client-1"), TextContent: null.StringFrom("您好")}}
+	service := NewAICCPublicService(store, nil)
+	service.now = func() time.Time { return aiccPublicTestNow }
+
+	result, err := service.GetMessageStatus(context.Background(), "tok", "message-1")
+
+	require.NoError(t, err)
+	assert.Equal(t, "message-1", result.MessageID)
+	assert.Equal(t, "completed", result.Status)
+	assert.Equal(t, "您好", result.Text)
+}
+
 // TestAICCPublicSendMessageReturnsExistingTask 覆盖幂等重试：相同 client_message_id 必须复用原任务，不重复写访客消息或任务。
 func TestAICCPublicSendMessageReturnsExistingTask(t *testing.T) {
 	store := newAICCPublicMessageStore()
@@ -1128,6 +1160,7 @@ type fakeAICCPublicStore struct {
 	session                   sqlc.AiccSession
 	sessionErr                error
 	message                   sqlc.AiccMessage
+	taskStatus                string
 	messages                  []sqlc.AiccMessage
 	image                     sqlc.AiccImage
 	settings                  sqlc.AiccAgentSetting
@@ -1346,10 +1379,21 @@ func (f *fakeAICCPublicStore) CreateAICCMessageTask(_ context.Context, arg sqlc.
 func (f *fakeAICCPublicStore) GetAICCMessageTaskByMessageID(_ context.Context, messageID string) (sqlc.AiccMessageTask, error) {
 	for _, task := range f.createdTasks {
 		if task.MessageID == messageID {
-			return sqlc.AiccMessageTask{ID: task.ID, MessageID: task.MessageID, SessionID: task.SessionID, AgentID: task.AgentID, OrgID: task.OrgID, AppID: task.AppID, Status: "queued", Attempts: 0, MaxAttempts: 5, RunAfter: task.RunAfter}, nil
+			status := f.taskStatus
+			if status == "" {
+				status = "queued"
+			}
+			return sqlc.AiccMessageTask{ID: task.ID, MessageID: task.MessageID, SessionID: task.SessionID, AgentID: task.AgentID, OrgID: task.OrgID, AppID: task.AppID, Status: status, Attempts: 0, MaxAttempts: 5, RunAfter: task.RunAfter}, nil
 		}
 	}
 	return sqlc.AiccMessageTask{}, sql.ErrNoRows
+}
+
+func (f *fakeAICCPublicStore) GetAICCMessageByID(_ context.Context, id string) (sqlc.AiccMessage, error) {
+	if f.message.ID == id {
+		return f.message, nil
+	}
+	return sqlc.AiccMessage{}, sql.ErrNoRows
 }
 
 func (f *fakeAICCPublicStore) GetAICCMessageByClientMessageID(_ context.Context, arg sqlc.GetAICCMessageByClientMessageIDParams) (sqlc.AiccMessage, error) {

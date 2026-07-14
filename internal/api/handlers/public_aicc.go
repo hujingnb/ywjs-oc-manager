@@ -26,6 +26,7 @@ type publicAICCService interface {
 	Consent(ctx context.Context, sessionToken string) error
 	UploadImage(ctx context.Context, input service.AICCPublicImageInput) (service.AICCPublicImageResult, error)
 	SendMessage(ctx context.Context, input service.AICCPublicMessageInput) (service.AICCPublicMessageResult, error)
+	GetMessageStatus(ctx context.Context, sessionToken, messageID string) (service.AICCPublicMessageResult, error)
 	SubmitLeadValues(ctx context.Context, input service.AICCPublicLeadValuesInput) (service.AICCPublicLeadValuesResult, error)
 	SubmitFeedback(ctx context.Context, input service.AICCPublicFeedbackInput) (service.AICCPublicFeedbackResult, error)
 	ResolveSession(ctx context.Context, sessionToken string) (service.AICCPublicResolutionResult, error)
@@ -46,6 +47,7 @@ func RegisterPublicAICCRoutes(router gin.IRouter, handler *PublicAICCHandler) {
 	group.POST("/sessions/:sessionToken/consent", handler.Consent)
 	group.POST("/sessions/:sessionToken/images", handler.UploadImage)
 	group.POST("/sessions/:sessionToken/messages", handler.SendMessage)
+	group.GET("/sessions/:sessionToken/messages/:messageId", handler.GetMessageStatus)
 	group.POST("/sessions/:sessionToken/lead-values", handler.SubmitLeadValues)
 	group.POST("/sessions/:sessionToken/resolution", handler.UpdateResolution)
 	group.POST("/sessions/:sessionToken/resolve", handler.ResolveSession)
@@ -198,16 +200,16 @@ func (h *PublicAICCHandler) Consent(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// SendMessage 发送访客消息并返回助手回复。
+// SendMessage 异步受理访客消息并返回任务标识。
 //
 // @Summary      发送 AICC 公开消息
-// @Description  访客通过 session token 发送消息，manager 转发隐藏 app runtime
+// @Description  访客通过 session token 发送消息，manager 异步受理并由后台任务转发隐藏 app runtime
 // @Tags         public-aicc
 // @Accept       json
 // @Produce      json
 // @Param        sessionToken  path      string                    true  "会话 token"
 // @Param        body          body      PublicAICCMessageRequest  true  "访客消息"
-// @Success      200           {object}  map[string]service.AICCPublicMessageResult
+// @Success      202           {object}  map[string]service.AICCPublicMessageResult
 // @Failure      400           {object}  ErrorResponse
 // @Failure      401           {object}  ErrorResponse
 // @Failure      403           {object}  ErrorResponse
@@ -222,11 +224,33 @@ func (h *PublicAICCHandler) SendMessage(c *gin.Context) {
 		return
 	}
 	result, err := h.service.SendMessage(c.Request.Context(), service.AICCPublicMessageInput{
-		SessionToken: c.Param("sessionToken"),
+		SessionToken:    c.Param("sessionToken"),
 		ClientMessageID: req.ClientMessageID,
-		Text:         req.Text,
-		ImageFileID:  req.ImageFileID,
+		Text:            req.Text,
+		ImageFileID:     req.ImageFileID,
 	})
+	if err != nil {
+		writePublicAICCError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"message": result})
+}
+
+// GetMessageStatus 返回当前会话内一条访客消息对应异步任务的处理状态。
+//
+// @Summary      查询 AICC 公开消息状态
+// @Description  访客通过会话 token 查询已受理消息；只能读取当前会话内的任务
+// @Tags         public-aicc
+// @Produce      json
+// @Param        sessionToken  path      string  true  "会话 token"
+// @Param        messageId     path      string  true  "访客消息 ID"
+// @Success      200           {object}  map[string]service.AICCPublicMessageResult
+// @Failure      401           {object}  ErrorResponse
+// @Failure      404           {object}  ErrorResponse
+// @Failure      500           {object}  ErrorResponse
+// @Router       /public/aicc/sessions/{sessionToken}/messages/{messageId} [get]
+func (h *PublicAICCHandler) GetMessageStatus(c *gin.Context) {
+	result, err := h.service.GetMessageStatus(c.Request.Context(), c.Param("sessionToken"), c.Param("messageId"))
 	if err != nil {
 		writePublicAICCError(c, err)
 		return

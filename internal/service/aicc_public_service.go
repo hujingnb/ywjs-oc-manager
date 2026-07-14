@@ -80,6 +80,8 @@ type AICCPublicStore interface {
 	GetAICCMessageByClientMessageID(ctx context.Context, arg sqlc.GetAICCMessageByClientMessageIDParams) (sqlc.AiccMessage, error)
 	// GetAICCMessageTaskByMessageID 查询访客消息对应的异步任务，用于幂等重试返回当前处理状态。
 	GetAICCMessageTaskByMessageID(ctx context.Context, messageID string) (sqlc.AiccMessageTask, error)
+	// GetAICCMessageByID 按消息主键读取访客消息，用于校验状态查询只访问所属会话。
+	GetAICCMessageByID(ctx context.Context, id string) (sqlc.AiccMessage, error)
 	// CreateAICCImage 写入公开会话图片对象记录。
 	CreateAICCImage(ctx context.Context, arg sqlc.CreateAICCImageParams) error
 	// GetAICCImageBySession 读取当前会话内已上传图片。
@@ -510,6 +512,35 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 		return AICCPublicMessageResult{MessageID: visitorMessage.ID, Status: "queued"}, nil
 	}
 	return AICCPublicMessageResult{MessageID: visitorMessage.ID, Status: "completed", Text: aiccPromptInjectionReply}, nil
+}
+
+// GetMessageStatus 按 session token 查询一条已受理访客消息的异步处理状态。
+// 先验证会话有效性和消息归属，再读取任务，防止其他访客通过枚举消息 ID 观察处理状态。
+func (s *AICCPublicService) GetMessageStatus(ctx context.Context, sessionToken, messageID string) (AICCPublicMessageResult, error) {
+	session, err := s.store.GetAICCSessionByToken(ctx, strings.TrimSpace(sessionToken))
+	if errors.Is(err, sql.ErrNoRows) {
+		return AICCPublicMessageResult{}, ErrAICCInvalidSession
+	}
+	if err != nil {
+		return AICCPublicMessageResult{}, fmt.Errorf("%w: %v", ErrAICCSessionStoreUnavailable, err)
+	}
+	if !session.ExpiresAt.After(s.now()) {
+		return AICCPublicMessageResult{}, ErrAICCInvalidSession
+	}
+	if _, err := s.activeAgentBySession(ctx, session); err != nil {
+		return AICCPublicMessageResult{}, err
+	}
+	message, err := s.store.GetAICCMessageByID(ctx, strings.TrimSpace(messageID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return AICCPublicMessageResult{}, ErrAICCInvalidMessage
+	}
+	if err != nil {
+		return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 公开消息失败: %w", err)
+	}
+	if message.SessionID != session.ID || message.Direction != domain.AICCMessageDirectionVisitor {
+		return AICCPublicMessageResult{}, ErrAICCInvalidMessage
+	}
+	return s.aiccMessageTaskResult(ctx, session.ID, message.ClientMessageID.String, message.ID)
 }
 
 func (s *AICCPublicService) reserveAICCVisitorMessage(ctx context.Context, session sqlc.AiccSession, limit int32, visitorMessage sqlc.CreateAICCMessageParams, appID string, createTask bool, assistantMessage *sqlc.CreateAICCMessageParams) (string, error) {

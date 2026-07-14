@@ -16,34 +16,38 @@ import (
 )
 
 type publicAICCServiceStub struct {
-	configResult   service.AICCPublicConfigResult
-	configErr      error
-	sessionResult  service.AICCPublicSessionResult
-	detailResult   service.AICCPublicSessionDetailResult
-	sessionErr     error
-	detailErr      error
-	imageResult    service.AICCPublicImageResult
-	imageErr       error
-	messageResult  service.AICCPublicMessageResult
-	messageErr     error
-	leadResult     service.AICCPublicLeadValuesResult
-	leadErr        error
-	feedbackResult service.AICCPublicFeedbackResult
-	feedbackErr    error
-	resolveResult  service.AICCPublicResolutionResult
-	resolveErr     error
-	consentErr     error
+	configResult        service.AICCPublicConfigResult
+	configErr           error
+	sessionResult       service.AICCPublicSessionResult
+	detailResult        service.AICCPublicSessionDetailResult
+	sessionErr          error
+	detailErr           error
+	imageResult         service.AICCPublicImageResult
+	imageErr            error
+	messageResult       service.AICCPublicMessageResult
+	messageErr          error
+	messageStatusResult service.AICCPublicMessageResult
+	messageStatusErr    error
+	leadResult          service.AICCPublicLeadValuesResult
+	leadErr             error
+	feedbackResult      service.AICCPublicFeedbackResult
+	feedbackErr         error
+	resolveResult       service.AICCPublicResolutionResult
+	resolveErr          error
+	consentErr          error
 
-	lastPublicToken   string
-	lastConfigChannel string
-	lastSessionToken  string
-	lastSessionInput  service.AICCPublicSessionInput
-	lastImageInput    service.AICCPublicImageInput
-	lastMessageInput  service.AICCPublicMessageInput
-	lastLeadInput     service.AICCPublicLeadValuesInput
-	lastFeedbackInput service.AICCPublicFeedbackInput
-	lastResolveToken  string
-	lastResolution    service.AICCPublicResolutionInput
+	lastPublicToken        string
+	lastConfigChannel      string
+	lastSessionToken       string
+	lastSessionInput       service.AICCPublicSessionInput
+	lastImageInput         service.AICCPublicImageInput
+	lastMessageInput       service.AICCPublicMessageInput
+	lastStatusSessionToken string
+	lastStatusMessageID    string
+	lastLeadInput          service.AICCPublicLeadValuesInput
+	lastFeedbackInput      service.AICCPublicFeedbackInput
+	lastResolveToken       string
+	lastResolution         service.AICCPublicResolutionInput
 }
 
 func (s *publicAICCServiceStub) PublicConfig(_ context.Context, publicToken, channel string) (service.AICCPublicConfigResult, error) {
@@ -76,6 +80,12 @@ func (s *publicAICCServiceStub) UploadImage(_ context.Context, input service.AIC
 func (s *publicAICCServiceStub) SendMessage(_ context.Context, input service.AICCPublicMessageInput) (service.AICCPublicMessageResult, error) {
 	s.lastMessageInput = input
 	return s.messageResult, s.messageErr
+}
+
+func (s *publicAICCServiceStub) GetMessageStatus(_ context.Context, sessionToken, messageID string) (service.AICCPublicMessageResult, error) {
+	s.lastStatusSessionToken = sessionToken
+	s.lastStatusMessageID = messageID
+	return s.messageStatusResult, s.messageStatusErr
 }
 
 func (s *publicAICCServiceStub) SubmitLeadValues(_ context.Context, input service.AICCPublicLeadValuesInput) (service.AICCPublicLeadValuesResult, error) {
@@ -134,9 +144,9 @@ func TestPublicAICCHandlerConfigPassesChannel(t *testing.T) {
 	assert.Equal(t, "web_widget", svc.lastConfigChannel)
 }
 
-// TestPublicAICCHandlerSendMessage 覆盖公开访客消息入口：session token 来自路径，消息文本来自请求体。
+// TestPublicAICCHandlerSendMessage 覆盖公开访客消息入口：异步任务受理后必须返回 202 和 queued 状态。
 func TestPublicAICCHandlerSendMessage(t *testing.T) {
-	svc := &publicAICCServiceStub{messageResult: service.AICCPublicMessageResult{MessageID: "msg-1", Text: "您好"}}
+	svc := &publicAICCServiceStub{messageResult: service.AICCPublicMessageResult{MessageID: "msg-1", Status: "queued"}}
 	router := newPublicAICCTestRouter(t, svc)
 
 	recorder := httptest.NewRecorder()
@@ -144,10 +154,26 @@ func TestPublicAICCHandlerSendMessage(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(recorder, request)
 
-	require.Equal(t, http.StatusOK, recorder.Code)
-	assert.Contains(t, recorder.Body.String(), "msg-1")
+	require.Equal(t, http.StatusAccepted, recorder.Code)
+	assert.JSONEq(t, `{"message":{"message_id":"msg-1","status":"queued"}}`, recorder.Body.String())
 	assert.Equal(t, "sess-1", svc.lastMessageInput.SessionToken)
 	assert.Equal(t, "你好", svc.lastMessageInput.Text)
+}
+
+// TestPublicAICCHandlerGetMessageStatus 覆盖公开消息状态查询：路径中的会话和消息标识必须完整透传，
+// 已完成任务同时返回持久化的助手文本。
+func TestPublicAICCHandlerGetMessageStatus(t *testing.T) {
+	svc := &publicAICCServiceStub{messageStatusResult: service.AICCPublicMessageResult{MessageID: "msg-1", Status: "completed", Text: "您好"}}
+	router := newPublicAICCTestRouter(t, svc)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/public/aicc/sessions/sess-1/messages/msg-1", nil)
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.JSONEq(t, `{"message":{"message_id":"msg-1","status":"completed","text":"您好"}}`, recorder.Body.String())
+	assert.Equal(t, "sess-1", svc.lastStatusSessionToken)
+	assert.Equal(t, "msg-1", svc.lastStatusMessageID)
 }
 
 // TestPublicAICCHandlerGetSession 覆盖公开会话刷新恢复：

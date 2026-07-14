@@ -128,6 +128,14 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		QueueKey: cfg.Redis.KeyPrefix + "jobs:queue",
 	})
 	defer redisQueue.Close()
+	// AICC 消息队列与通用 jobs 队列隔离，避免慢速运行时调用挤占应用初始化等控制面任务。
+	aiccMessageQueue := redis.NewRedisQueue(redis.Config{
+		Addr:     cfg.Redis.Addr,
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.DB,
+		QueueKey: cfg.Redis.KeyPrefix + "aicc:message-tasks",
+	})
+	defer aiccMessageQueue.Close()
 
 	tokenManager, err := auth.NewTokenManager(
 		cfg.Auth.JWTAccessSecret,
@@ -262,11 +270,14 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// AppLocaleStatus 需实时查 oc-ops 实例当前语言：注入 oc-ops 客户端与坐标解析器。
 	// 二者在此处才装配完成（appService 早于此构造），故用 setter 补注入。
 	appService.SetOcOps(ocopsClient, ocopsResolver)
-	aiccPublicService := service.NewAICCPublicService(dbStore.Queries, service.NewAICCPublicHermesChat(ocopsClient, aiccOcOpsResolver))
+	aiccPublicChat := service.NewAICCPublicHermesChat(ocopsClient, aiccOcOpsResolver)
+	aiccPublicService := service.NewAICCPublicService(dbStore.Queries, aiccPublicChat)
 	aiccPublicService.SetTxRunner(store.NewAICCPublicRunner(dbStore))
 	aiccPublicService.SetRateLimiter(service.NewRedisAICCRateLimiter(imagecoordRedis, cfg.Redis.KeyPrefix))
 	aiccGeoIPResolver := service.NewAICCIP2RegionResolver()
 	aiccPublicService.SetGeoIPResolver(aiccGeoIPResolver)
+	// dispatcher 负责领取持久化任务租约并写回助手回复；Redis 只用于唤醒，MySQL 仍是事实来源。
+	aiccMessageDispatcher := service.NewAICCDispatcher(dbStore.Queries, store.NewAICCDispatcherRunner(dbStore), aiccPublicChat, nil)
 
 	channelRegistry := channel.NewRegistry()
 	channelService := service.NewChannelService(dbStore.Queries, channelRegistry, redisQueue)
@@ -784,6 +795,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	pool.SetLogger(logger)
 	loop := scheduler.NewLoop(jobScheduler, 5*time.Second)
 	loop.SetLogger(logger)
+	// AICC 公开消息每秒扫库并消费独立 Redis 信号；Redis 故障后下轮扫描会重新补发信号。
+	aiccMessageLoop := aiccworker.NewMessageDispatchLoop(dbStore.Queries, aiccMessageQueue, aiccMessageDispatcher, logger)
 
 	// app 状态 poll reconciler：周期对运行中 app 调 Orchestrator.Status 同步 pod 状态到 DB，
 	// 取代 docker inspect 健康自愈（manager 不自愈，崩溃重启交 Deployment 控制器）。
@@ -873,6 +886,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	})
 	eg.Go(func() error { return pool.Run(gctx) })
 	eg.Go(func() error { return loop.Run(gctx) })
+	eg.Go(func() error { return aiccMessageLoop.Run(gctx) })
 
 	// reaper 启动:周期 60s tick,扫 5 个 init 子状态下连续 90s 无更新的孤儿。
 	// 多 manager 共存时通过 Redis 锁 ocm:reaper:lock 互斥;装配在 workerPool 启动之后,
