@@ -133,7 +133,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		Addr:     cfg.Redis.Addr,
 		Password: cfg.Redis.Password,
 		DB:       cfg.Redis.DB,
-		QueueKey: cfg.Redis.KeyPrefix + "aicc:message-tasks",
+		QueueKey: aiccMessageQueueKey(cfg.Redis.KeyPrefix),
 	})
 	defer aiccMessageQueue.Close()
 
@@ -951,6 +951,12 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		return err
 	}
 	return nil
+}
+
+// aiccMessageQueueKey 返回公开消息运行时的专用 Redis 队列键。
+// key_prefix 由部署配置完整控制，追加固定分隔符以与其他 AICC Redis 数据结构保持独立。
+func aiccMessageQueueKey(prefix string) string {
+	return prefix + ":aicc:message-tasks"
 }
 
 // allowedOriginsFromConfig 从配置抽出 CORS 白名单。

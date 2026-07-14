@@ -7,8 +7,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"oc-manager/internal/config"
 )
+
+// TestAICCMessageQueueKey 保证 AICC 运行时使用与通用 jobs 隔离的 Redis 键，
+// 且严格保留配置前缀后的分隔符，避免与既有键空间混淆。
+func TestAICCMessageQueueKey(t *testing.T) {
+	assert.Equal(t, "ocm::aicc:message-tasks", aiccMessageQueueKey("ocm:"))
+}
 
 // TestRunManager_RejectsBadMasterKey 校验 fail-fast：master_key 非合法 base64 时立刻报错，
 // 不进入数据库连接阶段。
