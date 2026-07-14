@@ -259,8 +259,11 @@ func CanManageAICCConfig(p Principal) bool {
 }
 
 // CanManageAICCAgent 判断主体能否管理指定企业的 AICC 智能体、投放、留资字段和运营数据。
-// AICC 是企业侧客服业务，本期仅本企业 org_admin 可管理；平台管理员只保留只读排障能力。
+// 平台管理员可在明确选择企业后跨企业代管；企业管理员仅能管理本企业，普通成员无管理权限。
 func CanManageAICCAgent(p Principal, orgID string) bool {
+	if p.Role == domain.UserRolePlatformAdmin {
+		return orgID != ""
+	}
 	return p.Role == domain.UserRoleOrgAdmin && p.OrgID == orgID
 }
 

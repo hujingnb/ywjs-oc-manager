@@ -113,8 +113,10 @@ type UpdateOrganizationAICCConfigRequest struct {
 	IndustryKnowledgeBaseIDs []string `json:"industry_knowledge_base_ids"`
 }
 
-// CreateAICCAgentRequest 是企业管理员创建 AICC 智能体的请求体。
+// CreateAICCAgentRequest 是管理端创建 AICC 智能体的请求体。
 type CreateAICCAgentRequest struct {
+	// OrgID 是平台管理员代管时的目标企业；企业管理员不需要也不能指定其他企业。
+	OrgID string `json:"org_id"`
 	// Name 是智能体展示名。
 	Name string `json:"name" binding:"required"`
 	// Scenario 是智能体适用业务场景说明。

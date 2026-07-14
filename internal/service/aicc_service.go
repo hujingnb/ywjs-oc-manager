@@ -162,7 +162,14 @@ func (s *AICCService) SetTxRunner(tx AICCTxRunner) { s.tx = tx }
 
 // CreateAgent 创建 AICC 智能体并自动创建隐藏 app。
 func (s *AICCService) CreateAgent(ctx context.Context, principal auth.Principal, input AICCAgentInput) (AICCAgentResult, error) {
-	if principal.OrgID == "" || !auth.CanManageAICCAgent(principal, principal.OrgID) {
+	orgID := principal.OrgID
+	if principal.Role == domain.UserRolePlatformAdmin {
+		orgID = strings.TrimSpace(input.OrgID)
+	} else if input.OrgID != "" && input.OrgID != principal.OrgID {
+		// 企业管理员不能通过请求体伪造目标企业；其创建归属始终固定为登录企业。
+		return AICCAgentResult{}, ErrForbidden
+	}
+	if orgID == "" || !auth.CanManageAICCAgent(principal, orgID) {
 		return AICCAgentResult{}, ErrForbidden
 	}
 	if s.apps == nil {
@@ -172,7 +179,7 @@ func (s *AICCService) CreateAgent(ctx context.Context, principal auth.Principal,
 	if err != nil {
 		return AICCAgentResult{}, err
 	}
-	org, err := s.store.GetOrganization(ctx, principal.OrgID)
+	org, err := s.store.GetOrganization(ctx, orgID)
 	if errors.Is(err, sql.ErrNoRows) {
 		// AICC 创建只能面向 principal 自身企业；主体企业不存在时按不可管理处理，避免泄露租户枚举信息。
 		return AICCAgentResult{}, ErrForbidden
@@ -198,7 +205,7 @@ func (s *AICCService) CreateAgent(ctx context.Context, principal auth.Principal,
 	}
 	createdAppID, err := s.apps.CreateHiddenAICCApp(ctx, principal, AICCHiddenAppInput{
 		AppID:  appID,
-		OrgID:  principal.OrgID,
+		OrgID:  orgID,
 		UserID: principal.UserID,
 		Name:   normalized.Name,
 	})
@@ -210,7 +217,7 @@ func (s *AICCService) CreateAgent(ctx context.Context, principal auth.Principal,
 	}
 	if err := s.store.CreateAICCAgent(ctx, sqlc.CreateAICCAgentParams{
 		ID:                 agentID,
-		OrgID:              principal.OrgID,
+		OrgID:              orgID,
 		AppID:              appID,
 		Name:               normalized.Name,
 		Status:             domain.AICCAgentStatusDraft,

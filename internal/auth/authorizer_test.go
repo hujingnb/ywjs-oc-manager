@@ -282,8 +282,10 @@ func TestAICCAuthorizerPredicates(t *testing.T) {
 	assert.False(t, CanManageAICCAgent(otherAdmin, "org-1"))
 	// 普通成员没有 AICC 管理入口。
 	assert.False(t, CanManageAICCAgent(member, "org-1"))
-	// 平台管理员对 AICC 业务数据保留只读排障能力，不参与企业侧管理写操作。
-	assert.False(t, CanManageAICCAgent(platform, "org-1"))
+	// 平台管理员在明确目标企业后可代管该企业的 AICC。
+	assert.True(t, CanManageAICCAgent(platform, "org-1"))
+	// 平台管理员未指定目标企业时不能进入写链路。
+	assert.False(t, CanManageAICCAgent(platform, ""))
 
 	// 平台管理员可跨企业只读查看 AICC 数据用于排障。
 	assert.True(t, CanViewAICC(platform, "org-1"))

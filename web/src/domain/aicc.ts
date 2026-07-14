@@ -47,7 +47,9 @@ export interface AICCAgent {
 
 // AICCAgentPayload 是创建和更新智能体时提交给后端的表单载荷。
 export interface AICCAgentPayload {
-  // 智能体展示名。
+	// org_id 仅平台管理员代管时提交，明确新建智能体的目标企业。
+	org_id?: string
+	// 智能体展示名。
   name: string
   // 业务场景说明。
   scenario?: string

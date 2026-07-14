@@ -71,14 +71,14 @@ export function useAICCAgentQuery(agentId: Ref<string | undefined>) {
   })
 }
 
-// useCreateAICCAgent 创建智能体，成功后刷新列表缓存。
-export function useCreateAICCAgent() {
+// useCreateAICCAgent 创建智能体，平台管理员传入已选企业后会将其作为目标归属提交。
+export function useCreateAICCAgent(orgId?: Ref<string | undefined>) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (payload: AICCAgentPayload) => {
       const response = await apiRequest<{ agent: AICCAgent }>('/api/v1/aicc/agents', {
         method: 'POST',
-        body: payload,
+        body: { ...payload, org_id: orgId?.value },
       })
       return response.agent
     },

@@ -78,12 +78,12 @@ func RegisterAICCRoutes(router gin.IRouter, handler *AICCHandler) {
 // CreateAgent 创建 AICC 智能体。
 //
 // @Summary      创建 AICC 智能体
-// @Description  企业管理员创建 AICC 智能体，并自动绑定隐藏 app runtime
+// @Description  企业管理员创建本企业智能体，平台管理员可携带 org_id 代管指定企业；创建后自动绑定隐藏 app runtime
 // @Tags         aicc
 // @Accept       json
 // @Produce      json
 // @Security     BearerAuth
-// @Param        body  body      CreateAICCAgentRequest  true  "创建智能体请求"
+// @Param        body  body      CreateAICCAgentRequest  true  "创建智能体请求（平台管理员须提供 org_id）"
 // @Success      201   {object}  map[string]service.AICCAgentResult
 // @Failure      400   {object}  ErrorResponse
 // @Failure      401   {object}  ErrorResponse
@@ -768,6 +768,7 @@ func queryTime(c *gin.Context, key string) (time.Time, bool) {
 
 func toAICCAgentInput(req CreateAICCAgentRequest) service.AICCAgentInput {
 	return service.AICCAgentInput{
+		OrgID:          req.OrgID,
 		Name:           req.Name,
 		Scenario:       req.Scenario,
 		Greeting:       req.Greeting,

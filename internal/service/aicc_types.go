@@ -11,8 +11,11 @@ const (
 	aiccLeadExportLimit int32 = 10000
 )
 
-// AICCAgentInput 是企业管理员创建或编辑 AICC 智能体的入参。
+// AICCAgentInput 是创建或编辑 AICC 智能体的入参。
 type AICCAgentInput struct {
+	// OrgID 是平台管理员创建时明确指定的目标企业；企业管理员创建时忽略该值并使用自身企业。
+	// 更新既有智能体时不使用该字段，资源归属始终以数据库记录为准。
+	OrgID string
 	// Name 是智能体展示名，创建和更新时 trim 后不能为空。
 	Name string
 	// Scenario 描述智能体适用业务场景，用于后续生成提示词和前端展示。

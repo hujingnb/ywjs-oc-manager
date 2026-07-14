@@ -821,7 +821,7 @@ func TestAICCServiceCreateAgentValidation(t *testing.T) {
 		{name: "达到企业上限返回配额错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1", AiccEnabled: true, AiccAgentLimit: null.IntFrom(1)}, count: 1, input: AICCAgentInput{Name: "售前"}, wantErr: ErrQuotaExceeded},                   // 场景：当前数量已达到 aicc_agent_limit。
 		{name: "跨组织管理员返回无权限", principal: auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: "org-2", UserID: "admin-2"}, org: sqlc.Organization{ID: "org-1", AiccEnabled: true}, input: AICCAgentInput{Name: "售前"}, wantErr: ErrForbidden}, // 场景：企业管理员只能管理本企业。
 		{name: "普通成员返回无权限", principal: auth.Principal{Role: domain.UserRoleOrgMember, OrgID: "org-1", UserID: "member-1"}, org: sqlc.Organization{ID: "org-1", AiccEnabled: true}, input: AICCAgentInput{Name: "售前"}, wantErr: ErrForbidden}, // 场景：普通成员无 AICC 管理入口。
-		{name: "平台管理员管理返回无权限", principal: auth.Principal{Role: domain.UserRolePlatformAdmin, UserID: "platform-1"}, org: sqlc.Organization{ID: "org-1", AiccEnabled: true}, input: AICCAgentInput{Name: "售前"}, wantErr: ErrForbidden},        // 场景：平台管理员仅只读不能管理智能体。
+		{name: "平台管理员未指定企业返回无权限", principal: auth.Principal{Role: domain.UserRolePlatformAdmin, UserID: "platform-1"}, org: sqlc.Organization{ID: "org-1", AiccEnabled: true}, input: AICCAgentInput{Name: "售前"}, wantErr: ErrForbidden},     // 场景：平台管理员必须明确目标企业。
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -896,9 +896,9 @@ func TestAICCSettingsDefaults(t *testing.T) {
 	assert.Nil(t, store.upsertSettings)
 }
 
-// TestAICCSettingsAllowsPlatformRead 覆盖平台排障读路径：
-// 平台管理员可以查看任意企业智能体的运营配置，但仍不能通过更新接口修改配置。
-func TestAICCSettingsAllowsPlatformRead(t *testing.T) {
+// TestAICCSettingsAllowsPlatformManagement 覆盖平台代管路径：
+// 平台管理员可以查看并更新指定企业智能体的运营配置。
+func TestAICCSettingsAllowsPlatformManagement(t *testing.T) {
 	store := seededAICCStore()
 	svc := NewAICCService(store, &fakeAICCHiddenAppCreator{})
 
@@ -907,11 +907,12 @@ func TestAICCSettingsAllowsPlatformRead(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "agent-1", result.AgentID)
 
-	_, err = svc.UpdateAgentSettings(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin, UserID: "platform-1"}, "agent-1", AICCAgentSettingsInput{
+	updated, err := svc.UpdateAgentSettings(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin, UserID: "platform-1"}, "agent-1", AICCAgentSettingsInput{
 		MessageLimitPerSession:  100,
 		SessionResumeTTLMinutes: 30,
 	})
-	require.ErrorIs(t, err, ErrForbidden)
+	require.NoError(t, err)
+	assert.Equal(t, "agent-1", updated.AgentID)
 }
 
 // TestAICCSettingsUpdateNormalizesInput 覆盖设置保存：
@@ -1001,13 +1002,29 @@ func TestAICCServiceUpdateAgentRequiresManagePermission(t *testing.T) {
 		assert.Equal(t, "update", store.audits[0].Action)
 	})
 
-	t.Run("平台管理员不可更新资料", func(t *testing.T) {
-		svc := NewAICCService(seededAICCStore(), &fakeAICCHiddenAppCreator{})
+	t.Run("平台管理员可更新资料", func(t *testing.T) {
+		store := seededAICCStore()
+		svc := NewAICCService(store, &fakeAICCHiddenAppCreator{})
 
-		_, err := svc.UpdateAgent(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, "agent-1", AICCAgentInput{Name: "官网售后"})
+		result, err := svc.UpdateAgent(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin, UserID: "platform-1"}, "agent-1", AICCAgentInput{Name: "官网售后"})
 
-		require.ErrorIs(t, err, ErrForbidden)
+		require.NoError(t, err)
+		assert.Equal(t, "官网售后", result.Name)
 	})
+}
+
+// TestAICCServiceCreateAgentAllowsPlatformAdminForTargetOrg 覆盖平台代管：平台管理员显式选择已开通企业后可创建该企业智能体。
+func TestAICCServiceCreateAgentAllowsPlatformAdminForTargetOrg(t *testing.T) {
+	store := &fakeAICCStore{org: sqlc.Organization{ID: "org-1", AiccEnabled: true}}
+	apps := &fakeAICCHiddenAppCreator{appID: "app-hidden-1"}
+	svc := NewAICCService(store, apps)
+
+	result, err := svc.CreateAgent(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin, UserID: "platform-1"}, AICCAgentInput{OrgID: "org-1", Name: "平台代管客服"})
+
+	require.NoError(t, err)
+	assert.Equal(t, "org-1", result.OrgID)
+	assert.Equal(t, "org-1", apps.lastInput.OrgID)
+	assert.Equal(t, "platform-1", apps.lastInput.UserID)
 }
 
 // TestAICCServiceStatusAndDelete 覆盖启动、停止和删除的状态写入。
@@ -1112,7 +1129,6 @@ func TestAICCServiceReplaceAgentKnowledgeValidation(t *testing.T) {
 		input     AICCKnowledgeInput
 		wantErr   error
 	}{
-		{name: "平台管理员不可保存", principal: auth.Principal{Role: domain.UserRolePlatformAdmin}, input: AICCKnowledgeInput{UseOrgKnowledge: true}, wantErr: ErrForbidden}, // 场景：平台只读排障不能改企业知识范围。
 		{name: "行业库 ID 为空返回参数错误", principal: aiccOrgAdmin(), input: AICCKnowledgeInput{IndustryKnowledgeBaseIDs: []string{" "}}, wantErr: ErrInvalidArgument},       // 场景：空 ID 不应进入数据库外键校验。
 		{name: "未授权行业库返回参数错误", principal: aiccOrgAdmin(), input: AICCKnowledgeInput{IndustryKnowledgeBaseIDs: []string{"industry-3"}}, wantErr: ErrInvalidArgument}, // 场景：企业管理员不能绕过平台授权提交任意行业库。
 	}
@@ -1125,6 +1141,17 @@ func TestAICCServiceReplaceAgentKnowledgeValidation(t *testing.T) {
 			require.ErrorIs(t, err, tc.wantErr)
 		})
 	}
+}
+
+// TestAICCServiceReplaceAgentKnowledgeAllowsPlatformAdmin 覆盖平台代管：平台管理员可保存指定企业客服的知识范围。
+func TestAICCServiceReplaceAgentKnowledgeAllowsPlatformAdmin(t *testing.T) {
+	store := seededAICCStore()
+	svc := NewAICCService(store, &fakeAICCHiddenAppCreator{})
+
+	result, err := svc.ReplaceAgentKnowledge(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin, UserID: "platform-1"}, "agent-1", AICCKnowledgeInput{UseOrgKnowledge: true})
+
+	require.NoError(t, err)
+	assert.True(t, result.UseOrgKnowledge)
 }
 
 // TestAICCServiceMapsMissingAgent 覆盖底层 sql.ErrNoRows 被转换为 service.ErrNotFound。

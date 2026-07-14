@@ -150,7 +150,7 @@ export interface paths {
         put?: never;
         /**
          * 创建 AICC 智能体
-         * @description 企业管理员创建 AICC 智能体，并自动绑定隐藏 app runtime
+         * @description 企业管理员创建本企业智能体，平台管理员可携带 org_id 代管指定企业；创建后自动绑定隐藏 app runtime
          */
         post: {
             parameters: {
@@ -159,7 +159,7 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            /** @description 创建智能体请求 */
+            /** @description 创建智能体请求（平台管理员须提供 org_id） */
             requestBody: {
                 content: {
                     "application/json": Record<string, never> | components["schemas"]["handlers.CreateAICCAgentRequest"];
@@ -15509,6 +15509,8 @@ export interface components {
             greeting?: string;
             /** @description Name 是智能体展示名。 */
             name: string;
+            /** @description OrgID 是平台管理员代管时的目标企业；企业管理员不需要也不能指定其他企业。 */
+            org_id?: string;
             /** @description PrivacyMode 是隐私提示模式：notice / consent_required。 */
             privacy_mode?: string;
             /** @description PrivacyText 是企业自定义隐私说明。 */
