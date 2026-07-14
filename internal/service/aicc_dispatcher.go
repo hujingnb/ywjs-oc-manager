@@ -96,7 +96,6 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 	if err != nil {
 		return d.finishError(ctx, task, token, err)
 	}
-	d.recordSuccess()
 	write := func(s AICCDispatcherStore) error {
 		if err := s.CreateAICCMessage(ctx, sqlc.CreateAICCMessageParams{ID: newUUID(), SessionID: task.SessionID, AgentID: task.AgentID, Direction: domain.AICCMessageDirectionAssistant, ContentType: domain.AICCMessageContentTypeText, TextContent: null.StringFrom(reply), ClientMessageID: visitor.ClientMessageID}); err != nil {
 			return err
@@ -110,7 +109,12 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 		}
 		return nil
 	}
-	return d.tx.WithAICCDispatcherTx(ctx, write)
+	if err := d.tx.WithAICCDispatcherTx(ctx, write); err != nil {
+		d.reopenHalfOpenProbe(d.now())
+		return err
+	}
+	d.recordSuccess()
+	return nil
 }
 
 // RecoverExpiredLeases 由扫库 worker 定期调用，使宕机 worker 的任务重新可领取。
@@ -119,6 +123,7 @@ func (d *AICCDispatcher) RecoverExpiredLeases(ctx context.Context) (int64, error
 }
 
 func (d *AICCDispatcher) finishError(ctx context.Context, task sqlc.AiccMessageTask, token string, err error) error {
+	d.reopenHalfOpenProbe(d.now())
 	if isAICCRetryable(err) {
 		d.recordOverload(d.now())
 		// Lease SQL 会先将 attempts 加一；重试退避必须使用本轮实际失败后的计数。
@@ -131,6 +136,17 @@ func (d *AICCDispatcher) finishError(ctx context.Context, task sqlc.AiccMessageT
 	}
 	_, updateErr := d.store.FailAICCMessageTask(ctx, sqlc.FailAICCMessageTaskParams{ID: task.ID, LeaseToken: null.StringFrom(token), LastError: null.StringFrom(aiccErrorSummary(err))})
 	return updateErr
+}
+
+// reopenHalfOpenProbe 把已领取但未成功完成的半开探测重新熔断 30 秒，
+// 防止确定性失败或持久化失败留下永久 half-open 状态。
+func (d *AICCDispatcher) reopenHalfOpenProbe(now time.Time) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.halfOpen && !d.circuitUntil.IsZero() {
+		d.circuitUntil = now.Add(30 * time.Second)
+		d.halfOpen = false
+	}
 }
 
 func aiccRetryDelay(attempts int32) time.Duration {

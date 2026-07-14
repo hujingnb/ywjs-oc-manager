@@ -58,6 +58,7 @@ func TestAICCPublicHermesChatPreservesHTTPOverloadStatus(t *testing.T) {
 
 	require.Error(t, err)
 	assert.True(t, isAICCRetryable(err))
+	assert.ErrorIs(t, err, ErrConversationCLI)
 }
 
 // TestAICCPublicHermesChatPreservesNetworkTimeout 覆盖运行时网络超时：
@@ -71,6 +72,15 @@ func TestAICCPublicHermesChatPreservesNetworkTimeout(t *testing.T) {
 
 	require.Error(t, err)
 	assert.True(t, isAICCRetryable(err))
+}
+
+// TestMapOcOpsConversationErrKeepsGenericCLIContract 覆盖普通 Hermes 调用契约：
+// 即使 oc-ops 返回 503，非 AICC 的通用映射仍必须保持 ErrConversationCLI（handler 映射 502）。
+func TestMapOcOpsConversationErrKeepsGenericCLIContract(t *testing.T) {
+	err := mapOcOpsConversationErr(&ocops.HTTPStatusError{StatusCode: 503, Err: ocops.ErrCLI})
+
+	assert.ErrorIs(t, err, ErrConversationCLI)
+	assert.False(t, isAICCRetryable(err))
 }
 
 // AICC 公开会话查找 Hermes 会话时不能按 web 过滤：Hermes 创建时接受 web，

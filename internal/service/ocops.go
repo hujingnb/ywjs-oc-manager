@@ -17,7 +17,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net"
 	"strings"
 
 	"oc-manager/internal/auth"
@@ -262,18 +261,6 @@ func mapOcOpsKanbanErr(err error) error {
 // mapOcOpsConversationErr 把 ocops 哨兵错误翻成 service 会话哨兵错误。
 // nil 透传 nil；未列举的错误兜底为 ErrConversationCLI（与 502/未知上游错误语义一致）。
 func mapOcOpsConversationErr(err error) error {
-	// AICC 异步调度必须保留限流、过载和网络超时的可重试语义；其它会话入口仍可使用原有哨兵映射。
-	var statusErr *ocops.HTTPStatusError
-	if errors.As(err, &statusErr) && (statusErr.StatusCode == 429 || statusErr.StatusCode == 503 || statusErr.StatusCode == 529) {
-		return &AICCUpstreamStatusError{StatusCode: statusErr.StatusCode}
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return err
-	}
-	var networkErr net.Error
-	if errors.As(err, &networkErr) && networkErr.Timeout() {
-		return err
-	}
 	switch {
 	case err == nil:
 		return nil

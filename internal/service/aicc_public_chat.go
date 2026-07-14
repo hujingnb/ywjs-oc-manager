@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -39,7 +40,7 @@ func (c *AICCPublicHermesChat) ChatAICC(ctx context.Context, appID, sessionID, t
 	}
 	out, err := c.ops.SessionChat(ctx, loc.Endpoint, hermesSessionID, ocops.ConversationChatReq{Message: text})
 	if err != nil {
-		return "", mapOcOpsConversationErr(err)
+		return "", mapAICCOpsConversationErr(err)
 	}
 	// Hermes 有时把模型网关失败诊断包装进成功响应；这不是可展示的客服答复，
 	// 必须转成可分类错误交给 dispatcher 写入 retry_wait / failed 状态。
@@ -50,6 +51,33 @@ func (c *AICCPublicHermesChat) ChatAICC(ctx context.Context, appID, sessionID, t
 }
 
 var aiccRuntimeStatusPattern = regexp.MustCompile(`(?i)\b(429|503|529)\b`)
+
+// aiccRuntimeRetryError 同时保留普通 Hermes 的错误语义和 AICC 专属的可重试原因。
+// errors.Is 仍能匹配 ErrConversationCLI，dispatcher 则通过 errors.As 分类上游状态或超时。
+type aiccRuntimeRetryError struct {
+	public error
+	cause  error
+}
+
+func (e *aiccRuntimeRetryError) Error() string   { return e.public.Error() }
+func (e *aiccRuntimeRetryError) Unwrap() []error { return []error{e.public, e.cause} }
+
+// mapAICCOpsConversationErr 仅供公开 AICC 转发使用；不能改变普通 Hermes handler 的 502 映射契约。
+func mapAICCOpsConversationErr(err error) error {
+	public := mapOcOpsConversationErr(err)
+	var statusErr *ocops.HTTPStatusError
+	if errors.As(err, &statusErr) && (statusErr.StatusCode == 429 || statusErr.StatusCode == 503 || statusErr.StatusCode == 529) {
+		return &aiccRuntimeRetryError{public: public, cause: &AICCUpstreamStatusError{StatusCode: statusErr.StatusCode}}
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return &aiccRuntimeRetryError{public: public, cause: err}
+	}
+	var networkErr interface{ Timeout() bool }
+	if errors.As(err, &networkErr) && networkErr.Timeout() {
+		return &aiccRuntimeRetryError{public: public, cause: err}
+	}
+	return public
+}
 
 // aiccRuntimeDiagnosticError 识别 Hermes 错误文本中的上游状态；未知诊断保留确定性失败语义，
 // 避免错误地把内部信息伪装成正常客服回复。
@@ -72,7 +100,7 @@ func (c *AICCPublicHermesChat) ensureHermesSession(ctx context.Context, ep ocops
 	// 这里必须不带 source 过滤，只用 AICC 专属标题匹配，避免查不到已有会话后重复创建触发 400。
 	sessions, err := c.ops.ListSessions(ctx, ep, "", 100, 0)
 	if err != nil {
-		return "", mapOcOpsConversationErr(err)
+		return "", mapAICCOpsConversationErr(err)
 	}
 	for _, session := range sessions {
 		if session.Title == title && strings.TrimSpace(session.ID) != "" {
@@ -84,7 +112,7 @@ func (c *AICCPublicHermesChat) ensureHermesSession(ctx context.Context, ep ocops
 		Title:  title,
 	})
 	if err != nil {
-		return "", mapOcOpsConversationErr(err)
+		return "", mapAICCOpsConversationErr(err)
 	}
 	if strings.TrimSpace(created.ID) == "" {
 		return "", ErrConversationRuntimeUnavailable

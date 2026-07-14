@@ -162,6 +162,24 @@ func TestAICCDispatcherReleasesHalfOpenProbeWhenTaskNotClaimed(t *testing.T) {
 	assert.True(t, d.allow(current))
 }
 
+// TestAICCDispatcherReopensCircuitAfterNonRetryableHalfOpenFailure 覆盖半开探测确定性失败：
+// 已领取的探测任务失败后必须重新熔断 30 秒，冷却结束后新的任务仍可被接纳。
+func TestAICCDispatcherReopensCircuitAfterNonRetryableHalfOpenFailure(t *testing.T) {
+	s := newAICCDispatcherStoreFake()
+	d := NewAICCDispatcher(s, aiccDispatcherTxFake{s}, aiccDispatcherChatFake{err: errors.New("invalid request")}, nil)
+	now := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
+	current := now
+	d.now = func() time.Time { return current }
+	for range 5 {
+		d.recordOverload(now)
+	}
+	current = now.Add(30 * time.Second)
+
+	require.NoError(t, d.Dispatch(context.Background(), s.task))
+	assert.False(t, d.allow(current.Add(time.Second)))
+	assert.True(t, d.allow(current.Add(30*time.Second)))
+}
+
 // TestAICCDispatcherCircuitHalfOpenSuccessRecovers 覆盖连续五次过载后的熔断和半开恢复：
 // 冷却期内不再领取任务，30 秒后允许一次探测；探测成功后恢复正常调度。
 func TestAICCDispatcherCircuitHalfOpenSuccessRecovers(t *testing.T) {
