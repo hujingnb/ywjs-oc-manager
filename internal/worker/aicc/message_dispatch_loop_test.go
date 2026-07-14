@@ -18,9 +18,9 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
-// TestMessageDispatchLoopTelemetryCoversQueueConcurrencyAndRecovery 覆盖真实 Tick 路径：
-// 队列等待、并发已满和重启租约回收必须经同一 observer 输出，且不能携带访客内容。
-func TestMessageDispatchLoopTelemetryCoversQueueConcurrencyAndRecovery(t *testing.T) {
+// TestMessageDispatchLoopTelemetryCoversQueueAndConcurrency 覆盖真实 Tick 路径：
+// 队列等待和并发已满必须经安全 observer 输出，且不能携带访客内容。
+func TestMessageDispatchLoopTelemetryCoversQueueAndConcurrency(t *testing.T) {
 	var output bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&output, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	queue := redis.NewMemoryQueue()
@@ -40,7 +40,6 @@ func TestMessageDispatchLoopTelemetryCoversQueueConcurrencyAndRecovery(t *testin
 
 	logs := output.String()
 	assert.Contains(t, logs, `"aicc_event":"queued"`)
-	assert.Contains(t, logs, `"aicc_event":"lease_recovered"`)
 	assert.Contains(t, logs, `"queue_wait_ms":`)
 	assert.Contains(t, logs, `"inflight":4`)
 	assert.NotContains(t, logs, "visitor-content")
@@ -67,6 +66,20 @@ func TestMessageDispatchLoopTelemetryClassifiesDispatchError(t *testing.T) {
 	assert.NotContains(t, logs, "visitor-content")
 	assert.NotContains(t, logs, "secret")
 	assert.False(t, strings.Contains(logs, `"error"`))
+}
+
+// TestMessageDispatchLoopRecoveryUsesDispatcherAsSingleObserverOwner 覆盖真实 dispatcher 与循环共享 observer：
+// 一批过期租约只能由 dispatcher 输出一条 lease_recovered，循环不得重复计数。
+func TestMessageDispatchLoopRecoveryUsesDispatcherAsSingleObserverOwner(t *testing.T) {
+	observer := &aiccObservationRecorder{}
+	store := &realDispatcherRecoveryStore{recovered: 1}
+	dispatcher := service.NewAICCDispatcher(store, nil, nil, nil)
+	dispatcher.SetObserver(observer)
+	loop := NewMessageDispatchLoop(store, redis.NewMemoryQueue(), dispatcher, slog.Default())
+	loop.SetObserver(observer)
+
+	require.NoError(t, loop.Tick(context.Background()))
+	assert.Equal(t, 1, observer.eventCount("lease_recovered"))
 }
 
 // TestMessageDispatchLoopTickSweepsReservesAndDispatches 覆盖任务运行循环：
@@ -177,6 +190,45 @@ func TestMessageDispatchLoopRunWaitsForSubmittedDispatchOnShutdown(t *testing.T)
 type messageTaskStoreStub struct {
 	ready []sqlc.AiccMessageTask
 	limit int32
+}
+
+// realDispatcherRecoveryStore 通过嵌入完整 store 接口复用 dispatcher 的真实恢复方法，
+// 本用例只触发 RecoverExpiredLeases，因此无需伪造无关的消息读写行为。
+type realDispatcherRecoveryStore struct {
+	service.AICCDispatcherStore
+	recovered int64
+}
+
+func (s *realDispatcherRecoveryStore) ListReadyAICCMessageTasks(context.Context, int32) ([]sqlc.AiccMessageTask, error) {
+	return nil, nil
+}
+
+func (s *realDispatcherRecoveryStore) RecoverExpiredAICCMessageTaskLeases(context.Context) (int64, error) {
+	return s.recovered, nil
+}
+
+// aiccObservationRecorder 在共享 observer 场景收集事件，避免依赖日志文本统计。
+type aiccObservationRecorder struct {
+	mu     sync.Mutex
+	events []service.AICCDispatchObservation
+}
+
+func (r *aiccObservationRecorder) Observe(_ context.Context, event service.AICCDispatchObservation) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, event)
+}
+
+func (r *aiccObservationRecorder) eventCount(name string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	count := 0
+	for _, event := range r.events {
+		if event.Event == name {
+			count++
+		}
+	}
+	return count
 }
 
 func (s *messageTaskStoreStub) ListReadyAICCMessageTasks(_ context.Context, limit int32) ([]sqlc.AiccMessageTask, error) {

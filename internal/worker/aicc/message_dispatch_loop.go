@@ -91,14 +91,10 @@ func (l *MessageDispatchLoop) Tick(ctx context.Context) error {
 		return fmt.Errorf("AICC 消息运行循环未配置")
 	}
 	// 必须经 dispatcher 的恢复入口执行，避免循环绕过其观测与未来的恢复策略。
-	recovered, err := l.dispatcher.RecoverExpiredLeases(ctx)
-	if err != nil {
+	if _, err := l.dispatcher.RecoverExpiredLeases(ctx); err != nil {
 		return fmt.Errorf("回收过期 AICC 消息租约失败: %w", err)
 	}
-	if recovered > 0 {
-		// 租约回收为聚合事件，不带任务或会话标识；MySQL 状态仍是重启恢复的唯一事实来源。
-		l.observe(ctx, service.AICCDispatchObservation{Event: "lease_recovered", Upstream: "hermes", Result: "recovered"})
-	}
+	// dispatcher 是租约恢复事件的唯一所有者；循环只负责调用入口，避免同一批恢复重复计数。
 	ready, err := l.store.ListReadyAICCMessageTasks(ctx, l.batchSize)
 	if err != nil {
 		return fmt.Errorf("扫描就绪 AICC 消息任务失败: %w", err)
