@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
+	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/k8sorch"
 )
 
@@ -87,6 +88,7 @@ func TestK3dEnsureAppCreatesResources(t *testing.T) {
 
 	spec := k8sorch.AppSpec{
 		AppID:           id,
+		AppType:         domain.AppTypeStandard,
 		HermesImage:     hermesImage,
 		OpsImage:        opsImage,
 		ControlToken:    "test-control-token",
@@ -193,6 +195,7 @@ func TestK3dRolloutRestartRecreatesPod(t *testing.T) {
 
 	spec := k8sorch.AppSpec{
 		AppID:           id,
+		AppType:         domain.AppTypeStandard,
 		HermesImage:     hermesImage,
 		OpsImage:        opsImage,
 		ControlToken:    "test-control-token",
@@ -240,6 +243,7 @@ func TestK3dDeleteRemovesResources(t *testing.T) {
 
 	spec := k8sorch.AppSpec{
 		AppID:           id,
+		AppType:         domain.AppTypeStandard,
 		HermesImage:     hermesImage,
 		OpsImage:        opsImage,
 		ControlToken:    "test-control-token",

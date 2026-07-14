@@ -124,6 +124,8 @@ func TestAppInitializeHandlesHappyPath(t *testing.T) {
 	require.Len(t, orch.ensureAppCalls, 1, "EnsureApp 应被调用 1 次")
 	spec := orch.ensureAppCalls[0]
 	assert.Equal(t, testAppID, spec.AppID, "AppSpec.AppID 应等于 app.ID")
+	// 编排输入必须保留持久化应用类型，由 RoutingOrchestrator 选择正确 namespace。
+	assert.Equal(t, domain.AppTypeStandard, spec.AppType)
 	assert.Equal(t, testRuntimeImageRef, spec.HermesImage, "AppSpec.HermesImage 应为 ResolveRuntimeImage 解析出的 ref")
 	assert.Equal(t, "ops:latest", spec.OpsImage, "AppSpec.OpsImage 应来自 k8sCfg.OpsImage")
 	assert.Equal(t, "acr-pull", spec.ImagePullSecret, "AppSpec.ImagePullSecret 应来自 k8sCfg.ImagePullSecret")

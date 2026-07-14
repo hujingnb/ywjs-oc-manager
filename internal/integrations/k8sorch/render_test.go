@@ -11,12 +11,16 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/yaml"
+
+	"oc-manager/internal/domain"
 )
 
 // testSpec 是渲染测试的固定 AppSpec，覆盖所有字段以确保 golden 完整。
 func testSpec() AppSpec {
 	return AppSpec{
-		AppID:           "a1",
+		AppID: "a1",
+		// 渲染测试默认使用普通应用类型；该字段只参与路由，不应改变资源 YAML。
+		AppType:         domain.AppTypeStandard,
 		HermesImage:     "registry/hermes:v1",
 		OpsImage:        "registry/ops:dev",
 		ControlToken:    "tok",

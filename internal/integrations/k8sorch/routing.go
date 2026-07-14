@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"oc-manager/internal/domain"
 )
 
-// AppKindResolver 查询应用是否属于 AICC 隐藏运行时。
+// AppKindResolver 查询应用类型，供状态类操作选择正确的运行时 namespace。
 type AppKindResolver interface {
-	IsAICCHidden(ctx context.Context, appID string) (bool, error)
+	ResolveAppType(ctx context.Context, appID string) (domain.AppType, error)
 }
 
 // RoutingOrchestrator 按应用类型把操作分发至普通或 AICC 专用 namespace。
@@ -27,11 +29,20 @@ func (r *RoutingOrchestrator) target(ctx context.Context, appID string) (Orchest
 	if r.resolver == nil {
 		return nil, fmt.Errorf("应用 %s 缺少 AICC 类型解析器", appID)
 	}
-	hidden, err := r.resolver.IsAICCHidden(ctx, appID)
+	appType, err := r.resolver.ResolveAppType(ctx, appID)
 	if err != nil {
-		return nil, fmt.Errorf("解析应用 %s 的 AICC 类型失败: %w", appID, err)
+		return nil, fmt.Errorf("解析应用 %s 的类型失败: %w", appID, err)
 	}
-	if hidden {
+	return r.targetForAppType(appID, appType)
+}
+
+// targetForAppType 按已校验的应用类型选择 namespace 编排器；未知类型必须失败，不能默认普通应用。
+func (r *RoutingOrchestrator) targetForAppType(appID string, appType domain.AppType) (Orchestrator, error) {
+	if appType != domain.AppTypeStandard && !domain.IsAICCAppType(appType) {
+		return nil, fmt.Errorf("应用 %s 的类型 %q 不支持编排路由", appID, appType)
+	}
+	// 仅由领域谓词决定 AICC 专属 adapter；其余已校验类型统一走普通 adapter。
+	if domain.IsAICCAppType(appType) {
 		if r.aicc == nil {
 			return nil, fmt.Errorf("AICC 应用 %s 缺少专用编排器", appID)
 		}
@@ -44,16 +55,11 @@ func (r *RoutingOrchestrator) target(ctx context.Context, appID string) (Orchest
 }
 
 func (r *RoutingOrchestrator) EnsureApp(ctx context.Context, spec AppSpec) error {
-	if spec.AICCHidden {
-		if r.aicc == nil {
-			return fmt.Errorf("AICC 应用 %s 缺少专用编排器", spec.AppID)
-		}
-		return r.aicc.EnsureApp(ctx, spec)
+	o, err := r.targetForAppType(spec.AppID, spec.AppType)
+	if err != nil {
+		return err
 	}
-	if r.normal == nil {
-		return fmt.Errorf("普通应用 %s 缺少编排器", spec.AppID)
-	}
-	return r.normal.EnsureApp(ctx, spec)
+	return o.EnsureApp(ctx, spec)
 }
 func (r *RoutingOrchestrator) WaitReady(ctx context.Context, id string, timeout time.Duration, cb func(AppStatus)) error {
 	o, e := r.target(ctx, id)
