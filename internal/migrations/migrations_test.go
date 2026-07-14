@@ -288,6 +288,26 @@ func TestAppsAppTypeMigrationGuardrails(t *testing.T) {
 	assert.Greater(t, dropCheckIndex, updateIndex)
 }
 
+// TestAICCMessageTasksMigrationDeclaresDurableDispatchState 验证客服消息任务迁移持久化调度状态、
+// 幂等锚点与租约扫描索引，避免 Redis 信号丢失后无法从 MySQL 恢复投递。
+func TestAICCMessageTasksMigrationDeclaresDurableDispatchState(t *testing.T) {
+	upBytes, err := FS.ReadFile("000034_aicc_message_tasks.up.sql")
+	require.NoError(t, err)
+	up := string(upBytes)
+
+	// 每条消息仅能创建一个任务，消息删除后任务也必须随会话历史一并清理。
+	assert.Contains(t, up, "CREATE TABLE aicc_message_tasks")
+	assert.Contains(t, up, "UNIQUE KEY uk_aicc_message_tasks_message (message_id)")
+	assert.Contains(t, up, "CONSTRAINT fk_aicc_message_tasks_message FOREIGN KEY (message_id) REFERENCES aicc_messages(id) ON DELETE CASCADE")
+
+	// 状态枚举覆盖排队、执行、重试、完成和最终失败，阻止未知状态绕过调度机。
+	assert.Contains(t, up, "CONSTRAINT aicc_message_tasks_status_check CHECK (status IN ('queued','processing','retry_wait','completed','failed'))")
+
+	// dispatcher 按到期时间扫描，reaper 按过期租约扫描；索引末尾 id 保证稳定的批量顺序。
+	assert.Contains(t, up, "KEY idx_aicc_message_tasks_ready (status, run_after, id)")
+	assert.Contains(t, up, "KEY idx_aicc_message_tasks_lease (status, lease_expires_at, id)")
+}
+
 // TestAICCSettingsMigrationContainsOperationalTables 覆盖 AICC 运营配置表：
 // 新增表必须按 agent 维度保存安全与续接策略，并用访客哈希记录封禁，避免保存明文 IP。
 func TestAICCSettingsMigrationContainsOperationalTables(t *testing.T) {

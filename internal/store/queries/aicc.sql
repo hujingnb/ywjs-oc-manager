@@ -168,6 +168,82 @@ SELECT *
 FROM aicc_messages
 WHERE session_id = ? AND direction = ? AND client_message_id = ?;
 
+-- name: CreateAICCMessageTask :exec
+INSERT INTO aicc_message_tasks (
+    id, message_id, session_id, agent_id, org_id, app_id, run_after
+) VALUES (?, ?, ?, ?, ?, ?, ?);
+
+-- name: GetAICCMessageTaskByMessageID :one
+SELECT *
+FROM aicc_message_tasks
+WHERE message_id = ?;
+
+-- name: ListReadyAICCMessageTasks :many
+-- 只返回当前到期且所在会话没有执行中任务的任务；租约时仍会再次原子校验，列表结果不能视作所有权。
+SELECT task.*
+FROM aicc_message_tasks AS task
+WHERE task.status IN ('queued', 'retry_wait')
+  AND task.run_after <= NOW(6)
+  AND NOT EXISTS (
+      SELECT 1
+      FROM aicc_message_tasks AS processing
+      WHERE processing.session_id = task.session_id
+        AND processing.status = 'processing'
+  )
+ORDER BY task.run_after ASC, task.id ASC
+LIMIT ?;
+
+-- name: LeaseAICCMessageTask :execrows
+-- status、到期时间和会话无 processing 任务均在同一 UPDATE 中判断，避免 dispatcher 先读后写造成重复租约。
+UPDATE aicc_message_tasks AS task
+LEFT JOIN aicc_message_tasks AS processing
+  ON processing.session_id = task.session_id
+ AND processing.status = 'processing'
+SET status = 'processing',
+    lease_token = sqlc.arg(lease_token),
+    lease_expires_at = sqlc.arg(lease_expires_at),
+    attempts = attempts + 1,
+    updated_at = NOW(6)
+WHERE task.id = sqlc.arg(id)
+  AND task.status IN ('queued', 'retry_wait')
+  AND task.run_after <= NOW(6)
+  AND processing.id IS NULL;
+
+-- name: CompleteAICCMessageTask :execrows
+UPDATE aicc_message_tasks
+SET status = 'completed', lease_token = NULL, lease_expires_at = NULL, updated_at = NOW(6)
+WHERE id = sqlc.arg(id) AND status = 'processing' AND lease_token = sqlc.arg(lease_token);
+
+-- name: RetryAICCMessageTask :execrows
+UPDATE aicc_message_tasks
+SET status = 'retry_wait',
+    run_after = sqlc.arg(run_after),
+    lease_token = NULL,
+    lease_expires_at = NULL,
+    last_error = sqlc.narg(last_error),
+    updated_at = NOW(6)
+WHERE id = sqlc.arg(id) AND status = 'processing' AND lease_token = sqlc.arg(lease_token);
+
+-- name: FailAICCMessageTask :execrows
+UPDATE aicc_message_tasks
+SET status = 'failed',
+    lease_token = NULL,
+    lease_expires_at = NULL,
+    last_error = sqlc.narg(last_error),
+    updated_at = NOW(6)
+WHERE id = sqlc.arg(id) AND status = 'processing' AND lease_token = sqlc.arg(lease_token);
+
+-- name: RecoverExpiredAICCMessageTaskLeases :execrows
+-- reaper 仅接管过期租约；耗尽尝试次数的任务转为 failed，其他任务立即回到 retry_wait。
+UPDATE aicc_message_tasks
+SET status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'retry_wait' END,
+    run_after = CASE WHEN attempts >= max_attempts THEN run_after ELSE NOW(6) END,
+    lease_token = NULL,
+    lease_expires_at = NULL,
+    last_error = COALESCE(last_error, 'processing lease expired'),
+    updated_at = NOW(6)
+WHERE status = 'processing' AND lease_expires_at <= NOW(6);
+
 -- name: CreateAICCImage :exec
 INSERT INTO aicc_images (
     id, session_id, agent_id, org_id, object_key, mime, size_bytes, filename

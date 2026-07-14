@@ -28,6 +28,7 @@ type Querier interface {
 	ClearAICCLeadLatestSession(ctx context.Context, latestSessionID null.String) error
 	// transitionTo / RequestInitialize 强制清空进度字段。
 	ClearAppProgress(ctx context.Context, id string) error
+	CompleteAICCMessageTask(ctx context.Context, arg CompleteAICCMessageTaskParams) (int64, error)
 	CountAICCAgentsByOrg(ctx context.Context, orgID string) (int64, error)
 	CountAICCCompletedLeadSessions(ctx context.Context, orgID string) (int64, error)
 	CountAICCCompletedLeadSessionsInRange(ctx context.Context, arg CountAICCCompletedLeadSessionsInRangeParams) (int64, error)
@@ -70,6 +71,7 @@ type Querier interface {
 	CreateAICCAgent(ctx context.Context, arg CreateAICCAgentParams) error
 	CreateAICCImage(ctx context.Context, arg CreateAICCImageParams) error
 	CreateAICCMessage(ctx context.Context, arg CreateAICCMessageParams) error
+	CreateAICCMessageTask(ctx context.Context, arg CreateAICCMessageTaskParams) error
 	CreateAICCSession(ctx context.Context, arg CreateAICCSessionParams) error
 	// k8s 模型下 app 对应 Deployment，pod 落点由调度器决定，不再写 runtime_node_id。
 	// locale 在创建时快照 owner 的用户语言偏好（NULL=平台回退默认）。
@@ -120,6 +122,7 @@ type Querier interface {
 	DeleteRAGFlowDatasetMapping(ctx context.Context, id string) error
 	// 删除本地 document 缓存；RAGFlow 远端删除由 service 在同一业务流程中处理。
 	DeleteRAGFlowDocumentMapping(ctx context.Context, id string) error
+	FailAICCMessageTask(ctx context.Context, arg FailAICCMessageTaskParams) (int64, error)
 	GetAICCAgent(ctx context.Context, id string) (AiccAgent, error)
 	GetAICCAgentByAppID(ctx context.Context, appID string) (AiccAgent, error)
 	GetAICCAgentByPublicToken(ctx context.Context, publicToken string) (AiccAgent, error)
@@ -129,6 +132,7 @@ type Querier interface {
 	GetAICCImageBySession(ctx context.Context, arg GetAICCImageBySessionParams) (AiccImage, error)
 	GetAICCLeadByContact(ctx context.Context, arg GetAICCLeadByContactParams) (AiccLead, error)
 	GetAICCMessageByClientMessageID(ctx context.Context, arg GetAICCMessageByClientMessageIDParams) (AiccMessage, error)
+	GetAICCMessageTaskByMessageID(ctx context.Context, messageID string) (AiccMessageTask, error)
 	GetAICCSession(ctx context.Context, id string) (AiccSession, error)
 	GetAICCSessionByToken(ctx context.Context, sessionToken string) (AiccSession, error)
 	GetActiveAICCBlockedVisitor(ctx context.Context, arg GetActiveAICCBlockedVisitorParams) (AiccBlockedVisitor, error)
@@ -196,6 +200,8 @@ type Querier interface {
 	// 用于组织创建链路失败时回滚刚刚 INSERT 的孤儿记录。
 	// 正常生命周期不可见此查询；普通"删除"必须走 SoftDeleteOrganization。
 	HardDeleteOrganization(ctx context.Context, id string) error
+	// status、到期时间和会话无 processing 任务均在同一 UPDATE 中判断，避免 dispatcher 先读后写造成重复租约。
+	LeaseAICCMessageTask(ctx context.Context, arg LeaseAICCMessageTaskParams) (int64, error)
 	ListAICCAgentKnowledge(ctx context.Context, agentID string) ([]AiccAgentKnowledge, error)
 	ListAICCAgentsByOrg(ctx context.Context, arg ListAICCAgentsByOrgParams) ([]AiccAgent, error)
 	ListAICCBlockedVisitorsByAgent(ctx context.Context, arg ListAICCBlockedVisitorsByAgentParams) ([]AiccBlockedVisitor, error)
@@ -270,6 +276,8 @@ type Querier interface {
 	// 全库列出 running 超过给定时刻仍未推进(updated_at 即「进入 running 时刻」,刷新任务状态不变时不写库)的文档,
 	// 供自愈任务 stop_parsing→reparse。只取 running、不取 queued(排队是正常积压,不在此恢复)。
 	ListRAGFlowStuckRunningDocumentsForHeal(ctx context.Context, arg ListRAGFlowStuckRunningDocumentsForHealParams) ([]ListRAGFlowStuckRunningDocumentsForHealRow, error)
+	// 只返回当前到期且所在会话没有执行中任务的任务；租约时仍会再次原子校验，列表结果不能视作所有权。
+	ListReadyAICCMessageTasks(ctx context.Context, limit int32) ([]AiccMessageTask, error)
 	ListReadyJobs(ctx context.Context, limit int32) ([]Job, error)
 	ListRechargeRecordsByOrg(ctx context.Context, arg ListRechargeRecordsByOrgParams) ([]RechargeRecord, error)
 	ListRequiredAICCLeadFieldsMissing(ctx context.Context, id string) ([]AiccLeadField, error)
@@ -327,6 +335,8 @@ type Querier interface {
 	MarkRAGFlowDocumentManualReparseQueued(ctx context.Context, id string) error
 	MarkSkillTicketDelivered(ctx context.Context, arg MarkSkillTicketDeliveredParams) error
 	MarkUserLoggedIn(ctx context.Context, id string) error
+	// reaper 仅接管过期租约；耗尽尝试次数的任务转为 failed，其他任务立即回到 retry_wait。
+	RecoverExpiredAICCMessageTaskLeases(ctx context.Context) (int64, error)
 	RejectSkillTicket(ctx context.Context, arg RejectSkillTicketParams) error
 	// 重命名未删除行业知识库；唯一约束负责拦截同名未删除记录。
 	RenameIndustryKnowledgeBase(ctx context.Context, arg RenameIndustryKnowledgeBaseParams) error
@@ -344,6 +354,7 @@ type Querier interface {
 	RequeueJob(ctx context.Context, id string) error
 	// 整库 embedding 模型切换后，把该 dataset 下所有本地 document 状态重置为 queued，交给现有刷新任务继续推进。
 	ResetRAGFlowDocumentsParseStatusByDataset(ctx context.Context, datasetID string) error
+	RetryAICCMessageTask(ctx context.Context, arg RetryAICCMessageTaskParams) (int64, error)
 	RetryJob(ctx context.Context, arg RetryJobParams) error
 	RevokeRefreshToken(ctx context.Context, id string) error
 	RevokeRefreshTokensByUser(ctx context.Context, userID string) error

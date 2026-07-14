@@ -147,6 +147,25 @@ type AiccMessage struct {
 	ClientMessageID null.String `db:"client_message_id" json:"client_message_id"`
 }
 
+type AiccMessageTask struct {
+	ID                   string      `db:"id" json:"id"`
+	MessageID            string      `db:"message_id" json:"message_id"`
+	SessionID            string      `db:"session_id" json:"session_id"`
+	AgentID              string      `db:"agent_id" json:"agent_id"`
+	OrgID                string      `db:"org_id" json:"org_id"`
+	AppID                string      `db:"app_id" json:"app_id"`
+	Status               string      `db:"status" json:"status"`
+	Attempts             int32       `db:"attempts" json:"attempts"`
+	MaxAttempts          int32       `db:"max_attempts" json:"max_attempts"`
+	RunAfter             time.Time   `db:"run_after" json:"run_after"`
+	LeaseToken           null.String `db:"lease_token" json:"lease_token"`
+	LeaseExpiresAt       null.Time   `db:"lease_expires_at" json:"lease_expires_at"`
+	LastError            null.String `db:"last_error" json:"last_error"`
+	ProcessingSessionKey null.String `db:"processing_session_key" json:"processing_session_key"`
+	CreatedAt            time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt            time.Time   `db:"updated_at" json:"updated_at"`
+}
+
 type AiccSession struct {
 	ID                 string      `db:"id" json:"id"`
 	AgentID            string      `db:"agent_id" json:"agent_id"`

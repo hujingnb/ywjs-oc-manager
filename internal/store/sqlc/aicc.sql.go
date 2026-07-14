@@ -78,6 +78,25 @@ func (q *Queries) ClearAICCLeadLatestSession(ctx context.Context, latestSessionI
 	return err
 }
 
+const completeAICCMessageTask = `-- name: CompleteAICCMessageTask :execrows
+UPDATE aicc_message_tasks
+SET status = 'completed', lease_token = NULL, lease_expires_at = NULL, updated_at = NOW(6)
+WHERE id = ? AND status = 'processing' AND lease_token = ?
+`
+
+type CompleteAICCMessageTaskParams struct {
+	ID         string      `db:"id" json:"id"`
+	LeaseToken null.String `db:"lease_token" json:"lease_token"`
+}
+
+func (q *Queries) CompleteAICCMessageTask(ctx context.Context, arg CompleteAICCMessageTaskParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, completeAICCMessageTask, arg.ID, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const countAICCAgentsByOrg = `-- name: CountAICCAgentsByOrg :one
 SELECT COUNT(*)
 FROM aicc_agents
@@ -425,6 +444,35 @@ func (q *Queries) CreateAICCMessage(ctx context.Context, arg CreateAICCMessagePa
 	return err
 }
 
+const createAICCMessageTask = `-- name: CreateAICCMessageTask :exec
+INSERT INTO aicc_message_tasks (
+    id, message_id, session_id, agent_id, org_id, app_id, run_after
+) VALUES (?, ?, ?, ?, ?, ?, ?)
+`
+
+type CreateAICCMessageTaskParams struct {
+	ID        string    `db:"id" json:"id"`
+	MessageID string    `db:"message_id" json:"message_id"`
+	SessionID string    `db:"session_id" json:"session_id"`
+	AgentID   string    `db:"agent_id" json:"agent_id"`
+	OrgID     string    `db:"org_id" json:"org_id"`
+	AppID     string    `db:"app_id" json:"app_id"`
+	RunAfter  time.Time `db:"run_after" json:"run_after"`
+}
+
+func (q *Queries) CreateAICCMessageTask(ctx context.Context, arg CreateAICCMessageTaskParams) error {
+	_, err := q.db.ExecContext(ctx, createAICCMessageTask,
+		arg.ID,
+		arg.MessageID,
+		arg.SessionID,
+		arg.AgentID,
+		arg.OrgID,
+		arg.AppID,
+		arg.RunAfter,
+	)
+	return err
+}
+
 const createAICCSession = `-- name: CreateAICCSession :exec
 INSERT INTO aicc_sessions (
     id, agent_id, org_id, session_token, channel, source_url, referrer, region,
@@ -551,6 +599,30 @@ WHERE l.org_id = ?
 func (q *Queries) DeleteOrphanAICCLeadsByOrg(ctx context.Context, orgID string) error {
 	_, err := q.db.ExecContext(ctx, deleteOrphanAICCLeadsByOrg, orgID)
 	return err
+}
+
+const failAICCMessageTask = `-- name: FailAICCMessageTask :execrows
+UPDATE aicc_message_tasks
+SET status = 'failed',
+    lease_token = NULL,
+    lease_expires_at = NULL,
+    last_error = ?,
+    updated_at = NOW(6)
+WHERE id = ? AND status = 'processing' AND lease_token = ?
+`
+
+type FailAICCMessageTaskParams struct {
+	LastError  null.String `db:"last_error" json:"last_error"`
+	ID         string      `db:"id" json:"id"`
+	LeaseToken null.String `db:"lease_token" json:"lease_token"`
+}
+
+func (q *Queries) FailAICCMessageTask(ctx context.Context, arg FailAICCMessageTaskParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, failAICCMessageTask, arg.LastError, arg.ID, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const getAICCAgent = `-- name: GetAICCAgent :one
@@ -830,6 +902,36 @@ func (q *Queries) GetAICCMessageByClientMessageID(ctx context.Context, arg GetAI
 	return i, err
 }
 
+const getAICCMessageTaskByMessageID = `-- name: GetAICCMessageTaskByMessageID :one
+SELECT id, message_id, session_id, agent_id, org_id, app_id, status, attempts, max_attempts, run_after, lease_token, lease_expires_at, last_error, processing_session_key, created_at, updated_at
+FROM aicc_message_tasks
+WHERE message_id = ?
+`
+
+func (q *Queries) GetAICCMessageTaskByMessageID(ctx context.Context, messageID string) (AiccMessageTask, error) {
+	row := q.db.QueryRowContext(ctx, getAICCMessageTaskByMessageID, messageID)
+	var i AiccMessageTask
+	err := row.Scan(
+		&i.ID,
+		&i.MessageID,
+		&i.SessionID,
+		&i.AgentID,
+		&i.OrgID,
+		&i.AppID,
+		&i.Status,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.RunAfter,
+		&i.LeaseToken,
+		&i.LeaseExpiresAt,
+		&i.LastError,
+		&i.ProcessingSessionKey,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getAICCSession = `-- name: GetAICCSession :one
 SELECT id, agent_id, org_id, session_token, channel, source_url, referrer, region, ip_hash, user_agent_hash, privacy_notice_shown, privacy_consented_at, resolution_status, lead_status, last_active_at, expires_at, created_at, updated_at
 FROM aicc_sessions
@@ -921,6 +1023,37 @@ func (q *Queries) GetActiveAICCBlockedVisitor(ctx context.Context, arg GetActive
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const leaseAICCMessageTask = `-- name: LeaseAICCMessageTask :execrows
+UPDATE aicc_message_tasks AS task
+LEFT JOIN aicc_message_tasks AS processing
+  ON processing.session_id = task.session_id
+ AND processing.status = 'processing'
+SET status = 'processing',
+    lease_token = ?,
+    lease_expires_at = ?,
+    attempts = attempts + 1,
+    updated_at = NOW(6)
+WHERE task.id = ?
+  AND task.status IN ('queued', 'retry_wait')
+  AND task.run_after <= NOW(6)
+  AND processing.id IS NULL
+`
+
+type LeaseAICCMessageTaskParams struct {
+	LeaseToken     null.String `db:"lease_token" json:"lease_token"`
+	LeaseExpiresAt null.Time   `db:"lease_expires_at" json:"lease_expires_at"`
+	ID             string      `db:"id" json:"id"`
+}
+
+// status、到期时间和会话无 processing 任务均在同一 UPDATE 中判断，避免 dispatcher 先读后写造成重复租约。
+func (q *Queries) LeaseAICCMessageTask(ctx context.Context, arg LeaseAICCMessageTaskParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, leaseAICCMessageTask, arg.LeaseToken, arg.LeaseExpiresAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const listAICCAgentKnowledge = `-- name: ListAICCAgentKnowledge :many
@@ -1938,6 +2071,62 @@ func (q *Queries) ListExpiredAICCSessions(ctx context.Context, limit int32) ([]A
 	return items, nil
 }
 
+const listReadyAICCMessageTasks = `-- name: ListReadyAICCMessageTasks :many
+SELECT task.id, task.message_id, task.session_id, task.agent_id, task.org_id, task.app_id, task.status, task.attempts, task.max_attempts, task.run_after, task.lease_token, task.lease_expires_at, task.last_error, task.processing_session_key, task.created_at, task.updated_at
+FROM aicc_message_tasks AS task
+WHERE task.status IN ('queued', 'retry_wait')
+  AND task.run_after <= NOW(6)
+  AND NOT EXISTS (
+      SELECT 1
+      FROM aicc_message_tasks AS processing
+      WHERE processing.session_id = task.session_id
+        AND processing.status = 'processing'
+  )
+ORDER BY task.run_after ASC, task.id ASC
+LIMIT ?
+`
+
+// 只返回当前到期且所在会话没有执行中任务的任务；租约时仍会再次原子校验，列表结果不能视作所有权。
+func (q *Queries) ListReadyAICCMessageTasks(ctx context.Context, limit int32) ([]AiccMessageTask, error) {
+	rows, err := q.db.QueryContext(ctx, listReadyAICCMessageTasks, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AiccMessageTask{}
+	for rows.Next() {
+		var i AiccMessageTask
+		if err := rows.Scan(
+			&i.ID,
+			&i.MessageID,
+			&i.SessionID,
+			&i.AgentID,
+			&i.OrgID,
+			&i.AppID,
+			&i.Status,
+			&i.Attempts,
+			&i.MaxAttempts,
+			&i.RunAfter,
+			&i.LeaseToken,
+			&i.LeaseExpiresAt,
+			&i.LastError,
+			&i.ProcessingSessionKey,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRequiredAICCLeadFieldsMissing = `-- name: ListRequiredAICCLeadFieldsMissing :many
 SELECT f.id, f.agent_id, f.field_key, f.label, f.field_type, f.required, f.prompt_text, f.sort_order, f.created_at, f.updated_at, f.deleted_at
 FROM aicc_lead_fields f
@@ -2042,6 +2231,57 @@ WHERE session_token = ? AND expires_at > now()
 
 func (q *Queries) MarkAICCSessionConsented(ctx context.Context, sessionToken string) (int64, error) {
 	result, err := q.db.ExecContext(ctx, markAICCSessionConsented, sessionToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const recoverExpiredAICCMessageTaskLeases = `-- name: RecoverExpiredAICCMessageTaskLeases :execrows
+UPDATE aicc_message_tasks
+SET status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'retry_wait' END,
+    run_after = CASE WHEN attempts >= max_attempts THEN run_after ELSE NOW(6) END,
+    lease_token = NULL,
+    lease_expires_at = NULL,
+    last_error = COALESCE(last_error, 'processing lease expired'),
+    updated_at = NOW(6)
+WHERE status = 'processing' AND lease_expires_at <= NOW(6)
+`
+
+// reaper 仅接管过期租约；耗尽尝试次数的任务转为 failed，其他任务立即回到 retry_wait。
+func (q *Queries) RecoverExpiredAICCMessageTaskLeases(ctx context.Context) (int64, error) {
+	result, err := q.db.ExecContext(ctx, recoverExpiredAICCMessageTaskLeases)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const retryAICCMessageTask = `-- name: RetryAICCMessageTask :execrows
+UPDATE aicc_message_tasks
+SET status = 'retry_wait',
+    run_after = ?,
+    lease_token = NULL,
+    lease_expires_at = NULL,
+    last_error = ?,
+    updated_at = NOW(6)
+WHERE id = ? AND status = 'processing' AND lease_token = ?
+`
+
+type RetryAICCMessageTaskParams struct {
+	RunAfter   time.Time   `db:"run_after" json:"run_after"`
+	LastError  null.String `db:"last_error" json:"last_error"`
+	ID         string      `db:"id" json:"id"`
+	LeaseToken null.String `db:"lease_token" json:"lease_token"`
+}
+
+func (q *Queries) RetryAICCMessageTask(ctx context.Context, arg RetryAICCMessageTaskParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, retryAICCMessageTask,
+		arg.RunAfter,
+		arg.LastError,
+		arg.ID,
+		arg.LeaseToken,
+	)
 	if err != nil {
 		return 0, err
 	}

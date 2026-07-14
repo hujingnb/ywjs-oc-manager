@@ -33,6 +33,7 @@ sql:
       - internal/migrations/000031_aicc_org_industry_knowledge.up.sql
       - internal/migrations/000032_aicc_message_idempotency.up.sql
       - internal/migrations/000033_apps_app_type.up.sql
+      - internal/migrations/000034_aicc_message_tasks.up.sql
     queries: internal/store/queries
     gen:
       go:
