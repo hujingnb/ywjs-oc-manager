@@ -534,6 +534,15 @@ async function submitEditOrganization() {
         assistant_version_ids: editForm.assistant_version_ids,
       },
     })
+    // 企业编辑页的主保存必须同时提交 AICC 开关，避免管理员误以为已保存但配置仍为旧值。
+    await updateAICCConfigMutation.mutateAsync({
+      id: editingOrg.value.id,
+      payload: {
+        enabled: editForm.aicc_enabled,
+        agent_limit: typeof editForm.aicc_agent_limit === 'number' ? editForm.aicc_agent_limit : null,
+        industry_knowledge_base_ids: [...editForm.industry_knowledge_base_ids],
+      },
+    })
     editFormVisible.value = false
     modalMode.value = 'create'
   } catch (err) {
