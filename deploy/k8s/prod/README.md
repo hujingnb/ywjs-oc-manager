@@ -17,7 +17,7 @@ manager-api/web、new-api、ragflow 与 RBAC 与本地一致，差异仅镜像 r
      目标存储无需支持 STS，sidecar 写回直接复用这对长期凭证，详见 secret.example.yaml 注释）。
      > 集群内地址（`newapi.base_url`、`hermes.manager_runtime_base_url`、
      > `k8s.bootstrap_base_url`）已用跨 namespace FQDN（`*.ocm.svc.cluster.local`）写死——
-     > app pod 在 oc-apps、后端 Service 在 ocm，短名跨 namespace 解析不到，勿改回短名。
+     > app pod 在 oc-apps 或 oc-aicc、后端 Service 在 ocm，短名跨 namespace 解析不到，勿改回短名。
    - new-api：`new-api-sql-dsn` / `new-api-redis-conn` 完整连接串。
    - ragflow：`ragflow-mysql-*`（host/port/dbname/user/password）、
      `ragflow-s3-*`（endpoint-url/region/bucket/access-key/secret-key）、
@@ -30,7 +30,7 @@ manager-api/web、new-api、ragflow 与 RBAC 与本地一致，差异仅镜像 r
      详见 secret.example.yaml 注释。
    - 镜像拉取 Secret `secret-registry-ywjs-26257ea5.ecis.huabei-3.cmecloud.cn`：移动云
      仓库拉取凭证，由集群侧预先创建，**已存在于 ocm 与 oc-apps 两个 namespace**——ocm 供
-     manager-api/web/new-api/ragflow 拉镜像，oc-apps 供 app pod（Hermes 实例）拉
+     manager-api/web/new-api/ragflow 拉镜像，oc-apps 与 oc-aicc 供 app pod（Hermes 实例与 AICC）拉
      hermes/ops 镜像（imagePullSecrets 是 namespace 级，缺则对应 namespace 的 pod
      ImagePullBackOff）。不在本仓库 secret.yaml 管理。
 
@@ -45,7 +45,7 @@ manager-api/web、new-api、ragflow 与 RBAC 与本地一致，差异仅镜像 r
 
 镜像仓库为移动云 `ywjs-26257ea5.ecis.huabei-3.cmecloud.cn`（自有走 `app`、上游与构建期
 基础镜像走 `public`）。拉取 Secret `secret-registry-ywjs-26257ea5.ecis.huabei-3.cmecloud.cn`
-由集群侧预先创建并已存在于 ocm 与 oc-apps，本仓库只按名引用、不再内嵌凭证。
+由集群侧预先创建并已存在于 ocm、oc-apps 与 oc-aicc，本仓库只按名引用、不再内嵌凭证。
 
 ## apply 顺序
 

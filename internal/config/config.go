@@ -299,6 +299,8 @@ type KubernetesConfig struct {
 	Enabled bool `yaml:"enabled"`
 	// Namespace 是 app pod 所在命名空间。
 	Namespace string `yaml:"namespace"`
+	// AICCNamespace 是 AICC 隐藏应用 pod 所在命名空间，与普通实例隔离。
+	AICCNamespace string `yaml:"aicc_namespace"`
 	// Kubeconfig 为空时用 in-cluster config；非空时用该 kubeconfig（本地 go run 指向 k3d）。
 	Kubeconfig string `yaml:"kubeconfig"`
 	// ImagePullSecret 是拉取私有镜像的 Secret 名（如 acr-pull）。

@@ -79,6 +79,9 @@ func (c *Config) applyDefaults() {
 		if strings.TrimSpace(c.Kubernetes.Namespace) == "" {
 			c.Kubernetes.Namespace = "oc-apps"
 		}
+		if strings.TrimSpace(c.Kubernetes.AICCNamespace) == "" {
+			c.Kubernetes.AICCNamespace = "oc-aicc"
+		}
 		if c.Kubernetes.Resources.Requests.CPU == "" {
 			c.Kubernetes.Resources.Requests.CPU = "250m"
 		}

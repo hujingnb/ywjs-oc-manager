@@ -495,6 +495,13 @@ func TestKubernetesValidationRequiresFields(t *testing.T) {
 	assert.Contains(t, err.Error(), "k8s")
 }
 
+// TestKubernetesDefaultsAICCNamespace 验证启用 k8s 且未配置客服命名空间时使用隔离默认值。
+func TestKubernetesDefaultsAICCNamespace(t *testing.T) {
+	cfg := loadConfigFromString(t, fullValidYAML()+"\nk8s:\n  enabled: true\n  ops_image: registry/ops:v1\n  bootstrap_base_url: http://manager-api:8080\n")
+	assert.Equal(t, "oc-apps", cfg.Kubernetes.Namespace)
+	assert.Equal(t, "oc-aicc", cfg.Kubernetes.AICCNamespace)
+}
+
 func writeTempConfig(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")

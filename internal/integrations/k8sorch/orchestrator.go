@@ -35,6 +35,8 @@ type Orchestrator interface {
 type AppSpec struct {
 	// AppID 是资源命名与 label 基准。
 	AppID string
+	// AICCHidden 表示该应用为客服隐藏运行时，仅用于选择独立 namespace，不写入 Pod。
+	AICCHidden bool
 	// HermesImage 是主容器镜像（版本 image_id 解析）；oc-ops 同镜像覆盖 CMD。
 	HermesImage string
 	// OpsImage 是 ops 镜像（spec-A1，initContainer/sidecar）。

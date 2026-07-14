@@ -209,12 +209,16 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// k8s 编排器：启用 k8s 时构造 client-go clientset + KubernetesAdapter，取代 docker 编排。
 	// 未启用时 orch 为 nil，生命周期/init handler 已做 nil 守卫（降级：无法管理 app，仅最小运行）。
 	var orch k8sorch.Orchestrator
+	// normalOrch 专供 web-publish 写入普通实例 namespace，不能使用 AICC 路由器。
+	var normalOrch *k8sorch.KubernetesAdapter
 	if cfg.Kubernetes.Enabled {
 		cs, err := k8sorch.NewClientset(cfg.Kubernetes.Kubeconfig)
 		if err != nil {
 			return fmt.Errorf("初始化 k8s clientset 失败: %w", err)
 		}
-		orch = k8sorch.NewKubernetesAdapter(cs, cfg.Kubernetes.Namespace)
+		normalOrch = k8sorch.NewKubernetesAdapter(cs, cfg.Kubernetes.Namespace)
+		aiccOrch := k8sorch.NewKubernetesAdapter(cs, cfg.Kubernetes.AICCNamespace)
+		orch = k8sorch.NewRoutingOrchestrator(normalOrch, aiccOrch, appKindResolver{store: dbStore.Queries})
 	}
 	// k8sInitCfg 供 app_initialize 渲染 AppSpec 使用，从 cfg.Kubernetes 提取最小子集。
 	k8sInitCfg := handlers.AppInitializeK8sConfig{
@@ -250,7 +254,11 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	}
 	ocopsBaseURLTpl := fmt.Sprintf("http://app-%%s-ocops.%s.svc:8080", ocopsNamespace)
 	ocopsResolver := service.NewOcOpsResolverFromStore(dbStore.Queries, cipher, ocopsBaseURLTpl)
-	aiccOcOpsResolver := service.NewAICCOcOpsResolverFromStore(dbStore.Queries, cipher, ocopsBaseURLTpl)
+	aiccOcopsNamespace := cfg.Kubernetes.AICCNamespace
+	if aiccOcopsNamespace == "" {
+		aiccOcopsNamespace = "oc-aicc"
+	}
+	aiccOcOpsResolver := service.NewAICCOcOpsResolverFromStore(dbStore.Queries, cipher, fmt.Sprintf("http://app-%%s-ocops.%s.svc:8080", aiccOcopsNamespace))
 	// AppLocaleStatus 需实时查 oc-ops 实例当前语言：注入 oc-ops 客户端与坐标解析器。
 	// 二者在此处才装配完成（appService 早于此构造），故用 setter 补注入。
 	appService.SetOcOps(ocopsClient, ocopsResolver)
@@ -589,9 +597,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	var webPublishClusterApplier handlers.ClusterApplier = noopClusterApplier{}
 	// acmeKeyStore 持久化平台 ACME 账户私钥；仅 k8s 启用时可用，未启用则为 nil（certProvisioner 降级）。
 	var acmeKeyStore acmeAccountKeyStore
-	if ka, ok := orch.(*k8sorch.KubernetesAdapter); ok {
-		webPublishClusterApplier = clusterApplierImpl{adapter: ka}
-		acmeKeyStore = ka
+	if normalOrch != nil {
+		webPublishClusterApplier = clusterApplierImpl{adapter: normalOrch}
+		acmeKeyStore = normalOrch
 	}
 	// 证书签发器：默认用真实 dnsprovider+ACME 链路；仅当本地/dev 显式开启 dev_self_signed_cert
 	// 时换成自签 provisioner（让无公网域名的 k3d 能端到端验证发布链路）。启用即打醒目 WARN。

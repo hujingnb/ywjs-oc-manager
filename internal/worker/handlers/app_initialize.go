@@ -487,6 +487,7 @@ func (h *AppInitializeHandler) buildAppSpec(ctx context.Context, app sqlc.App, h
 
 	return k8sorch.AppSpec{
 		AppID:           app.ID,
+		AICCHidden:      app.AiccHidden,
 		HermesImage:     hermesImage,
 		OpsImage:        h.k8sCfg.OpsImage,
 		ControlToken:    controlToken,
