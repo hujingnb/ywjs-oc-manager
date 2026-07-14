@@ -258,7 +258,7 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	// AICC 仍读取绑定版本以初始化模型、技能和行为配置，但运行时镜像必须与普通实例
 	// 隔离。普通实例继续根据版本 image_id 从 hermes.runtime_images 解析镜像。
 	var imageRef string
-	if app.AiccHidden {
+	if domain.IsAICCAppType(domain.AppType(app.AppType)) {
 		if h.cfg.ResolveAICCRuntimeImage == nil {
 			return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage,
 				errors.New("AICC 运行时镜像解析器未注入"))
@@ -487,7 +487,7 @@ func (h *AppInitializeHandler) buildAppSpec(ctx context.Context, app sqlc.App, h
 
 	return k8sorch.AppSpec{
 		AppID:           app.ID,
-		AICCHidden:      app.AiccHidden,
+		AICCHidden:      domain.IsAICCAppType(domain.AppType(app.AppType)),
 		HermesImage:     hermesImage,
 		OpsImage:        h.k8sCfg.OpsImage,
 		ControlToken:    controlToken,

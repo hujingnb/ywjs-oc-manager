@@ -100,7 +100,7 @@ func (s *RuntimeOperationService) InspectApp(ctx context.Context, principal auth
 	if err != nil {
 		return RuntimeView{}, fmt.Errorf("查询应用失败: %w", err)
 	}
-	if app.AiccHidden {
+	if domain.IsAICCAppType(domain.AppType(app.AppType)) {
 		return RuntimeView{}, ErrNotFound
 	}
 	if !auth.CanViewApp(principal, app.OrgID, app.OwnerUserID) {
@@ -180,7 +180,7 @@ func (s *RuntimeOperationService) Trigger(ctx context.Context, principal auth.Pr
 	if err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("查询应用失败: %w", err)
 	}
-	if app.AiccHidden {
+	if domain.IsAICCAppType(domain.AppType(app.AppType)) {
 		return RuntimeOperationResult{}, ErrNotFound
 	}
 	if err := s.ensurePrincipalActive(ctx, principal); err != nil {
@@ -272,7 +272,7 @@ func (s *RuntimeOperationService) RequestInitialize(ctx context.Context, princip
 	if err != nil {
 		return RuntimeOperationResult{}, fmt.Errorf("查询应用失败: %w", err)
 	}
-	if app.AiccHidden {
+	if domain.IsAICCAppType(domain.AppType(app.AppType)) {
 		return RuntimeOperationResult{}, ErrNotFound
 	}
 	if err := s.ensurePrincipalActive(ctx, principal); err != nil {

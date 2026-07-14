@@ -126,6 +126,8 @@ func newBootstrapApp(t *testing.T, cipher *auth.Cipher) sqlc.App {
 		RuntimeTokenCiphertext: null.StringFrom(tokCt),
 		RuntimeTokenHash:       null.StringFrom(HashAppRuntimeToken("control-tok")),
 		VersionID:              null.StringFrom("v1"),
+		// 默认 bootstrap 场景是普通应用，提示词与 hash 应明确按 standard 选择。
+		AppType: string(domain.AppTypeStandard),
 	}
 }
 
@@ -177,7 +179,7 @@ func TestBootstrapBuildHappyPath(t *testing.T) {
 	assert.Empty(t, res.Restore.StateDBURL)
 	assert.Empty(t, res.Restore.SessionsURL)
 	// bootstrap 应把当前平台 prompt 常量 hash stamp 进 apps，供概览需重启检测。
-	assert.Equal(t, config.PlatformPromptHash(false), store.capturedPlatformPromptHash)
+	assert.Equal(t, config.PlatformPromptHash(domain.AppTypeStandard), store.capturedPlatformPromptHash)
 }
 
 // TestBootstrapBuildSelectsPlatformPromptByAICCHidden 验证 bootstrap 按应用类型选择平台规则，
@@ -202,13 +204,13 @@ func TestBootstrapBuildSelectsPlatformPromptByAICCHidden(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Equal(t, config.DefaultInstanceSystemPromptTemplate, renderer.input.PlatformRule)
-		assert.Equal(t, config.PlatformPromptHash(false), store.capturedPlatformPromptHash)
+		assert.Equal(t, config.PlatformPromptHash(domain.AppTypeStandard), store.capturedPlatformPromptHash)
 	})
 
 	// AICC 隐藏实例必须使用客服平台规则及其 hash，避免将普通实例工作目录约束下发给外部访客。
 	t.Run("AICC 隐藏实例使用客服平台规则和 hash", func(t *testing.T) {
 		app := newBootstrapApp(t, cipher)
-		app.AiccHidden = true
+		app.AppType = string(domain.AppTypeAICC)
 		store := &fakeBootstrapStore{
 			app:     app,
 			org:     sqlc.Organization{ID: "o1", Name: "Org"},
@@ -223,7 +225,7 @@ func TestBootstrapBuildSelectsPlatformPromptByAICCHidden(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Equal(t, config.DefaultAICCSystemPromptTemplate, renderer.input.PlatformRule)
-		assert.Equal(t, config.PlatformPromptHash(true), store.capturedPlatformPromptHash)
+		assert.Equal(t, config.PlatformPromptHash(domain.AppTypeAICC), store.capturedPlatformPromptHash)
 	})
 }
 

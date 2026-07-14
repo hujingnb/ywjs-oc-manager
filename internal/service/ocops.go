@@ -214,7 +214,7 @@ func (r *OcOpsResolverFromStore) getVisibleApp(ctx context.Context, appID string
 		}
 		return sqlc.App{}, fmt.Errorf("查询 app 失败: %w", err)
 	}
-	if app.AiccHidden && !r.allowAICCHidden {
+	if domain.IsAICCAppType(domain.AppType(app.AppType)) && !r.allowAICCHidden {
 		return sqlc.App{}, ErrNotFound
 	}
 	return app, nil

@@ -97,7 +97,7 @@ func TestRuntimeOperationRejectsAICCHiddenApp(t *testing.T) {
 	// 子场景：InspectApp 不暴露 hidden app 运行态。
 	t.Run("运行态查看返回不存在", func(t *testing.T) {
 		store := newRuntimeOperationStub(t)
-		store.app.AiccHidden = true
+		store.app.AppType = string(domain.AppTypeAICC)
 		svc := NewRuntimeOperationService(store, newDiscardLogger())
 
 		_, err := svc.InspectApp(context.Background(), runtimeOrgAdminPrincipal(), testRuntimeOpAppID)
@@ -108,7 +108,7 @@ func TestRuntimeOperationRejectsAICCHiddenApp(t *testing.T) {
 	// 子场景：Trigger 不允许对 hidden app 入队启停重启删除任务。
 	t.Run("运行操作返回不存在", func(t *testing.T) {
 		store := newRuntimeOperationStub(t)
-		store.app.AiccHidden = true
+		store.app.AppType = string(domain.AppTypeAICC)
 		svc := NewRuntimeOperationService(store, newDiscardLogger())
 
 		_, err := svc.Trigger(context.Background(), runtimeOrgAdminPrincipal(), testRuntimeOpAppID, RuntimeOperationRestart)
@@ -119,7 +119,7 @@ func TestRuntimeOperationRejectsAICCHiddenApp(t *testing.T) {
 	// 子场景：RequestInitialize 不允许通过普通实例入口重跑 hidden app 初始化。
 	t.Run("重新初始化返回不存在", func(t *testing.T) {
 		store := newRuntimeOperationStub(t)
-		store.app.AiccHidden = true
+		store.app.AppType = string(domain.AppTypeAICC)
 		store.app.Status = domain.AppStatusError
 		svc := NewRuntimeOperationService(store, newDiscardLogger())
 
@@ -283,6 +283,8 @@ func newRuntimeOperationStub(t *testing.T) *runtimeOperationStub {
 		OwnerUserID:  mustUUID(t, testRuntimeOpOwner),
 		Status:       domain.AppStatusRunning,
 		ApiKeyStatus: domain.APIKeyStatusActive,
+		// 默认运行操作测试使用普通应用；客服应用由拒绝子用例显式标记。
+		AppType: string(domain.AppTypeStandard),
 	}
 	return &runtimeOperationStub{t: t, app: app, userStatus: domain.StatusActive}
 }

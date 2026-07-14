@@ -217,7 +217,7 @@ func (s *AuditService) authorizeAppTarget(ctx context.Context, principal auth.Pr
 		}
 		return fmt.Errorf("查询应用失败: %w", err)
 	}
-	if app.AiccHidden {
+	if domain.IsAICCAppType(domain.AppType(app.AppType)) {
 		return ErrNotFound
 	}
 	if !auth.CanViewAppAudit(principal, app.OrgID, app.OwnerUserID) {

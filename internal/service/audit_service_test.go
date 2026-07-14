@@ -121,7 +121,7 @@ func TestAuditServiceListByTargetRejectsAICCHiddenApp(t *testing.T) {
 				ID:          mustUUID(t, testAuditAppID),
 				OrgID:       mustUUID(t, testOrgID),
 				OwnerUserID: mustUUID(t, testMemUID),
-				AiccHidden:  true,
+				AppType:     string(domain.AppTypeAICC),
 			},
 		},
 	}

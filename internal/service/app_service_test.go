@@ -31,23 +31,23 @@ const (
 func TestComputePlatformPromptPendingRestart(t *testing.T) {
 	// 普通实例匹配普通规则 hash 时已是最新版本，不提示重启。
 	assert.False(t, computePlatformPromptPendingRestart(sqlc.App{
-		AiccHidden:                false,
-		AppliedPlatformPromptHash: config.PlatformPromptHash(false),
+		AppType:                   string(domain.AppTypeStandard),
+		AppliedPlatformPromptHash: config.PlatformPromptHash(domain.AppTypeStandard),
 	}))
 	// 普通实例持有 AICC 规则 hash 时属于错误规则版本，必须提示重启。
 	assert.True(t, computePlatformPromptPendingRestart(sqlc.App{
-		AiccHidden:                false,
-		AppliedPlatformPromptHash: config.PlatformPromptHash(true),
+		AppType:                   string(domain.AppTypeStandard),
+		AppliedPlatformPromptHash: config.PlatformPromptHash(domain.AppTypeAICC),
 	}))
 	// AICC 隐藏实例匹配客服规则 hash 时已是最新版本，不提示重启。
 	assert.False(t, computePlatformPromptPendingRestart(sqlc.App{
-		AiccHidden:                true,
-		AppliedPlatformPromptHash: config.PlatformPromptHash(true),
+		AppType:                   string(domain.AppTypeAICC),
+		AppliedPlatformPromptHash: config.PlatformPromptHash(domain.AppTypeAICC),
 	}))
 	// AICC 隐藏实例持有普通规则 hash 时属于错误规则版本，必须提示重启。
 	assert.True(t, computePlatformPromptPendingRestart(sqlc.App{
-		AiccHidden:                true,
-		AppliedPlatformPromptHash: config.PlatformPromptHash(false),
+		AppType:                   string(domain.AppTypeAICC),
+		AppliedPlatformPromptHash: config.PlatformPromptHash(domain.AppTypeStandard),
 	}))
 }
 
@@ -122,7 +122,7 @@ func TestGetAppExposeRuntimeImageOnlyToPlatformAdmin(t *testing.T) {
 func TestGetAppHidesAICCHiddenApp(t *testing.T) {
 	svc, store := newAppServiceWithStore(t)
 	app := store.mustSeedApp(t)
-	app.AiccHidden = true
+	app.AppType = string(domain.AppTypeAICC)
 	store.app = app
 
 	_, err := svc.Get(context.Background(), appOrgAdminPrincipal(store.organization), testAppServiceAppID)
@@ -135,7 +135,7 @@ func TestGetAppHidesAICCHiddenApp(t *testing.T) {
 func TestGetAppAllowsAICCHiddenAppForAgentAdmin(t *testing.T) {
 	svc, store := newAppServiceWithStore(t)
 	app := store.mustSeedApp(t)
-	app.AiccHidden = true
+	app.AppType = string(domain.AppTypeAICC)
 	store.app = app
 	store.aiccAgent = sqlc.AiccAgent{ID: "agent-1", OrgID: store.organization.ID, AppID: testAppServiceAppID}
 
@@ -151,7 +151,7 @@ func TestGetAppAllowsAICCHiddenAppForAgentAdmin(t *testing.T) {
 func TestGetAppAllowsAICCHiddenAppForPlatformViewer(t *testing.T) {
 	svc, store := newAppServiceWithStore(t)
 	app := store.mustSeedApp(t)
-	app.AiccHidden = true
+	app.AppType = string(domain.AppTypeAICC)
 	store.app = app
 	store.aiccAgent = sqlc.AiccAgent{ID: "agent-1", OrgID: store.organization.ID, AppID: testAppServiceAppID}
 
@@ -206,7 +206,7 @@ func TestCreateHiddenAICCAppCreatesHiddenAppAndInitializeJob(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "app-aicc-hidden-1", appID)
-	assert.True(t, store.app.AiccHidden)
+	assert.Equal(t, string(domain.AppTypeAICC), store.app.AppType)
 	assert.Equal(t, "官网售前", store.app.Name)
 	assert.Equal(t, testSwitchVersionID, store.app.VersionID.String)
 	assert.Equal(t, "zh", store.app.Locale.String)
@@ -300,6 +300,8 @@ func (s *appServiceStoreStub) mustSeedApp(t *testing.T) sqlc.App {
 		Name:         "测试实例",
 		Status:       domain.AppStatusRunning,
 		ApiKeyStatus: domain.APIKeyStatusActive,
+		// 默认构造普通应用，避免零值类型在测试中掩盖创建路径必须显式传 standard 的约束。
+		AppType: string(domain.AppTypeStandard),
 	}
 	return s.app
 }
@@ -317,17 +319,17 @@ func (s *appServiceStoreStub) CreateApp(_ context.Context, arg sqlc.CreateAppPar
 		ApiKeyStatus: arg.ApiKeyStatus,
 		VersionID:    arg.VersionID,
 		Locale:       arg.Locale,
-		AiccHidden:   arg.AiccHidden,
+		AppType:      arg.AppType,
 	}
 	return nil
 }
 
-// MarkAppAICCHidden 模拟隐藏 app 补标记，供 AppService 接口编译和隐藏 app 测试复用。
-func (s *appServiceStoreStub) MarkAppAICCHidden(_ context.Context, id string) error {
+// MarkAppAICCType 模拟客服应用补标记，供 AppService 接口编译和 AICC app 测试复用。
+func (s *appServiceStoreStub) MarkAppAICCType(_ context.Context, id string) error {
 	if s.app.ID != id {
 		return sql.ErrNoRows
 	}
-	s.app.AiccHidden = true
+	s.app.AppType = string(domain.AppTypeAICC)
 	return nil
 }
 
@@ -645,7 +647,7 @@ func TestAppManagementRejectsAICCHiddenApp(t *testing.T) {
 	t.Run("切换版本返回不存在", func(t *testing.T) {
 		svc, store := newAppServiceWithStore(t)
 		app := store.mustSeedApp(t)
-		app.AiccHidden = true
+		app.AppType = string(domain.AppTypeAICC)
 		store.app = app
 		store.organization = mustOrgWithAllowlist(t, testSwitchVersionID)
 
@@ -658,7 +660,7 @@ func TestAppManagementRejectsAICCHiddenApp(t *testing.T) {
 	t.Run("修改语言返回不存在", func(t *testing.T) {
 		svc, store := newAppServiceWithStore(t)
 		app := store.mustSeedApp(t)
-		app.AiccHidden = true
+		app.AppType = string(domain.AppTypeAICC)
 		store.app = app
 
 		_, err := svc.UpdateAppLocale(context.Background(), appOrgAdminPrincipal(store.organization), testAppServiceAppID, "zh")
@@ -671,7 +673,7 @@ func TestAppManagementRejectsAICCHiddenApp(t *testing.T) {
 	t.Run("语言状态返回不存在", func(t *testing.T) {
 		svc, store := newAppServiceWithStore(t)
 		app := store.mustSeedApp(t)
-		app.AiccHidden = true
+		app.AppType = string(domain.AppTypeAICC)
 		store.app = app
 		svc.SetOcOps(&fakeConfigOps{cfg: ocops.OcConfig{DisplayLanguage: "zh"}}, readyResolver())
 

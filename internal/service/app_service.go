@@ -22,8 +22,8 @@ import (
 // AppStore 抽象 app 服务的数据访问能力。
 type AppStore interface {
 	CreateApp(ctx context.Context, arg sqlc.CreateAppParams) error
-	// MarkAppAICCHidden 将 AICC 自动创建的隐藏 app 从普通应用列表中隔离。
-	MarkAppAICCHidden(ctx context.Context, id string) error
+	// MarkAppAICCType 将 AICC 自动创建的 app 标记为客服类型，从普通应用列表中隔离。
+	MarkAppAICCType(ctx context.Context, id string) error
 	// GetUser 读取创建者语言偏好，用于隐藏 app 初始化时快照 locale。
 	GetUser(ctx context.Context, id string) (sqlc.User, error)
 	// GetAppWithVersion 联查实例与绑定版本的 revision / image_id，用于计算 version_synced。
@@ -157,7 +157,7 @@ func (s *AppService) Get(ctx context.Context, principal auth.Principal, appID st
 	if err != nil {
 		return AppResult{}, fmt.Errorf("查询应用失败: %w", err)
 	}
-	if row.App.AiccHidden {
+	if domain.IsAICCAppType(domain.AppType(row.App.AppType)) {
 		if err := s.ensureAICCHiddenAppViewAccess(ctx, principal, row.App); err != nil {
 			return AppResult{}, err
 		}
@@ -271,7 +271,7 @@ func (s *AppService) CreateHiddenAICCApp(ctx context.Context, principal auth.Pri
 		VersionID:           null.StringFrom(versionID),
 		Locale:              appLocale,
 		KnowledgeQuotaBytes: org.DefaultAppKnowledgeQuotaBytes,
-		AiccHidden:          true,
+		AppType:             string(domain.AppTypeAICC),
 	}); err != nil {
 		return "", fmt.Errorf("创建 AICC 隐藏 app 失败: %w", err)
 	}
@@ -287,10 +287,10 @@ func (s *AppService) CreateHiddenAICCApp(ctx context.Context, principal auth.Pri
 	}
 	jobID := newUUID()
 	if err := s.store.CreateJob(ctx, sqlc.CreateJobParams{
-		ID:          jobID,
-		Type:        domain.JobTypeAppInitialize,
-		Priority:    100,
-		RunAfter:    time.Now(),
+		ID:       jobID,
+		Type:     domain.JobTypeAppInitialize,
+		Priority: 100,
+		RunAfter: time.Now(),
 		// new-api 获取完整 token 使用严格限流端点；AICC 公开入口不能因短暂 429 永久失效，
 		// 因此使用高频异步任务一致的重试预算，由 worker 指数退避避免继续放大上游压力。
 		MaxAttempts: 20,
@@ -298,7 +298,7 @@ func (s *AppService) CreateHiddenAICCApp(ctx context.Context, principal auth.Pri
 	}); err != nil {
 		return "", rollbackCreatedApp(fmt.Errorf("创建 AICC 隐藏 app 初始化任务失败: %w", err))
 	}
-	if err := s.store.MarkAppAICCHidden(ctx, input.AppID); err != nil {
+	if err := s.store.MarkAppAICCType(ctx, input.AppID); err != nil {
 		return "", rollbackCreatedApp(fmt.Errorf("标记 AICC 隐藏 app 失败: %w", err))
 	}
 	return input.AppID, nil
@@ -316,7 +316,7 @@ func (s *AppService) SoftDeleteHiddenAICCApp(ctx context.Context, principal auth
 	if err != nil {
 		return fmt.Errorf("查询 AICC 隐藏 app 失败: %w", err)
 	}
-	if !app.App.AiccHidden {
+	if !domain.IsAICCAppType(domain.AppType(app.App.AppType)) {
 		return fmt.Errorf("%w: 只能清理 AICC 隐藏 app", ErrInvalidArgument)
 	}
 	if !auth.CanManageAICCAgent(principal, app.App.OrgID) {
@@ -399,7 +399,7 @@ func (s *AppService) computeWebPublishPendingRestart(ctx context.Context, app sq
 // 上次 bootstrap stamp 的 applied_platform_prompt_hash 与当前常量 hash 不等即为真
 // （空 hash 的存量实例天然不等，一律判为需重启）。
 func computePlatformPromptPendingRestart(app sqlc.App) bool {
-	return app.AppliedPlatformPromptHash != config.PlatformPromptHash(app.AiccHidden)
+	return app.AppliedPlatformPromptHash != config.PlatformPromptHash(domain.AppType(app.AppType))
 }
 
 // SwitchAppVersion 切换实例绑定的助手版本。
@@ -414,7 +414,7 @@ func (s *AppService) SwitchAppVersion(ctx context.Context, principal auth.Princi
 	if err != nil {
 		return AppResult{}, fmt.Errorf("查询应用失败: %w", err)
 	}
-	if row.App.AiccHidden {
+	if domain.IsAICCAppType(domain.AppType(row.App.AppType)) {
 		return AppResult{}, ErrNotFound
 	}
 	// 权限校验：平台管理员、本组织管理员或实例 owner 成员可切换版本。
@@ -468,7 +468,7 @@ func (s *AppService) UpdateAppLocale(ctx context.Context, principal auth.Princip
 	if err != nil {
 		return AppResult{}, fmt.Errorf("查询应用失败: %w", err)
 	}
-	if row.App.AiccHidden {
+	if domain.IsAICCAppType(domain.AppType(row.App.AppType)) {
 		return AppResult{}, ErrNotFound
 	}
 	// 权限校验：平台管理员、本组织管理员或实例 owner 可修改语言。
@@ -573,7 +573,7 @@ func (s *AppService) AppLocaleStatus(ctx context.Context, principal auth.Princip
 	if err != nil {
 		return AppLocaleStatusResult{}, fmt.Errorf("查询应用失败: %w", err)
 	}
-	if row.App.AiccHidden {
+	if domain.IsAICCAppType(domain.AppType(row.App.AppType)) {
 		return AppLocaleStatusResult{}, ErrNotFound
 	}
 	// 访问权限：与详情页一致用 CanViewApp（平台管理员 / 本组织 org_admin / 实例 owner）。

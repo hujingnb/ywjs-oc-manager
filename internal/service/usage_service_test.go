@@ -87,7 +87,7 @@ func TestUsageServiceAppZeroKeyReturnsEmpty(t *testing.T) {
 func TestUsageServiceAppRejectsAICCHiddenApp(t *testing.T) {
 	client := &fakeUsageClient{}
 	store := &fakeUsageStore{appByID: map[string]sqlc.App{
-		"app": {ID: "app", OrgID: "org-1", OwnerUserID: "owner-user", AiccHidden: true, NewapiKeyName: null.StringFrom("app-token")},
+		"app": {ID: "app", OrgID: "org-1", OwnerUserID: "owner-user", AppType: string(domain.AppTypeAICC), NewapiKeyName: null.StringFrom("app-token")},
 	}}
 	svc := NewUsageService(store, client, nil)
 

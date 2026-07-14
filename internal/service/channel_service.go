@@ -668,7 +668,7 @@ func (s *ChannelService) loadViewableApp(ctx context.Context, principal auth.Pri
 	if err != nil {
 		return sqlc.App{}, fmt.Errorf("查询应用失败: %w", err)
 	}
-	if app.AiccHidden {
+	if domain.IsAICCAppType(domain.AppType(app.AppType)) {
 		return sqlc.App{}, ErrNotFound
 	}
 	if !auth.CanViewApp(principal, app.OrgID, app.OwnerUserID) {

@@ -101,6 +101,8 @@ func newWorkspaceStub(t *testing.T) *workspaceStub {
 		OwnerUserID:  mustUUID(t, testWorkOwner),
 		Status:       domain.AppStatusRunning,
 		ApiKeyStatus: domain.APIKeyStatusActive,
+		// 默认工作目录访问属于普通应用；AICC 拒绝用例另行覆盖。
+		AppType: string(domain.AppTypeStandard),
 	}
 	return &workspaceStub{t: t, app: app}
 }
@@ -308,7 +310,7 @@ func TestWorkspaceServiceListAllowsPlatformAdminRead(t *testing.T) {
 // 不允许通过普通 app workspace 接口列目录。
 func TestWorkspaceServiceRejectsAICCHiddenApp(t *testing.T) {
 	store := newWorkspaceStub(t)
-	store.app.AiccHidden = true
+	store.app.AppType = string(domain.AppTypeAICC)
 	svc := NewWorkspaceService(store, newFakeWorkspaceObjectStore(), time.Minute)
 
 	_, err := svc.List(context.Background(), platformAdmin(), testWorkAppID, "", "")

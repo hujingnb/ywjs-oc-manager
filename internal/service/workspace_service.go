@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"oc-manager/internal/auth"
+	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/storage"
 	"oc-manager/internal/store/sqlc"
 )
@@ -307,7 +308,7 @@ func (s *WorkspaceService) loadAuthorizedApp(ctx context.Context, principal auth
 	if err != nil {
 		return sqlc.App{}, fmt.Errorf("查询应用失败: %w", err)
 	}
-	if app.AiccHidden {
+	if domain.IsAICCAppType(domain.AppType(app.AppType)) {
 		return sqlc.App{}, ErrNotFound
 	}
 	// app.OrgID / app.OwnerUserID 已是 string，直接传入权限校验。

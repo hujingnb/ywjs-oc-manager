@@ -525,6 +525,8 @@ func newAppInitStub(t *testing.T) *appInitStub {
 			Name:         "alice-bot",
 			Status:       domain.AppStatusDraft,
 			ApiKeyStatus: domain.APIKeyStatusPending,
+			// 默认初始化测试走 standard 镜像解析分支；AICC 子用例显式切换类型。
+			AppType: string(domain.AppTypeStandard),
 		},
 		org:  sqlc.Organization{Name: "测试组织", Status: domain.StatusActive},
 		user: sqlc.User{DisplayName: "Alice"},
@@ -1023,7 +1025,7 @@ func TestAppInitialize_AppliedVersionRecorded(t *testing.T) {
 // 但运行时镜像必须只来自客服专用 resolver，不能回退到普通实例的版本镜像。
 func TestAppInitialize_AICCHiddenAppUsesDedicatedRuntimeImage(t *testing.T) {
 	store := newAppInitStub(t)
-	store.app.AiccHidden = true
+	store.app.AppType = string(domain.AppTypeAICC)
 	client := &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}
 	const aiccImageRef = "registry.example.com/app/oc-manager-aigowork-aicc:v1.0.0-test"
 
@@ -1044,7 +1046,7 @@ func TestAppInitialize_AICCHiddenAppUsesDedicatedRuntimeImage(t *testing.T) {
 // AICC 初始化应明确失败，不能使用绑定版本的普通实例镜像继续启动。
 func TestAppInitialize_AICCHiddenAppFailsWithoutDedicatedRuntimeImage(t *testing.T) {
 	store := newAppInitStub(t)
-	store.app.AiccHidden = true
+	store.app.AppType = string(domain.AppTypeAICC)
 	handler := NewAppInitializeHandler(store, &fakeNewAPI{}, AppInitializeConfig{
 		Cipher:              testCipher(t),
 		ResolveRuntimeImage: testResolveRuntimeImage,

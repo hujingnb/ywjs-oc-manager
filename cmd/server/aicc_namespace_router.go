@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -24,5 +25,5 @@ func (r appKindResolver) IsAICCHidden(ctx context.Context, appID string) (bool, 
 	if err != nil {
 		return false, err
 	}
-	return app.AiccHidden, nil
+	return domain.IsAICCAppType(domain.AppType(app.AppType)), nil
 }

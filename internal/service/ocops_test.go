@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"oc-manager/internal/auth"
+	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/ocops"
 	"oc-manager/internal/store/sqlc"
 )
@@ -101,7 +102,7 @@ func TestOcOpsResolverFromStoreNotFound(t *testing.T) {
 // TestOcOpsResolverFromStoreRejectsAICCHiddenApp 覆盖普通 oc-ops 坐标解析入口隔离：
 // AICC 隐藏 app 不应被普通会话、workspace 或 skill 等普通 app 子系统解析使用。
 func TestOcOpsResolverFromStoreRejectsAICCHiddenApp(t *testing.T) {
-	store := &fakeOcOpsAppStore{app: sqlc.App{AiccHidden: true}}
+	store := &fakeOcOpsAppStore{app: sqlc.App{AppType: string(domain.AppTypeAICC)}}
 	r := NewOcOpsResolverFromStore(store, nil, "http://app-%s-ocops.oc-apps.svc:8080")
 
 	_, resolveErr := r.Resolve(context.Background(), "app-hidden")
@@ -121,7 +122,7 @@ func TestAICCOcOpsResolverFromStoreAllowsHiddenApp(t *testing.T) {
 		Status:          "binding_waiting",
 		RuntimePhase:    "ready",
 		RuntimeImageRef: "registry/hermes:v1",
-		AiccHidden:      true,
+		AppType:         string(domain.AppTypeAICC),
 	}}
 	r := NewAICCOcOpsResolverFromStore(store, nil, "http://app-%s-ocops.oc-apps.svc:8080")
 
@@ -142,7 +143,7 @@ func TestAICCOcOpsResolverFromStoreRejectsUnreadyHiddenApp(t *testing.T) {
 		Status:          "error",
 		RuntimePhase:    "unknown",
 		RuntimeImageRef: "registry/hermes:v1",
-		AiccHidden:      true,
+		AppType:         string(domain.AppTypeAICC),
 	}}
 	r := NewAICCOcOpsResolverFromStore(store, nil, "http://app-%s-ocops.oc-apps.svc:8080")
 

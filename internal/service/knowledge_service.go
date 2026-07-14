@@ -18,6 +18,7 @@ import (
 
 	"oc-manager/internal/auth"
 	"oc-manager/internal/config"
+	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/ragflow"
 	"oc-manager/internal/integrations/storage"
 	"oc-manager/internal/store/sqlc"
@@ -1350,7 +1351,7 @@ func (s *KnowledgeService) getApp(ctx context.Context, principal auth.Principal,
 	if err != nil {
 		return sqlc.App{}, fmt.Errorf("查询应用失败: %w", err)
 	}
-	if app.AiccHidden {
+	if domain.IsAICCAppType(domain.AppType(app.AppType)) {
 		if err := s.ensureAICCHiddenAppKnowledgeAccess(ctx, principal, app, requireAICCManage); err != nil {
 			return sqlc.App{}, err
 		}

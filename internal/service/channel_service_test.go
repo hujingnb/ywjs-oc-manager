@@ -91,7 +91,7 @@ func TestChannelServiceBeginAuthPlatformAdminAllowed(t *testing.T) {
 // 不允许通过普通 app 渠道绑定入口发起认证。
 func TestChannelServiceRejectsAICCHiddenApp(t *testing.T) {
 	store := newChannelStub(t)
-	store.app.AiccHidden = true
+	store.app.AppType = string(domain.AppTypeAICC)
 	registry := channel.NewRegistry()
 	registry.MustRegister(&fakeAdapter{})
 	svc := NewChannelService(store, registry)
@@ -656,6 +656,8 @@ func newChannelStub(t *testing.T) *channelStub {
 		Status:       domain.AppStatusBindingWaiting,
 		RuntimePhase: domain.RuntimePhaseReady, // 渠道发起守卫双维度：测试 stub 默认置 ready 以通过闸门
 		ApiKeyStatus: domain.APIKeyStatusActive,
+		// 默认渠道测试仅覆盖普通应用，AICC 场景由专用子用例显式设置。
+		AppType: string(domain.AppTypeStandard),
 	}
 	binding := sqlc.ChannelBinding{
 		ID:          mustUUID(t, "00000000-0000-0000-0000-000000000d01"),

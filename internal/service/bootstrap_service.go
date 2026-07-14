@@ -260,7 +260,7 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 	}
 	// AICC 隐藏应用面向外部访客，必须使用专用客服规则；普通应用沿用实例工作目录等规则。
 	// 平台规则直接由应用类型映射，避免可变启动配置与已应用 hash 的版本语义脱节。
-	platformPrompt := config.PlatformPromptForApp(app.AiccHidden)
+	platformPrompt := config.PlatformPromptForApp(domain.AppType(app.AppType))
 	in := hermes.AppInputData{
 		AppID:                   app.ID,
 		AppName:                 app.Name,
@@ -301,7 +301,7 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 	// 故单点即覆盖 bootstrap 与 restart 两条路径（与 SetAppWebPublishApplied 单点同理）。
 	// best-effort：写失败只 warn，不阻断实例启动（仅影响 needs-restart 提示）。
 	if err := s.store.SetAppAppliedPlatformPromptHash(ctx, sqlc.SetAppAppliedPlatformPromptHashParams{
-		AppliedPlatformPromptHash: config.PlatformPromptHash(app.AiccHidden),
+		AppliedPlatformPromptHash: config.PlatformPromptHash(domain.AppType(app.AppType)),
 		ID:                        app.ID,
 	}); err != nil {
 		slog.WarnContext(ctx, "记录 applied_platform_prompt_hash 失败", "app_id", app.ID, mlog.Err(err))

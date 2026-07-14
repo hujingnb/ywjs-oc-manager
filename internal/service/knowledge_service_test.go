@@ -125,7 +125,7 @@ func TestRAGFlowKnowledgeUploadAppAllowsExactQuota(t *testing.T) {
 func TestRAGFlowKnowledgeRejectsAICCHiddenApp(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
 	app := store.apps[testKnowledgeApp]
-	app.AiccHidden = true
+	app.AppType = string(domain.AppTypeAICC)
 	store.apps[testKnowledgeApp] = app
 
 	_, err := svc.SaveAppFile(context.Background(), appOwnerPrincipal(), testKnowledgeApp, "b.md", strings.NewReader("bb"), 2)
@@ -139,7 +139,7 @@ func TestRAGFlowKnowledgeRejectsAICCHiddenApp(t *testing.T) {
 func TestRAGFlowKnowledgeAllowsAICCHiddenAppForAgentAdmin(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
 	app := store.apps[testKnowledgeApp]
-	app.AiccHidden = true
+	app.AppType = string(domain.AppTypeAICC)
 	store.apps[testKnowledgeApp] = app
 	store.aiccAgentsByApp = map[string]sqlc.AiccAgent{}
 	store.aiccAgentsByApp[testKnowledgeApp] = sqlc.AiccAgent{ID: "agent-1", OrgID: testKnowledgeOrg, AppID: testKnowledgeApp}
@@ -156,7 +156,7 @@ func TestRAGFlowKnowledgeAllowsAICCHiddenAppForAgentAdmin(t *testing.T) {
 func TestRAGFlowKnowledgeAllowsAICCHiddenAppListForPlatformViewer(t *testing.T) {
 	svc, store, _ := newRAGFlowKnowledgeTestService(t)
 	app := store.apps[testKnowledgeApp]
-	app.AiccHidden = true
+	app.AppType = string(domain.AppTypeAICC)
 	store.apps[testKnowledgeApp] = app
 	store.aiccAgentsByApp = map[string]sqlc.AiccAgent{
 		testKnowledgeApp: {ID: "agent-1", OrgID: testKnowledgeOrg, AppID: testKnowledgeApp},
@@ -175,7 +175,7 @@ func TestRAGFlowKnowledgeAllowsAICCHiddenAppListForPlatformViewer(t *testing.T) 
 func TestRAGFlowKnowledgeAllowsAICCHiddenAppWriteForPlatformAdmin(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)
 	app := store.apps[testKnowledgeApp]
-	app.AiccHidden = true
+	app.AppType = string(domain.AppTypeAICC)
 	store.apps[testKnowledgeApp] = app
 	store.aiccAgentsByApp = map[string]sqlc.AiccAgent{
 		testKnowledgeApp: {ID: "agent-1", OrgID: testKnowledgeOrg, AppID: testKnowledgeApp},
