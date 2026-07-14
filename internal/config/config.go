@@ -153,6 +153,21 @@ type HermesConfig struct {
 type AICCConfig struct {
 	// RuntimeImage 必须是带 tag 或 digest 的完整客服专用镜像引用，发布时使用不可变引用。
 	RuntimeImage string `yaml:"runtime_image"`
+	// Governance 描述公开消息队列、跨副本并发与上游熔断的有限治理参数。
+	Governance AICCGovernanceConfig `yaml:"governance"`
+}
+
+// AICCGovernanceConfig 是 AICC 异步执行的生产保护阈值；零值由 loader 回填为有限默认值。
+type AICCGovernanceConfig struct {
+	GlobalQueueCapacity   int64    `yaml:"global_queue_capacity"`
+	UpstreamConcurrency   int64    `yaml:"upstream_concurrency"`
+	OrgConcurrency        int64    `yaml:"org_concurrency"`
+	AgentConcurrency      int64    `yaml:"agent_concurrency"`
+	SessionConcurrency    int64    `yaml:"session_concurrency"`
+	CircuitConsecutive    int      `yaml:"circuit_consecutive_overloads"`
+	CircuitWindow         Duration `yaml:"circuit_window"`
+	CircuitFailurePercent int      `yaml:"circuit_overload_percent"`
+	CircuitCooldown       Duration `yaml:"circuit_cooldown"`
 }
 
 // RAGFlowConfig 描述 RAGFlow HTTP API 连接信息。

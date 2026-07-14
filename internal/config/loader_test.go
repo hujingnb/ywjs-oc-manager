@@ -427,6 +427,23 @@ transfer_limit:
 	}
 }
 
+// TestAICCGovernanceDefaults 验证未配置治理段时仍会得到有限的生产安全默认值。
+func TestAICCGovernanceDefaults(t *testing.T) {
+	cfg := loadConfigFromString(t, fullValidYAML())
+
+	assert.Equal(t, int64(64), cfg.AICC.Governance.GlobalQueueCapacity)
+	assert.Equal(t, int64(32), cfg.AICC.Governance.UpstreamConcurrency)
+	assert.Equal(t, 30*time.Second, cfg.AICC.Governance.CircuitCooldown.Duration)
+}
+
+// TestAICCGovernanceRejectsNegativeCapacity 验证队列容量不能被配置成负数。
+func TestAICCGovernanceRejectsNegativeCapacity(t *testing.T) {
+	yaml := strings.Replace(fullValidYAML(), "  runtime_image: \"registry.example.com/app/oc-manager-aigowork-aicc:v1.0.0-test\"", "  runtime_image: \"registry.example.com/app/oc-manager-aigowork-aicc:v1.0.0-test\"\n  governance:\n    global_queue_capacity: -1", 1)
+	_, err := loadConfigFromStringErr(t, yaml)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "aicc.governance.global_queue_capacity")
+}
+
 // TestStorageS3ValidationRequiresFields 验证启用 S3 但字段不全时加载报错（fail-fast）。
 func TestStorageS3ValidationRequiresFields(t *testing.T) {
 	// 启用 S3 却缺 endpoint/bucket/access_key_id/secret_access_key 等，Validate 必须 fail-fast。

@@ -37,6 +37,34 @@ func LoadFile(path string) (Config, error) {
 
 // applyDefaults 填充可选配置的默认值；所有必需配置仍由 Validate 统一校验。
 func (c *Config) applyDefaults() {
+	// AICC 治理默认值必须有限：避免未显式配置时匿名流量无限积压或跨副本放大上游压力。
+	if c.AICC.Governance.GlobalQueueCapacity == 0 {
+		c.AICC.Governance.GlobalQueueCapacity = 64
+	}
+	if c.AICC.Governance.UpstreamConcurrency == 0 {
+		c.AICC.Governance.UpstreamConcurrency = 32
+	}
+	if c.AICC.Governance.OrgConcurrency == 0 {
+		c.AICC.Governance.OrgConcurrency = 8
+	}
+	if c.AICC.Governance.AgentConcurrency == 0 {
+		c.AICC.Governance.AgentConcurrency = 4
+	}
+	if c.AICC.Governance.SessionConcurrency == 0 {
+		c.AICC.Governance.SessionConcurrency = 1
+	}
+	if c.AICC.Governance.CircuitConsecutive == 0 {
+		c.AICC.Governance.CircuitConsecutive = 5
+	}
+	if c.AICC.Governance.CircuitWindow.Duration == 0 {
+		c.AICC.Governance.CircuitWindow.Duration = 30 * time.Second
+	}
+	if c.AICC.Governance.CircuitFailurePercent == 0 {
+		c.AICC.Governance.CircuitFailurePercent = 30
+	}
+	if c.AICC.Governance.CircuitCooldown.Duration == 0 {
+		c.AICC.Governance.CircuitCooldown.Duration = 30 * time.Second
+	}
 	if strings.TrimSpace(c.Hermes.ManagerRuntimeBaseURL) == "" {
 		c.Hermes.ManagerRuntimeBaseURL = "http://manager-api:8080"
 	}
@@ -195,6 +223,9 @@ func (c Config) Validate() error {
 	if err := ValidateAICCRuntimeImage(c.AICC.RuntimeImage); err != nil {
 		return err
 	}
+	if err := c.AICC.Governance.validate(); err != nil {
+		return err
+	}
 	if err := c.RAGFlow.validate(); err != nil {
 		return err
 	}
@@ -227,6 +258,22 @@ func (c Config) Validate() error {
 	}
 	// Hermes 时代模板不再需要 {{workspace_dir}} 等 legacy OpenClaw 专属占位符，
 	// 仅需非空即可（上方 missing 检查已覆盖）。
+	return nil
+}
+
+// validate 拒绝会让治理失效或窗口语义不成立的参数，配置错误必须在启动时暴露。
+func (c AICCGovernanceConfig) validate() error {
+	if c.GlobalQueueCapacity <= 0 {
+		return fmt.Errorf("aicc.governance.global_queue_capacity 必须大于 0")
+	}
+	for name, value := range map[string]int64{"upstream_concurrency": c.UpstreamConcurrency, "org_concurrency": c.OrgConcurrency, "agent_concurrency": c.AgentConcurrency, "session_concurrency": c.SessionConcurrency} {
+		if value <= 0 {
+			return fmt.Errorf("aicc.governance.%s 必须大于 0", name)
+		}
+	}
+	if c.CircuitConsecutive <= 0 || c.CircuitWindow.Duration <= 0 || c.CircuitCooldown.Duration <= 0 || c.CircuitFailurePercent < 1 || c.CircuitFailurePercent > 100 {
+		return fmt.Errorf("aicc.governance 熔断阈值必须有效")
+	}
 	return nil
 }
 
