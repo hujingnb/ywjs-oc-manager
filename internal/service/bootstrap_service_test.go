@@ -166,6 +166,7 @@ func TestBootstrapBuildHappyPath(t *testing.T) {
 	// manifest 还须包含解密后的 control token（写入 knowledge.app_token），验证 token 统一链路透传
 	assert.Contains(t, res.ManifestYAML, "control-tok")
 	// 约定写入前缀必须为 apps/<appID>/，sidecar 据此只写自身前缀
+	require.NotNil(t, res.S3Write)
 	assert.Equal(t, "apps/a1/", res.S3Write.Prefix)
 	// 长期凭证须原样透传到响应，缺任一都会让 sidecar 无法写 S3
 	assert.Equal(t, "manager-ak", res.S3Write.AccessKeyID)
@@ -175,6 +176,7 @@ func TestBootstrapBuildHappyPath(t *testing.T) {
 	// 过期时间须为远未来，避免 sidecar 因「临近过期」反复回源续期
 	assert.True(t, res.S3Write.ExpiresAt.After(time.Now()))
 	// 首启：fakeObjectStore 无任何对象，三个 restore 字段全部为空
+	require.NotNil(t, res.Restore)
 	assert.Empty(t, res.Restore.WorkspaceURL)
 	assert.Empty(t, res.Restore.StateDBURL)
 	assert.Empty(t, res.Restore.SessionsURL)
@@ -205,11 +207,11 @@ func TestBootstrapBuildAICCIsStateless(t *testing.T) {
 
 	require.NoError(t, err)
 	// 客服运行时不下载任何 skill，也不在 manifest 内写入 skill 相对路径。
-	assert.Empty(t, res.Skills)
+	assert.Nil(t, res.Skills)
 	assert.NotContains(t, res.ManifestYAML, "resources/skills/")
 	// 客服运行时不读取恢复快照，也不获得 S3 写回凭证。
-	assert.Equal(t, BootstrapRestore{}, res.Restore)
-	assert.Equal(t, BootstrapS3Write{}, res.S3Write)
+	assert.Nil(t, res.Restore)
+	assert.Nil(t, res.S3Write)
 }
 
 // TestBootstrapBuildStandardRequiresObjectStorage 验证普通应用仍依赖 S3：
@@ -338,16 +340,17 @@ func TestBootstrapSkillsFromAppSkills(t *testing.T) {
 		require.NoError(t, err)
 
 		// 应有两个 skill 条目
-		require.Len(t, res.Skills, 2)
+		require.NotNil(t, res.Skills)
+		require.Len(t, *res.Skills, 2)
 
 		// 找到 weather（.tar）：RelPath 应为 resources/skills/weather.tar
 		var weatherSkill, searchSkill *BootstrapSkill
-		for i := range res.Skills {
-			switch res.Skills[i].Name {
+		for i := range *res.Skills {
+			switch (*res.Skills)[i].Name {
 			case "weather":
-				weatherSkill = &res.Skills[i]
+				weatherSkill = &(*res.Skills)[i]
 			case "search":
-				searchSkill = &res.Skills[i]
+				searchSkill = &(*res.Skills)[i]
 			}
 		}
 		require.NotNil(t, weatherSkill, "缺少 weather skill 条目")
@@ -390,7 +393,8 @@ func TestBootstrapSkillsFromAppSkills(t *testing.T) {
 		require.NoError(t, err)
 
 		// 来源切换后，version.skills_json 中的 skill 不再下发；app_skills 为空则 skills 列表为空
-		assert.Empty(t, res.Skills, "来源切换证明：version.skills_json 有内容但 app_skills 空时 bootstrap skills 应为空")
+		require.NotNil(t, res.Skills)
+		assert.Empty(t, *res.Skills, "来源切换证明：version.skills_json 有内容但 app_skills 空时 bootstrap skills 应为空")
 	})
 }
 

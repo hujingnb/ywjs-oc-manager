@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +22,8 @@ type fakeBootstrapAppService struct {
 	app        sqlc.App
 	resolveErr error
 	buildErr   error
+	result     *service.BootstrapResult
+	standard   bool
 }
 
 // ResolveByControlToken 如果 resolveErr 已设置则返回错误，否则返回预置 app。
@@ -36,7 +39,18 @@ func (f *fakeBootstrapAppService) Build(_ context.Context, _ sqlc.App) (service.
 	if f.buildErr != nil {
 		return service.BootstrapResult{}, f.buildErr
 	}
-	return service.BootstrapResult{ManifestYAML: "app:\n  id: a1\n"}, nil
+	if f.result != nil {
+		return *f.result, nil
+	}
+	result := service.BootstrapResult{ManifestYAML: "app:\n  id: a1\n"}
+	if f.standard {
+		// 普通应用响应必须始终保留 ops 恢复脚本消费的三个对象存储字段。
+		skills := []service.BootstrapSkill{}
+		result.Skills = &skills
+		result.Restore = &service.BootstrapRestore{}
+		result.S3Write = &service.BootstrapS3Write{Bucket: "oc-apps"}
+	}
+	return result, nil
 }
 
 // newBootstrapTestRouter 构造仅挂 /internal/apps/:id/bootstrap 路由的 gin engine，
@@ -126,6 +140,45 @@ func TestBootstrapHappyPath(t *testing.T) {
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "manifest_yaml")
+}
+
+// TestBootstrapResponseOmitsAICCObjectStorageFields 验证 AICC 的 HTTP 响应只包含无状态启动输入，
+// 不能以 null、空对象或零值时间的形式泄露 skills、restore 与 s3_write 字段。
+func TestBootstrapResponseOmitsAICCObjectStorageFields(t *testing.T) {
+	result := service.BootstrapResult{
+		ManifestYAML: "app:\n  id: aicc-1\n",
+		Persona:      "客服人格",
+		PlatformRule: "客服规则",
+	}
+	r := newBootstrapTestRouter(&fakeBootstrapAppService{app: sqlc.App{ID: "a1"}, result: &result})
+	req := httptest.NewRequest(http.MethodGet, "/internal/apps/a1/bootstrap", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var body map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.NotContains(t, body, "skills")
+	assert.NotContains(t, body, "restore")
+	assert.NotContains(t, body, "s3_write")
+}
+
+// TestBootstrapResponseKeepsStandardObjectStorageFields 验证普通应用仍保留 ops 恢复脚本消费的
+// skills、restore 与 s3_write 字段，避免可选字段改造破坏既有对象存储恢复协议。
+func TestBootstrapResponseKeepsStandardObjectStorageFields(t *testing.T) {
+	r := newBootstrapTestRouter(&fakeBootstrapAppService{app: sqlc.App{ID: "a1"}, standard: true})
+	req := httptest.NewRequest(http.MethodGet, "/internal/apps/a1/bootstrap", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var body map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Contains(t, body, "skills")
+	assert.Contains(t, body, "restore")
+	assert.Contains(t, body, "s3_write")
 }
 
 // TestBootstrapResolveError 验证 token 反查失败（如 DB 查无此记录）时返回 401，

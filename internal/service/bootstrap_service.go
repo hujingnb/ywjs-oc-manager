@@ -28,12 +28,15 @@ type BootstrapResult struct {
 	Persona string `json:"persona"`
 	// PlatformRule 是 resources/platform-rules.md 的文本内容，initContainer 写入 emptyDir。
 	PlatformRule string `json:"platform_rule"`
-	// Skills 是各 skill tar 的预签名读 URL + 目标相对路径（与 manifest.resources.skills 对应）。
-	Skills []BootstrapSkill `json:"skills"`
-	// Restore 是会话/工作区恢复的预签名读 URL；首启时各字段为空。
-	Restore BootstrapRestore `json:"restore"`
-	// S3Write 是 sidecar mirror 写回 S3 用的凭证 + 寻址信息（长期凭证直发，见 BootstrapS3Write）。
-	S3Write BootstrapS3Write `json:"s3_write"`
+	// Skills 是 standard app 的 skill tar 预签名读 URL + 目标相对路径（与 manifest.resources.skills 对应）。
+	// AICC 不读取对象存储，保持 nil 以便 JSON 省略该字段；standard 即使无 skill 也返回空数组。
+	Skills *[]BootstrapSkill `json:"skills,omitempty"`
+	// Restore 是 standard app 的会话/工作区恢复预签名读 URL；首启时为一个字段为空的对象。
+	// AICC 不恢复对象存储快照，保持 nil 以便 JSON 省略该字段。
+	Restore *BootstrapRestore `json:"restore,omitempty"`
+	// S3Write 是 standard app sidecar mirror 写回 S3 用的凭证 + 寻址信息（见 BootstrapS3Write）。
+	// AICC 不持有对象存储凭证，保持 nil 以便 JSON 省略该字段。
+	S3Write *BootstrapS3Write `json:"s3_write,omitempty"`
 }
 
 // BootstrapSkill 单个 skill 的下载信息。
@@ -269,13 +272,20 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 
 	// 5. 普通应用从 app_skills 取实例 skill 并预签名，AICC 固定为空。
 	// 运行时只下发实例实际安装的 skill；客服应用不接触对象存储中的任何 skill 数据。
-	var skills []BootstrapSkill
+	var skills *[]BootstrapSkill
 	var skillRelPaths []string
 	if appType == domain.AppTypeStandard {
-		skills, skillRelPaths, err = s.presignSkills(ctx, app.ID)
-		if err != nil {
-			return BootstrapResult{}, err
+		standardSkills, standardSkillRelPaths, skillErr := s.presignSkills(ctx, app.ID)
+		if skillErr != nil {
+			return BootstrapResult{}, skillErr
 		}
+		// standard 的 oc-restore 使用 .skills[]? 读取下载任务；即使无 skill 也固定输出 []，
+		// 与 AICC 的字段省略语义区分，避免旧脚本把对象存储配置误判为缺失。
+		if standardSkills == nil {
+			standardSkills = make([]BootstrapSkill, 0)
+		}
+		skills = &standardSkills
+		skillRelPaths = standardSkillRelPaths
 	}
 
 	// 6. 组装 AppInputData 并通过 renderer 渲染 manifest YAML、persona 与 platform 文本。
@@ -338,12 +348,13 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 	}
 
 	// 7. 普通应用对 workspace/state.db/sessions 快照生成 restore 预签名；AICC 保持零值。
-	var restore BootstrapRestore
+	var restore *BootstrapRestore
 	if appType == domain.AppTypeStandard {
-		restore, err = s.presignRestore(ctx, app.ID)
-		if err != nil {
-			return BootstrapResult{}, err
+		standardRestore, restoreErr := s.presignRestore(ctx, app.ID)
+		if restoreErr != nil {
+			return BootstrapResult{}, restoreErr
 		}
+		restore = &standardRestore
 	}
 
 	// 8. 普通应用下发 S3 写凭证。目标对象存储不支持标准 STS AssumeRole，无法签发 prefix 限定的
@@ -351,10 +362,10 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 	//    读写权限，per-app 前缀隔离退化为 sidecar 只主动写自身 Prefix 的「善意行为」，不再
 	//    由凭证策略强制；详见 secret 配置 storage.s3 注释）。SessionToken 留空表示这是长期
 	//    凭证而非临时凭证；ExpiresAt 给远未来，使 sidecar 不会因「临近过期」反复回源续期。
-	var s3Write BootstrapS3Write
+	var s3Write *BootstrapS3Write
 	if appType == domain.AppTypeStandard {
 		prefix := storage.AppPrefix(app.ID)
-		s3Write = BootstrapS3Write{
+		s3Write = &BootstrapS3Write{
 			Endpoint:        s.cfg.Endpoint,
 			Region:          s.cfg.Region,
 			Bucket:          s.cfg.Bucket,
