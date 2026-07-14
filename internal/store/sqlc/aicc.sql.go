@@ -402,26 +402,27 @@ func (q *Queries) CreateAICCImage(ctx context.Context, arg CreateAICCImageParams
 const createAICCMessage = `-- name: CreateAICCMessage :exec
 INSERT INTO aicc_messages (
     id, session_id, agent_id, direction, content_type, text_content,
-    image_object_key, image_mime, image_size_bytes, hermes_message_id, client_message_id,
+    image_object_key, image_mime, image_size_bytes, hermes_message_id, client_message_id, reply_to_message_id,
     is_fallback, is_refusal, error_summary
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateAICCMessageParams struct {
-	ID              string      `db:"id" json:"id"`
-	SessionID       string      `db:"session_id" json:"session_id"`
-	AgentID         string      `db:"agent_id" json:"agent_id"`
-	Direction       string      `db:"direction" json:"direction"`
-	ContentType     string      `db:"content_type" json:"content_type"`
-	TextContent     null.String `db:"text_content" json:"text_content"`
-	ImageObjectKey  null.String `db:"image_object_key" json:"image_object_key"`
-	ImageMime       null.String `db:"image_mime" json:"image_mime"`
-	ImageSizeBytes  null.Int    `db:"image_size_bytes" json:"image_size_bytes"`
-	HermesMessageID null.String `db:"hermes_message_id" json:"hermes_message_id"`
-	ClientMessageID null.String `db:"client_message_id" json:"client_message_id"`
-	IsFallback      bool        `db:"is_fallback" json:"is_fallback"`
-	IsRefusal       bool        `db:"is_refusal" json:"is_refusal"`
-	ErrorSummary    null.String `db:"error_summary" json:"error_summary"`
+	ID               string      `db:"id" json:"id"`
+	SessionID        string      `db:"session_id" json:"session_id"`
+	AgentID          string      `db:"agent_id" json:"agent_id"`
+	Direction        string      `db:"direction" json:"direction"`
+	ContentType      string      `db:"content_type" json:"content_type"`
+	TextContent      null.String `db:"text_content" json:"text_content"`
+	ImageObjectKey   null.String `db:"image_object_key" json:"image_object_key"`
+	ImageMime        null.String `db:"image_mime" json:"image_mime"`
+	ImageSizeBytes   null.Int    `db:"image_size_bytes" json:"image_size_bytes"`
+	HermesMessageID  null.String `db:"hermes_message_id" json:"hermes_message_id"`
+	ClientMessageID  null.String `db:"client_message_id" json:"client_message_id"`
+	ReplyToMessageID null.String `db:"reply_to_message_id" json:"reply_to_message_id"`
+	IsFallback       bool        `db:"is_fallback" json:"is_fallback"`
+	IsRefusal        bool        `db:"is_refusal" json:"is_refusal"`
+	ErrorSummary     null.String `db:"error_summary" json:"error_summary"`
 }
 
 func (q *Queries) CreateAICCMessage(ctx context.Context, arg CreateAICCMessageParams) error {
@@ -437,6 +438,7 @@ func (q *Queries) CreateAICCMessage(ctx context.Context, arg CreateAICCMessagePa
 		arg.ImageSizeBytes,
 		arg.HermesMessageID,
 		arg.ClientMessageID,
+		arg.ReplyToMessageID,
 		arg.IsFallback,
 		arg.IsRefusal,
 		arg.ErrorSummary,
@@ -776,8 +778,39 @@ func (q *Queries) GetAICCAgentSettings(ctx context.Context, agentID string) (Aic
 	return i, err
 }
 
+const getAICCAssistantMessageByVisitorMessageID = `-- name: GetAICCAssistantMessageByVisitorMessageID :one
+SELECT id, session_id, agent_id, direction, content_type, text_content, image_object_key, image_mime, image_size_bytes, hermes_message_id, is_fallback, is_refusal, error_summary, created_at, client_message_id, reply_to_message_id
+FROM aicc_messages
+WHERE reply_to_message_id = ? AND direction = 'assistant'
+`
+
+// dispatcher 写入 reply_to_message_id，使无 client_message_id 的公开消息也能准确定位助手回复。
+func (q *Queries) GetAICCAssistantMessageByVisitorMessageID(ctx context.Context, replyToMessageID null.String) (AiccMessage, error) {
+	row := q.db.QueryRowContext(ctx, getAICCAssistantMessageByVisitorMessageID, replyToMessageID)
+	var i AiccMessage
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.AgentID,
+		&i.Direction,
+		&i.ContentType,
+		&i.TextContent,
+		&i.ImageObjectKey,
+		&i.ImageMime,
+		&i.ImageSizeBytes,
+		&i.HermesMessageID,
+		&i.IsFallback,
+		&i.IsRefusal,
+		&i.ErrorSummary,
+		&i.CreatedAt,
+		&i.ClientMessageID,
+		&i.ReplyToMessageID,
+	)
+	return i, err
+}
+
 const getAICCAssistantMessageForFeedback = `-- name: GetAICCAssistantMessageForFeedback :one
-SELECT m.id, m.session_id, m.agent_id, m.direction, m.content_type, m.text_content, m.image_object_key, m.image_mime, m.image_size_bytes, m.hermes_message_id, m.is_fallback, m.is_refusal, m.error_summary, m.created_at, m.client_message_id
+SELECT m.id, m.session_id, m.agent_id, m.direction, m.content_type, m.text_content, m.image_object_key, m.image_mime, m.image_size_bytes, m.hermes_message_id, m.is_fallback, m.is_refusal, m.error_summary, m.created_at, m.client_message_id, m.reply_to_message_id
 FROM aicc_messages m
 JOIN aicc_sessions s ON s.id = m.session_id
 WHERE m.id = ? AND s.session_token = ? AND m.direction = 'assistant' AND s.expires_at > now()
@@ -807,6 +840,7 @@ func (q *Queries) GetAICCAssistantMessageForFeedback(ctx context.Context, arg Ge
 		&i.ErrorSummary,
 		&i.CreatedAt,
 		&i.ClientMessageID,
+		&i.ReplyToMessageID,
 	)
 	return i, err
 }
@@ -868,7 +902,7 @@ func (q *Queries) GetAICCLeadByContact(ctx context.Context, arg GetAICCLeadByCon
 }
 
 const getAICCMessageByClientMessageID = `-- name: GetAICCMessageByClientMessageID :one
-SELECT id, session_id, agent_id, direction, content_type, text_content, image_object_key, image_mime, image_size_bytes, hermes_message_id, is_fallback, is_refusal, error_summary, created_at, client_message_id
+SELECT id, session_id, agent_id, direction, content_type, text_content, image_object_key, image_mime, image_size_bytes, hermes_message_id, is_fallback, is_refusal, error_summary, created_at, client_message_id, reply_to_message_id
 FROM aicc_messages
 WHERE session_id = ? AND direction = ? AND client_message_id = ?
 `
@@ -898,12 +932,13 @@ func (q *Queries) GetAICCMessageByClientMessageID(ctx context.Context, arg GetAI
 		&i.ErrorSummary,
 		&i.CreatedAt,
 		&i.ClientMessageID,
+		&i.ReplyToMessageID,
 	)
 	return i, err
 }
 
 const getAICCMessageByID = `-- name: GetAICCMessageByID :one
-SELECT id, session_id, agent_id, direction, content_type, text_content, image_object_key, image_mime, image_size_bytes, hermes_message_id, is_fallback, is_refusal, error_summary, created_at, client_message_id
+SELECT id, session_id, agent_id, direction, content_type, text_content, image_object_key, image_mime, image_size_bytes, hermes_message_id, is_fallback, is_refusal, error_summary, created_at, client_message_id, reply_to_message_id
 FROM aicc_messages
 WHERE id = ?
 `
@@ -928,6 +963,7 @@ func (q *Queries) GetAICCMessageByID(ctx context.Context, id string) (AiccMessag
 		&i.ErrorSummary,
 		&i.CreatedAt,
 		&i.ClientMessageID,
+		&i.ReplyToMessageID,
 	)
 	return i, err
 }
@@ -1474,7 +1510,7 @@ func (q *Queries) ListAICCLeadsByOrg(ctx context.Context, arg ListAICCLeadsByOrg
 }
 
 const listAICCMessagesBySession = `-- name: ListAICCMessagesBySession :many
-SELECT id, session_id, agent_id, direction, content_type, text_content, image_object_key, image_mime, image_size_bytes, hermes_message_id, is_fallback, is_refusal, error_summary, created_at, client_message_id
+SELECT id, session_id, agent_id, direction, content_type, text_content, image_object_key, image_mime, image_size_bytes, hermes_message_id, is_fallback, is_refusal, error_summary, created_at, client_message_id, reply_to_message_id
 FROM aicc_messages
 WHERE session_id = ?
 ORDER BY created_at ASC, id ASC
@@ -1505,6 +1541,7 @@ func (q *Queries) ListAICCMessagesBySession(ctx context.Context, sessionID strin
 			&i.ErrorSummary,
 			&i.CreatedAt,
 			&i.ClientMessageID,
+			&i.ReplyToMessageID,
 		); err != nil {
 			return nil, err
 		}

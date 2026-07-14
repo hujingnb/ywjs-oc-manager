@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"oc-manager/internal/redis"
@@ -11,6 +12,8 @@ import (
 )
 
 const aiccMessageDispatchBatchSize int32 = 32
+
+const aiccMessageDispatchConcurrency = 4
 
 // messageTaskStore 是公开消息运行循环所需的最小 MySQL 查询集合。
 // MySQL 保存任务事实与租约，Redis 只提供低延迟的唤醒信号。
@@ -32,6 +35,10 @@ type MessageDispatchLoop struct {
 	logger     *slog.Logger
 	interval   time.Duration
 	batchSize  int32
+	// slots 控制同时调用运行时的数量，避免慢请求无限堆积或阻塞扫描循环。
+	slots chan struct{}
+	// dispatchWG 让 shutdown 等待已启动任务退出，避免主进程提前关闭依赖连接。
+	dispatchWG sync.WaitGroup
 }
 
 // NewMessageDispatchLoop 创建一秒一次的运行循环；每轮限制领取数量，避免长任务饿死其他后台任务。
@@ -42,6 +49,7 @@ func NewMessageDispatchLoop(store messageTaskStore, queue redis.Queue, dispatche
 	return &MessageDispatchLoop{
 		store: store, queue: queue, dispatcher: dispatcher, logger: logger,
 		interval: time.Second, batchSize: aiccMessageDispatchBatchSize,
+		slots: make(chan struct{}, aiccMessageDispatchConcurrency),
 	}
 }
 
@@ -55,6 +63,7 @@ func (l *MessageDispatchLoop) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			l.Wait()
 			return nil
 		case <-ticker.C:
 			if err := l.Tick(ctx); err != nil {
@@ -94,10 +103,38 @@ func (l *MessageDispatchLoop) Tick(ctx context.Context) error {
 			// 信号可能来自上一轮；本轮扫描未见到它时说明它已不再可执行，安全跳过。
 			continue
 		}
-		if err := l.dispatcher.Dispatch(ctx, task); err != nil {
-			// 单个任务失败由 dispatcher 写入重试或失败状态，不能阻塞同批其他会话。
-			l.logger.ErrorContext(ctx, "AICC 消息任务分派失败", "task_id", task.ID, "error", err)
+		if !l.tryDispatch(ctx, task) {
+			// 有界并发已满时不阻塞扫描；该任务仍是 MySQL 就绪任务，下轮会重新入队。
+			l.logger.DebugContext(ctx, "AICC 消息任务等待下轮分派", "task_id", task.ID)
 		}
 	}
 	return nil
+}
+
+// tryDispatch 非阻塞地提交一个任务；返回 false 表示并发额度已满，调用方不得等待运行时调用结束。
+func (l *MessageDispatchLoop) tryDispatch(ctx context.Context, task sqlc.AiccMessageTask) bool {
+	select {
+	case l.slots <- struct{}{}:
+		l.dispatchWG.Add(1)
+		go func() {
+			defer func() {
+				<-l.slots
+				l.dispatchWG.Done()
+			}()
+			if err := l.dispatcher.Dispatch(ctx, task); err != nil {
+				// 单个任务失败由 dispatcher 写入重试或失败状态，不能阻塞同批其他会话。
+				l.logger.ErrorContext(ctx, "AICC 消息任务分派失败", "task_id", task.ID, "error", err)
+			}
+		}()
+		return true
+	default:
+		return false
+	}
+}
+
+// Wait 等待当前已提交的运行时调用退出；Run 在收到 shutdown 信号后调用它。
+func (l *MessageDispatchLoop) Wait() {
+	if l != nil {
+		l.dispatchWG.Wait()
+	}
 }

@@ -159,14 +159,20 @@ WHERE id = ? AND expires_at > now();
 -- name: CreateAICCMessage :exec
 INSERT INTO aicc_messages (
     id, session_id, agent_id, direction, content_type, text_content,
-    image_object_key, image_mime, image_size_bytes, hermes_message_id, client_message_id,
+    image_object_key, image_mime, image_size_bytes, hermes_message_id, client_message_id, reply_to_message_id,
     is_fallback, is_refusal, error_summary
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetAICCMessageByClientMessageID :one
 SELECT *
 FROM aicc_messages
 WHERE session_id = ? AND direction = ? AND client_message_id = ?;
+
+-- name: GetAICCAssistantMessageByVisitorMessageID :one
+-- dispatcher 写入 reply_to_message_id，使无 client_message_id 的公开消息也能准确定位助手回复。
+SELECT *
+FROM aicc_messages
+WHERE reply_to_message_id = ? AND direction = 'assistant';
 
 -- name: GetAICCMessageByID :one
 -- dispatcher 仅按任务关联的访客消息读取原文，避免重新按客户端幂等键查询。

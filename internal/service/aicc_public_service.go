@@ -82,6 +82,8 @@ type AICCPublicStore interface {
 	GetAICCMessageTaskByMessageID(ctx context.Context, messageID string) (sqlc.AiccMessageTask, error)
 	// GetAICCMessageByID 按消息主键读取访客消息，用于校验状态查询只访问所属会话。
 	GetAICCMessageByID(ctx context.Context, id string) (sqlc.AiccMessage, error)
+	// GetAICCAssistantMessageByVisitorMessageID 按显式回复关联读取任务产出的助手消息。
+	GetAICCAssistantMessageByVisitorMessageID(ctx context.Context, visitorMessageID null.String) (sqlc.AiccMessage, error)
 	// CreateAICCImage 写入公开会话图片对象记录。
 	CreateAICCImage(ctx context.Context, arg sqlc.CreateAICCImageParams) error
 	// GetAICCImageBySession 读取当前会话内已上传图片。
@@ -489,13 +491,13 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 	isPromptInjection := isAICCPromptInjection(text)
 	var assistantMessage *sqlc.CreateAICCMessageParams
 	if isPromptInjection {
-		message := sqlc.CreateAICCMessageParams{ID: newUUID(), SessionID: session.ID, AgentID: session.AgentID, Direction: domain.AICCMessageDirectionAssistant, ContentType: domain.AICCMessageContentTypeText, TextContent: nullStr(aiccPromptInjectionReply), ClientMessageID: nullStr(clientMessageID)}
+		message := sqlc.CreateAICCMessageParams{ID: newUUID(), SessionID: session.ID, AgentID: session.AgentID, Direction: domain.AICCMessageDirectionAssistant, ContentType: domain.AICCMessageContentTypeText, TextContent: nullStr(aiccPromptInjectionReply), ClientMessageID: nullStr(clientMessageID), ReplyToMessageID: null.StringFrom(visitorMessage.ID)}
 		assistantMessage = &message
 	}
 	if clientMessageID != "" {
 		existing, err := s.store.GetAICCMessageByClientMessageID(ctx, sqlc.GetAICCMessageByClientMessageIDParams{SessionID: session.ID, Direction: domain.AICCMessageDirectionVisitor, ClientMessageID: nullStr(clientMessageID)})
 		if err == nil {
-			return s.aiccMessageTaskResult(ctx, session.ID, clientMessageID, existing.ID)
+			return s.aiccMessageTaskResult(ctx, existing.ID)
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 幂等消息失败: %w", err)
@@ -506,7 +508,7 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 		return AICCPublicMessageResult{}, err
 	}
 	if existingMessageID != "" {
-		return s.aiccMessageTaskResult(ctx, session.ID, clientMessageID, existingMessageID)
+		return s.aiccMessageTaskResult(ctx, existingMessageID)
 	}
 	if !isPromptInjection {
 		return AICCPublicMessageResult{MessageID: visitorMessage.ID, Status: "queued"}, nil
@@ -540,7 +542,7 @@ func (s *AICCPublicService) GetMessageStatus(ctx context.Context, sessionToken, 
 	if message.SessionID != session.ID || message.Direction != domain.AICCMessageDirectionVisitor {
 		return AICCPublicMessageResult{}, ErrAICCInvalidMessage
 	}
-	return s.aiccMessageTaskResult(ctx, session.ID, message.ClientMessageID.String, message.ID)
+	return s.aiccMessageTaskResult(ctx, message.ID)
 }
 
 func (s *AICCPublicService) reserveAICCVisitorMessage(ctx context.Context, session sqlc.AiccSession, limit int32, visitorMessage sqlc.CreateAICCMessageParams, appID string, createTask bool, assistantMessage *sqlc.CreateAICCMessageParams) (string, error) {
@@ -595,7 +597,7 @@ func (s *AICCPublicService) reserveAICCVisitorMessage(ctx context.Context, sessi
 }
 
 // aiccMessageTaskResult 将已存在访客消息映射为当前异步任务状态，避免幂等重试重复创建任务。
-func (s *AICCPublicService) aiccMessageTaskResult(ctx context.Context, sessionID, clientMessageID, messageID string) (AICCPublicMessageResult, error) {
+func (s *AICCPublicService) aiccMessageTaskResult(ctx context.Context, messageID string) (AICCPublicMessageResult, error) {
 	task, err := s.store.GetAICCMessageTaskByMessageID(ctx, messageID)
 	if err == nil {
 		result := AICCPublicMessageResult{MessageID: messageID, Status: task.Status}
@@ -608,7 +610,7 @@ func (s *AICCPublicService) aiccMessageTaskResult(ctx context.Context, sessionID
 			result.RetryAfterSeconds = &seconds
 		}
 		if task.Status == "completed" {
-			assistant, assistantErr := s.store.GetAICCMessageByClientMessageID(ctx, sqlc.GetAICCMessageByClientMessageIDParams{SessionID: sessionID, Direction: domain.AICCMessageDirectionAssistant, ClientMessageID: nullStr(clientMessageID)})
+			assistant, assistantErr := s.store.GetAICCAssistantMessageByVisitorMessageID(ctx, null.StringFrom(messageID))
 			if assistantErr == nil {
 				result.Text = assistant.TextContent.String
 			} else if !errors.Is(assistantErr, sql.ErrNoRows) {
@@ -620,7 +622,7 @@ func (s *AICCPublicService) aiccMessageTaskResult(ctx context.Context, sessionID
 	if !errors.Is(err, sql.ErrNoRows) {
 		return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 幂等任务失败: %w", err)
 	}
-	assistant, err := s.store.GetAICCMessageByClientMessageID(ctx, sqlc.GetAICCMessageByClientMessageIDParams{SessionID: sessionID, Direction: domain.AICCMessageDirectionAssistant, ClientMessageID: nullStr(clientMessageID)})
+	assistant, err := s.store.GetAICCAssistantMessageByVisitorMessageID(ctx, null.StringFrom(messageID))
 	if err == nil {
 		return AICCPublicMessageResult{MessageID: messageID, Status: "completed", Text: assistant.TextContent.String}, nil
 	}

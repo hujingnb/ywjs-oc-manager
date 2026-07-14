@@ -246,7 +246,7 @@ func TestAICCPublicGetMessageStatusReturnsCompletedText(t *testing.T) {
 	store.message = sqlc.AiccMessage{ID: "message-1", SessionID: "session-1", Direction: domain.AICCMessageDirectionVisitor, ClientMessageID: null.StringFrom("client-1")}
 	store.createdTasks = []sqlc.CreateAICCMessageTaskParams{{ID: "task-1", MessageID: "message-1", SessionID: "session-1", AgentID: "agent-1", OrgID: "org-1", AppID: "app-1", RunAfter: aiccPublicTestNow}}
 	store.taskStatus = "completed"
-	store.messages = []sqlc.AiccMessage{{ID: "assistant-1", SessionID: "session-1", Direction: domain.AICCMessageDirectionAssistant, ClientMessageID: null.StringFrom("client-1"), TextContent: null.StringFrom("您好")}}
+	store.messages = []sqlc.AiccMessage{{ID: "assistant-1", SessionID: "session-1", Direction: domain.AICCMessageDirectionAssistant, ClientMessageID: null.StringFrom("client-1"), ReplyToMessageID: null.StringFrom("message-1"), TextContent: null.StringFrom("您好")}}
 	service := NewAICCPublicService(store, nil)
 	service.now = func() time.Time { return aiccPublicTestNow }
 
@@ -256,6 +256,24 @@ func TestAICCPublicGetMessageStatusReturnsCompletedText(t *testing.T) {
 	assert.Equal(t, "message-1", result.MessageID)
 	assert.Equal(t, "completed", result.Status)
 	assert.Equal(t, "您好", result.Text)
+}
+
+// TestAICCPublicGetMessageStatusReturnsCompletedTextWithoutClientMessageID 覆盖未传幂等键的访客消息：
+// 任务完成后仍必须按消息关联取回对应助手回复，不能依赖 SQL 的 NULL 相等判断。
+func TestAICCPublicGetMessageStatusReturnsCompletedTextWithoutClientMessageID(t *testing.T) {
+	store := newAICCPublicMessageStore()
+	store.message = sqlc.AiccMessage{ID: "message-1", SessionID: "session-1", Direction: domain.AICCMessageDirectionVisitor}
+	store.createdTasks = []sqlc.CreateAICCMessageTaskParams{{ID: "task-1", MessageID: "message-1", SessionID: "session-1", AgentID: "agent-1", OrgID: "org-1", AppID: "app-1", RunAfter: aiccPublicTestNow}}
+	store.taskStatus = "completed"
+	store.messages = []sqlc.AiccMessage{{ID: "assistant-1", SessionID: "session-1", Direction: domain.AICCMessageDirectionAssistant, ReplyToMessageID: null.StringFrom("message-1"), TextContent: null.StringFrom("无需幂等键的回复")}}
+	service := NewAICCPublicService(store, nil)
+	service.now = func() time.Time { return aiccPublicTestNow }
+
+	result, err := service.GetMessageStatus(context.Background(), "tok", "message-1")
+
+	require.NoError(t, err)
+	assert.Equal(t, "completed", result.Status)
+	assert.Equal(t, "无需幂等键的回复", result.Text)
 }
 
 // TestAICCPublicSendMessageReturnsExistingTask 覆盖幂等重试：相同 client_message_id 必须复用原任务，不重复写访客消息或任务。
@@ -1396,7 +1414,20 @@ func (f *fakeAICCPublicStore) GetAICCMessageByID(_ context.Context, id string) (
 	return sqlc.AiccMessage{}, sql.ErrNoRows
 }
 
+func (f *fakeAICCPublicStore) GetAICCAssistantMessageByVisitorMessageID(_ context.Context, visitorMessageID null.String) (sqlc.AiccMessage, error) {
+	for _, message := range f.messages {
+		if message.Direction == domain.AICCMessageDirectionAssistant && message.ReplyToMessageID.Valid && message.ReplyToMessageID.String == visitorMessageID.String {
+			return message, nil
+		}
+	}
+	return sqlc.AiccMessage{}, sql.ErrNoRows
+}
+
 func (f *fakeAICCPublicStore) GetAICCMessageByClientMessageID(_ context.Context, arg sqlc.GetAICCMessageByClientMessageIDParams) (sqlc.AiccMessage, error) {
+	if !arg.ClientMessageID.Valid {
+		// MySQL 的 `column = NULL` 不会命中任何记录，fake 必须保持同样的语义。
+		return sqlc.AiccMessage{}, sql.ErrNoRows
+	}
 	for _, message := range f.messages {
 		if message.SessionID == arg.SessionID && message.Direction == arg.Direction && message.ClientMessageID == arg.ClientMessageID {
 			return message, nil

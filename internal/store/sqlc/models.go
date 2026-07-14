@@ -130,21 +130,22 @@ type AiccLeadValue struct {
 }
 
 type AiccMessage struct {
-	ID              string      `db:"id" json:"id"`
-	SessionID       string      `db:"session_id" json:"session_id"`
-	AgentID         string      `db:"agent_id" json:"agent_id"`
-	Direction       string      `db:"direction" json:"direction"`
-	ContentType     string      `db:"content_type" json:"content_type"`
-	TextContent     null.String `db:"text_content" json:"text_content"`
-	ImageObjectKey  null.String `db:"image_object_key" json:"image_object_key"`
-	ImageMime       null.String `db:"image_mime" json:"image_mime"`
-	ImageSizeBytes  null.Int    `db:"image_size_bytes" json:"image_size_bytes"`
-	HermesMessageID null.String `db:"hermes_message_id" json:"hermes_message_id"`
-	IsFallback      bool        `db:"is_fallback" json:"is_fallback"`
-	IsRefusal       bool        `db:"is_refusal" json:"is_refusal"`
-	ErrorSummary    null.String `db:"error_summary" json:"error_summary"`
-	CreatedAt       time.Time   `db:"created_at" json:"created_at"`
-	ClientMessageID null.String `db:"client_message_id" json:"client_message_id"`
+	ID               string      `db:"id" json:"id"`
+	SessionID        string      `db:"session_id" json:"session_id"`
+	AgentID          string      `db:"agent_id" json:"agent_id"`
+	Direction        string      `db:"direction" json:"direction"`
+	ContentType      string      `db:"content_type" json:"content_type"`
+	TextContent      null.String `db:"text_content" json:"text_content"`
+	ImageObjectKey   null.String `db:"image_object_key" json:"image_object_key"`
+	ImageMime        null.String `db:"image_mime" json:"image_mime"`
+	ImageSizeBytes   null.Int    `db:"image_size_bytes" json:"image_size_bytes"`
+	HermesMessageID  null.String `db:"hermes_message_id" json:"hermes_message_id"`
+	IsFallback       bool        `db:"is_fallback" json:"is_fallback"`
+	IsRefusal        bool        `db:"is_refusal" json:"is_refusal"`
+	ErrorSummary     null.String `db:"error_summary" json:"error_summary"`
+	CreatedAt        time.Time   `db:"created_at" json:"created_at"`
+	ClientMessageID  null.String `db:"client_message_id" json:"client_message_id"`
+	ReplyToMessageID null.String `db:"reply_to_message_id" json:"reply_to_message_id"`
 }
 
 type AiccMessageTask struct {

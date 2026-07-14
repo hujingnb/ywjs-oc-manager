@@ -128,6 +128,8 @@ type Querier interface {
 	GetAICCAgentByPublicToken(ctx context.Context, publicToken string) (AiccAgent, error)
 	GetAICCAgentByWidgetToken(ctx context.Context, widgetToken string) (AiccAgent, error)
 	GetAICCAgentSettings(ctx context.Context, agentID string) (AiccAgentSetting, error)
+	// dispatcher 写入 reply_to_message_id，使无 client_message_id 的公开消息也能准确定位助手回复。
+	GetAICCAssistantMessageByVisitorMessageID(ctx context.Context, replyToMessageID null.String) (AiccMessage, error)
 	GetAICCAssistantMessageForFeedback(ctx context.Context, arg GetAICCAssistantMessageForFeedbackParams) (AiccMessage, error)
 	GetAICCImageBySession(ctx context.Context, arg GetAICCImageBySessionParams) (AiccImage, error)
 	GetAICCLeadByContact(ctx context.Context, arg GetAICCLeadByContactParams) (AiccLead, error)

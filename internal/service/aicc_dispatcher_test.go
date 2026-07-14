@@ -266,6 +266,7 @@ func TestAICCDispatcherSuccessAtomicallyWritesAssistantAndCompletes(t *testing.T
 	require.NoError(t, d.Dispatch(context.Background(), s.task))
 	require.Len(t, s.assistant, 1)
 	assert.Equal(t, "答复", s.assistant[0].TextContent.String)
+	assert.Equal(t, "visitor", s.assistant[0].ReplyToMessageID.String)
 }
 
 // TestAICCDispatcherRetryableErrorsEnterRetryWait 覆盖上游限流、服务不可用、网关过载和超时：
