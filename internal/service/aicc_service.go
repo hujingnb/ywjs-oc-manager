@@ -1386,17 +1386,18 @@ func toAICCSessionListResult(row sqlc.ListAICCSessionsByAgentRow) AICCSessionRes
 
 func toAICCMessageResult(row sqlc.AiccMessage) AICCMessageResult {
 	return AICCMessageResult{
-		ID:             row.ID,
-		Direction:      row.Direction,
-		ContentType:    row.ContentType,
-		Text:           strOrEmpty(row.TextContent),
-		ImageObjectKey: strOrEmpty(row.ImageObjectKey),
-		ImageMime:      strOrEmpty(row.ImageMime),
-		ImageSizeBytes: row.ImageSizeBytes.Int64,
-		IsFallback:     row.IsFallback,
-		IsRefusal:      row.IsRefusal,
-		ErrorSummary:   strOrEmpty(row.ErrorSummary),
-		CreatedAt:      row.CreatedAt,
+		ID:              row.ID,
+		Direction:       row.Direction,
+		ContentType:     row.ContentType,
+		Text:            strOrEmpty(row.TextContent),
+		ImageObjectKey:  strOrEmpty(row.ImageObjectKey),
+		ImageMime:       strOrEmpty(row.ImageMime),
+		ImageSizeBytes:  row.ImageSizeBytes.Int64,
+		ClientMessageID: strOrEmpty(row.ClientMessageID),
+		IsFallback:      row.IsFallback,
+		IsRefusal:       row.IsRefusal,
+		ErrorSummary:    strOrEmpty(row.ErrorSummary),
+		CreatedAt:       row.CreatedAt,
 	}
 }
 

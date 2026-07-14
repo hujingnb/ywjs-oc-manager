@@ -16532,6 +16532,8 @@ export interface components {
             value?: string;
         };
         "service.AICCMessageResult": {
+            /** @description ClientMessageID 是访客消息幂等键；公开页刷新后用它安全重试失败任务。 */
+            client_message_id?: string;
             /** @description ContentType 描述文本、图片或混合消息。 */
             content_type?: string;
             /** @description CreatedAt 是消息创建时间。 */
@@ -16552,6 +16554,10 @@ export interface components {
             is_fallback?: boolean;
             /** @description IsRefusal 表示是否为拒答。 */
             is_refusal?: boolean;
+            /** @description RetryAfterSeconds 是 retry_wait 状态的建议轮询等待秒数。 */
+            retry_after_seconds?: number;
+            /** @description TaskStatus 是访客消息异步任务状态；仅公开会话恢复时补充。 */
+            task_status?: string;
             /** @description Text 是文本内容，可为空。 */
             text?: string;
         };

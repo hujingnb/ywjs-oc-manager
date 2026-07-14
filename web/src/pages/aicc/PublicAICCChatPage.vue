@@ -38,7 +38,7 @@
             <p v-if="message.text">{{ message.text }}</p>
             <img v-if="message.imageUrl" :src="message.imageUrl" :alt="t('aicc.publicChat.uploadedImageAlt')" />
             <p v-if="message.status" class="message-status">{{ messageStatusText(message.status) }}</p>
-            <n-button v-if="message.status === 'failed'" size="small" secondary @click="retryPendingMessage(message.clientMessageId)">
+            <n-button v-if="message.status === 'failed' && message.clientMessageId" size="small" secondary @click="retryPendingMessage(message.clientMessageId)">
               {{ t('aicc.publicChat.retry') }}
             </n-button>
           </div>
@@ -190,6 +190,11 @@ const fileInputEl = ref<HTMLInputElement | null>(null)
 const pendingPublicMessages = new Map<string, PendingPublicMessage>()
 const pollTimers = new Map<string, ReturnType<typeof setTimeout>>()
 let isPageActive = false
+
+// 公开轮询的最小、默认与最大等待时间；服务端异常值和网络错误都不能形成紧凑循环。
+const aiccPublicMinPollSeconds = 1
+const aiccPublicDefaultPollSeconds = 2
+const aiccPublicMaxPollSeconds = 30
 
 const privacyText = computed(() => config.value?.privacy_text || t('aicc.publicChat.defaultPrivacyText'))
 const needsConsent = computed(() => config.value?.privacy_mode === 'consent_required' && !hasConsent.value)
@@ -384,7 +389,8 @@ function setPendingMessageStatus(clientMessageId: string, status: AICCPublicMess
 // scheduleMessagePoll 根据服务端 retry_after_seconds 安排下次查询；未指定时采用两秒默认间隔。
 function scheduleMessagePoll(clientMessageId: string, retryAfterSeconds?: number) {
   stopMessagePolling(clientMessageId)
-  const waitMilliseconds = Math.max(0, retryAfterSeconds ?? 2) * 1_000
+  const seconds = retryAfterSeconds ?? aiccPublicDefaultPollSeconds
+  const waitMilliseconds = Math.min(aiccPublicMaxPollSeconds, Math.max(aiccPublicMinPollSeconds, seconds)) * 1_000
   const timer = setTimeout(() => {
     pollTimers.delete(clientMessageId)
     void pollPendingMessage(clientMessageId)
@@ -404,7 +410,7 @@ async function pollPendingMessage(clientMessageId: string) {
   } catch {
     if (!isPageActive || !pendingPublicMessages.has(clientMessageId)) return
     setPendingMessageStatus(clientMessageId, 'retry_wait')
-    scheduleMessagePoll(clientMessageId)
+    scheduleMessagePoll(clientMessageId, aiccPublicDefaultPollSeconds)
   }
 }
 
@@ -476,12 +482,46 @@ async function restoreSessionMessages(token: string) {
     leadComplete.value = true
     deferredLeadValues.value = null
   }
-  const restored = detail.messages.map(toChatMessage).filter((message): message is ChatMessage => Boolean(message))
+  const restored: ChatMessage[] = []
+  const pendingToPoll: Array<{ clientMessageId: string; retryAfterSeconds?: number }> = []
+  for (const message of detail.messages) {
+    const chatMessage = toChatMessage(message)
+    if (!chatMessage) continue
+    restored.push(chatMessage)
+    if (message.direction !== 'visitor' || !isPendingPublicMessageStatus(message.task_status)) continue
+    const clientMessageId = message.client_message_id || ''
+    const placeholderId = crypto.randomUUID()
+    const pending: PendingPublicMessage = {
+      clientMessageId,
+      placeholderId,
+      text: message.text || '',
+      messageId: message.id,
+      sessionToken: token,
+    }
+    // 旧会话没有 client_message_id 时仍展示状态，但不能新建幂等键重试。
+    if (clientMessageId) pendingPublicMessages.set(clientMessageId, pending)
+    restored.push({
+      id: placeholderId,
+      role: 'assistant',
+      status: message.task_status,
+      clientMessageId: clientMessageId || undefined,
+      sentAt: message.created_at,
+    })
+    if (clientMessageId && message.task_status !== 'failed') {
+      pendingToPoll.push({ clientMessageId, retryAfterSeconds: message.retry_after_seconds })
+    }
+  }
   if (restored.length > 0) {
     messages.value = restored
+    for (const pending of pendingToPoll) scheduleMessagePoll(pending.clientMessageId, pending.retryAfterSeconds)
     return
   }
   resetMessagesToGreeting()
+}
+
+// isPendingPublicMessageStatus 标识刷新后仍需展示助手占位的任务状态；完成任务已有持久化助手消息，无需重建。
+function isPendingPublicMessageStatus(status?: string): status is 'queued' | 'processing' | 'retry_wait' | 'failed' {
+  return status === 'queued' || status === 'processing' || status === 'retry_wait' || status === 'failed'
 }
 
 function toChatMessage(message: AICCMessage): ChatMessage | null {

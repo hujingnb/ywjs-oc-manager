@@ -229,6 +229,86 @@ describe('PublicAICCChatPage', () => {
     }
   })
 
+  // 场景：服务端错误返回 0 秒等待时，前端必须至少等待一秒，不能立刻递归发起下一次状态查询。
+  it('clamps a zero-second retry delay before polling again', async () => {
+    vi.useFakeTimers()
+    apiState.sendMessage.mockResolvedValue({ message_id: 'message-1', status: 'queued' })
+    apiState.fetchMessageStatus
+      .mockResolvedValueOnce({ message_id: 'message-1', status: 'retry_wait', retry_after_seconds: 0 })
+      .mockResolvedValueOnce({ message_id: 'message-1', status: 'completed', text: '延迟后的回复' })
+    try {
+      const wrapper = mountPublicChat()
+      await flushPromises()
+
+      await wrapper.find('textarea').setValue('等待下界')
+      await wrapper.find('form.composer').trigger('submit')
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(2_000)
+      await flushPromises()
+
+      expect(apiState.fetchMessageStatus).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(999)
+      expect(apiState.fetchMessageStatus).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1)
+      await flushPromises()
+      expect(wrapper.text()).toContain('延迟后的回复')
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // 场景：刷新恢复的排队访客消息必须重建助手占位并继续轮询，而不是再次发送访客原文。
+  it('restores and polls a queued message after the public chat page refreshes', async () => {
+    vi.useFakeTimers()
+    apiState.readStoredSession.mockReturnValue('stored-session-token')
+    apiState.fetchSession.mockResolvedValue({
+      resolution_status: 'unknown',
+      messages: [
+        { id: 'message-1', direction: 'visitor', text: '刷新中的问题', client_message_id: 'client-message-1', task_status: 'queued' },
+      ],
+    })
+    apiState.fetchMessageStatus.mockResolvedValue({ message_id: 'message-1', status: 'completed', text: '刷新后的回复' })
+    try {
+      const wrapper = mountPublicChat()
+      await flushPromises()
+
+      expect(wrapper.text()).toContain('刷新中的问题')
+      expect(wrapper.text()).toContain('消息已提交，正在排队处理。')
+      expect(apiState.sendMessage).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(2_000)
+      await flushPromises()
+
+      expect(apiState.fetchMessageStatus).toHaveBeenCalledWith('stored-session-token', 'message-1')
+      expect(wrapper.text()).toContain('刷新后的回复')
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // 场景：刷新恢复失败任务时，必须保留原 client_message_id 并重新展示访客可点击的重试操作。
+  it('restores a failed message with a retry action after the public chat page refreshes', async () => {
+    apiState.readStoredSession.mockReturnValue('stored-session-token')
+    apiState.fetchSession.mockResolvedValue({
+      resolution_status: 'unknown',
+      messages: [
+        { id: 'message-1', direction: 'visitor', text: '刷新后的失败问题', client_message_id: 'client-message-1', task_status: 'failed' },
+      ],
+    })
+    apiState.sendMessage.mockResolvedValue({ message_id: 'message-1', status: 'queued' })
+    const wrapper = mountPublicChat()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('回复失败，请重试。')
+    await wrapper.findAll('button').find(button => button.text().includes('重试'))?.trigger('click')
+    await flushPromises()
+
+    expect(apiState.sendMessage).toHaveBeenCalledWith('stored-session-token', expect.objectContaining({ client_message_id: 'client-message-1', text: '刷新后的失败问题' }))
+    expect(wrapper.findAll('.message-row.visitor')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   // 场景：页面卸载后必须取消未完成任务的定时轮询，不能由旧页面继续调用公开状态接口。
   it('stops polling queued messages after the chat page unmounts', async () => {
     vi.useFakeTimers()

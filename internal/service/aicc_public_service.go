@@ -395,7 +395,17 @@ func (s *AICCPublicService) GetSession(ctx context.Context, sessionToken string)
 		LeadStatus:       session.LeadStatus,
 	}
 	for _, row := range messages {
-		result.Messages = append(result.Messages, toAICCMessageResult(row))
+		message := toAICCMessageResult(row)
+		if row.Direction == domain.AICCMessageDirectionVisitor {
+			task, taskErr := s.aiccMessageTaskResult(ctx, row.ID)
+			if taskErr == nil {
+				message.TaskStatus = task.Status
+				message.RetryAfterSeconds = task.RetryAfterSeconds
+			} else if !errors.Is(taskErr, sql.ErrNoRows) {
+				return AICCPublicSessionDetailResult{}, fmt.Errorf("查询 AICC 公开消息任务状态失败: %w", taskErr)
+			}
+		}
+		result.Messages = append(result.Messages, message)
 	}
 	return result, nil
 }
@@ -435,19 +445,6 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 		return AICCPublicMessageResult{}, err
 	}
 	clientMessageID := strings.TrimSpace(input.ClientMessageID)
-	if clientMessageID != "" {
-		existing, err := s.store.GetAICCMessageByClientMessageID(ctx, sqlc.GetAICCMessageByClientMessageIDParams{SessionID: session.ID, Direction: domain.AICCMessageDirectionVisitor, ClientMessageID: nullStr(clientMessageID)})
-		if err == nil {
-			// 仅终态失败任务会被原子恢复；其他状态保持常规幂等语义，不重复排队。
-			if _, requeueErr := s.store.RequeueFailedAICCMessageTask(ctx, existing.ID); requeueErr != nil {
-				return AICCPublicMessageResult{}, fmt.Errorf("恢复失败的 AICC 消息任务失败: %w", requeueErr)
-			}
-			return s.aiccMessageTaskResult(ctx, existing.ID)
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 幂等消息失败: %w", err)
-		}
-	}
 	if agent.PrivacyMode == domain.AICCPrivacyModeConsentRequired && !session.PrivacyConsentedAt.Valid {
 		return AICCPublicMessageResult{}, ErrAICCConsentRequired
 	}
@@ -484,6 +481,19 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 	}
 	if text == "" && imageID == "" {
 		return AICCPublicMessageResult{}, fmt.Errorf("%w: 消息内容不能为空", ErrInvalidArgument)
+	}
+	if clientMessageID != "" {
+		existing, err := s.store.GetAICCMessageByClientMessageID(ctx, sqlc.GetAICCMessageByClientMessageIDParams{SessionID: session.ID, Direction: domain.AICCMessageDirectionVisitor, ClientMessageID: nullStr(clientMessageID)})
+		if err == nil {
+			// 已完成当前会话、风控与内容校验后，才允许终态失败任务恢复；其他状态继续保持幂等读取。
+			if _, requeueErr := s.store.RequeueFailedAICCMessageTask(ctx, existing.ID); requeueErr != nil {
+				return AICCPublicMessageResult{}, fmt.Errorf("恢复失败的 AICC 消息任务失败: %w", requeueErr)
+			}
+			return s.aiccMessageTaskResult(ctx, existing.ID)
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 幂等消息失败: %w", err)
+		}
 	}
 	contentType := domain.AICCMessageContentTypeText
 	if imageID != "" && text == "" {
@@ -613,6 +623,9 @@ func (s *AICCPublicService) aiccMessageTaskResult(ctx context.Context, messageID
 				delay = 0
 			}
 			seconds := int64((delay + time.Second - 1) / time.Second)
+			if seconds < 1 {
+				seconds = 1
+			}
 			result.RetryAfterSeconds = &seconds
 		}
 		if task.Status == "completed" {

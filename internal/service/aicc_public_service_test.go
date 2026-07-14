@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -73,6 +74,26 @@ func TestAICCPublicGetSessionReturnsMessages(t *testing.T) {
 	require.Len(t, result.Messages, 2)
 	assert.Equal(t, "报价多少", result.Messages[0].Text)
 	assert.Equal(t, "这是报价说明", result.Messages[1].Text)
+}
+
+// TestAICCPublicGetSessionIncludesPendingTaskState 覆盖刷新恢复排队任务：
+// 公开会话消息必须携带访客幂等键和任务状态，使浏览器重建占位并继续查询而非重复发送。
+func TestAICCPublicGetSessionIncludesPendingTaskState(t *testing.T) {
+	store := newAICCPublicMessageStore()
+	store.messages = []sqlc.AiccMessage{{ID: "message-1", SessionID: "session-1", AgentID: "agent-1", Direction: domain.AICCMessageDirectionVisitor, TextContent: null.StringFrom("刷新中的问题"), ClientMessageID: null.StringFrom("client-message-1")}}
+	store.createdTasks = []sqlc.CreateAICCMessageTaskParams{{ID: "task-1", MessageID: "message-1", SessionID: "session-1", AgentID: "agent-1", OrgID: "org-1", AppID: "app-1", RunAfter: aiccPublicTestNow}}
+	service := NewAICCPublicService(store, nil)
+	service.now = func() time.Time { return aiccPublicTestNow }
+
+	result, err := service.GetSession(context.Background(), "tok")
+
+	require.NoError(t, err)
+	payload, err := json.Marshal(result.Messages[0])
+	require.NoError(t, err)
+	var message map[string]any
+	require.NoError(t, json.Unmarshal(payload, &message))
+	assert.Equal(t, "client-message-1", message["client_message_id"])
+	assert.Equal(t, "queued", message["task_status"])
 }
 
 // TestAICCPublicGetSessionRejectsExpiredSession 覆盖公开会话详情授权边界：
@@ -276,6 +297,23 @@ func TestAICCPublicGetMessageStatusReturnsCompletedTextWithoutClientMessageID(t 
 	assert.Equal(t, "无需幂等键的回复", result.Text)
 }
 
+// TestAICCPublicGetMessageStatusClampsRetryWaitHint 覆盖已到期 retry_wait 任务：
+// 公开接口仍必须返回至少一秒的轮询建议，避免客户端因 0 秒延迟形成紧凑轮询。
+func TestAICCPublicGetMessageStatusClampsRetryWaitHint(t *testing.T) {
+	store := newAICCPublicMessageStore()
+	store.message = sqlc.AiccMessage{ID: "message-1", SessionID: "session-1", Direction: domain.AICCMessageDirectionVisitor}
+	store.createdTasks = []sqlc.CreateAICCMessageTaskParams{{ID: "task-1", MessageID: "message-1", SessionID: "session-1", AgentID: "agent-1", OrgID: "org-1", AppID: "app-1", RunAfter: aiccPublicTestNow.Add(-time.Second)}}
+	store.taskStatus = "retry_wait"
+	service := NewAICCPublicService(store, nil)
+	service.now = func() time.Time { return aiccPublicTestNow }
+
+	result, err := service.GetMessageStatus(context.Background(), "tok", "message-1")
+
+	require.NoError(t, err)
+	require.NotNil(t, result.RetryAfterSeconds)
+	assert.Equal(t, int64(1), *result.RetryAfterSeconds)
+}
+
 // TestAICCPublicSendMessageReturnsExistingTask 覆盖幂等重试：相同 client_message_id 必须复用原任务，不重复写访客消息或任务。
 func TestAICCPublicSendMessageReturnsExistingTask(t *testing.T) {
 	store := newAICCPublicMessageStore()
@@ -325,6 +363,40 @@ func TestAICCPublicSendMessageRequeuesFailedExistingTask(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "completed", completed.Status)
 	assert.Equal(t, "重试后的回复", completed.Text)
+}
+
+// TestAICCPublicSendMessageDoesNotRequeueFailedTaskWithoutConsent 覆盖策略变化边界：
+// 任务失败后若客服改为强制同意隐私说明，访客未重新同意时不得借重试绕过当前规则。
+func TestAICCPublicSendMessageDoesNotRequeueFailedTaskWithoutConsent(t *testing.T) {
+	store := newAICCPublicMessageStore()
+	store.agent.PrivacyMode = domain.AICCPrivacyModeConsentRequired
+	store.messages = []sqlc.AiccMessage{{ID: "message-1", SessionID: "session-1", Direction: domain.AICCMessageDirectionVisitor, ClientMessageID: null.StringFrom("retry-client"), TextContent: null.StringFrom("报价多少")}}
+	store.createdTasks = []sqlc.CreateAICCMessageTaskParams{{ID: "task-1", MessageID: "message-1", SessionID: "session-1", AgentID: "agent-1", OrgID: "org-1", AppID: "app-1", RunAfter: aiccPublicTestNow}}
+	store.taskStatus = "failed"
+	service := NewAICCPublicService(store, nil)
+	service.now = func() time.Time { return aiccPublicTestNow }
+
+	_, err := service.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", ClientMessageID: "retry-client", Text: "报价多少"})
+
+	require.ErrorIs(t, err, ErrAICCConsentRequired)
+	assert.Empty(t, store.requeuedMessageID)
+}
+
+// TestAICCPublicSendMessageDoesNotRequeueFailedTaskWithNewRequiredLead 覆盖动态留资规则：
+// 已失败消息重试时若管理员新增必填字段，缺失留资必须阻止任务恢复。
+func TestAICCPublicSendMessageDoesNotRequeueFailedTaskWithNewRequiredLead(t *testing.T) {
+	store := newAICCPublicMessageStore()
+	store.requiredLeadFields = []sqlc.AiccLeadField{{ID: "field-phone", Required: true, FieldKey: "phone", Label: "手机号"}}
+	store.messages = []sqlc.AiccMessage{{ID: "message-1", SessionID: "session-1", Direction: domain.AICCMessageDirectionVisitor, ClientMessageID: null.StringFrom("retry-client"), TextContent: null.StringFrom("报价多少")}}
+	store.createdTasks = []sqlc.CreateAICCMessageTaskParams{{ID: "task-1", MessageID: "message-1", SessionID: "session-1", AgentID: "agent-1", OrgID: "org-1", AppID: "app-1", RunAfter: aiccPublicTestNow}}
+	store.taskStatus = "failed"
+	service := NewAICCPublicService(store, nil)
+	service.now = func() time.Time { return aiccPublicTestNow }
+
+	_, err := service.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", ClientMessageID: "retry-client", Text: "报价多少"})
+
+	require.ErrorIs(t, err, ErrAICCLeadRequired)
+	assert.Empty(t, store.requeuedMessageID)
 }
 
 // TestAICCPublicSendMessageConcurrentClientMessageIDReusesLockedTask 覆盖并发幂等边界：

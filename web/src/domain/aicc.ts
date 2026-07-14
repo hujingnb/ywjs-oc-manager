@@ -312,6 +312,12 @@ export interface AICCMessage {
   image_mime?: string
   // 图片大小。
   image_size_bytes?: number
+  // 访客提交消息时携带的幂等键；失败任务重试必须复用该键。
+  client_message_id?: string
+  // 访客消息对应异步任务的当前状态，仅公开会话恢复接口提供。
+  task_status?: 'queued' | 'processing' | 'retry_wait' | 'completed' | 'failed' | string
+  // retry_wait 状态建议的下次轮询等待秒数。
+  retry_after_seconds?: number
   // 是否为兜底回答。
   is_fallback?: boolean
   // 是否为拒答。

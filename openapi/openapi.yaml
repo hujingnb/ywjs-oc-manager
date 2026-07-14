@@ -1744,6 +1744,9 @@ components:
       type: object
     service.AICCMessageResult:
       properties:
+        client_message_id:
+          description: ClientMessageID 是访客消息幂等键；公开页刷新后用它安全重试失败任务。
+          type: string
         content_type:
           description: ContentType 描述文本、图片或混合消息。
           type: string
@@ -1774,6 +1777,12 @@ components:
         is_refusal:
           description: IsRefusal 表示是否为拒答。
           type: boolean
+        retry_after_seconds:
+          description: RetryAfterSeconds 是 retry_wait 状态的建议轮询等待秒数。
+          type: integer
+        task_status:
+          description: TaskStatus 是访客消息异步任务状态；仅公开会话恢复时补充。
+          type: string
         text:
           description: Text 是文本内容，可为空。
           type: string

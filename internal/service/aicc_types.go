@@ -136,6 +136,12 @@ type AICCMessageResult struct {
 	ImageMime string `json:"image_mime,omitempty"`
 	// ImageSizeBytes 是图片大小。
 	ImageSizeBytes int64 `json:"image_size_bytes,omitempty"`
+	// ClientMessageID 是访客消息幂等键；公开页刷新后用它安全重试失败任务。
+	ClientMessageID string `json:"client_message_id,omitempty"`
+	// TaskStatus 是访客消息异步任务状态；仅公开会话恢复时补充。
+	TaskStatus string `json:"task_status,omitempty"`
+	// RetryAfterSeconds 是 retry_wait 状态的建议轮询等待秒数。
+	RetryAfterSeconds *int64 `json:"retry_after_seconds,omitempty"`
 	// IsFallback 表示是否为兜底回答。
 	IsFallback bool `json:"is_fallback"`
 	// IsRefusal 表示是否为拒答。
