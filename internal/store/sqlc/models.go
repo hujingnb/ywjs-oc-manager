@@ -207,8 +207,8 @@ type App struct {
 	WebPublishApplied bool `db:"web_publish_applied" json:"web_publish_applied"`
 	// 最近一次 bootstrap 写入 input 的平台层 prompt 文本 sha256（hex）：与当前常量 hash 比对判定是否需重启生效；空=存量/未 bootstrap，视为需重启
 	AppliedPlatformPromptHash string `db:"applied_platform_prompt_hash" json:"applied_platform_prompt_hash"`
-	// 是否为 AICC 自动创建的隐藏 app
-	AiccHidden     bool        `db:"aicc_hidden" json:"aicc_hidden"`
+	// 应用类型：standard=普通应用，aicc=AICC 应用
+	AppType        string      `db:"app_type" json:"app_type"`
 	OwnerActiveKey null.String `db:"owner_active_key" json:"owner_active_key"`
 }
 

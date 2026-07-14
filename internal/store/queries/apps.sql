@@ -13,7 +13,7 @@ INSERT INTO apps (
     version_id,
     locale,
     knowledge_quota_bytes,
-    aicc_hidden
+    app_type
 ) VALUES (
     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 );
@@ -26,29 +26,29 @@ WHERE id = ?;
 -- name: GetActiveAppByOwner :one
 SELECT *
 FROM apps
-WHERE owner_user_id = ? AND deleted_at IS NULL AND aicc_hidden = FALSE;
+WHERE owner_user_id = ? AND deleted_at IS NULL AND app_type = 'standard';
 
 -- name: ListAppsByOrg :many
 SELECT *
 FROM apps
-WHERE org_id = ? AND deleted_at IS NULL AND aicc_hidden = FALSE
+WHERE org_id = ? AND deleted_at IS NULL AND app_type = 'standard'
 ORDER BY created_at DESC, id DESC
 LIMIT ? OFFSET ?;
 
--- name: MarkAppAICCHidden :exec
--- AICC 隐藏 app 不出现在普通实例列表中；创建时已写入 true，此查询用于幂等补标记。
+-- name: MarkAppAICCType :exec
+-- AICC app 不出现在普通实例列表中；创建时已写入 aicc，此查询用于幂等补标记。
 UPDATE apps
-SET aicc_hidden = TRUE,
+SET app_type = 'aicc',
     updated_at = now()
 WHERE id = ? AND deleted_at IS NULL;
 
 -- name: ListStaleAICCRuntimeApps :many
--- 逐个找出已应用镜像与当前客服专用镜像不一致的隐藏 app。
+-- 逐个找出已应用镜像与当前客服专用镜像不一致的 AICC app。
 -- 初始化阶段中的 app 由既有 worker 接管，不能重复入队；每轮 limit=1，避免客服镜像升级时
 -- 同时重建全部接待运行时。applied_image_ref 为 NULL 或空值表示历史客服尚未记录专用镜像，也需要升级。
 SELECT id
 FROM apps
-WHERE aicc_hidden = TRUE
+WHERE app_type = 'aicc'
   AND deleted_at IS NULL
   AND (applied_image_ref IS NULL OR applied_image_ref <> sqlc.arg(target_image_ref))
   AND status NOT IN ('pulling_runtime_image', 'preparing_runtime', 'creating_container', 'starting')
@@ -260,13 +260,13 @@ WHERE apps.id = ?;
 SELECT sqlc.embed(apps), av.revision AS version_revision, av.image_id AS version_image_id
 FROM apps
 JOIN assistant_versions av ON av.id = apps.version_id
-WHERE apps.org_id = ? AND apps.deleted_at IS NULL AND apps.aicc_hidden = FALSE
+WHERE apps.org_id = ? AND apps.deleted_at IS NULL AND apps.app_type = 'standard'
 ORDER BY apps.created_at DESC, apps.id DESC
 LIMIT ? OFFSET ?;
 
 -- name: CountActiveAppsByOrg :one
--- 统计企业当前未删除普通实例数；AICC 隐藏 app 使用独立 aicc_agent_limit，不占用普通实例上限。
-SELECT COUNT(*) FROM apps WHERE org_id = ? AND deleted_at IS NULL AND aicc_hidden = FALSE;
+-- 统计企业当前未删除普通实例数；AICC app 使用独立 aicc_agent_limit，不占用普通实例上限。
+SELECT COUNT(*) FROM apps WHERE org_id = ? AND deleted_at IS NULL AND app_type = 'standard';
 
 -- name: UpdateAppLocale :exec
 -- 更新实例语言偏好（hermes 对终端用户说话的语言）。locale 由 service 层校验合法取值后传入。

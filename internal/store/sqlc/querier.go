@@ -38,7 +38,7 @@ type Querier interface {
 	CountAICCUnreadLeads(ctx context.Context, orgID string) (int64, error)
 	CountAICCVisitorMessagesBySession(ctx context.Context, sessionID string) (int64, error)
 	CountActiveAICCBlockedVisitorsByAgent(ctx context.Context, agentID string) (int64, error)
-	// 统计企业当前未删除普通实例数；AICC 隐藏 app 使用独立 aicc_agent_limit，不占用普通实例上限。
+	// 统计企业当前未删除普通实例数；AICC app 使用独立 aicc_agent_limit，不占用普通实例上限。
 	CountActiveAppsByOrg(ctx context.Context, orgID string) (int64, error)
 	// 平台总览组织计数：剔除 soft-deleted；status='active' 与 'disabled' 都算入册组织。
 	CountActiveOrganizations(ctx context.Context) (int64, error)
@@ -287,7 +287,7 @@ type Querier interface {
 	ListSitesByOrg(ctx context.Context, orgID string) ([]ListSitesByOrgRow, error)
 	ListSkillTicketMessages(ctx context.Context, ticketID string) ([]SkillTicketMessage, error)
 	ListSkillTicketsByRequester(ctx context.Context, requesterUserID string) ([]SkillTicket, error)
-	// 逐个找出已应用镜像与当前客服专用镜像不一致的隐藏 app。
+	// 逐个找出已应用镜像与当前客服专用镜像不一致的 AICC app。
 	// 初始化阶段中的 app 由既有 worker 接管，不能重复入队；每轮 limit=1，避免客服镜像升级时
 	// 同时重建全部接待运行时。applied_image_ref 为 NULL 或空值表示历史客服尚未记录专用镜像，也需要升级。
 	ListStaleAICCRuntimeApps(ctx context.Context, arg ListStaleAICCRuntimeAppsParams) ([]string, error)
@@ -312,8 +312,8 @@ type Querier interface {
 	LockJobForUpdate(ctx context.Context, id string) (Job, error)
 	MarkAICCLeadRead(ctx context.Context, arg MarkAICCLeadReadParams) (int64, error)
 	MarkAICCSessionConsented(ctx context.Context, sessionToken string) (int64, error)
-	// AICC 隐藏 app 不出现在普通实例列表中；创建时已写入 true，此查询用于幂等补标记。
-	MarkAppAICCHidden(ctx context.Context, id string) error
+	// AICC app 不出现在普通实例列表中；创建时已写入 aicc，此查询用于幂等补标记。
+	MarkAppAICCType(ctx context.Context, id string) error
 	// 任意状态 → error 时同时写入来源状态与错误文本，保留"在哪一步失败"与"为什么失败"语义。
 	// last_error_status 不加 CHECK 约束，值由调用方在 Go 层负责合法性。
 	MarkAppFailed(ctx context.Context, arg MarkAppFailedParams) error

@@ -27,10 +27,10 @@ func (q *Queries) ClearAppProgress(ctx context.Context, id string) error {
 }
 
 const countActiveAppsByOrg = `-- name: CountActiveAppsByOrg :one
-SELECT COUNT(*) FROM apps WHERE org_id = ? AND deleted_at IS NULL AND aicc_hidden = FALSE
+SELECT COUNT(*) FROM apps WHERE org_id = ? AND deleted_at IS NULL AND app_type = 'standard'
 `
 
-// 统计企业当前未删除普通实例数；AICC 隐藏 app 使用独立 aicc_agent_limit，不占用普通实例上限。
+// 统计企业当前未删除普通实例数；AICC app 使用独立 aicc_agent_limit，不占用普通实例上限。
 func (q *Queries) CountActiveAppsByOrg(ctx context.Context, orgID string) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countActiveAppsByOrg, orgID)
 	var count int64
@@ -50,7 +50,7 @@ INSERT INTO apps (
     version_id,
     locale,
     knowledge_quota_bytes,
-    aicc_hidden
+    app_type
 ) VALUES (
     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 )
@@ -67,7 +67,7 @@ type CreateAppParams struct {
 	VersionID           null.String `db:"version_id" json:"version_id"`
 	Locale              null.String `db:"locale" json:"locale"`
 	KnowledgeQuotaBytes int64       `db:"knowledge_quota_bytes" json:"knowledge_quota_bytes"`
-	AiccHidden          bool        `db:"aicc_hidden" json:"aicc_hidden"`
+	AppType             string      `db:"app_type" json:"app_type"`
 }
 
 // k8s 模型下 app 对应 Deployment，pod 落点由调度器决定，不再写 runtime_node_id。
@@ -85,15 +85,15 @@ func (q *Queries) CreateApp(ctx context.Context, arg CreateAppParams) error {
 		arg.VersionID,
 		arg.Locale,
 		arg.KnowledgeQuotaBytes,
-		arg.AiccHidden,
+		arg.AppType,
 	)
 	return err
 }
 
 const getActiveAppByOwner = `-- name: GetActiveAppByOwner :one
-SELECT id, org_id, owner_user_id, name, description, status, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, runtime_token_active_key, knowledge_quota_bytes, locale, runtime_phase, web_publish_applied, applied_platform_prompt_hash, aicc_hidden, owner_active_key
+SELECT id, org_id, owner_user_id, name, description, status, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, runtime_token_active_key, knowledge_quota_bytes, locale, runtime_phase, web_publish_applied, applied_platform_prompt_hash, app_type, owner_active_key
 FROM apps
-WHERE owner_user_id = ? AND deleted_at IS NULL AND aicc_hidden = FALSE
+WHERE owner_user_id = ? AND deleted_at IS NULL AND app_type = 'standard'
 `
 
 func (q *Queries) GetActiveAppByOwner(ctx context.Context, ownerUserID string) (App, error) {
@@ -134,14 +134,14 @@ func (q *Queries) GetActiveAppByOwner(ctx context.Context, ownerUserID string) (
 		&i.RuntimePhase,
 		&i.WebPublishApplied,
 		&i.AppliedPlatformPromptHash,
-		&i.AiccHidden,
+		&i.AppType,
 		&i.OwnerActiveKey,
 	)
 	return i, err
 }
 
 const getApp = `-- name: GetApp :one
-SELECT id, org_id, owner_user_id, name, description, status, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, runtime_token_active_key, knowledge_quota_bytes, locale, runtime_phase, web_publish_applied, applied_platform_prompt_hash, aicc_hidden, owner_active_key
+SELECT id, org_id, owner_user_id, name, description, status, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, runtime_token_active_key, knowledge_quota_bytes, locale, runtime_phase, web_publish_applied, applied_platform_prompt_hash, app_type, owner_active_key
 FROM apps
 WHERE id = ?
 `
@@ -184,14 +184,14 @@ func (q *Queries) GetApp(ctx context.Context, id string) (App, error) {
 		&i.RuntimePhase,
 		&i.WebPublishApplied,
 		&i.AppliedPlatformPromptHash,
-		&i.AiccHidden,
+		&i.AppType,
 		&i.OwnerActiveKey,
 	)
 	return i, err
 }
 
 const getAppByRuntimeTokenHash = `-- name: GetAppByRuntimeTokenHash :one
-SELECT id, org_id, owner_user_id, name, description, status, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, runtime_token_active_key, knowledge_quota_bytes, locale, runtime_phase, web_publish_applied, applied_platform_prompt_hash, aicc_hidden, owner_active_key
+SELECT id, org_id, owner_user_id, name, description, status, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, runtime_token_active_key, knowledge_quota_bytes, locale, runtime_phase, web_publish_applied, applied_platform_prompt_hash, app_type, owner_active_key
 FROM apps
 WHERE runtime_token_hash = ? AND deleted_at IS NULL
 `
@@ -236,14 +236,14 @@ func (q *Queries) GetAppByRuntimeTokenHash(ctx context.Context, runtimeTokenHash
 		&i.RuntimePhase,
 		&i.WebPublishApplied,
 		&i.AppliedPlatformPromptHash,
-		&i.AiccHidden,
+		&i.AppType,
 		&i.OwnerActiveKey,
 	)
 	return i, err
 }
 
 const getAppWithVersion = `-- name: GetAppWithVersion :one
-SELECT apps.id, apps.org_id, apps.owner_user_id, apps.name, apps.description, apps.status, apps.newapi_key_id, apps.newapi_key_ciphertext, apps.api_key_status, apps.runtime_snapshot_json, apps.runtime_snapshot_at, apps.restart_policy_json, apps.health_state_json, apps.progress_current, apps.progress_total, apps.last_error_status, apps.last_error_message, apps.runtime_image_ref, apps.runtime_image_sha256, apps.newapi_key_name, apps.version_id, apps.applied_version_revision, apps.applied_image_ref, apps.runtime_token_hash, apps.runtime_token_ciphertext, apps.created_at, apps.updated_at, apps.deleted_at, apps.runtime_token_active_key, apps.knowledge_quota_bytes, apps.locale, apps.runtime_phase, apps.web_publish_applied, apps.applied_platform_prompt_hash, apps.aicc_hidden, apps.owner_active_key, av.revision AS version_revision, av.image_id AS version_image_id
+SELECT apps.id, apps.org_id, apps.owner_user_id, apps.name, apps.description, apps.status, apps.newapi_key_id, apps.newapi_key_ciphertext, apps.api_key_status, apps.runtime_snapshot_json, apps.runtime_snapshot_at, apps.restart_policy_json, apps.health_state_json, apps.progress_current, apps.progress_total, apps.last_error_status, apps.last_error_message, apps.runtime_image_ref, apps.runtime_image_sha256, apps.newapi_key_name, apps.version_id, apps.applied_version_revision, apps.applied_image_ref, apps.runtime_token_hash, apps.runtime_token_ciphertext, apps.created_at, apps.updated_at, apps.deleted_at, apps.runtime_token_active_key, apps.knowledge_quota_bytes, apps.locale, apps.runtime_phase, apps.web_publish_applied, apps.applied_platform_prompt_hash, apps.app_type, apps.owner_active_key, av.revision AS version_revision, av.image_id AS version_image_id
 FROM apps
 JOIN assistant_versions av ON av.id = apps.version_id
 WHERE apps.id = ?
@@ -294,7 +294,7 @@ func (q *Queries) GetAppWithVersion(ctx context.Context, id string) (GetAppWithV
 		&i.App.RuntimePhase,
 		&i.App.WebPublishApplied,
 		&i.App.AppliedPlatformPromptHash,
-		&i.App.AiccHidden,
+		&i.App.AppType,
 		&i.App.OwnerActiveKey,
 		&i.VersionRevision,
 		&i.VersionImageID,
@@ -303,9 +303,9 @@ func (q *Queries) GetAppWithVersion(ctx context.Context, id string) (GetAppWithV
 }
 
 const listAppsByOrg = `-- name: ListAppsByOrg :many
-SELECT id, org_id, owner_user_id, name, description, status, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, runtime_token_active_key, knowledge_quota_bytes, locale, runtime_phase, web_publish_applied, applied_platform_prompt_hash, aicc_hidden, owner_active_key
+SELECT id, org_id, owner_user_id, name, description, status, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, runtime_token_active_key, knowledge_quota_bytes, locale, runtime_phase, web_publish_applied, applied_platform_prompt_hash, app_type, owner_active_key
 FROM apps
-WHERE org_id = ? AND deleted_at IS NULL AND aicc_hidden = FALSE
+WHERE org_id = ? AND deleted_at IS NULL AND app_type = 'standard'
 ORDER BY created_at DESC, id DESC
 LIMIT ? OFFSET ?
 `
@@ -360,7 +360,7 @@ func (q *Queries) ListAppsByOrg(ctx context.Context, arg ListAppsByOrgParams) ([
 			&i.RuntimePhase,
 			&i.WebPublishApplied,
 			&i.AppliedPlatformPromptHash,
-			&i.AiccHidden,
+			&i.AppType,
 			&i.OwnerActiveKey,
 		); err != nil {
 			return nil, err
@@ -377,10 +377,10 @@ func (q *Queries) ListAppsByOrg(ctx context.Context, arg ListAppsByOrgParams) ([
 }
 
 const listAppsByOrgWithVersion = `-- name: ListAppsByOrgWithVersion :many
-SELECT apps.id, apps.org_id, apps.owner_user_id, apps.name, apps.description, apps.status, apps.newapi_key_id, apps.newapi_key_ciphertext, apps.api_key_status, apps.runtime_snapshot_json, apps.runtime_snapshot_at, apps.restart_policy_json, apps.health_state_json, apps.progress_current, apps.progress_total, apps.last_error_status, apps.last_error_message, apps.runtime_image_ref, apps.runtime_image_sha256, apps.newapi_key_name, apps.version_id, apps.applied_version_revision, apps.applied_image_ref, apps.runtime_token_hash, apps.runtime_token_ciphertext, apps.created_at, apps.updated_at, apps.deleted_at, apps.runtime_token_active_key, apps.knowledge_quota_bytes, apps.locale, apps.runtime_phase, apps.web_publish_applied, apps.applied_platform_prompt_hash, apps.aicc_hidden, apps.owner_active_key, av.revision AS version_revision, av.image_id AS version_image_id
+SELECT apps.id, apps.org_id, apps.owner_user_id, apps.name, apps.description, apps.status, apps.newapi_key_id, apps.newapi_key_ciphertext, apps.api_key_status, apps.runtime_snapshot_json, apps.runtime_snapshot_at, apps.restart_policy_json, apps.health_state_json, apps.progress_current, apps.progress_total, apps.last_error_status, apps.last_error_message, apps.runtime_image_ref, apps.runtime_image_sha256, apps.newapi_key_name, apps.version_id, apps.applied_version_revision, apps.applied_image_ref, apps.runtime_token_hash, apps.runtime_token_ciphertext, apps.created_at, apps.updated_at, apps.deleted_at, apps.runtime_token_active_key, apps.knowledge_quota_bytes, apps.locale, apps.runtime_phase, apps.web_publish_applied, apps.applied_platform_prompt_hash, apps.app_type, apps.owner_active_key, av.revision AS version_revision, av.image_id AS version_image_id
 FROM apps
 JOIN assistant_versions av ON av.id = apps.version_id
-WHERE apps.org_id = ? AND apps.deleted_at IS NULL AND apps.aicc_hidden = FALSE
+WHERE apps.org_id = ? AND apps.deleted_at IS NULL AND apps.app_type = 'standard'
 ORDER BY apps.created_at DESC, apps.id DESC
 LIMIT ? OFFSET ?
 `
@@ -442,7 +442,7 @@ func (q *Queries) ListAppsByOrgWithVersion(ctx context.Context, arg ListAppsByOr
 			&i.App.RuntimePhase,
 			&i.App.WebPublishApplied,
 			&i.App.AppliedPlatformPromptHash,
-			&i.App.AiccHidden,
+			&i.App.AppType,
 			&i.App.OwnerActiveKey,
 			&i.VersionRevision,
 			&i.VersionImageID,
@@ -567,7 +567,7 @@ func (q *Queries) ListRunningApps(ctx context.Context) ([]string, error) {
 const listStaleAICCRuntimeApps = `-- name: ListStaleAICCRuntimeApps :many
 SELECT id
 FROM apps
-WHERE aicc_hidden = TRUE
+WHERE app_type = 'aicc'
   AND deleted_at IS NULL
   AND (applied_image_ref IS NULL OR applied_image_ref <> ?)
   AND status NOT IN ('pulling_runtime_image', 'preparing_runtime', 'creating_container', 'starting')
@@ -580,7 +580,7 @@ type ListStaleAICCRuntimeAppsParams struct {
 	Limit          int32  `db:"limit" json:"limit"`
 }
 
-// 逐个找出已应用镜像与当前客服专用镜像不一致的隐藏 app。
+// 逐个找出已应用镜像与当前客服专用镜像不一致的 AICC app。
 // 初始化阶段中的 app 由既有 worker 接管，不能重复入队；每轮 limit=1，避免客服镜像升级时
 // 同时重建全部接待运行时。applied_image_ref 为 NULL 或空值表示历史客服尚未记录专用镜像，也需要升级。
 func (q *Queries) ListStaleAICCRuntimeApps(ctx context.Context, arg ListStaleAICCRuntimeAppsParams) ([]string, error) {
@@ -649,16 +649,16 @@ func (q *Queries) ListStaleInits(ctx context.Context, dateSUB interface{}) ([]Li
 	return items, nil
 }
 
-const markAppAICCHidden = `-- name: MarkAppAICCHidden :exec
+const markAppAICCType = `-- name: MarkAppAICCType :exec
 UPDATE apps
-SET aicc_hidden = TRUE,
+SET app_type = 'aicc',
     updated_at = now()
 WHERE id = ? AND deleted_at IS NULL
 `
 
-// AICC 隐藏 app 不出现在普通实例列表中；创建时已写入 true，此查询用于幂等补标记。
-func (q *Queries) MarkAppAICCHidden(ctx context.Context, id string) error {
-	_, err := q.db.ExecContext(ctx, markAppAICCHidden, id)
+// AICC app 不出现在普通实例列表中；创建时已写入 aicc，此查询用于幂等补标记。
+func (q *Queries) MarkAppAICCType(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, markAppAICCType, id)
 	return err
 }
 

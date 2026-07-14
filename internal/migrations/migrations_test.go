@@ -251,6 +251,28 @@ func TestAICCMigrationGuardrails(t *testing.T) {
 	assert.Greater(t, dropDocumentIndex, dropKnowledgeIndex)
 }
 
+// TestAppsAppTypeMigrationGuardrails 验证应用类型迁移会保留 AICC 标记语义，
+// 并将普通应用的 owner 唯一约束限定在未删除的 standard 应用。
+func TestAppsAppTypeMigrationGuardrails(t *testing.T) {
+	upBytes, err := FS.ReadFile("000033_apps_app_type.up.sql")
+	require.NoError(t, err)
+	up := string(upBytes)
+
+	// 新列默认 standard，存量 aicc_hidden=true 必须明确回填为 aicc，不能丢失客服应用身份。
+	assert.Contains(t, up, "ADD COLUMN app_type VARCHAR(32) NOT NULL DEFAULT 'standard'")
+	assert.Contains(t, up, "UPDATE apps SET app_type = CASE WHEN aicc_hidden THEN 'aicc' ELSE 'standard' END")
+	assert.Contains(t, up, "CONSTRAINT apps_app_type_check CHECK (app_type IN ('standard', 'aicc'))")
+	// MySQL 生成列模拟部分唯一索引，仅未删除的普通应用占用 owner 唯一名额。
+	assert.Contains(t, up, "CASE WHEN deleted_at IS NULL AND app_type = 'standard' THEN owner_user_id END")
+	assert.Contains(t, up, "DROP COLUMN aicc_hidden")
+
+	downBytes, err := FS.ReadFile("000033_apps_app_type.down.sql")
+	require.NoError(t, err)
+	down := string(downBytes)
+	// 回滚必须恢复旧标记列，供退回旧代码版本后继续识别 AICC 应用。
+	assert.Contains(t, down, "ADD COLUMN aicc_hidden BOOLEAN NOT NULL DEFAULT FALSE")
+}
+
 // TestAICCSettingsMigrationContainsOperationalTables 覆盖 AICC 运营配置表：
 // 新增表必须按 agent 维度保存安全与续接策略，并用访客哈希记录封禁，避免保存明文 IP。
 func TestAICCSettingsMigrationContainsOperationalTables(t *testing.T) {
