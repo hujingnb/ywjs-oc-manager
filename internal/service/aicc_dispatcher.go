@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
@@ -66,7 +65,7 @@ func NewAICCDispatcher(store AICCDispatcherStore, tx AICCDispatcherTxRunner, cha
 
 // Dispatch 领取 taskID 的租约并执行；未领取到租约表示已被其他 worker 接管，不视为错误。
 func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask) error {
-	if d == nil || d.store == nil || d.chat == nil {
+	if d == nil || d.store == nil || d.chat == nil || d.tx == nil {
 		return errors.New("aicc dispatcher unavailable")
 	}
 	if !d.allow(d.now()) {
@@ -75,6 +74,7 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 	token := newUUID()
 	claimed, err := d.store.LeaseAICCMessageTask(ctx, sqlc.LeaseAICCMessageTaskParams{ID: task.ID, LeaseToken: null.StringFrom(token), LeaseExpiresAt: null.TimeFrom(d.now().Add(aiccTaskLeaseDuration))})
 	if err != nil || claimed == 0 {
+		d.releaseHalfOpenProbe()
 		return err
 	}
 	if d.limiter != nil {
@@ -110,10 +110,7 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 		}
 		return nil
 	}
-	if d.tx != nil {
-		return d.tx.WithAICCDispatcherTx(ctx, write)
-	}
-	return write(d.store)
+	return d.tx.WithAICCDispatcherTx(ctx, write)
 }
 
 // RecoverExpiredLeases 由扫库 worker 定期调用，使宕机 worker 的任务重新可领取。
@@ -124,7 +121,9 @@ func (d *AICCDispatcher) RecoverExpiredLeases(ctx context.Context) (int64, error
 func (d *AICCDispatcher) finishError(ctx context.Context, task sqlc.AiccMessageTask, token string, err error) error {
 	if isAICCRetryable(err) {
 		d.recordOverload(d.now())
-		_, updateErr := d.store.RetryAICCMessageTask(ctx, sqlc.RetryAICCMessageTaskParams{ID: task.ID, LeaseToken: null.StringFrom(token), RunAfter: d.now().Add(aiccRetryDelayWithJitter(task.Attempts, task.ID)), LastError: null.StringFrom(aiccErrorSummary(err))})
+		// Lease SQL 会先将 attempts 加一；重试退避必须使用本轮实际失败后的计数。
+		attempts := task.Attempts + 1
+		_, updateErr := d.store.RetryAICCMessageTask(ctx, sqlc.RetryAICCMessageTaskParams{ID: task.ID, LeaseToken: null.StringFrom(token), RunAfter: d.now().Add(aiccRetryDelayWithJitter(attempts, task.ID)), LastError: null.StringFrom(aiccErrorSummary(err))})
 		if updateErr != nil {
 			return updateErr
 		}
@@ -205,4 +204,11 @@ func (d *AICCDispatcher) recordSuccess() {
 	d.halfOpen = false
 }
 
-var _ = strings.TrimSpace
+// releaseHalfOpenProbe 在半开探测任务未能领取租约时释放探测权，避免空任务永久阻塞后续工作。
+func (d *AICCDispatcher) releaseHalfOpenProbe() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.circuitUntil.IsZero() {
+		d.halfOpen = false
+	}
+}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"net"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -43,6 +44,32 @@ func TestAICCPublicHermesChatReturnsTypedOverloadError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Empty(t, reply)
+	assert.True(t, isAICCRetryable(err))
+}
+
+// TestAICCPublicHermesChatPreservesHTTPOverloadStatus 覆盖 oc-ops HTTP 错误映射：
+// 真实 429/503/529 必须保留为 dispatcher 可识别的重试错误，不能退化成通用 CLI 错误。
+func TestAICCPublicHermesChatPreservesHTTPOverloadStatus(t *testing.T) {
+	ops := &fakeConversationOps{chatErr: &ocops.HTTPStatusError{StatusCode: 503, Err: ocops.ErrCLI}}
+	loc := OcOpsAppLocation{Supported: true, Endpoint: ocops.Endpoint{BaseURL: "http://runtime"}}
+	svc := NewAICCPublicHermesChat(ops, &fakeOcOpsResolver{loc: loc})
+
+	_, err := svc.ChatAICC(context.Background(), "app-1", "aicc-session-1", "你好")
+
+	require.Error(t, err)
+	assert.True(t, isAICCRetryable(err))
+}
+
+// TestAICCPublicHermesChatPreservesNetworkTimeout 覆盖运行时网络超时：
+// 底层 net.Error 必须穿透会话映射，以便 dispatcher 将短暂网络故障安排重试。
+func TestAICCPublicHermesChatPreservesNetworkTimeout(t *testing.T) {
+	ops := &fakeConversationOps{chatErr: &net.DNSError{IsTimeout: true}}
+	loc := OcOpsAppLocation{Supported: true, Endpoint: ocops.Endpoint{BaseURL: "http://runtime"}}
+	svc := NewAICCPublicHermesChat(ops, &fakeOcOpsResolver{loc: loc})
+
+	_, err := svc.ChatAICC(context.Background(), "app-1", "aicc-session-1", "你好")
+
+	require.Error(t, err)
 	assert.True(t, isAICCRetryable(err))
 }
 

@@ -23,6 +23,9 @@ type aiccDispatcherStoreFake struct {
 	assistant []sqlc.CreateAICCMessageParams
 	complete  int64
 	recover   int64
+	leaseRows int64
+	leaseErr  error
+	unclaimed bool
 }
 
 func (s *aiccDispatcherStoreFake) GetAICCMessageByID(context.Context, string) (sqlc.AiccMessage, error) {
@@ -33,7 +36,10 @@ func (s *aiccDispatcherStoreFake) GetAICCAgent(context.Context, string) (sqlc.Ai
 }
 func (s *aiccDispatcherStoreFake) LeaseAICCMessageTask(_ context.Context, p sqlc.LeaseAICCMessageTaskParams) (int64, error) {
 	s.leased = p
-	return 1, nil
+	if !s.unclaimed && s.leaseRows == 0 && s.leaseErr == nil {
+		return 1, nil
+	}
+	return s.leaseRows, s.leaseErr
 }
 func (s *aiccDispatcherStoreFake) CompleteAICCMessageTask(context.Context, sqlc.CompleteAICCMessageTaskParams) (int64, error) {
 	return s.complete, nil
@@ -70,7 +76,7 @@ func (t aiccDispatcherTxFake) WithAICCDispatcherTx(ctx context.Context, fn func(
 }
 
 func newAICCDispatcherStoreFake() *aiccDispatcherStoreFake {
-	return &aiccDispatcherStoreFake{task: sqlc.AiccMessageTask{ID: "task", MessageID: "visitor", SessionID: "session", AgentID: "agent", OrgID: "org", AppID: "app", Attempts: 1, MaxAttempts: 5}, visitor: sqlc.AiccMessage{ID: "visitor", TextContent: null.StringFrom("价格")}, agent: sqlc.AiccAgent{ID: "agent"}, complete: 1}
+	return &aiccDispatcherStoreFake{task: sqlc.AiccMessageTask{ID: "task", MessageID: "visitor", SessionID: "session", AgentID: "agent", OrgID: "org", AppID: "app", Attempts: 0, MaxAttempts: 5}, visitor: sqlc.AiccMessage{ID: "visitor", TextContent: null.StringFrom("价格")}, agent: sqlc.AiccAgent{ID: "agent"}, complete: 1}
 }
 
 // TestAICCDispatcherLeaseUsesThirtySecondWindow 覆盖 dispatcher 领取任务时的租约边界：
@@ -117,7 +123,7 @@ func TestAICCDispatcherDeterministicErrorFails(t *testing.T) {
 // dispatcher 仍调用原子 Retry 查询，由 SQL 根据 attempts/max_attempts 终态化，不能在 service 层绕过该约束。
 func TestAICCDispatcherFifthRetryKeepsQueryTerminalSemantics(t *testing.T) {
 	s := newAICCDispatcherStoreFake()
-	s.task.Attempts = 5
+	s.task.Attempts = 4
 	d := NewAICCDispatcher(s, aiccDispatcherTxFake{s}, aiccDispatcherChatFake{err: &AICCUpstreamStatusError{StatusCode: 503}}, nil)
 
 	require.NoError(t, d.Dispatch(context.Background(), s.task))
@@ -125,6 +131,35 @@ func TestAICCDispatcherFifthRetryKeepsQueryTerminalSemantics(t *testing.T) {
 	delay := s.retry.RunAfter.Sub(time.Now())
 	assert.GreaterOrEqual(t, delay, 40*time.Second)
 	assert.Less(t, delay, 41*time.Second)
+}
+
+// TestAICCDispatcherRequiresTransactionRunner 覆盖成功写入的事务边界：
+// 未提供事务 runner 时 dispatcher 必须在领取任务前失败，不能产生半提交的助手消息。
+func TestAICCDispatcherRequiresTransactionRunner(t *testing.T) {
+	s := newAICCDispatcherStoreFake()
+	d := NewAICCDispatcher(s, nil, aiccDispatcherChatFake{reply: "答复"}, nil)
+
+	require.Error(t, d.Dispatch(context.Background(), s.task))
+	assert.Empty(t, s.leased.ID)
+	assert.Empty(t, s.assistant)
+}
+
+// TestAICCDispatcherReleasesHalfOpenProbeWhenTaskNotClaimed 覆盖半开探测无可领取任务：
+// 租约竞争失败后必须释放探测权，后续到期任务才能继续尝试领取。
+func TestAICCDispatcherReleasesHalfOpenProbeWhenTaskNotClaimed(t *testing.T) {
+	s := newAICCDispatcherStoreFake()
+	s.unclaimed = true
+	d := NewAICCDispatcher(s, aiccDispatcherTxFake{s}, aiccDispatcherChatFake{reply: "答复"}, nil)
+	now := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
+	current := now
+	d.now = func() time.Time { return current }
+	for range 5 {
+		d.recordOverload(now)
+	}
+
+	current = now.Add(30 * time.Second)
+	require.NoError(t, d.Dispatch(context.Background(), s.task))
+	assert.True(t, d.allow(current))
 }
 
 // TestAICCDispatcherCircuitHalfOpenSuccessRecovers 覆盖连续五次过载后的熔断和半开恢复：

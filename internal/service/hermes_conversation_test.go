@@ -16,6 +16,7 @@ import (
 type fakeConversationOps struct {
 	sessions    []ocops.ConversationSession
 	chatOut     ocops.ConversationChatResult
+	chatErr     error
 	gotSID      string
 	listSource  string
 	lastReq     ocops.ConversationChatReq // 记录最后一次 SessionChat/SessionChatStream 的请求，供富化断言
@@ -42,7 +43,7 @@ func (f *fakeConversationOps) DeleteSession(_ context.Context, _ ocops.Endpoint,
 func (f *fakeConversationOps) SessionChat(_ context.Context, _ ocops.Endpoint, sid string, req ocops.ConversationChatReq) (ocops.ConversationChatResult, error) {
 	f.gotSID = sid
 	f.lastReq = req
-	return f.chatOut, nil
+	return f.chatOut, f.chatErr
 }
 func (f *fakeConversationOps) SessionChatStream(_ context.Context, _ ocops.Endpoint, sid string, req ocops.ConversationChatReq) (<-chan ocops.ConversationStreamEvent, error) {
 	f.gotSID = sid

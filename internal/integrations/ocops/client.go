@@ -78,8 +78,8 @@ func (c *Client) DoJSON(ctx context.Context, ep Endpoint, method, path string, r
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		// 网络级错误归入 ErrCLI（与 502 语义一致：上游不可达）
-		return fmt.Errorf("%w: %v", ErrCLI, err)
+		// 同时保留底层网络/超时错误，AICC dispatcher 需要据此决定是否可重试。
+		return fmt.Errorf("%w: %w", ErrCLI, err)
 	}
 	defer resp.Body.Close()
 
@@ -91,7 +91,7 @@ func (c *Client) DoJSON(ctx context.Context, ep Endpoint, method, path string, r
 			Message string `json:"message"`
 		}
 		_ = json.NewDecoder(resp.Body).Decode(&e)
-		return fmt.Errorf("%w: %s", sentinel, e.Message)
+		return &HTTPStatusError{StatusCode: resp.StatusCode, Err: fmt.Errorf("%w: %s", sentinel, e.Message)}
 	}
 
 	// 2xx：按需解码响应体

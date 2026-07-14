@@ -7,6 +7,16 @@ package ocops
 
 import "errors"
 
+// HTTPStatusError 保留非 2xx 响应的真实 HTTP 状态，同时允许上层继续 errors.Is 匹配既有哨兵错误。
+// 调度型调用依赖该状态区分限流/过载与确定性失败，不能只留下 ErrCLI。
+type HTTPStatusError struct {
+	StatusCode int
+	Err        error
+}
+
+func (e *HTTPStatusError) Error() string { return e.Err.Error() }
+func (e *HTTPStatusError) Unwrap() error { return e.Err }
+
 // 哨兵错误：与 oc-ops HTTP 状态码 / 契约错误码一一对应，供 service 映射成自身哨兵错误。
 var (
 	// ErrBadRequest 对应 HTTP 400，请求参数非法。
