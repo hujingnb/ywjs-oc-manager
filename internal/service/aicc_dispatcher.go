@@ -59,6 +59,7 @@ type AICCDispatcher struct {
 	tx      AICCDispatcherTxRunner
 	chat    AICCHermesChat
 	limiter AICCConcurrencyLimiter
+	circuit AICCUpstreamCircuit
 	// observer 只接收固定的安全观测字段，避免 dispatcher 将访客原文写出服务边界。
 	observer     AICCDispatchObserver
 	now          func() time.Time
@@ -80,12 +81,25 @@ func (d *AICCDispatcher) SetObserver(observer AICCDispatchObserver) {
 	}
 }
 
+// SetUpstreamCircuit 注入 Redis 共享熔断器；生产环境以 upstream 为隔离边界，避免副本各自失忆。
+func (d *AICCDispatcher) SetUpstreamCircuit(circuit AICCUpstreamCircuit) {
+	if d != nil {
+		d.circuit = circuit
+	}
+}
+
 // Dispatch 领取 taskID 的租约并执行；未领取到租约表示已被其他 worker 接管，不视为错误。
 func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask) error {
 	if d == nil || d.store == nil || d.chat == nil || d.tx == nil {
 		return errors.New("aicc dispatcher unavailable")
 	}
-	if !d.allow(d.now()) {
+	if d.circuit != nil {
+		allowed, err := d.circuit.Allow(ctx, "hermes")
+		if err != nil || !allowed {
+			d.observe(ctx, task, "circuit_open", "circuit_open")
+			return err
+		}
+	} else if !d.allow(d.now()) {
 		d.observe(ctx, task, "circuit_open", "circuit_open")
 		return nil
 	}
@@ -143,7 +157,11 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 		d.reopenHalfOpenProbe(d.now())
 		return txErr
 	}
-	d.recordSuccess()
+	if d.circuit != nil {
+		_ = d.circuit.Record(ctx, "hermes", false)
+	} else {
+		d.recordSuccess()
+	}
 	d.observe(ctx, task, "completed", "completed")
 	return nil
 }
@@ -169,7 +187,11 @@ func (d *AICCDispatcher) finishError(ctx context.Context, task sqlc.AiccMessageT
 		if rows != 1 {
 			return ErrAICCLeaseLost
 		}
-		d.recordOverload(d.now())
+		if d.circuit != nil {
+			_ = d.circuit.Record(ctx, "hermes", true)
+		} else {
+			d.recordOverload(d.now())
+		}
 		if attempts >= task.MaxAttempts {
 			// SQL 会将耗尽重试配额的任务原子转为 failed，观测结果必须与持久化终态一致。
 			d.observe(ctx, task, "failed", aiccResultLabel(err, "failed"))
