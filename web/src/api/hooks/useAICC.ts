@@ -50,6 +50,8 @@ export function useAICCAgentsQuery(orgId?: Ref<string | undefined>, enabled?: ()
   return useQuery<AICCAgent[]>({
     queryKey: computed(() => aiccAgentsKey(orgId?.value)),
     enabled,
+    // 隐藏运行时初始化期间短轮询；达到稳定展示状态后立即停止，避免工作台空转请求。
+    refetchInterval: query => query.state.data?.some(agent => agent.runtime_status === 'starting') ? 1500 : false,
     queryFn: async () => {
       const query = orgId?.value ? { org_id: orgId.value, limit: 200 } : { limit: 200 }
       const response = await apiRequest<{ agents: AICCAgent[] }>('/api/v1/aicc/agents', { query })
