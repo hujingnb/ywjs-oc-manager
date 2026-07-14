@@ -22,14 +22,16 @@ type Orchestrator interface {
 	WaitReady(ctx context.Context, appID string, timeout time.Duration, onPoll func(AppStatus)) error
 	// Scale 伸缩 replicas（0=停，1=起）。
 	Scale(ctx context.Context, appID string, replicas int32) error
-	// UpdateImage patch Deployment 主容器（hermes/oc-ops 同镜像）镜像，触发 Recreate 重启。
+	// UpdateImage patch Deployment 主容器（hermes/oc-ops 同镜像）镜像；普通应用按 Recreate
+	// 重建，AICC 按 RollingUpdate 滚动更新。
 	UpdateImage(ctx context.Context, appID, hermesImage string) error
 	// Delete 删除 Deployment + Service + Secret（幂等，NotFound 视为成功）。
 	Delete(ctx context.Context, appID string) error
 	// Status 读 app 的 pod 状态。
 	Status(ctx context.Context, appID string) (AppStatus, error)
 	// RolloutRestart 触发 Deployment 滚动重启（patch pod template 注解），
-	// 不改镜像/副本数，按 Recreate 策略重建 pod。渠道绑定后重载 hermes platform 用。
+	// 不改镜像/副本数；普通应用按 Recreate 重建，AICC 按 RollingUpdate 滚动更新。
+	// 渠道绑定后重载 hermes platform 用。
 	RolloutRestart(ctx context.Context, appID string) error
 }
 

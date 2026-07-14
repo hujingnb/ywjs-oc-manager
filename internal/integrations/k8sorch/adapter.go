@@ -151,8 +151,9 @@ func (a *KubernetesAdapter) UpdateImage(ctx context.Context, appID, hermesImage 
 	return wrapK8s("更新镜像", uerr)
 }
 
-// RolloutRestart 给 Deployment 的 pod template 注解写入当前时间戳，触发 Deployment 按
-// Recreate 策略重建 pod（等价 kubectl rollout restart）。用于渠道绑定后重载 hermes platform。
+// RolloutRestart 给 Deployment 的 pod template 注解写入当前时间戳，触发 Deployment 按其
+// 当前策略更新 pod（普通应用为 Recreate，AICC 为 RollingUpdate，等价 kubectl rollout restart）。
+// 用于渠道绑定后重载 hermes platform。
 // 使用 retry.RetryOnConflict 处理 Get→Update 之间控制器并发修改导致的乐观锁冲突（409 Conflict），
 // 每次重试重新 Get 最新版本再写入注解，避免 EnsureApp 后立即调用时 resourceVersion 不一致。
 func (a *KubernetesAdapter) RolloutRestart(ctx context.Context, appID string) error {
