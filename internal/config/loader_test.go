@@ -444,6 +444,34 @@ func TestAICCGovernanceRejectsNegativeCapacity(t *testing.T) {
 	assert.Contains(t, err.Error(), "aicc.governance.global_queue_capacity")
 }
 
+// TestAICCGovernanceRejectsInvalidThresholds 验证所有治理阈值都会在启动期拒绝无效值，避免某层保护静默失效。
+func TestAICCGovernanceRejectsInvalidThresholds(t *testing.T) {
+	cases := []struct {
+		name string // 场景名称。
+		body string // 覆盖的治理配置。
+		want string // 预期错误定位文本。
+	}{
+		{name: "上游并发为负数", body: "upstream_concurrency: -1", want: "upstream_concurrency"}, // 场景：全局上游额度非法。
+		{name: "组织并发为负数", body: "org_concurrency: -1", want: "org_concurrency"},           // 场景：组织隔离额度非法。
+		{name: "智能体并发为负数", body: "agent_concurrency: -1", want: "agent_concurrency"},      // 场景：智能体额度非法。
+		{name: "会话并发为负数", body: "session_concurrency: -1", want: "session_concurrency"},   // 场景：会话顺序额度非法。
+		{name: "连续失败阈值为负数", body: "circuit_consecutive_overloads: -1", want: "熔断阈值"},      // 场景：连续失败阈值非法。
+		{name: "熔断窗口为负数", body: "circuit_window: \"-1s\"", want: "熔断阈值"},                  // 场景：滑动窗口非法。
+		{name: "冷却时间为负数", body: "circuit_cooldown: \"-1s\"", want: "熔断阈值"},                // 场景：半开冷却期非法。
+		{name: "失败率超过百分百", body: "circuit_overload_percent: 101", want: "熔断阈值"},           // 场景：失败率上界非法。
+		{name: "失败率小于一", body: "circuit_overload_percent: -1", want: "熔断阈值"},              // 场景：失败率下界非法。
+	}
+	for _, tc := range cases {
+		// 子测试：单独确认某个治理参数无效时返回可定位的启动错误。
+		t.Run(tc.name, func(t *testing.T) {
+			yaml := strings.Replace(fullValidYAML(), "  runtime_image: \"registry.example.com/app/oc-manager-aigowork-aicc:v1.0.0-test\"", "  runtime_image: \"registry.example.com/app/oc-manager-aigowork-aicc:v1.0.0-test\"\n  governance:\n    "+tc.body, 1)
+			_, err := loadConfigFromStringErr(t, yaml)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
 // TestStorageS3ValidationRequiresFields 验证启用 S3 但字段不全时加载报错（fail-fast）。
 func TestStorageS3ValidationRequiresFields(t *testing.T) {
 	// 启用 S3 却缺 endpoint/bucket/access_key_id/secret_access_key 等，Validate 必须 fail-fast。
