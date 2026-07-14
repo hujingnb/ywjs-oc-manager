@@ -420,7 +420,7 @@ export async function consentAICCPublicSession(sessionToken: string): Promise<vo
   })
 }
 
-// sendAICCPublicMessage 发送文字、图片或混合消息，并返回助手回复。
+// sendAICCPublicMessage 异步受理文字、图片或混合消息；调用方应继续按 message_id 查询完成状态。
 export async function sendAICCPublicMessage(
   sessionToken: string,
   payload: { client_message_id: string; text?: string; image_file_id?: string },
@@ -429,6 +429,14 @@ export async function sendAICCPublicMessage(
     method: 'POST',
     withAuth: false,
     body: payload,
+  })
+  return response.message
+}
+
+// fetchAICCPublicMessageStatus 查询公开消息异步任务状态；公开接口不携带登录态，session token 同时限制消息归属。
+export async function fetchAICCPublicMessageStatus(sessionToken: string, messageId: string): Promise<AICCPublicMessageResult> {
+  const response = await apiRequest<{ message: AICCPublicMessageResult }>(`/api/v1/public/aicc/sessions/${sessionToken}/messages/${messageId}`, {
+    withAuth: false,
   })
   return response.message
 }

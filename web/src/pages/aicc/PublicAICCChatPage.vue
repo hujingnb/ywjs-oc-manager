@@ -37,11 +37,12 @@
           <div class="bubble">
             <p v-if="message.text">{{ message.text }}</p>
             <img v-if="message.imageUrl" :src="message.imageUrl" :alt="t('aicc.publicChat.uploadedImageAlt')" />
+            <p v-if="message.status" class="message-status">{{ messageStatusText(message.status) }}</p>
+            <n-button v-if="message.status === 'failed'" size="small" secondary @click="retryPendingMessage(message.clientMessageId)">
+              {{ t('aicc.publicChat.retry') }}
+            </n-button>
           </div>
           <time v-if="formatMessageTime(message.sentAt)" class="message-time">{{ formatMessageTime(message.sentAt) }}</time>
-        </article>
-        <article v-if="isSending" class="message-row assistant">
-          <div class="bubble typing">{{ t('aicc.publicChat.typing') }}</div>
         </article>
       </section>
 
@@ -122,6 +123,7 @@ import {
   createAICCPublicSession,
   clearAICCPublicStoredSessionToken,
   fetchAICCPublicConfig,
+  fetchAICCPublicMessageStatus,
   fetchAICCPublicSession,
   readAICCPublicStoredSessionToken,
   sendAICCPublicMessage,
@@ -130,7 +132,7 @@ import {
   uploadAICCPublicImage,
 } from '@/api/hooks/useAICC'
 import type { ApiError } from '@/api/client'
-import type { AICCLeadField, AICCMessage, AICCPublicConfig } from '@/domain/aicc'
+import type { AICCLeadField, AICCMessage, AICCPublicConfig, AICCPublicMessageResult } from '@/domain/aicc'
 import { normalizeAICCPublicChannel } from '@/domain/aicc'
 
 // PublicAICCChatPage 是访客公开客服页，不依赖后台登录态。
@@ -142,11 +144,26 @@ interface ChatMessage {
   imageUrl?: string
   // sentAt 是用于公开聊天页展示的发送时间；服务端历史消息沿用 created_at，即时消息在浏览器创建。
   sentAt?: string
+  // status 仅用于当前浏览器内存中的异步助手占位，历史完成消息不携带该字段。
+  status?: AICCPublicMessageResult['status']
+  // clientMessageId 用于失败占位的手动重试，始终复用首次提交的幂等键。
+  clientMessageId?: string
 }
 
 interface PendingImage {
   file: File
   previewUrl: string
+}
+
+// PendingPublicMessage 保存异步任务重试所需的原始请求数据，避免失败重试重新创建访客气泡或幂等键。
+interface PendingPublicMessage {
+  clientMessageId: string
+  placeholderId: string
+  text: string
+  image?: PendingImage
+  imageFileId?: string
+  messageId?: string
+  sessionToken?: string
 }
 
 const route = useRoute()
@@ -170,6 +187,9 @@ const pendingImage = ref<PendingImage | null>(null)
 const resolutionStatus = ref<'resolved' | 'unresolved' | 'unknown' | string>('unknown')
 const messageListEl = ref<HTMLElement | null>(null)
 const fileInputEl = ref<HTMLInputElement | null>(null)
+const pendingPublicMessages = new Map<string, PendingPublicMessage>()
+const pollTimers = new Map<string, ReturnType<typeof setTimeout>>()
+let isPageActive = false
 
 const privacyText = computed(() => config.value?.privacy_text || t('aicc.publicChat.defaultPrivacyText'))
 const needsConsent = computed(() => config.value?.privacy_mode === 'consent_required' && !hasConsent.value)
@@ -188,10 +208,13 @@ const showPrivacyNotice = computed(() => Boolean(privacyText.value) && !hasVisit
 const aiccPublicImageTypes = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
 
 onMounted(() => {
+  isPageActive = true
   void boot()
 })
 
 onBeforeUnmount(() => {
+  isPageActive = false
+  clearAllMessagePolls()
   clearPendingImage()
 })
 
@@ -258,6 +281,9 @@ async function submitMessage() {
   if (!canSubmit.value) return
   const text = draft.value.trim()
   const image = pendingImage.value
+  const clientMessageId = crypto.randomUUID()
+  const placeholderId = crypto.randomUUID()
+  const sentAt = new Date().toISOString()
   draft.value = ''
   pendingImage.value = null
   errorMessage.value = ''
@@ -267,30 +293,132 @@ async function submitMessage() {
     role: 'visitor',
     text,
     imageUrl: image?.previewUrl,
-    sentAt: new Date().toISOString(),
+    sentAt,
   })
+  messages.value.push({
+    id: placeholderId,
+    role: 'assistant',
+    status: 'queued',
+    clientMessageId,
+    sentAt,
+  })
+  pendingPublicMessages.set(clientMessageId, { clientMessageId, placeholderId, text, image: image ?? undefined })
   await scrollToBottom()
   try {
-    const token = await ensureSessionReadyForSend()
-    const imageResult = image ? await uploadAICCPublicImage(token, image.file) : null
-    const response = await sendAICCPublicMessage(token, {
-	      client_message_id: crypto.randomUUID(),
-      text: text || undefined,
-      image_file_id: imageResult?.image_file_id,
-    })
-    messages.value.push({
-      id: crypto.randomUUID(),
-      role: 'assistant',
-      text: response.text || t('aicc.publicChat.defaultAssistantReply'),
-      sentAt: new Date().toISOString(),
-    })
+    await sendPendingMessage(clientMessageId)
   } catch (err) {
     errorMessage.value = publicMessageErrorText(err)
-    if (image) pendingImage.value = image
+    setPendingMessageStatus(clientMessageId, 'failed')
   } finally {
     isSending.value = false
     await scrollToBottom()
   }
+}
+
+// sendPendingMessage 首次提交和访客手动重试共用同一条路径，确保 client_message_id 在整个任务生命周期内保持稳定。
+async function sendPendingMessage(clientMessageId: string) {
+  const pending = pendingPublicMessages.get(clientMessageId)
+  if (!pending) return
+  const token = pending.sessionToken || await ensureSessionReadyForSend()
+  pending.sessionToken = token
+  if (!pending.imageFileId && pending.image) {
+    const imageResult = await uploadAICCPublicImage(token, pending.image.file)
+    pending.imageFileId = imageResult.image_file_id
+  }
+  const response = await sendAICCPublicMessage(token, {
+    client_message_id: pending.clientMessageId,
+    text: pending.text || undefined,
+    image_file_id: pending.imageFileId,
+  })
+  pending.messageId = response.message_id
+  applyPublicMessageStatus(pending, response)
+}
+
+// retryPendingMessage 为 failed 状态提供显式恢复入口；复用待处理记录而不是重新插入访客消息。
+async function retryPendingMessage(clientMessageId?: string) {
+  if (!clientMessageId || isSending.value) return
+  errorMessage.value = ''
+  isSending.value = true
+  setPendingMessageStatus(clientMessageId, 'queued')
+  try {
+    await sendPendingMessage(clientMessageId)
+  } catch (err) {
+    errorMessage.value = publicMessageErrorText(err)
+    setPendingMessageStatus(clientMessageId, 'failed')
+  } finally {
+    isSending.value = false
+    await scrollToBottom()
+  }
+}
+
+// applyPublicMessageStatus 将后端任务状态映射为唯一的助手占位气泡，并在完成后停止本消息的轮询。
+function applyPublicMessageStatus(pending: PendingPublicMessage, result: AICCPublicMessageResult) {
+  // 新建会话或页面卸载已清除该记录时，忽略仍在飞行中的旧请求响应。
+  if (!pendingPublicMessages.has(pending.clientMessageId)) return
+  const status = result.status || 'queued'
+  if (status === 'completed') {
+    const message = messages.value.find(item => item.id === pending.placeholderId)
+    if (message) {
+      message.status = undefined
+      message.text = result.text || ''
+    }
+    stopMessagePolling(pending.clientMessageId)
+    pendingPublicMessages.delete(pending.clientMessageId)
+    return
+  }
+  setPendingMessageStatus(pending.clientMessageId, status)
+  if (status === 'failed') {
+    stopMessagePolling(pending.clientMessageId)
+    return
+  }
+  scheduleMessagePoll(pending.clientMessageId, result.retry_after_seconds)
+}
+
+// setPendingMessageStatus 只更新关联占位，不影响同一会话内其他正在处理的消息。
+function setPendingMessageStatus(clientMessageId: string, status: AICCPublicMessageResult['status']) {
+  const pending = pendingPublicMessages.get(clientMessageId)
+  const message = pending && messages.value.find(item => item.id === pending.placeholderId)
+  if (message) message.status = status
+}
+
+// scheduleMessagePoll 根据服务端 retry_after_seconds 安排下次查询；未指定时采用两秒默认间隔。
+function scheduleMessagePoll(clientMessageId: string, retryAfterSeconds?: number) {
+  stopMessagePolling(clientMessageId)
+  const waitMilliseconds = Math.max(0, retryAfterSeconds ?? 2) * 1_000
+  const timer = setTimeout(() => {
+    pollTimers.delete(clientMessageId)
+    void pollPendingMessage(clientMessageId)
+  }, waitMilliseconds)
+  pollTimers.set(clientMessageId, timer)
+}
+
+// pollPendingMessage 在页面仍存活且任务仍未结束时查询状态，网络瞬时错误保持排队并按默认间隔继续查询。
+async function pollPendingMessage(clientMessageId: string) {
+  const pending = pendingPublicMessages.get(clientMessageId)
+  if (!isPageActive || !pending?.messageId || !pending.sessionToken) return
+  try {
+    const result = await fetchAICCPublicMessageStatus(pending.sessionToken, pending.messageId)
+    if (!isPageActive || !pendingPublicMessages.has(clientMessageId)) return
+    applyPublicMessageStatus(pending, result)
+    await scrollToBottom()
+  } catch {
+    if (!isPageActive || !pendingPublicMessages.has(clientMessageId)) return
+    setPendingMessageStatus(clientMessageId, 'retry_wait')
+    scheduleMessagePoll(clientMessageId)
+  }
+}
+
+// stopMessagePolling 清除指定任务的定时器，避免重试或完成后形成重复轮询。
+function stopMessagePolling(clientMessageId: string) {
+  const timer = pollTimers.get(clientMessageId)
+  if (timer) clearTimeout(timer)
+  pollTimers.delete(clientMessageId)
+}
+
+// clearAllMessagePolls 在卸载或新建对话时统一释放定时器，防止旧会话回写新页面状态。
+function clearAllMessagePolls() {
+  for (const clientMessageId of pollTimers.keys()) stopMessagePolling(clientMessageId)
+  pendingPublicMessages.clear()
 }
 
 async function ensureSessionReadyForSend(): Promise<string> {
@@ -316,6 +444,7 @@ async function ensureSessionReadyForSend(): Promise<string> {
 }
 
 function startNewConversation() {
+  clearAllMessagePolls()
   clearAICCPublicStoredSessionToken(publicToken.value, publicChannel.value)
   sessionToken.value = ''
   draft.value = ''
@@ -363,6 +492,14 @@ function toChatMessage(message: AICCMessage): ChatMessage | null {
     text: message.text,
     sentAt: message.created_at,
   }
+}
+
+// messageStatusText 将运行时状态转换成访客可理解的提示，避免把内部任务枚举直接展示到公开页。
+function messageStatusText(status: AICCPublicMessageResult['status']): string {
+  if (status === 'processing') return t('aicc.publicChat.busy')
+  if (status === 'retry_wait') return t('aicc.publicChat.retrying')
+  if (status === 'failed') return t('aicc.publicChat.failed')
+  return t('aicc.publicChat.queued')
 }
 
 // formatMessageTime 将服务端 ISO 时间或浏览器即时记录按访客本地时区收敛为 HH:mm；无效值不展示，避免暴露 Invalid Date。

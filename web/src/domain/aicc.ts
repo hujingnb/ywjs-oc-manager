@@ -200,12 +200,16 @@ export interface AICCPublicSessionDetail {
   lead_status?: 'pending' | 'complete' | 'skipped' | string
 }
 
-// AICCPublicMessageResult 是公开消息接口返回的助手回复。
+// AICCPublicMessageResult 是公开消息异步任务的当前状态；完成后才携带助手回复。
 export interface AICCPublicMessageResult {
-  // 消息 ID，用于后续反馈绑定。
-  message_id?: string
-  // 助手回复文本。
+  // 访客消息 ID，也是后续查询异步任务状态的关联键。
+  message_id: string
+  // 异步任务状态；completed 时可读取 text，failed 时允许客户端用原幂等键重试。
+  status: 'queued' | 'processing' | 'retry_wait' | 'completed' | 'failed' | string
+  // 助手完成回复文本。
   text?: string
+  // retry_wait 状态建议的下一次查询等待秒数。
+  retry_after_seconds?: number
 }
 
 // AICCPublicImageResult 是公开图片上传后返回的文件引用。

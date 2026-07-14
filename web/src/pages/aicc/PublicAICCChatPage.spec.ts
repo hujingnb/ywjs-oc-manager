@@ -14,6 +14,7 @@ const apiState = vi.hoisted(() => ({
   fetchConfig: vi.fn(),
   createSession: vi.fn(),
   sendMessage: vi.fn(),
+  fetchMessageStatus: vi.fn(),
   fetchSession: vi.fn(),
   consent: vi.fn(),
   submitLeadValues: vi.fn(),
@@ -35,6 +36,7 @@ vi.mock('@/api/hooks/useAICC', () => ({
   readAICCPublicStoredSessionToken: apiState.readStoredSession,
   clearAICCPublicStoredSessionToken: apiState.clearStoredSession,
   sendAICCPublicMessage: apiState.sendMessage,
+  fetchAICCPublicMessageStatus: apiState.fetchMessageStatus,
   consentAICCPublicSession: apiState.consent,
   submitAICCPublicLeadValues: apiState.submitLeadValues,
   submitAICCPublicFeedback: apiState.submitFeedback,
@@ -106,6 +108,7 @@ describe('PublicAICCChatPage', () => {
     apiState.fetchConfig.mockReset()
     apiState.createSession.mockReset()
     apiState.sendMessage.mockReset()
+    apiState.fetchMessageStatus.mockReset()
     apiState.fetchSession.mockReset()
     apiState.consent.mockReset()
     apiState.submitLeadValues.mockReset()
@@ -125,7 +128,8 @@ describe('PublicAICCChatPage', () => {
     })
     apiState.createSession.mockResolvedValue({ session_token: 'session-token' })
     apiState.fetchSession.mockResolvedValue({ messages: [], resolution_status: 'unknown' })
-    apiState.sendMessage.mockResolvedValue({ message_id: 'message-1', text: '收到' })
+    apiState.sendMessage.mockResolvedValue({ message_id: 'message-1', status: 'completed', text: '收到' })
+    apiState.fetchMessageStatus.mockResolvedValue({ message_id: 'message-1', status: 'completed', text: '收到' })
     apiState.updateResolution.mockImplementation(async (_token: string, status: string) => ({ resolution_status: status }))
   })
 
@@ -154,6 +158,119 @@ describe('PublicAICCChatPage', () => {
     expect(apiState.createSession).toHaveBeenCalledWith('public-token', 'web_link')
     expect(apiState.sendMessage).toHaveBeenCalledWith('session-token', expect.objectContaining({ client_message_id: expect.any(String), text: '报价多少', image_file_id: undefined }))
     expect(wrapper.text()).toContain('收到')
+  })
+
+  // 场景：异步任务刚受理时，访客消息与排队中的助手占位必须立即显示，不能伪造一条默认回复。
+  it('shows a queued placeholder after the visitor message is accepted asynchronously', async () => {
+    apiState.sendMessage.mockResolvedValue({ message_id: 'message-1', status: 'queued' })
+    const wrapper = mountPublicChat()
+    await flushPromises()
+
+    await wrapper.find('textarea').setValue('异步问题')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('异步问题')
+    expect(wrapper.text()).toContain('消息已提交，正在排队处理。')
+    expect(wrapper.text()).not.toContain('我已收到，请继续补充您的问题。')
+    wrapper.unmount()
+  })
+
+  // 场景：轮询完成后应将原占位替换为唯一一条助手回复，不能额外追加重复气泡。
+  it('replaces the queued placeholder with one completed assistant reply', async () => {
+    vi.useFakeTimers()
+    apiState.sendMessage.mockResolvedValue({ message_id: 'message-1', status: 'queued' })
+    apiState.fetchMessageStatus.mockResolvedValue({ message_id: 'message-1', status: 'completed', text: '异步回复' })
+    try {
+      const wrapper = mountPublicChat()
+      await flushPromises()
+
+      await wrapper.find('textarea').setValue('异步问题')
+      await wrapper.find('form.composer').trigger('submit')
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(2_000)
+      await flushPromises()
+
+      expect(apiState.fetchMessageStatus).toHaveBeenCalledWith('session-token', 'message-1')
+      expect(wrapper.text()).toContain('异步回复')
+      expect(wrapper.findAll('.message-row.assistant')).toHaveLength(2)
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // 场景：服务端要求等待重试时，公开页需展示等待状态并按 retry_after_seconds 调度下一次查询。
+  it('shows retry-wait status and uses the server polling delay', async () => {
+    vi.useFakeTimers()
+    apiState.sendMessage.mockResolvedValue({ message_id: 'message-1', status: 'queued' })
+    apiState.fetchMessageStatus
+      .mockResolvedValueOnce({ message_id: 'message-1', status: 'retry_wait', retry_after_seconds: 5 })
+      .mockResolvedValueOnce({ message_id: 'message-1', status: 'completed', text: '恢复后的回复' })
+    try {
+      const wrapper = mountPublicChat()
+      await flushPromises()
+
+      await wrapper.find('textarea').setValue('稍后重试')
+      await wrapper.find('form.composer').trigger('submit')
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(2_000)
+      await flushPromises()
+
+      expect(wrapper.text()).toContain('服务繁忙，正在稍后重试。')
+      await vi.advanceTimersByTimeAsync(4_999)
+      expect(apiState.fetchMessageStatus).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1)
+      await flushPromises()
+      expect(wrapper.text()).toContain('恢复后的回复')
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // 场景：页面卸载后必须取消未完成任务的定时轮询，不能由旧页面继续调用公开状态接口。
+  it('stops polling queued messages after the chat page unmounts', async () => {
+    vi.useFakeTimers()
+    apiState.sendMessage.mockResolvedValue({ message_id: 'message-1', status: 'queued' })
+    try {
+      const wrapper = mountPublicChat()
+      await flushPromises()
+
+      await wrapper.find('textarea').setValue('离开页面')
+      await wrapper.find('form.composer').trigger('submit')
+      await flushPromises()
+      wrapper.unmount()
+      await vi.advanceTimersByTimeAsync(2_000)
+
+      expect(apiState.fetchMessageStatus).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // 场景：任务失败后点击重试必须复用原 client_message_id，且页面中只保留原来的访客消息。
+  it('retries a failed task with the original client message id without duplicating the visitor message', async () => {
+    apiState.sendMessage
+      .mockResolvedValueOnce({ message_id: 'message-1', status: 'failed' })
+      .mockResolvedValueOnce({ message_id: 'message-1', status: 'completed', text: '重试成功' })
+    const wrapper = mountPublicChat()
+    await flushPromises()
+
+    await wrapper.find('textarea').setValue('失败后重试')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+    const firstPayload = apiState.sendMessage.mock.calls[0][1]
+
+    expect(wrapper.text()).toContain('回复失败，请重试。')
+    await wrapper.findAll('button').find(button => button.text().includes('重试'))?.trigger('click')
+    await flushPromises()
+
+    expect(apiState.sendMessage).toHaveBeenCalledTimes(2)
+    expect(apiState.sendMessage.mock.calls[1][1].client_message_id).toBe(firstPayload.client_message_id)
+    expect(wrapper.findAll('.message-row.visitor')).toHaveLength(1)
+    expect(wrapper.text()).toContain('重试成功')
+    wrapper.unmount()
   })
 
   // 场景：隐私提示只在访客刚进入公开页时展示，发送消息后不再占用输入区上方空间。
