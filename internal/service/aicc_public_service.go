@@ -485,6 +485,11 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 		ClientMessageID: nullStr(clientMessageID),
 	}
 	isPromptInjection := isAICCPromptInjection(text)
+	var assistantMessage *sqlc.CreateAICCMessageParams
+	if isPromptInjection {
+		message := sqlc.CreateAICCMessageParams{ID: newUUID(), SessionID: session.ID, AgentID: session.AgentID, Direction: domain.AICCMessageDirectionAssistant, ContentType: domain.AICCMessageContentTypeText, TextContent: nullStr(aiccPromptInjectionReply), ClientMessageID: nullStr(clientMessageID)}
+		assistantMessage = &message
+	}
 	if clientMessageID != "" {
 		existing, err := s.store.GetAICCMessageByClientMessageID(ctx, sqlc.GetAICCMessageByClientMessageIDParams{SessionID: session.ID, Direction: domain.AICCMessageDirectionVisitor, ClientMessageID: nullStr(clientMessageID)})
 		if err == nil {
@@ -494,7 +499,7 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 			return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 幂等消息失败: %w", err)
 		}
 	}
-	existingMessageID, err := s.reserveAICCVisitorMessage(ctx, session, settings.MessageLimitPerSession, visitorMessage, agent.AppID, !isPromptInjection)
+	existingMessageID, err := s.reserveAICCVisitorMessage(ctx, session, settings.MessageLimitPerSession, visitorMessage, agent.AppID, !isPromptInjection, assistantMessage)
 	if err != nil {
 		return AICCPublicMessageResult{}, err
 	}
@@ -504,15 +509,10 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 	if !isPromptInjection {
 		return AICCPublicMessageResult{MessageID: visitorMessage.ID, Status: "queued"}, nil
 	}
-	replyID := newUUID()
-	assistantMessage := sqlc.CreateAICCMessageParams{ID: replyID, SessionID: session.ID, AgentID: session.AgentID, Direction: domain.AICCMessageDirectionAssistant, ContentType: domain.AICCMessageContentTypeText, TextContent: nullStr(aiccPromptInjectionReply), ClientMessageID: nullStr(clientMessageID)}
-	if err := s.storeAICCAssistantMessage(ctx, session.ID, assistantMessage); err != nil {
-		return AICCPublicMessageResult{}, err
-	}
 	return AICCPublicMessageResult{MessageID: visitorMessage.ID, Status: "completed", Text: aiccPromptInjectionReply}, nil
 }
 
-func (s *AICCPublicService) reserveAICCVisitorMessage(ctx context.Context, session sqlc.AiccSession, limit int32, visitorMessage sqlc.CreateAICCMessageParams, appID string, createTask bool) (string, error) {
+func (s *AICCPublicService) reserveAICCVisitorMessage(ctx context.Context, session sqlc.AiccSession, limit int32, visitorMessage sqlc.CreateAICCMessageParams, appID string, createTask bool, assistantMessage *sqlc.CreateAICCMessageParams) (string, error) {
 	var existingMessageID string
 	err := s.withAICCPublicTx(ctx, func(store AICCPublicStore) error {
 		locked, err := store.LockAICCSessionForUpdate(ctx, session.ID)
@@ -545,6 +545,11 @@ func (s *AICCPublicService) reserveAICCVisitorMessage(ctx context.Context, sessi
 			// status、attempts 与 max_attempts 使用迁移中的 queued、0、5 默认值；sqlc 参数仅暴露可写列。
 			if err := store.CreateAICCMessageTask(ctx, sqlc.CreateAICCMessageTaskParams{ID: newUUID(), MessageID: visitorMessage.ID, SessionID: session.ID, AgentID: session.AgentID, OrgID: session.OrgID, AppID: appID, RunAfter: s.now()}); err != nil {
 				return fmt.Errorf("创建 AICC 消息任务失败: %w", err)
+			}
+		}
+		if assistantMessage != nil {
+			if err := store.CreateAICCMessage(ctx, *assistantMessage); err != nil {
+				return fmt.Errorf("保存 AICC 本地拒答消息失败: %w", err)
 			}
 		}
 		if err := touchAICCSessionLastActive(ctx, store, session.ID); err != nil {
@@ -592,18 +597,6 @@ func (s *AICCPublicService) aiccMessageTaskResult(ctx context.Context, sessionID
 		return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 幂等助手回复失败: %w", err)
 	}
 	return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 幂等任务失败: %w", sql.ErrNoRows)
-}
-
-func (s *AICCPublicService) storeAICCAssistantMessage(ctx context.Context, sessionID string, assistantMessage sqlc.CreateAICCMessageParams) error {
-	return s.withAICCPublicTx(ctx, func(store AICCPublicStore) error {
-		if err := store.CreateAICCMessage(ctx, assistantMessage); err != nil {
-			return fmt.Errorf("保存 AICC 助手回复失败: %w", err)
-		}
-		if err := touchAICCSessionLastActive(ctx, store, sessionID); err != nil {
-			return err
-		}
-		return nil
-	})
 }
 
 func (s *AICCPublicService) withAICCPublicTx(ctx context.Context, fn func(AICCPublicStore) error) error {
