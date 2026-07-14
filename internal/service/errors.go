@@ -61,6 +61,9 @@ var ErrAICCMessageLimitExceeded = errors.New("aicc message limit exceeded")
 // ErrAICCQueueBusy 表示全局持久化任务队列已满；必须在创建访客消息前返回 429，避免孤儿消息。
 var ErrAICCQueueBusy = errors.New("aicc queue busy")
 
+// ErrAICCConcurrencyLimited 表示任一运行时并发层级已满，任务应进入既有退避重试。
+var ErrAICCConcurrencyLimited = errors.New("aicc concurrency limited")
+
 // ErrAICCVisitorBlocked 表示当前访客命中了智能体有效封禁名单。
 var ErrAICCVisitorBlocked = errors.New("aicc visitor blocked")
 

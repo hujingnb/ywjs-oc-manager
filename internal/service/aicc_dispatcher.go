@@ -96,13 +96,14 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 		d.releaseHalfOpenProbe()
 		return err
 	}
-	if d.limiter != nil {
-		release, acquireErr := d.limiter.Acquire(ctx, task.OrgID, task.AgentID, task.SessionID)
-		if acquireErr != nil {
-			return d.finishError(ctx, task, token, acquireErr)
-		}
-		defer release()
+	if d.limiter == nil {
+		return d.finishError(ctx, task, token, ErrAICCConcurrencyLimited)
 	}
+	release, acquireErr := d.limiter.Acquire(ctx, task.OrgID, task.AgentID, task.SessionID)
+	if acquireErr != nil {
+		return d.finishError(ctx, task, token, acquireErr)
+	}
+	defer release()
 	visitor, err := d.store.GetAICCMessageByID(ctx, task.MessageID)
 	if err != nil {
 		return d.finishError(ctx, task, token, err)
@@ -287,6 +288,9 @@ func aiccErrorSummary(err error) string {
 	return s
 }
 func isAICCRetryable(err error) bool {
+	if errors.Is(err, ErrAICCConcurrencyLimited) {
+		return true
+	}
 	var status *AICCUpstreamStatusError
 	if errors.As(err, &status) {
 		return status.StatusCode == 429 || status.StatusCode == 503 || status.StatusCode == 529
