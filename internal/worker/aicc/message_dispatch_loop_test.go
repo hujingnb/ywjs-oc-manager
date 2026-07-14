@@ -33,15 +33,18 @@ func TestMessageDispatchLoopTelemetryCoversQueueAndConcurrency(t *testing.T) {
 	}}
 	dispatcher := &concurrentMessageTaskDispatcher{release: make(chan struct{})}
 	loop := NewMessageDispatchLoop(store, queue, dispatcher, logger)
-	loop.SetObserver(service.NewSlogAICCDispatchObserver(logger))
+	observer := service.NewSlogAICCDispatchObserver(logger)
+	loop.SetObserver(observer)
 
 	require.NoError(t, loop.Tick(context.Background()))
 	require.Eventually(t, func() bool { return dispatcher.activeCount() == aiccMessageDispatchConcurrency }, time.Second, 10*time.Millisecond)
 
 	logs := output.String()
-	assert.Contains(t, logs, `"aicc_event":"queued"`)
-	assert.Contains(t, logs, `"queue_wait_ms":`)
-	assert.Contains(t, logs, `"inflight":4`)
+	assert.NotContains(t, logs, `"aicc_event":"queued"`)
+	metrics := observer.Metrics()
+	assert.Equal(t, uint64(5), metrics.Counters["aicc_message_queue_depth"])
+	assert.Positive(t, metrics.QueueWaitMS)
+	assert.Equal(t, int64(4), metrics.Inflight)
 	assert.NotContains(t, logs, "visitor-content")
 	assert.NotContains(t, logs, "token")
 	close(dispatcher.release)

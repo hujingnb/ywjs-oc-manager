@@ -100,14 +100,14 @@ func (l *MessageDispatchLoop) Tick(ctx context.Context) error {
 		return fmt.Errorf("扫描就绪 AICC 消息任务失败: %w", err)
 	}
 	byID := make(map[string]sqlc.AiccMessageTask, len(ready))
+	var queueWaitMS int64
 	for _, task := range ready {
 		byID[task.ID] = task
 		queueWait := time.Duration(0)
 		if !task.CreatedAt.IsZero() {
 			queueWait = time.Since(task.CreatedAt)
 		}
-		// queued 事件只记录稳定任务归属和等待时长，不记录访客输入、session 或 Redis 信号 ID。
-		l.observe(ctx, service.AICCDispatchObservation{Event: "queued", AgentID: task.AgentID, OrgID: task.OrgID, Upstream: "hermes", Result: "queued", QueueWaitMS: queueWait.Milliseconds()})
+		queueWaitMS += queueWait.Milliseconds()
 		if err := l.queue.Enqueue(ctx, task.ID); err != nil {
 			return fmt.Errorf("写入 AICC 消息 Redis 信号失败: %w", err)
 		}
@@ -124,9 +124,10 @@ func (l *MessageDispatchLoop) Tick(ctx context.Context) error {
 		}
 		if !l.tryDispatch(ctx, task) {
 			// 有界并发已满时不阻塞扫描；该任务仍是 MySQL 就绪任务，下轮会重新入队。
-			l.observe(ctx, service.AICCDispatchObservation{Event: "queued", AgentID: task.AgentID, OrgID: task.OrgID, Upstream: "hermes", Result: "concurrency_limited", Inflight: len(l.slots)})
+			l.recordInflightMetrics(len(l.slots))
 		}
 	}
+	l.recordQueueMetrics(len(ready), queueWaitMS)
 	return nil
 }
 
@@ -134,6 +135,7 @@ func (l *MessageDispatchLoop) Tick(ctx context.Context) error {
 func (l *MessageDispatchLoop) tryDispatch(ctx context.Context, task sqlc.AiccMessageTask) bool {
 	select {
 	case l.slots <- struct{}{}:
+		l.recordInflightMetrics(len(l.slots))
 		l.dispatchWG.Add(1)
 		go func() {
 			defer func() {
@@ -147,7 +149,25 @@ func (l *MessageDispatchLoop) tryDispatch(ctx context.Context, task sqlc.AiccMes
 		}()
 		return true
 	default:
+		l.recordInflightMetrics(len(l.slots))
 		return false
+	}
+}
+
+type aiccDispatchMetricRecorder interface {
+	RecordQueueMetrics(depth int, queueWaitMS int64)
+	RecordInflightMetrics(inflight int)
+}
+
+func (l *MessageDispatchLoop) recordQueueMetrics(depth int, queueWaitMS int64) {
+	if recorder, ok := l.observer.(aiccDispatchMetricRecorder); ok {
+		recorder.RecordQueueMetrics(depth, queueWaitMS)
+	}
+}
+
+func (l *MessageDispatchLoop) recordInflightMetrics(inflight int) {
+	if recorder, ok := l.observer.(aiccDispatchMetricRecorder); ok {
+		recorder.RecordInflightMetrics(inflight)
 	}
 }
 

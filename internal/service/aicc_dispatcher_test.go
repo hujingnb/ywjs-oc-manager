@@ -224,7 +224,12 @@ func TestAICCDispatcherHeartbeatPreventsReaperAfterInitialLeaseWindow(t *testing
 	nowMu.Lock()
 	now = now.Add(31 * time.Second)
 	nowMu.Unlock()
-	<-s.renewed
+	// 等待推进后的续租真正写入新过期时间；只消费通知可能读到推进前积压的信号，导致测试偶发误判租约过期。
+	require.Eventually(t, func() bool {
+		s.leaseMu.Lock()
+		defer s.leaseMu.Unlock()
+		return s.expiresAt.After(s.leaseNow())
+	}, time.Second, time.Millisecond)
 
 	recovered, err := d.RecoverExpiredLeases(context.Background())
 	require.NoError(t, err)

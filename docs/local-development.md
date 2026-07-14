@@ -70,6 +70,14 @@ AICC 公开消息任务以 MySQL 的 `aicc_message_tasks` 为事实来源，Redi
 `org_id`、`upstream`、`result` 标签及 `queue_wait_ms`、`inflight` 等数值，绝不应包含访客
 原文、会话标识或令牌。
 
+进程内指标注册表为现有日志/监控桥接保留安全快照：`aicc_message_transitions_total`、
+`aicc_message_retries_total`、`aicc_message_failures_total`、`aicc_message_circuit_open_total`、
+`aicc_message_lease_recoveries_total` 与 `aicc_message_queue_depth`。生命周期计数标签仅为
+`org`、`agent`、`upstream`、`result`；`queue_wait_ms` 为累计等待值，`inflight` 为当前在飞 gauge。
+扫描就绪任务只更新 gauge，不产生 `queued` 日志事件，避免积压时产生日志风暴。当前项目未部署
+Prometheus，注册表通过 `SlogAICCDispatchObserver.Metrics()` 提供给既有日志或监控桥接层；不得从
+指标中加入访客内容、token、session/message 原文或执行 pod 的非受控名称。
+
 ```bash
 make local-logs svc=manager-api
 ```
