@@ -16,6 +16,12 @@ import (
 
 const aiccTaskLeaseDuration = 30 * time.Second
 
+// aiccLeaseHeartbeatInterval 小于租约时长，给一次数据库抖动留下续租余量；测试可临时缩短该值。
+var aiccLeaseHeartbeatInterval = 10 * time.Second
+
+// ErrAICCLeaseLost 表示任务已不再由当前 worker 持有，后续不得写回复或累计熔断状态。
+var ErrAICCLeaseLost = errors.New("aicc task lease lost")
+
 // AICCUpstreamStatusError 保留运行时上游的 HTTP 状态，供调度器区分可恢复过载与确定性失败。
 type AICCUpstreamStatusError struct{ StatusCode int }
 
@@ -36,6 +42,7 @@ type AICCDispatcherStore interface {
 	CompleteAICCMessageTask(context.Context, sqlc.CompleteAICCMessageTaskParams) (int64, error)
 	RetryAICCMessageTask(context.Context, sqlc.RetryAICCMessageTaskParams) (int64, error)
 	FailAICCMessageTask(context.Context, sqlc.FailAICCMessageTaskParams) (int64, error)
+	RenewAICCMessageTaskLease(context.Context, sqlc.RenewAICCMessageTaskLeaseParams) (int64, error)
 	RecoverExpiredAICCMessageTaskLeases(context.Context) (int64, error)
 	CreateAICCMessage(context.Context, sqlc.CreateAICCMessageParams) error
 }
@@ -92,8 +99,13 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 	if err != nil {
 		return d.finishError(ctx, task, token, err)
 	}
-	reply, err := d.chat.ChatAICC(ctx, task.AppID, task.SessionID, buildAICCRuntimePrompt(agent, visitor.TextContent.String))
+	chatCtx, cancelChat := context.WithCancel(ctx)
+	stopHeartbeat := d.startLeaseHeartbeat(chatCtx, cancelChat, task.ID, token)
+	reply, err := d.chat.ChatAICC(chatCtx, task.AppID, task.SessionID, buildAICCRuntimePrompt(agent, visitor.TextContent.String))
 	if err != nil {
+		if heartbeatErr := stopHeartbeat(); heartbeatErr != nil {
+			return heartbeatErr
+		}
 		return d.finishError(ctx, task, token, err)
 	}
 	write := func(s AICCDispatcherStore) error {
@@ -105,13 +117,18 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 			return err
 		}
 		if rows != 1 {
-			return errors.New("aicc task lease lost")
+			return ErrAICCLeaseLost
 		}
 		return nil
 	}
-	if err := d.tx.WithAICCDispatcherTx(ctx, write); err != nil {
+	txErr := d.tx.WithAICCDispatcherTx(ctx, write)
+	heartbeatErr := stopHeartbeat()
+	if heartbeatErr != nil {
+		return heartbeatErr
+	}
+	if txErr != nil {
 		d.reopenHalfOpenProbe(d.now())
-		return err
+		return txErr
 	}
 	d.recordSuccess()
 	return nil
@@ -125,17 +142,71 @@ func (d *AICCDispatcher) RecoverExpiredLeases(ctx context.Context) (int64, error
 func (d *AICCDispatcher) finishError(ctx context.Context, task sqlc.AiccMessageTask, token string, err error) error {
 	d.reopenHalfOpenProbe(d.now())
 	if isAICCRetryable(err) {
-		d.recordOverload(d.now())
 		// Lease SQL 会先将 attempts 加一；重试退避必须使用本轮实际失败后的计数。
 		attempts := task.Attempts + 1
-		_, updateErr := d.store.RetryAICCMessageTask(ctx, sqlc.RetryAICCMessageTaskParams{ID: task.ID, LeaseToken: null.StringFrom(token), RunAfter: d.now().Add(aiccRetryDelayWithJitter(attempts, task.ID)), LastError: null.StringFrom(aiccErrorSummary(err))})
+		rows, updateErr := d.store.RetryAICCMessageTask(ctx, sqlc.RetryAICCMessageTaskParams{ID: task.ID, LeaseToken: null.StringFrom(token), RunAfter: d.now().Add(aiccRetryDelayWithJitter(attempts, task.ID)), LastError: null.StringFrom(aiccErrorSummary(err))})
 		if updateErr != nil {
 			return updateErr
 		}
+		if rows != 1 {
+			return ErrAICCLeaseLost
+		}
+		d.recordOverload(d.now())
 		return nil
 	}
-	_, updateErr := d.store.FailAICCMessageTask(ctx, sqlc.FailAICCMessageTaskParams{ID: task.ID, LeaseToken: null.StringFrom(token), LastError: null.StringFrom(aiccErrorSummary(err))})
-	return updateErr
+	rows, updateErr := d.store.FailAICCMessageTask(ctx, sqlc.FailAICCMessageTaskParams{ID: task.ID, LeaseToken: null.StringFrom(token), LastError: null.StringFrom(aiccErrorSummary(err))})
+	if updateErr != nil {
+		return updateErr
+	}
+	if rows != 1 {
+		return ErrAICCLeaseLost
+	}
+	return nil
+}
+
+// startLeaseHeartbeat 在 ChatAICC 执行期间使用同一 lease token 续租；续租失败会取消聊天请求，
+// 防止 worker 在已失去所有权后仍将回复写回数据库。
+func (d *AICCDispatcher) startLeaseHeartbeat(ctx context.Context, cancel context.CancelFunc, taskID, token string) func() error {
+	ticker := time.NewTicker(aiccLeaseHeartbeatInterval)
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(stopped)
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				rows, err := d.store.RenewAICCMessageTaskLease(ctx, sqlc.RenewAICCMessageTaskLeaseParams{ID: taskID, LeaseToken: null.StringFrom(token)})
+				if err == nil && rows != 1 {
+					err = ErrAICCLeaseLost
+				}
+				if err != nil {
+					select {
+					case errCh <- err:
+					default:
+					}
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return func() error {
+		ticker.Stop()
+		close(done)
+		<-stopped
+		cancel()
+		select {
+		case err := <-errCh:
+			return err
+		default:
+			return nil
+		}
+	}
 }
 
 // reopenHalfOpenProbe 把已领取但未成功完成的半开探测重新熔断 30 秒，

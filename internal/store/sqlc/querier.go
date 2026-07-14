@@ -342,6 +342,8 @@ type Querier interface {
 	RejectSkillTicket(ctx context.Context, arg RejectSkillTicketParams) error
 	// 重命名未删除行业知识库；唯一约束负责拦截同名未删除记录。
 	RenameIndustryKnowledgeBase(ctx context.Context, arg RenameIndustryKnowledgeBaseParams) error
+	// 续租使用数据库当前时间，避免 worker 时钟漂移把有效租约提前判过期。
+	RenewAICCMessageTaskLease(ctx context.Context, arg RenewAICCMessageTaskLeaseParams) (int64, error)
 	// 续期：把过期时间延后到 now + N 天（N 由 service 按企业 site_ttl_days 传入），并置回 active。
 	RenewPublishedSite(ctx context.Context, arg RenewPublishedSiteParams) error
 	// 替换助手版本行业知识库关联前先清空旧关联，由调用方在同一事务中重新插入。

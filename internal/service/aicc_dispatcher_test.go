@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,6 +24,14 @@ type aiccDispatcherStoreFake struct {
 	assistant []sqlc.CreateAICCMessageParams
 	complete  int64
 	recover   int64
+	retryRows int64
+	failRows  int64
+	lostRetry bool
+	lostFail  bool
+	renews    int
+	leaseMu   sync.Mutex
+	exclusive bool
+	claimed   bool
 	leaseRows int64
 	leaseErr  error
 	unclaimed bool
@@ -35,6 +44,14 @@ func (s *aiccDispatcherStoreFake) GetAICCAgent(context.Context, string) (sqlc.Ai
 	return s.agent, nil
 }
 func (s *aiccDispatcherStoreFake) LeaseAICCMessageTask(_ context.Context, p sqlc.LeaseAICCMessageTaskParams) (int64, error) {
+	s.leaseMu.Lock()
+	defer s.leaseMu.Unlock()
+	if s.exclusive && s.claimed {
+		return 0, nil
+	}
+	if s.exclusive {
+		s.claimed = true
+	}
 	s.leased = p
 	if !s.unclaimed && s.leaseRows == 0 && s.leaseErr == nil {
 		return 1, nil
@@ -42,14 +59,35 @@ func (s *aiccDispatcherStoreFake) LeaseAICCMessageTask(_ context.Context, p sqlc
 	return s.leaseRows, s.leaseErr
 }
 func (s *aiccDispatcherStoreFake) CompleteAICCMessageTask(context.Context, sqlc.CompleteAICCMessageTaskParams) (int64, error) {
+	s.leaseMu.Lock()
+	s.claimed = false
+	s.leaseMu.Unlock()
 	return s.complete, nil
 }
 func (s *aiccDispatcherStoreFake) RetryAICCMessageTask(_ context.Context, p sqlc.RetryAICCMessageTaskParams) (int64, error) {
 	s.retry = p
+	if s.lostRetry {
+		return 0, nil
+	}
+	if s.retryRows != 0 {
+		return s.retryRows, nil
+	}
 	return 1, nil
 }
 func (s *aiccDispatcherStoreFake) FailAICCMessageTask(_ context.Context, p sqlc.FailAICCMessageTaskParams) (int64, error) {
 	s.failed = p
+	if s.lostFail {
+		return 0, nil
+	}
+	if s.failRows != 0 {
+		return s.failRows, nil
+	}
+	return 1, nil
+}
+func (s *aiccDispatcherStoreFake) RenewAICCMessageTaskLease(_ context.Context, _ sqlc.RenewAICCMessageTaskLeaseParams) (int64, error) {
+	s.leaseMu.Lock()
+	defer s.leaseMu.Unlock()
+	s.renews++
 	return 1, nil
 }
 func (s *aiccDispatcherStoreFake) RecoverExpiredAICCMessageTaskLeases(context.Context) (int64, error) {
@@ -63,9 +101,13 @@ func (s *aiccDispatcherStoreFake) CreateAICCMessage(_ context.Context, p sqlc.Cr
 type aiccDispatcherChatFake struct {
 	reply string
 	err   error
+	run   func(context.Context) (string, error)
 }
 
-func (c aiccDispatcherChatFake) ChatAICC(context.Context, string, string, string) (string, error) {
+func (c aiccDispatcherChatFake) ChatAICC(ctx context.Context, _ string, _ string, _ string) (string, error) {
+	if c.run != nil {
+		return c.run(ctx)
+	}
 	return c.reply, c.err
 }
 
@@ -88,6 +130,39 @@ func TestAICCDispatcherLeaseUsesThirtySecondWindow(t *testing.T) {
 	d.now = func() time.Time { return now }
 	require.NoError(t, d.Dispatch(context.Background(), s.task))
 	assert.Equal(t, now.Add(30*time.Second), s.leased.LeaseExpiresAt.Time)
+}
+
+// TestAICCDispatcherHeartbeatKeepsSlowChatLease 覆盖慢速 Hermes 调用：
+// 首轮调用持续超过初始租约窗口时，心跳必须持续续租，第二个 dispatcher 不得再次领取同一任务。
+func TestAICCDispatcherHeartbeatKeepsSlowChatLease(t *testing.T) {
+	s := newAICCDispatcherStoreFake()
+	s.exclusive = true
+	started := make(chan struct{})
+	finish := make(chan struct{})
+	oldInterval := aiccLeaseHeartbeatInterval
+	aiccLeaseHeartbeatInterval = time.Millisecond
+	defer func() { aiccLeaseHeartbeatInterval = oldInterval }()
+	d := NewAICCDispatcher(s, aiccDispatcherTxFake{s}, aiccDispatcherChatFake{run: func(ctx context.Context) (string, error) {
+		close(started)
+		select {
+		case <-finish:
+			return "答复", nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}}, nil)
+	done := make(chan error, 1)
+	go func() { done <- d.Dispatch(context.Background(), s.task) }()
+	<-started
+	time.Sleep(5 * time.Millisecond)
+
+	require.NoError(t, d.Dispatch(context.Background(), s.task))
+	s.leaseMu.Lock()
+	renews := s.renews
+	s.leaseMu.Unlock()
+	assert.Positive(t, renews)
+	close(finish)
+	require.NoError(t, <-done)
 }
 
 // TestAICCDispatcherSuccessAtomicallyWritesAssistantAndCompletes 覆盖成功闭环：
@@ -117,6 +192,31 @@ func TestAICCDispatcherDeterministicErrorFails(t *testing.T) {
 	d := NewAICCDispatcher(s, aiccDispatcherTxFake{s}, aiccDispatcherChatFake{err: errors.New("invalid runtime request")}, nil)
 	require.NoError(t, d.Dispatch(context.Background(), s.task))
 	assert.Equal(t, "invalid runtime request", s.failed.LastError.String)
+}
+
+// TestAICCDispatcherRetryZeroRowsMeansLeaseLost 覆盖可重试失败时租约已被接管：
+// Retry 更新未命中当前 token 不能累计过载次数或伪装为成功重试。
+func TestAICCDispatcherRetryZeroRowsMeansLeaseLost(t *testing.T) {
+	s := newAICCDispatcherStoreFake()
+	s.lostRetry = true
+	d := NewAICCDispatcher(s, aiccDispatcherTxFake{s}, aiccDispatcherChatFake{err: &AICCUpstreamStatusError{StatusCode: 503}}, nil)
+
+	err := d.Dispatch(context.Background(), s.task)
+
+	require.ErrorIs(t, err, ErrAICCLeaseLost)
+	assert.Zero(t, d.overloads)
+}
+
+// TestAICCDispatcherFailZeroRowsMeansLeaseLost 覆盖确定性失败时租约已被接管：
+// Fail 更新未命中时当前 worker 不得再宣称已将任务终态化。
+func TestAICCDispatcherFailZeroRowsMeansLeaseLost(t *testing.T) {
+	s := newAICCDispatcherStoreFake()
+	s.lostFail = true
+	d := NewAICCDispatcher(s, aiccDispatcherTxFake{s}, aiccDispatcherChatFake{err: errors.New("invalid request")}, nil)
+
+	err := d.Dispatch(context.Background(), s.task)
+
+	require.ErrorIs(t, err, ErrAICCLeaseLost)
 }
 
 // TestAICCDispatcherFifthRetryKeepsQueryTerminalSemantics 覆盖第五次暂态失败：

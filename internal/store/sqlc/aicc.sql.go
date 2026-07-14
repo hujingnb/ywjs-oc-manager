@@ -2288,6 +2288,26 @@ func (q *Queries) RecoverExpiredAICCMessageTaskLeases(ctx context.Context) (int6
 	return result.RowsAffected()
 }
 
+const renewAICCMessageTaskLease = `-- name: RenewAICCMessageTaskLease :execrows
+UPDATE aicc_message_tasks
+SET lease_expires_at = DATE_ADD(NOW(6), INTERVAL 30 SECOND), updated_at = NOW(6)
+WHERE id = ? AND status = 'processing' AND lease_token = ?
+`
+
+type RenewAICCMessageTaskLeaseParams struct {
+	ID         string      `db:"id" json:"id"`
+	LeaseToken null.String `db:"lease_token" json:"lease_token"`
+}
+
+// 续租使用数据库当前时间，避免 worker 时钟漂移把有效租约提前判过期。
+func (q *Queries) RenewAICCMessageTaskLease(ctx context.Context, arg RenewAICCMessageTaskLeaseParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, renewAICCMessageTaskLease, arg.ID, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const retryAICCMessageTask = `-- name: RetryAICCMessageTask :execrows
 UPDATE aicc_message_tasks
 SET status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'retry_wait' END,

@@ -221,6 +221,12 @@ UPDATE aicc_message_tasks
 SET status = 'completed', lease_token = NULL, lease_expires_at = NULL, updated_at = NOW(6)
 WHERE id = sqlc.arg(id) AND status = 'processing' AND lease_token = sqlc.arg(lease_token);
 
+-- name: RenewAICCMessageTaskLease :execrows
+-- 续租使用数据库当前时间，避免 worker 时钟漂移把有效租约提前判过期。
+UPDATE aicc_message_tasks
+SET lease_expires_at = DATE_ADD(NOW(6), INTERVAL 30 SECOND), updated_at = NOW(6)
+WHERE id = sqlc.arg(id) AND status = 'processing' AND lease_token = sqlc.arg(lease_token);
+
 -- name: RetryAICCMessageTask :execrows
 -- 重试请求会在同一更新内判定上限；最后一次失败直接终态化，且继续记录 worker 返回的错误摘要。
 UPDATE aicc_message_tasks
