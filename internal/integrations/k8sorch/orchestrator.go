@@ -22,7 +22,7 @@ type Orchestrator interface {
 	WaitReady(ctx context.Context, appID string, timeout time.Duration, onPoll func(AppStatus)) error
 	// Scale 伸缩 replicas（0=停，1=起）。
 	Scale(ctx context.Context, appID string, replicas int32) error
-	// Start 启动应用。AICC 会先恢复 HPA，再将 Deployment 拉到最小副本；普通应用等价 Scale(1)。
+	// Start 启动应用。AICC 先成功将 Deployment 缩放到 1，再恢复 HPA；普通应用等价 Scale(1)。
 	Start(ctx context.Context, appID string) error
 	// Stop 停止应用。AICC 会先移除 HPA，避免 minReplicas 自动回弹；普通应用等价 Scale(0)。
 	Stop(ctx context.Context, appID string) error
