@@ -182,6 +182,74 @@ func TestBootstrapBuildHappyPath(t *testing.T) {
 	assert.Equal(t, config.PlatformPromptHash(domain.AppTypeStandard), store.capturedPlatformPromptHash)
 }
 
+// TestBootstrapBuildAICCIsStateless 验证客服应用启动时不依赖对象存储：
+// 即使 S3 与 skill 来源均未装配，仍应只下发 manifest、persona 和平台规则，
+// 不向外部访客运行时泄露 skill、恢复快照或 S3 长期写凭证。
+func TestBootstrapBuildAICCIsStateless(t *testing.T) {
+	cipher := newRuntimeTokenTestCipher(t)
+	app := newBootstrapApp(t, cipher)
+	app.AppType = string(domain.AppTypeAICC)
+	store := &fakeBootstrapStore{
+		app:     app,
+		org:     sqlc.Organization{ID: "o1", Name: "Org"},
+		owner:   sqlc.User{ID: "u1", DisplayName: "Owner"},
+		version: sqlc.AssistantVersion{ID: "v1", MainModel: "gpt-x", SystemPrompt: "客服助手"},
+	}
+	// AICC 不应触碰对象存储或 skill 来源，故两项依赖均显式传 nil。
+	svc := NewBootstrapService(store, cipher, nil, nil, BootstrapConfig{
+		NewAPIBaseURL:    "http://new-api:3000",
+		KnowledgeBaseURL: "http://manager/runtime",
+	})
+
+	res, err := svc.Build(context.Background(), app)
+
+	require.NoError(t, err)
+	// 客服运行时不下载任何 skill，也不在 manifest 内写入 skill 相对路径。
+	assert.Empty(t, res.Skills)
+	assert.NotContains(t, res.ManifestYAML, "resources/skills/")
+	// 客服运行时不读取恢复快照，也不获得 S3 写回凭证。
+	assert.Equal(t, BootstrapRestore{}, res.Restore)
+	assert.Equal(t, BootstrapS3Write{}, res.S3Write)
+}
+
+// TestBootstrapBuildStandardRequiresObjectStorage 验证普通应用仍依赖 S3：
+// 禁用对象存储后不能静默下发不完整配置，必须返回可识别错误供部署排查。
+func TestBootstrapBuildStandardRequiresObjectStorage(t *testing.T) {
+	cipher := newRuntimeTokenTestCipher(t)
+	app := newBootstrapApp(t, cipher)
+
+	// 对象存储缺失时，普通应用无法生成恢复快照的预签名 URL。
+	t.Run("缺少对象存储", func(t *testing.T) {
+		svc := NewBootstrapService(&fakeBootstrapStore{app: app}, cipher, nil, fakeSkills{}, BootstrapConfig{})
+
+		_, err := svc.Build(context.Background(), app)
+
+		require.ErrorIs(t, err, ErrStandardAppBootstrapRequiresObjectStorage)
+	})
+
+	// skill 来源缺失时，普通应用无法为已安装 skill 生成下载 URL。
+	t.Run("缺少 skill 来源", func(t *testing.T) {
+		svc := NewBootstrapService(&fakeBootstrapStore{app: app}, cipher, newFakeObjectStore(), nil, BootstrapConfig{})
+
+		_, err := svc.Build(context.Background(), app)
+
+		require.ErrorIs(t, err, ErrStandardAppBootstrapRequiresObjectStorage)
+	})
+}
+
+// TestBootstrapBuildRejectsUnknownAppType 验证未知应用类型必须拒绝启动：
+// bootstrap 不能猜测其对象存储权限，避免未来新增类型意外继承 standard 的数据下发能力。
+func TestBootstrapBuildRejectsUnknownAppType(t *testing.T) {
+	cipher := newRuntimeTokenTestCipher(t)
+	app := newBootstrapApp(t, cipher)
+	app.AppType = "future-type"
+	svc := NewBootstrapService(&fakeBootstrapStore{app: app}, cipher, nil, nil, BootstrapConfig{})
+
+	_, err := svc.Build(context.Background(), app)
+
+	require.ErrorIs(t, err, ErrUnsupportedBootstrapAppType)
+}
+
 // TestBootstrapBuildSelectsPlatformPromptByAICCHidden 验证 bootstrap 按应用类型选择平台规则，
 // 并将相同类型的平台规则 hash 记录为已应用版本，供概览页判定是否需要重启。
 func TestBootstrapBuildSelectsPlatformPromptByAICCHidden(t *testing.T) {

@@ -191,6 +191,14 @@ func NewBootstrapService(
 // 尚不能 bootstrap（应由创建流程先 ensure）。
 var ErrAppNotReady = errors.New("app 未就绪：缺少 api_key、control token 或发布版本")
 
+// ErrStandardAppBootstrapRequiresObjectStorage 表示普通应用启动缺少对象存储或 skill 来源。
+// 普通应用依赖它们下发 skill、恢复快照与 sidecar 写回凭证，不能退化为不完整配置。
+var ErrStandardAppBootstrapRequiresObjectStorage = errors.New("standard app bootstrap requires object storage")
+
+// ErrUnsupportedBootstrapAppType 表示不支持的应用类型。
+// 启动配置涉及运行时权限与数据下发，未知类型必须拒绝而非按任一既有类型猜测处理。
+var ErrUnsupportedBootstrapAppType = errors.New("unsupported app type for bootstrap")
+
 // ResolveByControlToken 用 control token hash 反查 app（鉴权即定位）。
 // tokenHash 是调用方已对 plain token 做过 HashAppRuntimeToken 后的 hex 字符串；
 // 内部转换为 null.String 以匹配 sqlc 生成的查询参数类型。
@@ -202,10 +210,27 @@ func (s *BootstrapService) ResolveByControlToken(ctx context.Context, tokenHash 
 // 调用方已通过 control token 鉴权并确认 token 属于该 app，此处不再重复鉴权。
 // 整体只读：不写库、不创建 key，所有 new-api key 与 control token 已由创建流程 ensure。
 func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapResult, error) {
-	// 1. 解密 new-api api_key；缺失代表创建流程未完成，视为未就绪。
-	if !app.NewapiKeyCiphertext.Valid {
+	// 保持未就绪错误的既有语义优先级：创建流程尚未写入两类运行时密文时，调用方应得到
+	// 可重试的 ErrAppNotReady，而不是因尚未补齐 app_type 被误判为永久配置错误。
+	if !app.NewapiKeyCiphertext.Valid || !app.RuntimeTokenCiphertext.Valid {
 		return BootstrapResult{}, ErrAppNotReady
 	}
+
+	// app_type 是是否允许向 pod 下发对象存储数据的唯一边界：普通应用保留既有 S3 行为，
+	// AICC 面向外部访客，必须保持无状态且绝不访问 objects / skills。
+	appType := domain.AppType(app.AppType)
+	switch appType {
+	case domain.AppTypeStandard:
+		if s.objects == nil || s.skills == nil {
+			return BootstrapResult{}, ErrStandardAppBootstrapRequiresObjectStorage
+		}
+	case domain.AppTypeAICC:
+		// AICC 不需要对象存储依赖；后续逻辑只组装 manifest、persona 与平台规则。
+	default:
+		return BootstrapResult{}, fmt.Errorf("%w: %q", ErrUnsupportedBootstrapAppType, app.AppType)
+	}
+
+	// 1. 解密 new-api api_key；缺失代表创建流程未完成，视为未就绪。
 	apiKeyPlain, err := s.cipher.Decrypt(app.NewapiKeyCiphertext.String)
 	if err != nil {
 		return BootstrapResult{}, fmt.Errorf("解密 api_key 失败: %w", err)
@@ -213,9 +238,6 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 
 	// 2. 解密 control token；缺失同样视为未就绪。
 	// control token 用于 manifest.knowledge.app_token，供 pod 访问 manager runtime 知识库 API。
-	if !app.RuntimeTokenCiphertext.Valid {
-		return BootstrapResult{}, ErrAppNotReady
-	}
 	controlToken, err := s.cipher.Decrypt(app.RuntimeTokenCiphertext.String)
 	if err != nil {
 		return BootstrapResult{}, fmt.Errorf("解密 control token 失败: %w", err)
@@ -245,11 +267,15 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 		_ = json.Unmarshal(version.RoutingJson, &routing)
 	}
 
-	// 5. 从 app_skills 取实例 skill 并预签名，获得 pod 下载 URL 与 manifest 内相对路径。
-	// 来源已从 version.SkillsJson 切换为 app_skills，运行时只下发实例实际安装的 skill。
-	skills, skillRelPaths, err := s.presignSkills(ctx, app.ID)
-	if err != nil {
-		return BootstrapResult{}, err
+	// 5. 普通应用从 app_skills 取实例 skill 并预签名，AICC 固定为空。
+	// 运行时只下发实例实际安装的 skill；客服应用不接触对象存储中的任何 skill 数据。
+	var skills []BootstrapSkill
+	var skillRelPaths []string
+	if appType == domain.AppTypeStandard {
+		skills, skillRelPaths, err = s.presignSkills(ctx, app.ID)
+		if err != nil {
+			return BootstrapResult{}, err
+		}
 	}
 
 	// 6. 组装 AppInputData 并通过 renderer 渲染 manifest YAML、persona 与 platform 文本。
@@ -311,25 +337,24 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 		return BootstrapResult{}, err
 	}
 
-	// 7. restore 预签名：对存在的 workspace/state.db/sessions 对象生成读 URL；首启时留空。
-	restore, err := s.presignRestore(ctx, app.ID)
-	if err != nil {
-		return BootstrapResult{}, err
+	// 7. 普通应用对 workspace/state.db/sessions 快照生成 restore 预签名；AICC 保持零值。
+	var restore BootstrapRestore
+	if appType == domain.AppTypeStandard {
+		restore, err = s.presignRestore(ctx, app.ID)
+		if err != nil {
+			return BootstrapResult{}, err
+		}
 	}
 
-	// 8. 下发 S3 写凭证。目标对象存储不支持标准 STS AssumeRole，无法签发 prefix 限定的
+	// 8. 普通应用下发 S3 写凭证。目标对象存储不支持标准 STS AssumeRole，无法签发 prefix 限定的
 	//    临时凭证，故直接下发 manager 的长期凭证（取舍：sidecar 凭证拥有整个 bucket 的
 	//    读写权限，per-app 前缀隔离退化为 sidecar 只主动写自身 Prefix 的「善意行为」，不再
 	//    由凭证策略强制；详见 secret 配置 storage.s3 注释）。SessionToken 留空表示这是长期
 	//    凭证而非临时凭证；ExpiresAt 给远未来，使 sidecar 不会因「临近过期」反复回源续期。
-	prefix := storage.AppPrefix(app.ID)
-	return BootstrapResult{
-		ManifestYAML: manifestYAML,
-		Persona:      persona,
-		PlatformRule: platform,
-		Skills:       skills,
-		Restore:      restore,
-		S3Write: BootstrapS3Write{
+	var s3Write BootstrapS3Write
+	if appType == domain.AppTypeStandard {
+		prefix := storage.AppPrefix(app.ID)
+		s3Write = BootstrapS3Write{
 			Endpoint:        s.cfg.Endpoint,
 			Region:          s.cfg.Region,
 			Bucket:          s.cfg.Bucket,
@@ -338,7 +363,15 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 			SecretAccessKey: s.cfg.SecretAccessKey,
 			SessionToken:    "",
 			ExpiresAt:       time.Now().AddDate(10, 0, 0),
-		},
+		}
+	}
+	return BootstrapResult{
+		ManifestYAML: manifestYAML,
+		Persona:      persona,
+		PlatformRule: platform,
+		Skills:       skills,
+		Restore:      restore,
+		S3Write:      s3Write,
 	}, nil
 }
 

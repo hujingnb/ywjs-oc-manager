@@ -346,9 +346,18 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		usageService = service.NewUsageService(nil, nil, nil)
 		organizationService = service.NewOrganizationService(dbStore.Queries, nil, nil, nil)
 	}
-	// bootstrapSvc 仅在 S3 启用时赋值（bootstrap 依赖对象存储 + skill 预签名）；
-	// nil 时 router 不注册 /internal 路由，符合最小模式预期。
-	var bootstrapSvc *service.BootstrapService
+	// bootstrap 服务始终装配，保证 AICC 在未启用 S3 的最小模式下仍能获取 manifest、persona
+	// 与平台规则。普通应用的 S3 依赖由 service 在 Build 时明确校验并报错，避免静默下发残缺配置。
+	bootstrapSvc := service.NewBootstrapService(
+		dbStore.Queries,
+		cipher,
+		nil,
+		nil,
+		service.BootstrapConfig{
+			NewAPIBaseURL:    cfg.NewAPI.BaseURL,
+			KnowledgeBaseURL: cfg.Hermes.ManagerRuntimeBaseURL,
+		},
+	)
 	// webPublishService 仅在 S3 启用时赋值（runtime 发布需要对象存储写入/删除能力）；
 	// nil 时 router 的 nil-guard 不注册 runtime 发布端点与 site-server 内部同步端点。
 	var webPublishService *service.WebPublishService
