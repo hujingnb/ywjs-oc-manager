@@ -38,9 +38,14 @@ local now=tonumber(ARGV[1]); local window=tonumber(ARGV[2]); local threshold=ton
 redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now-window); redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', now-window)
 redis.call('ZADD', KEYS[1], now, ARGV[7]); if overload=='1' then redis.call('ZADD', KEYS[2], now, ARGV[7]); redis.call('HINCRBY', KEYS[3], 'consecutive', 1) else redis.call('HSET', KEYS[3], 'consecutive', 0) end
 local total=redis.call('ZCARD', KEYS[1]); local failed=redis.call('ZCARD', KEYS[2]); local cons=tonumber(redis.call('HGET', KEYS[3], 'consecutive') or '0')
-if cons>=threshold or (total>0 and failed*100>=total*pct) then redis.call('HSET', KEYS[3], 'open_until', now+cooldown); redis.call('DEL', KEYS[4]) end
+if cons>=threshold or (total>=10 and failed*100>=total*pct) then redis.call('HSET', KEYS[3], 'open_until', now+cooldown); redis.call('DEL', KEYS[4]) end
 redis.call('PEXPIRE', KEYS[1], window*2); redis.call('PEXPIRE', KEYS[2], window*2); redis.call('PEXPIRE', KEYS[3], cooldown*2); return 1`
-const aiccCircuitSuccessLua = `redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4]); return 1`
+const aiccCircuitSuccessLua = `
+local now=tonumber(ARGV[1]); local window=tonumber(ARGV[2]);
+if redis.call('EXISTS', KEYS[4]) == 1 then redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4]); return 1 end
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now-window); redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', now-window)
+redis.call('ZADD', KEYS[1], now, ARGV[3]); redis.call('HSET', KEYS[3], 'consecutive', 0)
+redis.call('PEXPIRE', KEYS[1], window*2); redis.call('PEXPIRE', KEYS[2], window*2); redis.call('PEXPIRE', KEYS[3], window*2); return 1`
 const aiccCircuitReopenLua = `redis.call('HSET', KEYS[1], 'open_until', ARGV[1]); redis.call('PEXPIRE', KEYS[1], ARGV[2]); redis.call('DEL', KEYS[2]); return 1`
 
 func (c *RedisAICCUpstreamCircuit) Allow(ctx context.Context, upstream string) (bool, error) {
@@ -69,7 +74,9 @@ func (c *RedisAICCUpstreamCircuit) RecordOverload(ctx context.Context, upstream 
 	return err
 }
 func (c *RedisAICCUpstreamCircuit) RecordSuccess(ctx context.Context, upstream string) error {
-	_, err := c.client.Eval(ctx, aiccCircuitSuccessLua, []string{c.key(upstream, "outcomes"), c.key(upstream, "failures"), c.key(upstream, "state"), c.key(upstream, "probe")}).Result()
+	now := time.Now().UnixMilli()
+	id := fmt.Sprintf("%d-%d", now, time.Now().UnixNano())
+	_, err := c.client.Eval(ctx, aiccCircuitSuccessLua, []string{c.key(upstream, "outcomes"), c.key(upstream, "failures"), c.key(upstream, "state"), c.key(upstream, "probe")}, now, c.window.Milliseconds(), id).Result()
 	return err
 }
 func (c *RedisAICCUpstreamCircuit) Reopen(ctx context.Context, upstream string) error {

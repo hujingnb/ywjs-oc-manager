@@ -144,6 +144,13 @@ func (c aiccDispatcherChatFake) ChatAICC(ctx context.Context, _ string, _ string
 
 type aiccDispatcherTxFake struct{ store *aiccDispatcherStoreFake }
 
+// aiccDispatcherAllowLimiter 显式模拟测试环境可获得的运行额度，避免成功路径依赖生产 Redis。
+type aiccDispatcherAllowLimiter struct{}
+
+func (aiccDispatcherAllowLimiter) Acquire(context.Context, string, string, string) (func(), error) {
+	return func() {}, nil
+}
+
 func (t aiccDispatcherTxFake) WithAICCDispatcherTx(ctx context.Context, fn func(AICCDispatcherStore) error) error {
 	return fn(t.store)
 }
@@ -156,7 +163,7 @@ func newAICCDispatcherStoreFake() *aiccDispatcherStoreFake {
 // 初次租约过期时间必须由 SQL NOW(6) 写入，worker 只提交任务 ID 与租约 token。
 func TestAICCDispatcherLeaseUsesDatabaseClock(t *testing.T) {
 	s := newAICCDispatcherStoreFake()
-	d := NewAICCDispatcher(s, aiccDispatcherTxFake{s}, aiccDispatcherChatFake{reply: "答复"}, nil)
+	d := NewAICCDispatcher(s, aiccDispatcherTxFake{s}, aiccDispatcherChatFake{reply: "答复"}, aiccDispatcherAllowLimiter{})
 	require.NoError(t, d.Dispatch(context.Background(), s.task))
 	assert.Equal(t, "task", s.leased.ID)
 	assert.True(t, s.leased.LeaseToken.Valid)
@@ -267,7 +274,7 @@ func TestAICCDispatcherHeartbeatStopCancelsBlockedRenew(t *testing.T) {
 // 助手镜像与任务完成由同一个事务回调写入，刷新页面不会看到已完成但缺少回复。
 func TestAICCDispatcherSuccessAtomicallyWritesAssistantAndCompletes(t *testing.T) {
 	s := newAICCDispatcherStoreFake()
-	d := NewAICCDispatcher(s, aiccDispatcherTxFake{s}, aiccDispatcherChatFake{reply: "答复"}, nil)
+	d := NewAICCDispatcher(s, aiccDispatcherTxFake{s}, aiccDispatcherChatFake{reply: "答复"}, aiccDispatcherAllowLimiter{})
 	require.NoError(t, d.Dispatch(context.Background(), s.task))
 	require.Len(t, s.assistant, 1)
 	assert.Equal(t, "答复", s.assistant[0].TextContent.String)

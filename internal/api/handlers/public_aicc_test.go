@@ -312,6 +312,7 @@ func TestPublicAICCHandlerMapsConversationGates(t *testing.T) {
 		{name: "缺少必填留资返回稳定 code", err: service.ErrAICCLeadRequired, status: http.StatusConflict, code: "AICC_LEAD_REQUIRED"},                         // 场景：必填字段未完成。
 		{name: "敏感词拦截返回稳定 code", err: service.ErrAICCSensitiveWord, status: http.StatusBadRequest, code: "AICC_SENSITIVE_WORD"},                      // 场景：访客消息命中敏感词配置。
 		{name: "消息上限拦截返回稳定 code", err: service.ErrAICCMessageLimitExceeded, status: http.StatusTooManyRequests, code: "AICC_MESSAGE_LIMIT_EXCEEDED"}, // 场景：当前会话访客消息数已达上限。
+		{name: "全局队列繁忙返回稳定 code", err: service.ErrAICCQueueBusy, status: http.StatusTooManyRequests, code: "AICC_QUEUE_BUSY"},                        // 场景：跨会话持久任务队列达到容量。
 		{name: "封禁访客拦截返回稳定 code", err: service.ErrAICCVisitorBlocked, status: http.StatusForbidden, code: "AICC_VISITOR_BLOCKED"},                    // 场景：当前访客命中有效封禁名单。
 	}
 	for _, tc := range cases {

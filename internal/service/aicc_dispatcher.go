@@ -203,7 +203,7 @@ func (d *AICCDispatcher) finishError(ctx context.Context, task sqlc.AiccMessageT
 		}
 		if d.circuit != nil && !errors.Is(err, ErrAICCConcurrencyLimited) {
 			_ = d.circuit.RecordOverload(ctx, "hermes")
-		} else {
+		} else if !errors.Is(err, ErrAICCConcurrencyLimited) {
 			d.recordOverload(d.now())
 		}
 		if attempts >= task.MaxAttempts {

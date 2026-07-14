@@ -485,8 +485,14 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 				return AICCPublicMessageResult{}, fmt.Errorf("%w: 已保存消息内容不能为空", ErrInvalidArgument)
 			}
 			// 已完成当前会话、风控与持久化内容校验后，才允许终态失败任务恢复；其他状态继续保持幂等读取。
-			if requeueErr := s.requeueFailedTaskWithAdmission(ctx, existing.ID); requeueErr != nil {
-				return AICCPublicMessageResult{}, requeueErr
+			task, taskErr := s.store.GetAICCMessageTaskByMessageID(ctx, existing.ID)
+			if taskErr != nil && !errors.Is(taskErr, sql.ErrNoRows) {
+				return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 幂等任务失败: %w", taskErr)
+			}
+			if taskErr == nil && task.Status == "failed" {
+				if requeueErr := s.requeueFailedTaskWithAdmission(ctx, existing.ID); requeueErr != nil {
+					return AICCPublicMessageResult{}, requeueErr
+				}
 			}
 			return s.aiccMessageTaskResult(ctx, existing.ID)
 		}

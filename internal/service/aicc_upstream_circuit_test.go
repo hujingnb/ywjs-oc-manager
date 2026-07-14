@@ -52,3 +52,27 @@ func TestRedisAICCUpstreamCircuitReopenReleasesProbe(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, allowed)
 }
+
+// TestRedisAICCUpstreamCircuitUsesMixedOutcomeRate 验证失败率以全部上游结果为分母，单次失败不会提前熔断。
+func TestRedisAICCUpstreamCircuitUsesMixedOutcomeRate(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+	circuit := NewRedisAICCUpstreamCircuit(client, "test:", 5, time.Second, 30, time.Second)
+	for i := 0; i < 9; i++ {
+		require.NoError(t, circuit.RecordSuccess(context.Background(), "hermes"))
+	}
+	require.NoError(t, circuit.RecordOverload(context.Background(), "hermes"))
+	allowed, err := circuit.Allow(context.Background(), "hermes")
+	require.NoError(t, err)
+	assert.True(t, allowed)
+	for i := 0; i < 7; i++ {
+		require.NoError(t, circuit.RecordSuccess(context.Background(), "other"))
+	}
+	for i := 0; i < 3; i++ {
+		require.NoError(t, circuit.RecordOverload(context.Background(), "other"))
+	}
+	allowed, err = circuit.Allow(context.Background(), "other")
+	require.NoError(t, err)
+	assert.False(t, allowed)
+}
