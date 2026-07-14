@@ -56,7 +56,7 @@
           </div>
         </div>
 
-        <n-button v-if="!isPlatformAdmin" size="small" type="primary" secondary @click="startCreateAgent">
+        <n-button v-if="canManageAICC" size="small" type="primary" secondary @click="startCreateAgent">
           <template #icon><Plus :size="15" /></template>
           {{ t('aicc.console.createAgent') }}
         </n-button>
@@ -126,6 +126,8 @@ const selectedAgentIdState = ref<string | undefined>()
 const isCreatingAgent = ref(false)
 const organizationsQuery = useOrganizationsQuery(() => isPlatformAdmin.value)
 const selectedOrgIdForAgents = computed(() => isPlatformAdmin.value ? selectedOrgIdState.value : undefined)
+// 平台管理员必须先选定企业才能创建或编辑该企业的智能体；企业管理员天然处于自身企业上下文。
+const canManageAICC = computed(() => !isPlatformAdmin.value || Boolean(selectedOrgIdState.value))
 const agentsQuery = useAICCAgentsQuery(selectedOrgIdForAgents, () => !isPlatformAdmin.value || Boolean(selectedOrgIdState.value))
 
 // 顶部导航按工作台信息架构排序；路径与后续子页面路由保持一一对应。

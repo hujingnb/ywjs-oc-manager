@@ -530,7 +530,9 @@ const deleteMutation = useDeleteAICCAgent()
 
 const selectedKnowledgeAppId = computed(() => knowledgeQuery.data.value?.app_id || selectedAgent.value?.app_id)
 const isSelectedRunning = computed(() => selectedAgent.value ? isAICCAgentRunning(selectedAgent.value) : false)
-const canManageAICC = computed(() => !consoleContext.isPlatformAdmin.value)
+// 平台管理员从企业列表进入时已带 selectedOrgId，可代企业管理员维护该企业 AICC。
+// 未选择企业的全局平台视图仍保持只读，避免没有归属上下文时误创建智能体。
+const canManageAICC = computed(() => !consoleContext.isPlatformAdmin.value || Boolean(consoleContext.selectedOrgId.value))
 const activeAgentCount = computed(() => agents.value.filter(agent => isAICCAgentRunning(agent)).length)
 const submitBusy = computed(() => createMutation.isPending.value || updateMutation.isPending.value)
 const statusBusy = computed(() => statusMutation.isPending.value)

@@ -186,7 +186,8 @@ function mountManager(context: AICCConsoleContext, props: { initialSection?: 're
   })
 }
 
-function makeConsoleContext() {
+// makeConsoleContext：按角色与企业上下文构造工作台注入对象，覆盖平台管理员代管企业客服的权限边界。
+function makeConsoleContext(options: { platformAdmin?: boolean; selectedOrgId?: string } = {}) {
   const agents = ref<AICCAgent[]>([
     makeAgent(),
     makeAgent({ id: 'agent-support', app_id: 'app-2', name: '售后支持', status: 'paused' }),
@@ -195,8 +196,8 @@ function makeConsoleContext() {
   const selectedAgent = computed(() => agents.value.find(agent => agent.id === selectedAgentIdState.value))
   const context: AICCConsoleContext = {
     agents: computed(() => agents.value),
-    selectedOrgId: computed(() => 'org-1'),
-    isPlatformAdmin: computed(() => false),
+    selectedOrgId: computed(() => options.selectedOrgId ?? 'org-1'),
+    isPlatformAdmin: computed(() => options.platformAdmin ?? false),
     selectedAgentId: computed(() => selectedAgentIdState.value) as ComputedRef<string | undefined>,
     selectedAgent,
     agentsLoading: computed(() => false),
@@ -322,5 +323,15 @@ describe('AICCManagerPage', () => {
 
     expect(wrapper.text()).toContain('未命名接待员')
     expect(wrapper.text()).not.toContain('售前接待')
+  })
+
+  // 覆盖平台管理员代管企业：从企业列表携带 org_id 进入时，设置页应允许保存该企业的客服配置。
+  it('allows a platform admin with a selected organization to save agent configuration', () => {
+    const { context } = makeConsoleContext({ platformAdmin: true, selectedOrgId: 'org-1' })
+    const wrapper = mountManager(context, { initialSection: 'settings' })
+    const saveButton = wrapper.findAll('button').find(button => button.text().includes('保存配置'))
+
+    expect(saveButton).toBeDefined()
+    expect(saveButton?.attributes('disabled')).toBeUndefined()
   })
 })
