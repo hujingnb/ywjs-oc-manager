@@ -75,6 +75,25 @@ func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 	assert.Equal(t, prov.lastCreate.Password, creds.Password)
 }
 
+// TestCreateOrganizationTruncatesNewAPIDisplayName 验证组织名称超过 new-api 展示名上限时，
+// 创建企业仍会使用截断后的展示名创建计费用户，避免上游参数校验导致整笔创建回滚。
+func TestCreateOrganizationTruncatesNewAPIDisplayName(t *testing.T) {
+	store := &organizationStoreStub{}
+	prov := &fakeProvisioner{user: newapi.User{ID: 42}, accessToken: "access-tok-xyz"}
+	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
+	svc.SetVersionValidator(fakeVersionValidator{known: map[string]bool{}})
+	svc.hashPassword = fakeHash
+	_, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
+		Name:             "AICC Namespace Verify Long",
+		Code:             "aicc-verify",
+		AdminUsername:    "admin",
+		AdminDisplayName: "管理员",
+		AdminPassword:    "secret-123",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "AICC Namespace Verif", prov.lastCreate.DisplayName)
+}
+
 // TestOrganizationServiceCreateEnsuresKnowledgeDataset 验证组织创建成功后会预创建组织级 RAGFlow dataset。
 func TestOrganizationServiceCreateEnsuresKnowledgeDataset(t *testing.T) {
 	store := &organizationStoreStub{}

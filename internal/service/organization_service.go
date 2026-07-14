@@ -410,6 +410,18 @@ func normalizeOrganizationCode(value string) (string, error) {
 	return code, nil
 }
 
+// truncateRunes 按字符数截断展示文本，避免 UTF-8 多字节字符被截断成非法字符串。
+func truncateRunes(value string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= max {
+		return value
+	}
+	return string(runes[:max])
+}
+
 // isMySQLUniqueViolation 判断底层 MySQL 错误是否为唯一约束冲突（error 1062）。
 func isMySQLUniqueViolation(err error) bool {
 	if err == nil {
@@ -438,7 +450,7 @@ func (s *OrganizationService) provisionNewAPIUser(ctx context.Context, org *sqlc
 	user, err := s.provisioner.CreateUser(ctx, newapi.CreateUserInput{
 		Username:    username,
 		Password:    password,
-		DisplayName: org.Name,
+		DisplayName: truncateRunes(org.Name, newAPIUserDisplayNameMaxLen),
 	})
 	if err != nil {
 		return sqlc.Organization{}, nil, fmt.Errorf("调用 new-api 创建用户失败: %w", err)
@@ -508,6 +520,9 @@ const (
 	// 6 位 base32 小写字符（[a-z2-7]）熵约 30 bits，足以避免与同 code 的少量
 	// 历史残留账号碰撞，同时为 code 前缀留出足够长度。
 	newapiUsernameSuffixLen = 6
+	// newAPIUserDisplayNameMaxLen 与 new-api User.DisplayName 的 max 校验保持一致。
+	// 企业名称允许更长，但创建计费用户时必须截断，否则上游会拒绝整笔企业创建。
+	newAPIUserDisplayNameMaxLen = 20
 )
 
 // generateNewAPIUsernameSuffix 生成 new-api username 的随机后缀。
