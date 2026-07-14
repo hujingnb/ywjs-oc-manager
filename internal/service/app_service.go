@@ -235,7 +235,7 @@ func (s *AppService) ListByOrg(ctx context.Context, principal auth.Principal, or
 // CreateHiddenAICCApp 创建 AICC 智能体专用隐藏 app，并复用现有 app_initialize worker 初始化链路。
 //
 // 取舍说明：成员 onboarding 会同时创建成员、渠道绑定和审计，AICC 只需要一个 hermes runtime，
-// 因此这里保留最小共享边界：创建 apps 行、创建 app_initialize job、标记 aicc_hidden。
+// 因此这里保留最小共享边界：创建 apps 行、创建 app_initialize job、将 app_type 标记为 aicc。
 // 隐藏 app 绑定的助手版本仅提供模型、技能和行为初始化配置；客服镜像由 worker 从
 // aicc.runtime_image 单独选择。new-api token、runtime token、k8s Deployment、知识注入等细节继续由 app_initialize worker 统一处理。
 func (s *AppService) CreateHiddenAICCApp(ctx context.Context, principal auth.Principal, input AICCHiddenAppInput) (string, error) {
