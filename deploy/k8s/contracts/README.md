@@ -16,9 +16,11 @@
 
 `app_type='aicc'` 实例使用独立的无状态 Pod 形态：
 
-- initContainer `oc-bootstrap` 仅通过 control token 拉取 bootstrap manifest 并初始化
-  `/opt/oc-input`、`/opt/data`；不进行 S3 恢复。
-- 容器为 `hermes` 与 `oc-ops`，均使用当前 AICC 镜像和共享 `emptyDir`。
+- initContainer `oc-bootstrap` 仅通过 control token 将启动输入 manifest、persona、platform
+  rule 写入 `/opt/oc-input`；不挂载 `/opt/data`，不进行 S3 恢复。
+- 容器为 `hermes` 与 `oc-ops`，均使用同一当前 AICC Hermes 镜像和共享 `emptyDir`。`oc-ops`
+  通过该镜像内的 venv 执行 `python -m uvicorn ocops.server:app --host 0.0.0.0 --port 8080`，并注入
+  `OC_OPS_TOKEN`、`API_SERVER_KEY` 和 `PYTHONPATH=/usr/local/lib`。
 - 不创建 `s3-sync` sidecar，不配置 `oc-presync` preStop hook，也不下发运行时 S3
   凭证；Pod 删除后 `/opt/data` 可以丢弃。
 - Deployment、Service、Secret 位于 `oc-aicc`，而普通实例保留在 `oc-apps`。
@@ -34,5 +36,5 @@ manager 对 oc-apps ns 的权限已在 `../local/manager-rbac.yaml` /
 - app 工作区 prefix、删除时 `archive/` 归档前缀（设计 §5）。
 - manifest(含 api_key) 不落 S3，由 manager bootstrap 端点内存渲染。
 
-AICC 启动 bootstrap 只返回 manifest，不返回 S3 写凭证、运行时文件恢复 URL 或从对象
-存储下载的自定义 skill。
+AICC 启动 bootstrap 只返回启动输入 manifest、persona 与 platform rule，不返回 S3
+credentials、运行时文件 restore 内容或从对象存储下载的自定义 skill。

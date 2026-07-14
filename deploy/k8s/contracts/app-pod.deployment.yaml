@@ -56,7 +56,8 @@ stringData:
   control-token: "<RANDOM_PER_APP_TOKEN>"
 ---
 # AICC 契约样例（不 apply）：仅适用于 app_type='aicc'，由 manager 渲染并 apply 到 oc-aicc ns。
-# AICC 是无状态运行时：oc-bootstrap 初始化 + hermes + oc-ops，共享 emptyDir；没有 S3 恢复或同步容器。
+# AICC 是无状态运行时：oc-bootstrap 写入启动输入 manifest、persona、platform rule，随后由
+# hermes + oc-ops 使用共享 emptyDir 启动；没有 S3 恢复或同步容器。
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -77,7 +78,8 @@ spec:
       imagePullSecrets:
         - name: acr-pull
       initContainers:
-        # 只请求 bootstrap manifest 并创建运行目录；不读取或写入 S3。
+        # 只请求启动输入 manifest、persona、platform rule；响应不含 S3 credentials、
+        # restore 文件或 skill，且只写入 oc-input。
         - name: oc-bootstrap
           image: "<OPS_IMAGE_REF>"
           command: ["oc-bootstrap"]
@@ -88,28 +90,37 @@ spec:
               value: "<OC_BOOTSTRAP_URL>"
           volumeMounts:
             - { name: oc-input, mountPath: /opt/oc-input }
-            - { name: data, mountPath: /opt/data }
       containers:
         - name: hermes
           image: "<AICC_HERMES_IMAGE_REF>"
           env:
             - name: HERMES_HOME
               value: /opt/data
+            - name: API_SERVER_ENABLED
+              value: "true"
+            - name: API_SERVER_KEY
+              valueFrom: { secretKeyRef: { name: app-<APP_ID>-token, key: control-token } }
           volumeMounts:
             - { name: oc-input, mountPath: /opt/oc-input }
             - { name: data, mountPath: /opt/data }
         - name: oc-ops
-          image: "<AICC_OC_OPS_IMAGE_REF>"
+          # 与 hermes 使用同一 AICC 镜像；ocops 包随该镜像版本发布，不能替换为独立镜像。
+          image: "<AICC_HERMES_IMAGE_REF>"
+          command: ["/usr/local/lib/hermes-agent/venv/bin/python", "-m", "uvicorn", "ocops.server:app", "--host", "0.0.0.0", "--port", "8080"]
           ports:
             - containerPort: 8080
           env:
             - name: OC_OPS_TOKEN
               valueFrom: { secretKeyRef: { name: app-<APP_ID>-token, key: control-token } }
+            - name: API_SERVER_KEY
+              valueFrom: { secretKeyRef: { name: app-<APP_ID>-token, key: control-token } }
+            - name: PYTHONPATH
+              value: /usr/local/lib
           volumeMounts:
             - { name: data, mountPath: /opt/data }
       volumes:
         - name: oc-input
-          emptyDir: {}          # bootstrap manifest 仅在本次 Pod 生命周期内可见
+          emptyDir: {}          # bootstrap 启动输入仅在本次 Pod 生命周期内可见
         - name: data
           emptyDir: {}          # AICC 无状态运行时数据；不恢复到 S3，也不向 S3 同步
 ---
