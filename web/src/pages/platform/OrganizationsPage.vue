@@ -245,9 +245,10 @@
               <n-button @click="closeAnyForm">{{ t('common.actions.cancel') }}</n-button>
               <n-button
                 type="primary"
-                attr-type="submit"
+                attr-type="button"
                 :loading="modalMode === 'create' ? creating : editSubmitting"
                 :disabled="modalMode === 'create' ? creating : editSubmitting"
+                @click="submitAnyForm"
               >{{ t('common.actions.save') }}</n-button>
             </n-space>
             <p v-if="modalMode === 'create' ? submitError : editError" class="state-text danger">

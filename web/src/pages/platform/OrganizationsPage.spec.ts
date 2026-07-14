@@ -529,6 +529,26 @@ describe('OrganizationsPage', () => {
     }))
   })
 
+  // 覆盖真实点击路径：Naive UI 的 attr-type 不应成为唯一提交机制，点击主保存按钮必须触发组织与 AICC 配置写入。
+  it('点击编辑表单主保存按钮会提交组织和 AICC 配置', async () => {
+    updateOrganization.mockResolvedValue({ id: 'org-1', name: '测试企业', code: 'test-org', status: 'active' })
+    updateOrganizationAICCConfig.mockResolvedValue({ id: 'org-1', name: '测试企业', code: 'test-org', status: 'active', aicc_enabled: true })
+    const wrapper = mountPage()
+
+    const editButton = wrapper.findAll('button').find(button => button.text().includes('编辑'))
+    expect(editButton).toBeTruthy()
+    await editButton!.trigger('click')
+    await nextTick()
+
+    const saveButton = wrapper.findAll('button').find(button => button.text() === '保存')
+    expect(saveButton).toBeTruthy()
+    await saveButton!.trigger('click')
+    await nextTick()
+
+    expect(updateOrganization).toHaveBeenCalledWith(expect.objectContaining({ id: 'org-1' }))
+    expect(updateOrganizationAICCConfig).toHaveBeenCalledWith(expect.objectContaining({ id: 'org-1' }))
+  })
+
   // 助手版本为可选项，留空时表单仍可正常提交。
   it('不选助手版本时表单仍可提交', async () => {
     createOrganization.mockResolvedValue({ id: 'org-3', name: '空版本企业', code: 'empty-org', status: 'active' })
