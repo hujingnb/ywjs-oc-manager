@@ -42,10 +42,18 @@ func TestRoutingOrchestratorEnsureAppSeparatesNamespaces(t *testing.T) {
 // TestRoutingOrchestratorRejectsUnknownAppType 验证状态操作解析到未知类型时必须失败，
 // 不能把未知类型静默路由至普通 namespace。
 func TestRoutingOrchestratorRejectsUnknownAppType(t *testing.T) {
-	resolver := routingResolver{"unknown": domain.AppType("unknown")}
+	resolver := routingResolver{
+		// 未登记的枚举值必须拒绝，防止后续类型扩展被静默路由为普通应用。
+		"unknown": domain.AppType("unknown"),
+		// 持久化字段为空时同样必须拒绝，避免错误数据被默认分发到普通 namespace。
+		"empty": "",
+	}
 	r := NewRoutingOrchestrator(nil, nil, resolver)
 
 	// 未知类型不具备明确 namespace 归属，target 必须返回错误而非默认 normal。
 	_, err := r.target(context.Background(), "unknown")
+	assert.Error(t, err)
+	// 空类型也不具备明确 namespace 归属，必须与未知枚举一致 fail-closed。
+	_, err = r.target(context.Background(), "empty")
 	assert.Error(t, err)
 }

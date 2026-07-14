@@ -27,6 +27,8 @@ func TestAppKindResolverResolveAppType(t *testing.T) {
 		{name: "客服应用", appType: string(domain.AppTypeAICC), want: domain.AppTypeAICC},
 		// 未知持久化类型不能被默认为普通应用，必须显式失败。
 		{name: "未知类型", appType: "unknown", wantErr: true},
+		// 空类型同样没有 namespace 归属，必须 fail-closed，不能依赖数据库默认值兜底。
+		{name: "空类型", appType: "", wantErr: true},
 	}
 
 	for _, testCase := range testCases {
