@@ -399,6 +399,23 @@ func TestAICCPublicSendMessageDoesNotRequeueFailedTaskWithNewRequiredLead(t *tes
 	assert.Empty(t, store.requeuedMessageID)
 }
 
+// TestAICCPublicSendMessageDoesNotRequeueFailedTaskWithNewSensitiveWord 覆盖内容策略变化：
+// 已失败消息重试时必须校验数据库中持久化的原消息，不能由本次请求携带的无害文本绕过新增敏感词规则。
+func TestAICCPublicSendMessageDoesNotRequeueFailedTaskWithNewSensitiveWord(t *testing.T) {
+	store := newAICCPublicMessageStore()
+	store.settings.SensitiveWordsJson = []byte(`["违禁词"]`)
+	store.messages = []sqlc.AiccMessage{{ID: "message-1", SessionID: "session-1", Direction: domain.AICCMessageDirectionVisitor, ClientMessageID: null.StringFrom("retry-client"), TextContent: null.StringFrom("包含违禁词")}}
+	store.createdTasks = []sqlc.CreateAICCMessageTaskParams{{ID: "task-1", MessageID: "message-1", SessionID: "session-1", AgentID: "agent-1", OrgID: "org-1", AppID: "app-1", RunAfter: aiccPublicTestNow}}
+	store.taskStatus = "failed"
+	service := NewAICCPublicService(store, nil)
+	service.now = func() time.Time { return aiccPublicTestNow }
+
+	_, err := service.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", ClientMessageID: "retry-client", Text: "这是一条无害的新文本"})
+
+	require.ErrorIs(t, err, ErrAICCSensitiveWord)
+	assert.Empty(t, store.requeuedMessageID)
+}
+
 // TestAICCPublicSendMessageConcurrentClientMessageIDReusesLockedTask 覆盖并发幂等边界：
 // 两个请求都在事务外查不到同一消息时，后获得会话锁的请求必须复用先提交的任务，不能暴露唯一键错误。
 func TestAICCPublicSendMessageConcurrentClientMessageIDReusesLockedTask(t *testing.T) {

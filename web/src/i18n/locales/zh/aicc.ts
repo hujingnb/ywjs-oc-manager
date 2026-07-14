@@ -360,6 +360,7 @@ export default {
     busy: '客服正在处理，请稍候。',
     retrying: '服务繁忙，正在稍后重试。',
     failed: '回复失败，请重试。',
+    failedNoRetry: '回复失败。此历史消息无法重试，请重新发送问题。',
     retry: '重试',
     consentTitle: '继续前请确认隐私说明',
     consentButton: '同意并开始',

@@ -360,6 +360,7 @@ export default {
     busy: 'The assistant is working on your message.',
     retrying: 'The service is busy and will retry shortly.',
     failed: 'The reply failed. Please retry.',
+    failedNoRetry: 'The reply failed. This historical message cannot be retried; please send your question again.',
     retry: 'Retry',
     consentTitle: 'Confirm privacy notice before continuing',
     consentButton: 'Agree and start',

@@ -37,8 +37,8 @@
           <div class="bubble">
             <p v-if="message.text">{{ message.text }}</p>
             <img v-if="message.imageUrl" :src="message.imageUrl" :alt="t('aicc.publicChat.uploadedImageAlt')" />
-            <p v-if="message.status" class="message-status">{{ messageStatusText(message.status) }}</p>
-            <n-button v-if="message.status === 'failed' && message.clientMessageId" size="small" secondary @click="retryPendingMessage(message.clientMessageId)">
+            <p v-if="message.status" class="message-status">{{ messageStatusText(message.status, Boolean(message.clientMessageId)) }}</p>
+            <n-button v-if="message.status === 'failed' && message.clientMessageId" size="small" secondary @click="retryPendingMessage(message.pendingKey)">
               {{ t('aicc.publicChat.retry') }}
             </n-button>
           </div>
@@ -148,6 +148,8 @@ interface ChatMessage {
   status?: AICCPublicMessageResult['status']
   // clientMessageId 用于失败占位的手动重试，始终复用首次提交的幂等键。
   clientMessageId?: string
+  // pendingKey 是浏览器内存中的任务索引；旧消息没有幂等键时以消息 ID 继续轮询。
+  pendingKey?: string
 }
 
 interface PendingImage {
@@ -157,7 +159,9 @@ interface PendingImage {
 
 // PendingPublicMessage 保存异步任务重试所需的原始请求数据，避免失败重试重新创建访客气泡或幂等键。
 interface PendingPublicMessage {
-  clientMessageId: string
+  // key 统一作为 pending map 与定时器索引；它不必是可手动重试的 client_message_id。
+  key: string
+  clientMessageId?: string
   placeholderId: string
   text: string
   image?: PendingImage
@@ -305,9 +309,10 @@ async function submitMessage() {
     role: 'assistant',
     status: 'queued',
     clientMessageId,
+    pendingKey: clientMessageId,
     sentAt,
   })
-  pendingPublicMessages.set(clientMessageId, { clientMessageId, placeholderId, text, image: image ?? undefined })
+  pendingPublicMessages.set(clientMessageId, { key: clientMessageId, clientMessageId, placeholderId, text, image: image ?? undefined })
   await scrollToBottom()
   try {
     await sendPendingMessage(clientMessageId)
@@ -323,7 +328,7 @@ async function submitMessage() {
 // sendPendingMessage 首次提交和访客手动重试共用同一条路径，确保 client_message_id 在整个任务生命周期内保持稳定。
 async function sendPendingMessage(clientMessageId: string) {
   const pending = pendingPublicMessages.get(clientMessageId)
-  if (!pending) return
+  if (!pending?.clientMessageId) return
   const token = pending.sessionToken || await ensureSessionReadyForSend()
   pending.sessionToken = token
   if (!pending.imageFileId && pending.image) {
@@ -340,16 +345,18 @@ async function sendPendingMessage(clientMessageId: string) {
 }
 
 // retryPendingMessage 为 failed 状态提供显式恢复入口；复用待处理记录而不是重新插入访客消息。
-async function retryPendingMessage(clientMessageId?: string) {
-  if (!clientMessageId || isSending.value) return
+async function retryPendingMessage(pendingKey?: string) {
+  if (!pendingKey || isSending.value) return
+  const pending = pendingPublicMessages.get(pendingKey)
+  if (!pending?.clientMessageId) return
   errorMessage.value = ''
   isSending.value = true
-  setPendingMessageStatus(clientMessageId, 'queued')
+  setPendingMessageStatus(pendingKey, 'queued')
   try {
-    await sendPendingMessage(clientMessageId)
+    await sendPendingMessage(pendingKey)
   } catch (err) {
     errorMessage.value = publicMessageErrorText(err)
-    setPendingMessageStatus(clientMessageId, 'failed')
+    setPendingMessageStatus(pendingKey, 'failed')
   } finally {
     isSending.value = false
     await scrollToBottom()
@@ -359,7 +366,7 @@ async function retryPendingMessage(clientMessageId?: string) {
 // applyPublicMessageStatus 将后端任务状态映射为唯一的助手占位气泡，并在完成后停止本消息的轮询。
 function applyPublicMessageStatus(pending: PendingPublicMessage, result: AICCPublicMessageResult) {
   // 新建会话或页面卸载已清除该记录时，忽略仍在飞行中的旧请求响应。
-  if (!pendingPublicMessages.has(pending.clientMessageId)) return
+  if (!pendingPublicMessages.has(pending.key)) return
   const status = result.status || 'queued'
   if (status === 'completed') {
     const message = messages.value.find(item => item.id === pending.placeholderId)
@@ -367,16 +374,16 @@ function applyPublicMessageStatus(pending: PendingPublicMessage, result: AICCPub
       message.status = undefined
       message.text = result.text || ''
     }
-    stopMessagePolling(pending.clientMessageId)
-    pendingPublicMessages.delete(pending.clientMessageId)
+    stopMessagePolling(pending.key)
+    pendingPublicMessages.delete(pending.key)
     return
   }
-  setPendingMessageStatus(pending.clientMessageId, status)
+  setPendingMessageStatus(pending.key, status)
   if (status === 'failed') {
-    stopMessagePolling(pending.clientMessageId)
+    stopMessagePolling(pending.key)
     return
   }
-  scheduleMessagePoll(pending.clientMessageId, result.retry_after_seconds)
+  scheduleMessagePoll(pending.key, result.retry_after_seconds)
 }
 
 // setPendingMessageStatus 只更新关联占位，不影响同一会话内其他正在处理的消息。
@@ -387,43 +394,43 @@ function setPendingMessageStatus(clientMessageId: string, status: AICCPublicMess
 }
 
 // scheduleMessagePoll 根据服务端 retry_after_seconds 安排下次查询；未指定时采用两秒默认间隔。
-function scheduleMessagePoll(clientMessageId: string, retryAfterSeconds?: number) {
-  stopMessagePolling(clientMessageId)
+function scheduleMessagePoll(pendingKey: string, retryAfterSeconds?: number) {
+  stopMessagePolling(pendingKey)
   const seconds = retryAfterSeconds ?? aiccPublicDefaultPollSeconds
   const waitMilliseconds = Math.min(aiccPublicMaxPollSeconds, Math.max(aiccPublicMinPollSeconds, seconds)) * 1_000
   const timer = setTimeout(() => {
-    pollTimers.delete(clientMessageId)
-    void pollPendingMessage(clientMessageId)
+    pollTimers.delete(pendingKey)
+    void pollPendingMessage(pendingKey)
   }, waitMilliseconds)
-  pollTimers.set(clientMessageId, timer)
+  pollTimers.set(pendingKey, timer)
 }
 
 // pollPendingMessage 在页面仍存活且任务仍未结束时查询状态，网络瞬时错误保持排队并按默认间隔继续查询。
-async function pollPendingMessage(clientMessageId: string) {
-  const pending = pendingPublicMessages.get(clientMessageId)
+async function pollPendingMessage(pendingKey: string) {
+  const pending = pendingPublicMessages.get(pendingKey)
   if (!isPageActive || !pending?.messageId || !pending.sessionToken) return
   try {
     const result = await fetchAICCPublicMessageStatus(pending.sessionToken, pending.messageId)
-    if (!isPageActive || !pendingPublicMessages.has(clientMessageId)) return
+    if (!isPageActive || !pendingPublicMessages.has(pendingKey)) return
     applyPublicMessageStatus(pending, result)
     await scrollToBottom()
   } catch {
-    if (!isPageActive || !pendingPublicMessages.has(clientMessageId)) return
-    setPendingMessageStatus(clientMessageId, 'retry_wait')
-    scheduleMessagePoll(clientMessageId, aiccPublicDefaultPollSeconds)
+    if (!isPageActive || !pendingPublicMessages.has(pendingKey)) return
+    setPendingMessageStatus(pendingKey, 'retry_wait')
+    scheduleMessagePoll(pendingKey, aiccPublicDefaultPollSeconds)
   }
 }
 
 // stopMessagePolling 清除指定任务的定时器，避免重试或完成后形成重复轮询。
-function stopMessagePolling(clientMessageId: string) {
-  const timer = pollTimers.get(clientMessageId)
+function stopMessagePolling(pendingKey: string) {
+  const timer = pollTimers.get(pendingKey)
   if (timer) clearTimeout(timer)
-  pollTimers.delete(clientMessageId)
+  pollTimers.delete(pendingKey)
 }
 
 // clearAllMessagePolls 在卸载或新建对话时统一释放定时器，防止旧会话回写新页面状态。
 function clearAllMessagePolls() {
-  for (const clientMessageId of pollTimers.keys()) stopMessagePolling(clientMessageId)
+  for (const pendingKey of pollTimers.keys()) stopMessagePolling(pendingKey)
   pendingPublicMessages.clear()
 }
 
@@ -483,37 +490,40 @@ async function restoreSessionMessages(token: string) {
     deferredLeadValues.value = null
   }
   const restored: ChatMessage[] = []
-  const pendingToPoll: Array<{ clientMessageId: string; retryAfterSeconds?: number }> = []
+  const pendingToPoll: Array<{ pendingKey: string; retryAfterSeconds?: number }> = []
   for (const message of detail.messages) {
     const chatMessage = toChatMessage(message)
     if (!chatMessage) continue
     restored.push(chatMessage)
     if (message.direction !== 'visitor' || !isPendingPublicMessageStatus(message.task_status)) continue
-    const clientMessageId = message.client_message_id || ''
+    const clientMessageId = message.client_message_id || undefined
+    const pendingKey = clientMessageId || `message:${message.id}`
     const placeholderId = crypto.randomUUID()
     const pending: PendingPublicMessage = {
+      key: pendingKey,
       clientMessageId,
       placeholderId,
       text: message.text || '',
       messageId: message.id,
       sessionToken: token,
     }
-    // 旧会话没有 client_message_id 时仍展示状态，但不能新建幂等键重试。
-    if (clientMessageId) pendingPublicMessages.set(clientMessageId, pending)
+    // 旧会话没有 client_message_id 时仍可按消息 ID 轮询，但不能凭空新建幂等键进行手动重试。
+    pendingPublicMessages.set(pendingKey, pending)
     restored.push({
       id: placeholderId,
       role: 'assistant',
       status: message.task_status,
-      clientMessageId: clientMessageId || undefined,
+      clientMessageId,
+      pendingKey,
       sentAt: message.created_at,
     })
-    if (clientMessageId && message.task_status !== 'failed') {
-      pendingToPoll.push({ clientMessageId, retryAfterSeconds: message.retry_after_seconds })
+    if (message.task_status !== 'failed') {
+      pendingToPoll.push({ pendingKey, retryAfterSeconds: message.retry_after_seconds })
     }
   }
   if (restored.length > 0) {
     messages.value = restored
-    for (const pending of pendingToPoll) scheduleMessagePoll(pending.clientMessageId, pending.retryAfterSeconds)
+    for (const pending of pendingToPoll) scheduleMessagePoll(pending.pendingKey, pending.retryAfterSeconds)
     return
   }
   resetMessagesToGreeting()
@@ -535,10 +545,10 @@ function toChatMessage(message: AICCMessage): ChatMessage | null {
 }
 
 // messageStatusText 将运行时状态转换成访客可理解的提示，避免把内部任务枚举直接展示到公开页。
-function messageStatusText(status: AICCPublicMessageResult['status']): string {
+function messageStatusText(status: AICCPublicMessageResult['status'], canRetry = true): string {
   if (status === 'processing') return t('aicc.publicChat.busy')
   if (status === 'retry_wait') return t('aicc.publicChat.retrying')
-  if (status === 'failed') return t('aicc.publicChat.failed')
+  if (status === 'failed') return canRetry ? t('aicc.publicChat.failed') : t('aicc.publicChat.failedNoRetry')
   return t('aicc.publicChat.queued')
 }
 

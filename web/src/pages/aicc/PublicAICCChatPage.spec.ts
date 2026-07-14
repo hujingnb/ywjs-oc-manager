@@ -287,6 +287,51 @@ describe('PublicAICCChatPage', () => {
     }
   })
 
+  // 场景：旧会话中的待处理任务缺少 client_message_id 时，仍须按消息 ID 恢复轮询，不能永久停留在排队提示。
+  it('restores and polls a legacy queued message without a client message ID', async () => {
+    vi.useFakeTimers()
+    apiState.readStoredSession.mockReturnValue('stored-session-token')
+    apiState.fetchSession.mockResolvedValue({
+      resolution_status: 'unknown',
+      messages: [
+        { id: 'legacy-message-1', direction: 'visitor', text: '旧会话中的问题', task_status: 'queued' },
+      ],
+    })
+    apiState.fetchMessageStatus.mockResolvedValue({ message_id: 'legacy-message-1', status: 'completed', text: '旧会话的回复' })
+    try {
+      const wrapper = mountPublicChat()
+      await flushPromises()
+
+      expect(wrapper.text()).toContain('旧会话中的问题')
+      expect(apiState.sendMessage).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(2_000)
+      await flushPromises()
+
+      expect(apiState.fetchMessageStatus).toHaveBeenCalledWith('stored-session-token', 'legacy-message-1')
+      expect(wrapper.text()).toContain('旧会话的回复')
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // 场景：旧失败任务没有幂等键时，应明确提示访客重新发送，且不展示无法执行的重试按钮。
+  it('explains that a legacy failed message without a client message ID cannot be retried', async () => {
+    apiState.readStoredSession.mockReturnValue('stored-session-token')
+    apiState.fetchSession.mockResolvedValue({
+      resolution_status: 'unknown',
+      messages: [
+        { id: 'legacy-message-2', direction: 'visitor', text: '旧失败问题', task_status: 'failed' },
+      ],
+    })
+    const wrapper = mountPublicChat()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('此历史消息无法重试，请重新发送问题。')
+    expect(wrapper.findAll('button').some(button => button.text().includes('重试'))).toBe(false)
+    wrapper.unmount()
+  })
+
   // 场景：刷新恢复失败任务时，必须保留原 client_message_id 并重新展示访客可点击的重试操作。
   it('restores a failed message with a retry action after the public chat page refreshes', async () => {
     apiState.readStoredSession.mockReturnValue('stored-session-token')

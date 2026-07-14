@@ -464,6 +464,28 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 			return AICCPublicMessageResult{}, err
 		}
 	}
+	if clientMessageID != "" {
+		existing, err := s.store.GetAICCMessageByClientMessageID(ctx, sqlc.GetAICCMessageByClientMessageIDParams{SessionID: session.ID, Direction: domain.AICCMessageDirectionVisitor, ClientMessageID: nullStr(clientMessageID)})
+		if err == nil {
+			// 幂等键命中后，重试请求的正文和图片均不参与决策；dispatcher 始终消费已持久化的访客消息。
+			existingText := strings.TrimSpace(existing.TextContent.String)
+			existingImageObjectKey := strings.TrimSpace(existing.ImageObjectKey.String)
+			if containsAICCSensitiveWord(existingText, settings.SensitiveWords) {
+				return AICCPublicMessageResult{}, ErrAICCSensitiveWord
+			}
+			if existingText == "" && existingImageObjectKey == "" {
+				return AICCPublicMessageResult{}, fmt.Errorf("%w: 已保存消息内容不能为空", ErrInvalidArgument)
+			}
+			// 已完成当前会话、风控与持久化内容校验后，才允许终态失败任务恢复；其他状态继续保持幂等读取。
+			if _, requeueErr := s.store.RequeueFailedAICCMessageTask(ctx, existing.ID); requeueErr != nil {
+				return AICCPublicMessageResult{}, fmt.Errorf("恢复失败的 AICC 消息任务失败: %w", requeueErr)
+			}
+			return s.aiccMessageTaskResult(ctx, existing.ID)
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 幂等消息失败: %w", err)
+		}
+	}
 	if containsAICCSensitiveWord(input.Text, settings.SensitiveWords) {
 		return AICCPublicMessageResult{}, ErrAICCSensitiveWord
 	}
@@ -481,19 +503,6 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 	}
 	if text == "" && imageID == "" {
 		return AICCPublicMessageResult{}, fmt.Errorf("%w: 消息内容不能为空", ErrInvalidArgument)
-	}
-	if clientMessageID != "" {
-		existing, err := s.store.GetAICCMessageByClientMessageID(ctx, sqlc.GetAICCMessageByClientMessageIDParams{SessionID: session.ID, Direction: domain.AICCMessageDirectionVisitor, ClientMessageID: nullStr(clientMessageID)})
-		if err == nil {
-			// 已完成当前会话、风控与内容校验后，才允许终态失败任务恢复；其他状态继续保持幂等读取。
-			if _, requeueErr := s.store.RequeueFailedAICCMessageTask(ctx, existing.ID); requeueErr != nil {
-				return AICCPublicMessageResult{}, fmt.Errorf("恢复失败的 AICC 消息任务失败: %w", requeueErr)
-			}
-			return s.aiccMessageTaskResult(ctx, existing.ID)
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 幂等消息失败: %w", err)
-		}
 	}
 	contentType := domain.AICCMessageContentTypeText
 	if imageID != "" && text == "" {
