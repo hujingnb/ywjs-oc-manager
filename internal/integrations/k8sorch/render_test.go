@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/yaml"
@@ -69,12 +70,54 @@ func TestRenderDeploymentAICC(t *testing.T) {
 	assert.NotNil(t, containerByName(dep, "hermes"))
 	assert.NotNil(t, containerByName(dep, "oc-ops"))
 	assert.Nil(t, containerByName(dep, "s3-sync"))
+	// AICC 可以弹性扩容，更新时必须保留旧副本直至新副本就绪，避免客服会话入口中断。
+	require.NotNil(t, dep.Spec.Strategy.RollingUpdate)
+	assert.Equal(t, appsv1.RollingUpdateDeploymentStrategyType, dep.Spec.Strategy.Type)
+	assert.Equal(t, intstr.FromInt(0), *dep.Spec.Strategy.RollingUpdate.MaxUnavailable)
+	assert.Equal(t, intstr.FromInt(1), *dep.Spec.Strategy.RollingUpdate.MaxSurge)
+	require.NotNil(t, dep.Spec.Template.Spec.TerminationGracePeriodSeconds)
+	assert.Equal(t, int64(90), *dep.Spec.Template.Spec.TerminationGracePeriodSeconds)
+	for _, c := range dep.Spec.Template.Spec.Containers {
+		// preStop 等待 Service endpoints 传播后再终止，保证 Kubernetes 层面的优雅摘流。
+		require.NotNil(t, c.Lifecycle)
+		require.NotNil(t, c.Lifecycle.PreStop)
+		require.NotNil(t, c.Lifecycle.PreStop.Sleep)
+		assert.Equal(t, int64(10), c.Lifecycle.PreStop.Sleep.Seconds)
+	}
+	// HPA 的 utilization 指标要求每个常驻容器都有资源 request，否则该 Pod 的指标会变为 unknown。
+	ocops := containerByName(dep, "oc-ops")
+	require.NotNil(t, ocops)
+	assert.NotZero(t, ocops.Resources.Requests.Cpu().MilliValue())
+	assert.NotZero(t, ocops.Resources.Requests.Memory().Value())
 	for _, c := range append(dep.Spec.Template.Spec.InitContainers, dep.Spec.Template.Spec.Containers...) {
 		assert.Nil(t, envByName(&c, "AWS_ACCESS_KEY_ID"), "%s 不得注入 AWS 凭证", c.Name)
 		assert.Nil(t, envByName(&c, "AWS_SECRET_ACCESS_KEY"), "%s 不得注入 AWS 凭证", c.Name)
 		assert.Nil(t, envByName(&c, "AWS_ENDPOINT_URL"), "%s 不得注入 AWS/S3 endpoint", c.Name)
 	}
 	assertGolden(t, "deployment-aicc.golden.yaml", dep)
+}
+
+// TestRenderAICCHPA 验证 AICC HPA 固定保留一个副本，并按 CPU、内存负载伸缩与延迟缩容。
+func TestRenderAICCHPA(t *testing.T) {
+	hpa := RenderAICCHPA(testSpec(), "oc-aicc")
+
+	assert.Equal(t, "app-a1", hpa.Name)
+	assert.Equal(t, "oc-aicc", hpa.Namespace)
+	require.NotNil(t, hpa.Spec.MinReplicas)
+	assert.Equal(t, int32(1), *hpa.Spec.MinReplicas)
+	assert.Equal(t, int32(10), hpa.Spec.MaxReplicas)
+	assert.Equal(t, autoscalingv2.CrossVersionObjectReference{APIVersion: "apps/v1", Kind: "Deployment", Name: "app-a1"}, hpa.Spec.ScaleTargetRef)
+	require.Len(t, hpa.Spec.Metrics, 2)
+	assert.Equal(t, corev1.ResourceCPU, hpa.Spec.Metrics[0].Resource.Name)
+	assert.Equal(t, autoscalingv2.UtilizationMetricType, hpa.Spec.Metrics[0].Resource.Target.Type)
+	assert.Equal(t, int32(70), *hpa.Spec.Metrics[0].Resource.Target.AverageUtilization)
+	assert.Equal(t, corev1.ResourceMemory, hpa.Spec.Metrics[1].Resource.Name)
+	assert.Equal(t, autoscalingv2.UtilizationMetricType, hpa.Spec.Metrics[1].Resource.Target.Type)
+	assert.Equal(t, int32(75), *hpa.Spec.Metrics[1].Resource.Target.AverageUtilization)
+	require.NotNil(t, hpa.Spec.Behavior)
+	require.NotNil(t, hpa.Spec.Behavior.ScaleDown)
+	require.NotNil(t, hpa.Spec.Behavior.ScaleDown.StabilizationWindowSeconds)
+	assert.Equal(t, int32(600), *hpa.Spec.Behavior.ScaleDown.StabilizationWindowSeconds)
 }
 
 // TestRenderDeploymentOmitsEmptyImagePullSecret 覆盖本地公开镜像：空 secret 不能渲染为无效列表项。

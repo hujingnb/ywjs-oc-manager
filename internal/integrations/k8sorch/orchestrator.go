@@ -1,6 +1,6 @@
 // Package k8sorch 提供 k8s 原生的 app 编排抽象，替代 docker 形状的 runtime.Adapter。
-// app = 一个 Deployment(replicas=1, Recreate) + Service(oc-ops) + Secret(control-token)，
-// manager 按 appID 确定性命名（app-<id> / app-<id>-ocops / app-<id>-token）寻址。
+// 普通 app = 一个 Deployment(replicas=1, Recreate) + Service(oc-ops) + Secret(control-token)；
+// AICC 额外有 HPA，并使用可用性优先的滚动更新。manager 按 appID 确定性命名寻址。
 package k8sorch
 
 import (

@@ -4,6 +4,7 @@ import (
 	"oc-manager/internal/domain"
 
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -14,6 +15,7 @@ import (
 func deploymentName(appID string) string { return "app-" + appID }
 func serviceName(appID string) string    { return "app-" + appID + "-ocops" }
 func secretName(appID string) string     { return "app-" + appID + "-token" }
+func hpaName(appID string) string        { return deploymentName(appID) }
 
 // appLabels 是资源 ObjectMeta 与 pod template 的完整 label（含分组维度 part-of）。
 func appLabels(appID string) map[string]string {
@@ -63,6 +65,42 @@ func RenderService(spec AppSpec, namespace string) *corev1.Service {
 		},
 	}
 }
+
+// RenderAICCHPA 渲染 AICC 应用的 autoscaling/v2 HPA。最少保留一个副本维持客服入口，
+// 缩容稳定窗口避免瞬时负载下降时过快回收仍在处理会话的 Pod。
+func RenderAICCHPA(spec AppSpec, namespace string) *autoscalingv2.HorizontalPodAutoscaler {
+	minReplicas := int32(1)
+	stabilizationWindowSeconds := int32(600)
+	return &autoscalingv2.HorizontalPodAutoscaler{
+		ObjectMeta: metav1.ObjectMeta{Name: hpaName(spec.AppID), Namespace: namespace, Labels: appLabels(spec.AppID)},
+		Spec: autoscalingv2.HorizontalPodAutoscalerSpec{
+			ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{
+				APIVersion: "apps/v1",
+				Kind:       "Deployment",
+				Name:       deploymentName(spec.AppID),
+			},
+			MinReplicas: &minReplicas,
+			// MaxReplicas 是 API 必填项。十个副本限制单个客服应用的突发资源占用。
+			MaxReplicas: 10,
+			Metrics: []autoscalingv2.MetricSpec{
+				{Type: autoscalingv2.ResourceMetricSourceType, Resource: &autoscalingv2.ResourceMetricSource{
+					Name:   corev1.ResourceCPU,
+					Target: autoscalingv2.MetricTarget{Type: autoscalingv2.UtilizationMetricType, AverageUtilization: int32Ptr(70)},
+				}},
+				{Type: autoscalingv2.ResourceMetricSourceType, Resource: &autoscalingv2.ResourceMetricSource{
+					Name:   corev1.ResourceMemory,
+					Target: autoscalingv2.MetricTarget{Type: autoscalingv2.UtilizationMetricType, AverageUtilization: int32Ptr(75)},
+				}},
+			},
+			Behavior: &autoscalingv2.HorizontalPodAutoscalerBehavior{
+				ScaleDown: &autoscalingv2.HPAScalingRules{StabilizationWindowSeconds: &stabilizationWindowSeconds},
+			},
+		},
+	}
+}
+
+// int32Ptr 为 HPA 内嵌可选字段构造独立指针，避免多个指标意外共享可变地址。
+func int32Ptr(v int32) *int32 { return &v }
 
 // RenderDeployment 渲染 app Deployment（replicas=1, Recreate）。普通应用使用 restore 与
 // s3-sync 持久化运行时数据；AICC 使用 oc-bootstrap 初始化且不挂载 S3 同步 sidecar。
@@ -198,6 +236,34 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 			},
 		})
 	}
+	strategy := appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
+	var terminationGracePeriodSeconds *int64
+	if domain.IsAICCAppType(spec.AppType) {
+		// AICC 允许 HPA 同时保有多副本；滚动更新中旧副本持续服务至新副本 Ready。
+		maxUnavailable, maxSurge := intstr.FromInt(0), intstr.FromInt(1)
+		strategy = appsv1.DeploymentStrategy{
+			Type: appsv1.RollingUpdateDeploymentStrategyType,
+			RollingUpdate: &appsv1.RollingUpdateDeployment{
+				MaxUnavailable: &maxUnavailable,
+				MaxSurge:       &maxSurge,
+			},
+		}
+		grace := int64(90)
+		terminationGracePeriodSeconds = &grace
+		for i := range containers {
+			if containers[i].Name == "oc-ops" {
+				// HPA 的 CPU/内存 utilization 要求 Pod 内所有常驻容器都有对应 request；
+				// oc-ops 为轻量控制 sidecar，使用固定小 request，避免放大客服主进程配额。
+				containers[i].Resources.Requests = corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("100m"),
+					corev1.ResourceMemory: resource.MustParse("128Mi"),
+				}
+			}
+			// 不调用容器内未定义的业务 drain 命令；仅等待 endpoints 摘除传播，
+			// 随后由 Kubernetes 在 90 秒终止窗口内发送 SIGTERM 并回收 Pod。
+			containers[i].Lifecycle = &corev1.Lifecycle{PreStop: &corev1.LifecycleHandler{Sleep: &corev1.SleepAction{Seconds: 10}}}
+		}
+	}
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      deploymentName(spec.AppID),
@@ -206,12 +272,13 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
-			// Recreate 策略：旧 pod 先完全停止再启新 pod，避免数据卷冲突。
-			Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType},
+			// 普通应用保留 Recreate 避免数据卷冲突；AICC 使用上方的零不可用滚动策略。
+			Strategy: strategy,
 			Selector: &metav1.LabelSelector{MatchLabels: selectorLabels(spec.AppID)},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: appLabels(spec.AppID)},
 				Spec: corev1.PodSpec{
+					TerminationGracePeriodSeconds: terminationGracePeriodSeconds,
 					// imagePullSecrets 用于拉取私有镜像仓库。
 					ImagePullSecrets: imagePullSecrets,
 					InitContainers:   []corev1.Container{initContainer},

@@ -7,9 +7,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"oc-manager/internal/domain"
 )
 
 // TestEnsureAppCreatesResources 验证 EnsureApp 在空集群创建 Deployment/Service/Secret。
@@ -32,6 +35,45 @@ func TestEnsureAppIdempotent(t *testing.T) {
 	a := NewKubernetesAdapter(cs, "oc-apps")
 	require.NoError(t, a.EnsureApp(context.Background(), testSpec()))
 	require.NoError(t, a.EnsureApp(context.Background(), testSpec()))
+}
+
+// TestEnsureAppAICCCreatesHPA 验证 AICC 适配器会创建指向应用 Deployment 的 HPA，普通应用不创建。
+func TestEnsureAppAICCCreatesHPA(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	a := NewAICCKubernetesAdapter(cs, "oc-aicc")
+	aicc := testSpec()
+	aicc.AppType = domain.AppTypeAICC
+	require.NoError(t, a.EnsureApp(context.Background(), aicc))
+	// 模拟 HPA 已将 Deployment 扩容；后续业务 reconcile 不得把副本数强制写回初始值 1。
+	require.NoError(t, a.Scale(context.Background(), aicc.AppID, 3))
+	// 重复 reconcile 应走 Update 路径并保持幂等，避免 worker 重试时因 HPA 已存在而失败。
+	require.NoError(t, a.EnsureApp(context.Background(), aicc))
+
+	hpa, err := cs.AutoscalingV2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-a1", metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "app-a1", hpa.Spec.ScaleTargetRef.Name)
+	dep, err := cs.AppsV1().Deployments("oc-aicc").Get(context.Background(), "app-a1", metav1.GetOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, dep.Spec.Replicas)
+	assert.Equal(t, int32(3), *dep.Spec.Replicas)
+	normal := NewKubernetesAdapter(cs, "oc-apps")
+	standard := testSpec()
+	standard.AppID = "normal"
+	require.NoError(t, normal.EnsureApp(context.Background(), standard))
+	_, err = cs.AutoscalingV2().HorizontalPodAutoscalers("oc-apps").Get(context.Background(), "app-normal", metav1.GetOptions{})
+	require.Error(t, err)
+	_, err = cs.AutoscalingV2().HorizontalPodAutoscalers("oc-apps").Get(context.Background(), "app-a1", metav1.GetOptions{})
+	require.Error(t, err)
+}
+
+// TestDeleteAICCDeletesHPA 验证删除 AICC 应用时 HPA 一并删除，避免遗留控制器继续调节已删除 Deployment。
+func TestDeleteAICCDeletesHPA(t *testing.T) {
+	cs := fake.NewSimpleClientset(&autoscalingv2.HorizontalPodAutoscaler{ObjectMeta: metav1.ObjectMeta{Name: "app-a1", Namespace: "oc-aicc"}})
+	a := NewAICCKubernetesAdapter(cs, "oc-aicc")
+
+	require.NoError(t, a.Delete(context.Background(), "a1"))
+	_, err := cs.AutoscalingV2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-a1", metav1.GetOptions{})
+	require.Error(t, err)
 }
 
 // TestScale 验证 Scale 改 replicas。
@@ -182,10 +224,10 @@ func TestIsTerminalBad(t *testing.T) {
 		want bool
 	}{
 		{"Ready 正常", AppStatus{Phase: "Running", Ready: true}, false},                        // 就绪：非坏态
-		{"Pending 拉镜像瞬态", AppStatus{Phase: "Pending", Message: "PodInitializing"}, false},     // 启动瞬态：非坏态
+		{"Pending 拉镜像瞬态", AppStatus{Phase: "Pending", Message: "PodInitializing"}, false},    // 启动瞬态：非坏态
 		{"NotFound 真消失", AppStatus{Phase: "NotFound"}, true},                                 // pod/Deployment 消失：坏态
 		{"Failed 终相", AppStatus{Phase: "Failed"}, true},                                      // Failed：坏态
-		{"CrashLoopBackOff", AppStatus{Phase: "Running", Message: "CrashLoopBackOff"}, true},   // 反复崩溃：坏态
+		{"CrashLoopBackOff", AppStatus{Phase: "Running", Message: "CrashLoopBackOff"}, true}, // 反复崩溃：坏态
 		{"重启达阈值", AppStatus{Phase: "Running", RestartCount: 3}, true},                        // 重启 >=3：坏态
 		{"重启未达阈值", AppStatus{Phase: "Running", RestartCount: 2}, false},                      // 重启 <3：非坏态
 	}

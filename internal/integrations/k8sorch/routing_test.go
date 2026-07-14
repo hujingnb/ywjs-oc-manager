@@ -22,7 +22,7 @@ func (r routingResolver) ResolveAppType(_ context.Context, id string) (domain.Ap
 // TestRoutingOrchestratorEnsureAppSeparatesNamespaces 验证两类应用不会在对方 namespace 创建资源。
 func TestRoutingOrchestratorEnsureAppSeparatesNamespaces(t *testing.T) {
 	cs := fake.NewSimpleClientset()
-	r := NewRoutingOrchestrator(NewKubernetesAdapter(cs, "oc-apps"), NewKubernetesAdapter(cs, "oc-aicc"), routingResolver{})
+	r := NewRoutingOrchestrator(NewKubernetesAdapter(cs, "oc-apps"), NewAICCKubernetesAdapter(cs, "oc-aicc"), routingResolver{})
 	normal := testSpec()
 	normal.AppID = "normal"
 	normal.AppType = domain.AppTypeStandard
@@ -36,6 +36,11 @@ func TestRoutingOrchestratorEnsureAppSeparatesNamespaces(t *testing.T) {
 	_, err = cs.AppsV1().Deployments("oc-aicc").Get(context.Background(), "app-aicc", metav1.GetOptions{})
 	require.NoError(t, err)
 	_, err = cs.AppsV1().Deployments("oc-apps").Get(context.Background(), "app-aicc", metav1.GetOptions{})
+	require.Error(t, err)
+	// AICC 的 HPA 也必须随路由写入专用 namespace，不能落在普通应用 namespace。
+	_, err = cs.AutoscalingV2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-aicc", metav1.GetOptions{})
+	require.NoError(t, err)
+	_, err = cs.AutoscalingV2().HorizontalPodAutoscalers("oc-apps").Get(context.Background(), "app-aicc", metav1.GetOptions{})
 	require.Error(t, err)
 }
 

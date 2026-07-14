@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"time"
 
+	"oc-manager/internal/domain"
+
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,6 +21,8 @@ import (
 type KubernetesAdapter struct {
 	client    kubernetes.Interface
 	namespace string
+	// aicc 表示该适配器专供 AICC namespace，负责管理 AICC 独有 HPA 生命周期。
+	aicc bool
 }
 
 // NewKubernetesAdapter 构造 adapter（client 可注入 fake 便于单测）。
@@ -25,9 +30,14 @@ func NewKubernetesAdapter(client kubernetes.Interface, namespace string) *Kubern
 	return &KubernetesAdapter{client: client, namespace: namespace}
 }
 
+// NewAICCKubernetesAdapter 构造 AICC 专用 adapter；除基础资源外还会创建和删除 HPA。
+func NewAICCKubernetesAdapter(client kubernetes.Interface, namespace string) *KubernetesAdapter {
+	return &KubernetesAdapter{client: client, namespace: namespace, aicc: true}
+}
+
 var _ Orchestrator = (*KubernetesAdapter)(nil)
 
-// EnsureApp 幂等 apply Secret → Service → Deployment（先建依赖后建主体）。
+// EnsureApp 幂等 apply Secret → Service → Deployment；AICC adapter 在 Deployment 存在后再 apply HPA。
 // EnsureApp 是全量 reconcile，会把 replicas 重置回 1（创建/换镜像重启用）；暂停 app 用 Scale(0) 而非 EnsureApp。
 func (a *KubernetesAdapter) EnsureApp(ctx context.Context, spec AppSpec) error {
 	if err := a.applySecret(ctx, RenderSecret(spec, a.namespace)); err != nil {
@@ -36,10 +46,33 @@ func (a *KubernetesAdapter) EnsureApp(ctx context.Context, spec AppSpec) error {
 	if err := a.applyService(ctx, RenderService(spec, a.namespace)); err != nil {
 		return err
 	}
-	return a.applyDeployment(ctx, RenderDeployment(spec, a.namespace))
+	if err := a.applyDeployment(ctx, RenderDeployment(spec, a.namespace), a.aicc && domain.IsAICCAppType(spec.AppType)); err != nil {
+		return err
+	}
+	if a.aicc && domain.IsAICCAppType(spec.AppType) {
+		return a.applyHPA(ctx, RenderAICCHPA(spec, a.namespace))
+	}
+	return nil
 }
 
-func (a *KubernetesAdapter) applyDeployment(ctx context.Context, d *appsv1.Deployment) error {
+// applyHPA 以 Get→Create/Update 方式幂等收敛 HPA，保留 apiserver 分配的 ResourceVersion。
+func (a *KubernetesAdapter) applyHPA(ctx context.Context, h *autoscalingv2.HorizontalPodAutoscaler) error {
+	api := a.client.AutoscalingV2().HorizontalPodAutoscalers(a.namespace)
+	existing, err := api.Get(ctx, h.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		_, cerr := api.Create(ctx, h, metav1.CreateOptions{})
+		return wrapK8s("创建 HPA", cerr)
+	}
+	if err != nil {
+		return wrapK8s("查询 HPA", err)
+	}
+	h.ResourceVersion = existing.ResourceVersion
+	_, uerr := api.Update(ctx, h, metav1.UpdateOptions{})
+	return wrapK8s("更新 HPA", uerr)
+}
+
+// applyDeployment 全量收敛 Deployment 模板；AICC 由 HPA 管理副本数，更新时必须保留控制器当前值。
+func (a *KubernetesAdapter) applyDeployment(ctx context.Context, d *appsv1.Deployment, preserveReplicas bool) error {
 	api := a.client.AppsV1().Deployments(a.namespace)
 	existing, err := api.Get(ctx, d.Name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
@@ -50,6 +83,10 @@ func (a *KubernetesAdapter) applyDeployment(ctx context.Context, d *appsv1.Deplo
 		return wrapK8s("查询 Deployment", err)
 	}
 	d.ResourceVersion = existing.ResourceVersion
+	if preserveReplicas {
+		// HPA 的 scale 子资源会异步调节 replicas；业务配置变更不能抢回初始副本数。
+		d.Spec.Replicas = existing.Spec.Replicas
+	}
 	_, uerr := api.Update(ctx, d, metav1.UpdateOptions{})
 	return wrapK8s("更新 Deployment", uerr)
 }
@@ -166,9 +203,14 @@ func (a *KubernetesAdapter) PatchSecretKeys(ctx context.Context, appID string, s
 	return wrapK8s("patch Secret keys", err)
 }
 
-// Delete 删除三资源（NotFound 视为成功）。
+// Delete 删除 app 资源；AICC 专用 adapter 先删除 HPA，避免控制器继续写入正在删除的 Deployment。
 func (a *KubernetesAdapter) Delete(ctx context.Context, appID string) error {
 	del := metav1.DeleteOptions{}
+	if a.aicc {
+		if err := a.client.AutoscalingV2().HorizontalPodAutoscalers(a.namespace).Delete(ctx, hpaName(appID), del); err != nil && !apierrors.IsNotFound(err) {
+			return wrapK8s("删除 HPA", err)
+		}
+	}
 	if err := a.client.AppsV1().Deployments(a.namespace).Delete(ctx, deploymentName(appID), del); err != nil && !apierrors.IsNotFound(err) {
 		return wrapK8s("删除 Deployment", err)
 	}

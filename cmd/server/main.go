@@ -225,7 +225,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			return fmt.Errorf("初始化 k8s clientset 失败: %w", err)
 		}
 		normalOrch = k8sorch.NewKubernetesAdapter(cs, cfg.Kubernetes.Namespace)
-		aiccOrch := k8sorch.NewKubernetesAdapter(cs, cfg.Kubernetes.AICCNamespace)
+		aiccOrch := k8sorch.NewAICCKubernetesAdapter(cs, cfg.Kubernetes.AICCNamespace)
 		orch = k8sorch.NewRoutingOrchestrator(normalOrch, aiccOrch, appKindResolver{store: dbStore.Queries})
 	}
 	// k8sInitCfg 供 app_initialize 渲染 AppSpec 使用，从 cfg.Kubernetes 提取最小子集。
