@@ -207,7 +207,8 @@ LEFT JOIN aicc_message_tasks AS processing
  AND processing.status = 'processing'
 SET status = 'processing',
     lease_token = sqlc.arg(lease_token),
-    lease_expires_at = sqlc.arg(lease_expires_at),
+    -- 初次领取与续租都以数据库时间计算，避免 worker 时钟漂移产生错误过期时间。
+    lease_expires_at = DATE_ADD(NOW(6), INTERVAL 30 SECOND),
     attempts = attempts + 1,
     updated_at = NOW(6)
 WHERE task.id = sqlc.arg(id)

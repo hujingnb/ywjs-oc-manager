@@ -11,6 +11,8 @@ import (
 func TestAICCMessageTaskQueriesStopAtMaxAttempts(t *testing.T) {
 	// 租约前必须拒绝已耗尽次数的任务，不能让 attempts 在 max_attempts 之后继续增长。
 	assert.Contains(t, normalizedSQL(leaseAICCMessageTask), "task.attempts < task.max_attempts")
+	// 初次租约必须使用数据库 NOW(6) 计算，避免 worker 本地时钟漂移造成过早回收或重复执行。
+	assert.Contains(t, normalizedSQL(leaseAICCMessageTask), "lease_expires_at = date_add(now(6), interval 30 second)")
 
 	// worker 请求重试时，达到边界的 processing 任务必须直接结束为 failed，并保留本次错误信息。
 	assert.Contains(t, normalizedSQL(retryAICCMessageTask), "case when attempts >= max_attempts then 'failed' else 'retry_wait' end")

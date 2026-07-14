@@ -1062,7 +1062,8 @@ LEFT JOIN aicc_message_tasks AS processing
  AND processing.status = 'processing'
 SET status = 'processing',
     lease_token = ?,
-    lease_expires_at = ?,
+    -- 初次领取与续租都以数据库时间计算，避免 worker 时钟漂移产生错误过期时间。
+    lease_expires_at = DATE_ADD(NOW(6), INTERVAL 30 SECOND),
     attempts = attempts + 1,
     updated_at = NOW(6)
 WHERE task.id = ?
@@ -1073,14 +1074,13 @@ WHERE task.id = ?
 `
 
 type LeaseAICCMessageTaskParams struct {
-	LeaseToken     null.String `db:"lease_token" json:"lease_token"`
-	LeaseExpiresAt null.Time   `db:"lease_expires_at" json:"lease_expires_at"`
-	ID             string      `db:"id" json:"id"`
+	LeaseToken null.String `db:"lease_token" json:"lease_token"`
+	ID         string      `db:"id" json:"id"`
 }
 
 // status、尝试上限、到期时间和会话无 processing 任务均在同一 UPDATE 中判断，避免 dispatcher 先读后写造成重复租约。
 func (q *Queries) LeaseAICCMessageTask(ctx context.Context, arg LeaseAICCMessageTaskParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, leaseAICCMessageTask, arg.LeaseToken, arg.LeaseExpiresAt, arg.ID)
+	result, err := q.db.ExecContext(ctx, leaseAICCMessageTask, arg.LeaseToken, arg.ID)
 	if err != nil {
 		return 0, err
 	}

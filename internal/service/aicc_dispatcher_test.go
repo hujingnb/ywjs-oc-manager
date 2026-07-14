@@ -15,26 +15,31 @@ import (
 )
 
 type aiccDispatcherStoreFake struct {
-	task      sqlc.AiccMessageTask
-	visitor   sqlc.AiccMessage
-	agent     sqlc.AiccAgent
-	leased    sqlc.LeaseAICCMessageTaskParams
-	retry     sqlc.RetryAICCMessageTaskParams
-	failed    sqlc.FailAICCMessageTaskParams
-	assistant []sqlc.CreateAICCMessageParams
-	complete  int64
-	recover   int64
-	retryRows int64
-	failRows  int64
-	lostRetry bool
-	lostFail  bool
-	renews    int
-	leaseMu   sync.Mutex
-	exclusive bool
-	claimed   bool
-	leaseRows int64
-	leaseErr  error
-	unclaimed bool
+	task       sqlc.AiccMessageTask
+	visitor    sqlc.AiccMessage
+	agent      sqlc.AiccAgent
+	leased     sqlc.LeaseAICCMessageTaskParams
+	retry      sqlc.RetryAICCMessageTaskParams
+	failed     sqlc.FailAICCMessageTaskParams
+	assistant  []sqlc.CreateAICCMessageParams
+	complete   int64
+	recover    int64
+	retryRows  int64
+	failRows   int64
+	lostRetry  bool
+	lostFail   bool
+	renews     int
+	leaseMu    sync.Mutex
+	exclusive  bool
+	claimed    bool
+	leaseNow   func() time.Time
+	expiresAt  time.Time
+	leaseCalls int
+	renewed    chan struct{}
+	blockRenew chan struct{}
+	leaseRows  int64
+	leaseErr   error
+	unclaimed  bool
 }
 
 func (s *aiccDispatcherStoreFake) GetAICCMessageByID(context.Context, string) (sqlc.AiccMessage, error) {
@@ -46,11 +51,15 @@ func (s *aiccDispatcherStoreFake) GetAICCAgent(context.Context, string) (sqlc.Ai
 func (s *aiccDispatcherStoreFake) LeaseAICCMessageTask(_ context.Context, p sqlc.LeaseAICCMessageTaskParams) (int64, error) {
 	s.leaseMu.Lock()
 	defer s.leaseMu.Unlock()
+	s.leaseCalls++
 	if s.exclusive && s.claimed {
 		return 0, nil
 	}
 	if s.exclusive {
 		s.claimed = true
+		if s.leaseNow != nil {
+			s.expiresAt = s.leaseNow().Add(aiccTaskLeaseDuration)
+		}
 	}
 	s.leased = p
 	if !s.unclaimed && s.leaseRows == 0 && s.leaseErr == nil {
@@ -84,13 +93,35 @@ func (s *aiccDispatcherStoreFake) FailAICCMessageTask(_ context.Context, p sqlc.
 	}
 	return 1, nil
 }
-func (s *aiccDispatcherStoreFake) RenewAICCMessageTaskLease(_ context.Context, _ sqlc.RenewAICCMessageTaskLeaseParams) (int64, error) {
+func (s *aiccDispatcherStoreFake) RenewAICCMessageTaskLease(ctx context.Context, _ sqlc.RenewAICCMessageTaskLeaseParams) (int64, error) {
+	if s.blockRenew != nil {
+		select {
+		case <-s.blockRenew:
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
+	}
 	s.leaseMu.Lock()
 	defer s.leaseMu.Unlock()
 	s.renews++
+	if s.leaseNow != nil {
+		s.expiresAt = s.leaseNow().Add(aiccTaskLeaseDuration)
+	}
+	if s.renewed != nil {
+		select {
+		case s.renewed <- struct{}{}:
+		default:
+		}
+	}
 	return 1, nil
 }
 func (s *aiccDispatcherStoreFake) RecoverExpiredAICCMessageTaskLeases(context.Context) (int64, error) {
+	s.leaseMu.Lock()
+	defer s.leaseMu.Unlock()
+	if s.exclusive && s.leaseNow != nil && s.claimed && !s.expiresAt.After(s.leaseNow()) {
+		s.claimed = false
+		return 1, nil
+	}
 	return s.recover, nil
 }
 func (s *aiccDispatcherStoreFake) CreateAICCMessage(_ context.Context, p sqlc.CreateAICCMessageParams) error {
@@ -121,15 +152,14 @@ func newAICCDispatcherStoreFake() *aiccDispatcherStoreFake {
 	return &aiccDispatcherStoreFake{task: sqlc.AiccMessageTask{ID: "task", MessageID: "visitor", SessionID: "session", AgentID: "agent", OrgID: "org", AppID: "app", Attempts: 0, MaxAttempts: 5}, visitor: sqlc.AiccMessage{ID: "visitor", TextContent: null.StringFrom("价格")}, agent: sqlc.AiccAgent{ID: "agent"}, complete: 1}
 }
 
-// TestAICCDispatcherLeaseUsesThirtySecondWindow 覆盖 dispatcher 领取任务时的租约边界：
-// 运行中的上游调用必须拥有固定 30 秒所有权，避免多个 worker 重复执行同一访客消息。
-func TestAICCDispatcherLeaseUsesThirtySecondWindow(t *testing.T) {
+// TestAICCDispatcherLeaseUsesDatabaseClock 覆盖 dispatcher 领取任务：
+// 初次租约过期时间必须由 SQL NOW(6) 写入，worker 只提交任务 ID 与租约 token。
+func TestAICCDispatcherLeaseUsesDatabaseClock(t *testing.T) {
 	s := newAICCDispatcherStoreFake()
 	d := NewAICCDispatcher(s, aiccDispatcherTxFake{s}, aiccDispatcherChatFake{reply: "答复"}, nil)
-	now := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
-	d.now = func() time.Time { return now }
 	require.NoError(t, d.Dispatch(context.Background(), s.task))
-	assert.Equal(t, now.Add(30*time.Second), s.leased.LeaseExpiresAt.Time)
+	assert.Equal(t, "task", s.leased.ID)
+	assert.True(t, s.leased.LeaseToken.Valid)
 }
 
 // TestAICCDispatcherHeartbeatKeepsSlowChatLease 覆盖慢速 Hermes 调用：
@@ -163,6 +193,69 @@ func TestAICCDispatcherHeartbeatKeepsSlowChatLease(t *testing.T) {
 	assert.Positive(t, renews)
 	close(finish)
 	require.NoError(t, <-done)
+}
+
+// TestAICCDispatcherHeartbeatPreventsReaperAfterInitialLeaseWindow 覆盖超过初始 30 秒的慢调用：
+// 推进可控数据库时钟并触发 reaper 后，心跳已续租的 processing 任务不能被第二个 worker 重新领取。
+func TestAICCDispatcherHeartbeatPreventsReaperAfterInitialLeaseWindow(t *testing.T) {
+	s := newAICCDispatcherStoreFake()
+	s.exclusive = true
+	s.renewed = make(chan struct{}, 4)
+	started, finish := make(chan struct{}), make(chan struct{})
+	now := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
+	var nowMu sync.Mutex
+	s.leaseNow = func() time.Time { nowMu.Lock(); defer nowMu.Unlock(); return now }
+	oldInterval := aiccLeaseHeartbeatInterval
+	aiccLeaseHeartbeatInterval = time.Millisecond
+	defer func() { aiccLeaseHeartbeatInterval = oldInterval }()
+	d := NewAICCDispatcher(s, aiccDispatcherTxFake{s}, aiccDispatcherChatFake{run: func(ctx context.Context) (string, error) {
+		close(started)
+		select {
+		case <-finish:
+			return "答复", nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}}, nil)
+	done := make(chan error, 1)
+	go func() { done <- d.Dispatch(context.Background(), s.task) }()
+	<-started
+	<-s.renewed
+	nowMu.Lock()
+	now = now.Add(31 * time.Second)
+	nowMu.Unlock()
+	<-s.renewed
+
+	recovered, err := d.RecoverExpiredLeases(context.Background())
+	require.NoError(t, err)
+	assert.Zero(t, recovered)
+	require.NoError(t, d.Dispatch(context.Background(), s.task))
+	assert.Equal(t, 2, s.leaseCalls)
+	close(finish)
+	require.NoError(t, <-done)
+}
+
+// TestAICCDispatcherHeartbeatStopCancelsBlockedRenew 覆盖数据库续租阻塞：
+// stop 必须先取消 context，再等待心跳 goroutine，避免 worker 在关闭时死锁。
+func TestAICCDispatcherHeartbeatStopCancelsBlockedRenew(t *testing.T) {
+	s := newAICCDispatcherStoreFake()
+	s.blockRenew = make(chan struct{})
+	d := NewAICCDispatcher(s, aiccDispatcherTxFake{s}, aiccDispatcherChatFake{}, nil)
+	oldInterval := aiccLeaseHeartbeatInterval
+	aiccLeaseHeartbeatInterval = time.Millisecond
+	defer func() { aiccLeaseHeartbeatInterval = oldInterval }()
+	ctx, cancel := context.WithCancel(context.Background())
+	stop := d.startLeaseHeartbeat(ctx, cancel, "task", "token")
+	time.Sleep(5 * time.Millisecond)
+	done := make(chan error, 1)
+	go func() { done <- stop() }()
+
+	select {
+	case err := <-done:
+		require.Error(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("续租停止发生死锁")
+	}
 }
 
 // TestAICCDispatcherSuccessAtomicallyWritesAssistantAndCompletes 覆盖成功闭环：

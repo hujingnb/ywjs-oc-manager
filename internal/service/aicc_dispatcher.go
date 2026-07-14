@@ -79,7 +79,8 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 		return nil
 	}
 	token := newUUID()
-	claimed, err := d.store.LeaseAICCMessageTask(ctx, sqlc.LeaseAICCMessageTaskParams{ID: task.ID, LeaseToken: null.StringFrom(token), LeaseExpiresAt: null.TimeFrom(d.now().Add(aiccTaskLeaseDuration))})
+	// 租约起止由 SQL 的 NOW(6) 计算，worker 本地时钟只用于熔断和退避，不参与所有权判定。
+	claimed, err := d.store.LeaseAICCMessageTask(ctx, sqlc.LeaseAICCMessageTaskParams{ID: task.ID, LeaseToken: null.StringFrom(token)})
 	if err != nil || claimed == 0 {
 		d.releaseHalfOpenProbe()
 		return err
@@ -197,9 +198,10 @@ func (d *AICCDispatcher) startLeaseHeartbeat(ctx context.Context, cancel context
 	}()
 	return func() error {
 		ticker.Stop()
+		// 先取消续租请求；数据库或网络阻塞时 goroutine 才能从 ctx.Done 退出，避免 stop 死锁。
+		cancel()
 		close(done)
 		<-stopped
-		cancel()
 		select {
 		case err := <-errCh:
 			return err
