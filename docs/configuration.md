@@ -140,7 +140,35 @@ Hermes Agent runtime 容器相关配置。
 
 客服运行时使用 `runtime/hermes/hermes-aicc` 构建上下文和 `oc-manager-aigowork-aicc` 镜像仓库。生产发布使用 `make prod-deploy-aicc-runtime`：该命令构建并推送不可变镜像、更新 `aicc.runtime_image`，随后由 leader-only 协调器逐个重建镜像漂移的客服隐藏应用。回滚时将该配置恢复为上一条不可变镜像引用，协调器按相同顺序逐个回滚。
 
-### 1.12 `agent`
+### 1.12 `k8s.aicc_hpa_business_metrics`
+
+默认不启用。基础 k3s 仅有 metrics-server，AICC HPA 因而只使用 CPU（70%）和内存（75%）
+指标。只有集群已经安装并配置 `external.metrics.k8s.io` adapter，且 adapter 能返回按隐藏应用
+ID 隔离的队列深度与在飞调用 gauge 时，才开启此段：
+
+```yaml
+k8s:
+  aicc_hpa_business_metrics:
+    enabled: true
+    provider: prometheus-adapter # 部署者安装的 external metrics adapter 标识
+    app_label: app_id            # adapter 返回的隐藏 app ID 标签键
+    queue_depth:
+      name: aicc_message_queue_depth
+      target_average_value: "5"
+    inflight:
+      name: aicc_dispatch_inflight
+      target_average_value: "2"
+```
+
+开启后，manager 为每个 AICC HPA 添加两项 External metric，并以
+`app_label=<隐藏 app ID>` selector 查询。adapter 必须把受控 AICC 指标桥接为这两个 metric，
+每条时间序列都携带该标签；队列深度表示等待任务数，在飞表示上游调用数。`provider` 是部署契约
+和排障标识，HPA 实际经 Kubernetes 聚合 API 查询 adapter，manager 不会也不应使用平台管理员
+Bearer token 调用 `/api/v1/platform/aicc/metrics`。两个 metric、正数阈值、provider 和 app_label
+任一缺失都会使 manager 在启动阶段 fail-fast，防止渲染无法工作的 HPA；关闭时不会请求或授权
+custom/external metrics API。
+
+### 1.13 `agent`
 
 manager 侧用于与 runtime-agent 协调的参数（非 runtime-agent 自身配置）。
 
@@ -148,7 +176,7 @@ manager 侧用于与 runtime-agent 协调的参数（非 runtime-agent 自身配
 |---|---|---|---|
 | `heartbeat_interval_seconds` | int | `30` | runtime-agent 注册成功后回写并按此频率上报心跳；manager 以 90 秒阈值判定节点离线（`NodeHealthReconciler`） |
 
-### 1.12 `runtime`
+### 1.14 `runtime`
 
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|

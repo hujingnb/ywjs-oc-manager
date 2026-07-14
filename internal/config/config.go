@@ -330,6 +330,33 @@ type KubernetesConfig struct {
 	// ilinkai.weixin.qq.com）注入 HTTP(S)_PROXY/NO_PROXY。本地 k3d 无外网出口、
 	// 须经宿主代理；生产 pod 有正常出口则全部留空、不注入任何代理 env。
 	PodProxy K8sPodProxy `yaml:"pod_proxy"`
+	// AICCHPABusinessMetrics 是 AICC HPA 的可选 external metrics adapter 合同；默认关闭，
+	// 未安装 custom/external metrics adapter 的集群仍只使用 metrics-server 的 CPU/内存指标。
+	AICCHPABusinessMetrics AICCHPABusinessMetricsConfig `yaml:"aicc_hpa_business_metrics"`
+}
+
+// AICCHPABusinessMetricsConfig 描述 AICC HPA 消费的两类业务负载指标。
+// provider 表示已部署并注册 external.metrics.k8s.io 的适配器身份；manager 不连接该 provider，
+// HPA 由 kube-controller-manager 通过聚合 API 查询它。
+type AICCHPABusinessMetricsConfig struct {
+	// Enabled 是业务指标总开关；false 时即便集群没有 adapter 也能安全运行。
+	Enabled bool `yaml:"enabled"`
+	// Provider 是部署者安装的 adapter 标识（如 prometheus-adapter），用于明确运行契约和排障责任。
+	Provider string `yaml:"provider"`
+	// AppLabel 是 adapter 返回的 hidden app ID 标签键，HPA 用该标签隔离各客服应用的负载。
+	AppLabel string `yaml:"app_label"`
+	// QueueDepth 是待处理消息积压 gauge，突发积压时可先于 CPU 利用率触发扩容。
+	QueueDepth AICCHPAExternalMetricConfig `yaml:"queue_depth"`
+	// Inflight 是正在调用上游的任务 gauge，用于反映尚未体现在 CPU 使用率中的并发压力。
+	Inflight AICCHPAExternalMetricConfig `yaml:"inflight"`
+}
+
+// AICCHPAExternalMetricConfig 是一项由 external.metrics.k8s.io 提供的 HPA 指标及其阈值。
+type AICCHPAExternalMetricConfig struct {
+	// Name 是 adapter 已注册的 metric 名称，必须与 external metrics API 返回的名称完全一致。
+	Name string `yaml:"name"`
+	// TargetAverageValue 是每个 AICC Pod 的平均负载目标，使用 Kubernetes quantity 字符串。
+	TargetAverageValue string `yaml:"target_average_value"`
 }
 
 // K8sPodProxy 是注入 app pod 容器的代理环境变量（留空则不注入对应项）。

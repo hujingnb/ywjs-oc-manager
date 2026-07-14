@@ -10,6 +10,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/yaml"
 
@@ -97,9 +98,9 @@ func TestRenderDeploymentAICC(t *testing.T) {
 	assertGolden(t, "deployment-aicc.golden.yaml", dep)
 }
 
-// TestRenderAICCHPA 验证 AICC HPA 固定保留一个副本，并按 CPU、内存负载伸缩与延迟缩容。
+// TestRenderAICCHPA 验证未配置外部指标适配器时，AICC HPA 只使用集群已提供的 CPU、内存指标。
 func TestRenderAICCHPA(t *testing.T) {
-	hpa := RenderAICCHPA(testSpec(), "oc-aicc")
+	hpa := RenderAICCHPA(testSpec(), "oc-aicc", AICCBusinessMetricsConfig{})
 
 	assert.Equal(t, "app-a1", hpa.Name)
 	assert.Equal(t, "oc-aicc", hpa.Namespace)
@@ -118,6 +119,37 @@ func TestRenderAICCHPA(t *testing.T) {
 	require.NotNil(t, hpa.Spec.Behavior.ScaleDown)
 	require.NotNil(t, hpa.Spec.Behavior.ScaleDown.StabilizationWindowSeconds)
 	assert.Equal(t, int32(600), *hpa.Spec.Behavior.ScaleDown.StabilizationWindowSeconds)
+}
+
+// TestRenderAICCHPAWithBusinessMetrics 验证外部指标适配器已按每个隐藏应用提供安全队列和在飞
+// gauge 时，HPA 会把两类突发信号一并交给 external.metrics.k8s.io 计算副本数。
+func TestRenderAICCHPAWithBusinessMetrics(t *testing.T) {
+	metrics := AICCBusinessMetricsConfig{
+		Provider: "prometheus-adapter",
+		AppLabel: "app_id",
+		QueueDepth: AICCExternalMetricConfig{
+			Name:               "aicc_message_queue_depth",
+			TargetAverageValue: resource.MustParse("5"),
+		},
+		Inflight: AICCExternalMetricConfig{
+			Name:               "aicc_dispatch_inflight",
+			TargetAverageValue: resource.MustParse("2"),
+		},
+	}
+
+	hpa := RenderAICCHPA(testSpec(), "oc-aicc", metrics)
+
+	require.Len(t, hpa.Spec.Metrics, 4)
+	for _, metric := range hpa.Spec.Metrics[2:] {
+		require.NotNil(t, metric.External)
+		assert.Equal(t, autoscalingv2.ExternalMetricSourceType, metric.Type)
+		assert.Equal(t, "a1", metric.External.Metric.Selector.MatchLabels["app_id"])
+		assert.Equal(t, autoscalingv2.AverageValueMetricType, metric.External.Target.Type)
+	}
+	assert.Equal(t, "aicc_message_queue_depth", hpa.Spec.Metrics[2].External.Metric.Name)
+	assert.Equal(t, "5", hpa.Spec.Metrics[2].External.Target.AverageValue.String())
+	assert.Equal(t, "aicc_dispatch_inflight", hpa.Spec.Metrics[3].External.Metric.Name)
+	assert.Equal(t, "2", hpa.Spec.Metrics[3].External.Target.AverageValue.String())
 }
 
 // TestRenderDeploymentOmitsEmptyImagePullSecret 覆盖本地公开镜像：空 secret 不能渲染为无效列表项。

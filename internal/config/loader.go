@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // LoadFile 从 YAML 文件读取配置，并执行启动前校验。
@@ -255,9 +257,43 @@ func (c Config) Validate() error {
 		if strings.TrimSpace(c.Kubernetes.OpsImage) == "" || strings.TrimSpace(c.Kubernetes.BootstrapBaseURL) == "" {
 			return fmt.Errorf("k8s 已启用但 ops_image / bootstrap_base_url 不完整")
 		}
+		if err := c.Kubernetes.AICCHPABusinessMetrics.validate(); err != nil {
+			return err
+		}
 	}
 	// Hermes 时代模板不再需要 {{workspace_dir}} 等 legacy OpenClaw 专属占位符，
 	// 仅需非空即可（上方 missing 检查已覆盖）。
+	return nil
+}
+
+// validate 校验外部业务指标 HPA 合同。HPA 本身只会调用 Kubernetes 聚合 metrics API，
+// 因此必须显式声明 adapter、按 app 隔离标签与完整的队列/在飞信号，不能把管理 JSON 当作指标源。
+func (c AICCHPABusinessMetricsConfig) validate() error {
+	if !c.Enabled {
+		return nil
+	}
+	if strings.TrimSpace(c.Provider) == "" || strings.TrimSpace(c.AppLabel) == "" {
+		return fmt.Errorf("k8s.aicc_hpa_business_metrics 已启用但 provider / app_label 不完整")
+	}
+	if problems := validation.IsQualifiedName(c.AppLabel); len(problems) > 0 {
+		return fmt.Errorf("k8s.aicc_hpa_business_metrics.app_label 非法: %s", strings.Join(problems, "; "))
+	}
+	for _, metric := range []struct {
+		name  string
+		value AICCHPAExternalMetricConfig
+	}{
+		// 队列深度与在飞调用缺一不可，防止只按单一信号在突发期错误扩缩。
+		{name: "queue_depth", value: c.QueueDepth},
+		{name: "inflight", value: c.Inflight},
+	} {
+		if strings.TrimSpace(metric.value.Name) == "" || strings.TrimSpace(metric.value.TargetAverageValue) == "" {
+			return fmt.Errorf("k8s.aicc_hpa_business_metrics.%s.name / target_average_value 不完整", metric.name)
+		}
+		quantity, err := resource.ParseQuantity(metric.value.TargetAverageValue)
+		if err != nil || quantity.Sign() <= 0 {
+			return fmt.Errorf("k8s.aicc_hpa_business_metrics.%s.target_average_value 必须是大于 0 的 Kubernetes quantity", metric.name)
+		}
+	}
 	return nil
 }
 

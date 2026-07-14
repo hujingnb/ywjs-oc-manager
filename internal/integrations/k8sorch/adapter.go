@@ -22,7 +22,8 @@ type KubernetesAdapter struct {
 	client    kubernetes.Interface
 	namespace string
 	// aicc 表示该适配器专供 AICC namespace，负责管理 AICC 独有 HPA 生命周期。
-	aicc bool
+	aicc            bool
+	businessMetrics AICCBusinessMetricsConfig
 }
 
 // NewKubernetesAdapter 构造 adapter（client 可注入 fake 便于单测）。
@@ -33,6 +34,13 @@ func NewKubernetesAdapter(client kubernetes.Interface, namespace string) *Kubern
 // NewAICCKubernetesAdapter 构造 AICC 专用 adapter；除基础资源外还会创建和删除 HPA。
 func NewAICCKubernetesAdapter(client kubernetes.Interface, namespace string) *KubernetesAdapter {
 	return &KubernetesAdapter{client: client, namespace: namespace, aicc: true}
+}
+
+// WithAICCBusinessMetrics 为 AICC adapter 注入已校验的 external metrics 合同。
+// 此方法仅在 server 装配阶段调用；未调用时保持 CPU/内存 HPA，兼容没有 adapter 的集群。
+func (a *KubernetesAdapter) WithAICCBusinessMetrics(metrics AICCBusinessMetricsConfig) *KubernetesAdapter {
+	a.businessMetrics = metrics
+	return a
 }
 
 var _ Orchestrator = (*KubernetesAdapter)(nil)
@@ -50,7 +58,7 @@ func (a *KubernetesAdapter) EnsureApp(ctx context.Context, spec AppSpec) error {
 		return err
 	}
 	if a.aicc && domain.IsAICCAppType(spec.AppType) {
-		return a.applyHPA(ctx, RenderAICCHPA(spec, a.namespace))
+		return a.applyHPA(ctx, RenderAICCHPA(spec, a.namespace, a.businessMetrics))
 	}
 	return nil
 }
@@ -140,7 +148,7 @@ func (a *KubernetesAdapter) Start(ctx context.Context, appID string) error {
 		return err
 	}
 	if a.aicc {
-		if err := a.applyHPA(ctx, RenderAICCHPA(AppSpec{AppID: appID}, a.namespace)); err != nil {
+		if err := a.applyHPA(ctx, RenderAICCHPA(AppSpec{AppID: appID}, a.namespace, a.businessMetrics)); err != nil {
 			return err
 		}
 	}

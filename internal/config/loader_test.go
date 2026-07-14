@@ -519,6 +519,56 @@ func TestKubernetesDefaultsAICCNamespace(t *testing.T) {
 	assert.Equal(t, "oc-aicc", cfg.Kubernetes.AICCNamespace)
 }
 
+// TestKubernetesAICCHPABusinessMetricsRequiresCompleteAdapterContract 验证开启业务 HPA 后，
+// 缺失 external metrics adapter 或任一突发信号时必须在启动阶段失败，不能渲染无效 HPA。
+func TestKubernetesAICCHPABusinessMetricsRequiresCompleteAdapterContract(t *testing.T) {
+	// 仅开启开关但没有 provider、应用标签或两项指标，不能假定管理员 JSON 指标端点可被 HPA 使用。
+	yaml := fullValidYAML() + `
+k8s:
+  enabled: true
+  ops_image: registry/ops:v1
+  bootstrap_base_url: http://manager-api:8080
+  aicc_hpa_business_metrics:
+    enabled: true
+`
+
+	_, err := loadConfigFromStringErr(t, yaml)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "aicc_hpa_business_metrics")
+}
+
+// TestKubernetesAICCHPABusinessMetricsAcceptsCompleteExternalContract 验证配置了按隐藏应用
+// 标签分片的 external metrics adapter 后，队列与在飞指标及平均阈值会完整保留给 server 装配。
+func TestKubernetesAICCHPABusinessMetricsAcceptsCompleteExternalContract(t *testing.T) {
+	yaml := fullValidYAML() + `
+k8s:
+  enabled: true
+  ops_image: registry/ops:v1
+  bootstrap_base_url: http://manager-api:8080
+  aicc_hpa_business_metrics:
+    enabled: true
+    provider: prometheus-adapter
+    app_label: app_id
+    queue_depth:
+      name: aicc_message_queue_depth
+      target_average_value: "5"
+    inflight:
+      name: aicc_dispatch_inflight
+      target_average_value: "2"
+`
+
+	cfg := loadConfigFromString(t, yaml)
+
+	assert.True(t, cfg.Kubernetes.AICCHPABusinessMetrics.Enabled)
+	assert.Equal(t, "prometheus-adapter", cfg.Kubernetes.AICCHPABusinessMetrics.Provider)
+	assert.Equal(t, "app_id", cfg.Kubernetes.AICCHPABusinessMetrics.AppLabel)
+	assert.Equal(t, "aicc_message_queue_depth", cfg.Kubernetes.AICCHPABusinessMetrics.QueueDepth.Name)
+	assert.Equal(t, "5", cfg.Kubernetes.AICCHPABusinessMetrics.QueueDepth.TargetAverageValue)
+	assert.Equal(t, "aicc_dispatch_inflight", cfg.Kubernetes.AICCHPABusinessMetrics.Inflight.Name)
+	assert.Equal(t, "2", cfg.Kubernetes.AICCHPABusinessMetrics.Inflight.TargetAverageValue)
+}
+
 func writeTempConfig(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")

@@ -100,8 +100,15 @@ kubectl -n oc-aicc get hpa,pods
 kubectl -n oc-aicc describe hpa app-<本地隐藏应用ID>
 ```
 
-HPA 依据 CPU（70%）和内存（75%）目标扩缩；异步任务日志用于判断排队等待和在飞调用，
-不把访客负载指标写入 HPA 标签。若当前上下文不是本地 k3d 集群，停止执行这些命令。
+HPA 默认只依据 CPU（70%）和内存（75%）目标扩缩。local k3d 没有部署
+`external.metrics.k8s.io` adapter，因此不要在本地配置 `k8s.aicc_hpa_business_metrics.enabled`；
+否则 HPA 会因指标 API 不可用而显示 unknown。若需要验证业务突发扩缩，先在测试集群部署
+external metrics adapter（例如 Prometheus Adapter），由它从受控监控桥接层导出每个隐藏应用的
+`aicc_message_queue_depth` 与 `aicc_dispatch_inflight`，并为每条序列附加隐藏 app ID 标签。
+配置开启后 HPA 以该标签筛选对应 app 的两项 External 指标；管理员 JSON 端点
+`/api/v1/platform/aicc/metrics` 仍只供受控读取，不能作为 HPA provider。manager 不需要读取
+external metrics API 的 RBAC，查询由 Kubernetes HPA controller 完成。若当前上下文不是本地 k3d
+集群，停止执行这些命令。
 
 ## 已知限制（依赖 spec-A/B/E）
 

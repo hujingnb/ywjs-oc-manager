@@ -67,10 +67,29 @@ func RenderService(spec AppSpec, namespace string) *corev1.Service {
 }
 
 // RenderAICCHPA 渲染 AICC 应用的 autoscaling/v2 HPA。最少保留一个副本维持客服入口，
-// 缩容稳定窗口避免瞬时负载下降时过快回收仍在处理会话的 Pod。
-func RenderAICCHPA(spec AppSpec, namespace string) *autoscalingv2.HorizontalPodAutoscaler {
+// 缩容稳定窗口避免瞬时负载下降时过快回收仍在处理会话的 Pod。未配置 external metrics
+// adapter 时仅渲染集群内置 CPU/内存指标，避免提交无法解析的无效 HPA。
+func RenderAICCHPA(spec AppSpec, namespace string, businessMetrics AICCBusinessMetricsConfig) *autoscalingv2.HorizontalPodAutoscaler {
 	minReplicas := int32(1)
 	stabilizationWindowSeconds := int32(600)
+	metrics := []autoscalingv2.MetricSpec{
+		{Type: autoscalingv2.ResourceMetricSourceType, Resource: &autoscalingv2.ResourceMetricSource{
+			Name:   corev1.ResourceCPU,
+			Target: autoscalingv2.MetricTarget{Type: autoscalingv2.UtilizationMetricType, AverageUtilization: int32Ptr(70)},
+		}},
+		{Type: autoscalingv2.ResourceMetricSourceType, Resource: &autoscalingv2.ResourceMetricSource{
+			Name:   corev1.ResourceMemory,
+			Target: autoscalingv2.MetricTarget{Type: autoscalingv2.UtilizationMetricType, AverageUtilization: int32Ptr(75)},
+		}},
+	}
+	if businessMetrics.Enabled() {
+		// External 指标按隐藏 app ID 选择，防止一个客服应用的积压把其他应用一并扩容。
+		selector := &metav1.LabelSelector{MatchLabels: map[string]string{businessMetrics.AppLabel: spec.AppID}}
+		metrics = append(metrics,
+			externalMetricSpec(businessMetrics.QueueDepth, selector),
+			externalMetricSpec(businessMetrics.Inflight, selector),
+		)
+	}
 	return &autoscalingv2.HorizontalPodAutoscaler{
 		ObjectMeta: metav1.ObjectMeta{Name: hpaName(spec.AppID), Namespace: namespace, Labels: appLabels(spec.AppID)},
 		Spec: autoscalingv2.HorizontalPodAutoscalerSpec{
@@ -82,21 +101,22 @@ func RenderAICCHPA(spec AppSpec, namespace string) *autoscalingv2.HorizontalPodA
 			MinReplicas: &minReplicas,
 			// MaxReplicas 是 API 必填项。十个副本限制单个客服应用的突发资源占用。
 			MaxReplicas: 10,
-			Metrics: []autoscalingv2.MetricSpec{
-				{Type: autoscalingv2.ResourceMetricSourceType, Resource: &autoscalingv2.ResourceMetricSource{
-					Name:   corev1.ResourceCPU,
-					Target: autoscalingv2.MetricTarget{Type: autoscalingv2.UtilizationMetricType, AverageUtilization: int32Ptr(70)},
-				}},
-				{Type: autoscalingv2.ResourceMetricSourceType, Resource: &autoscalingv2.ResourceMetricSource{
-					Name:   corev1.ResourceMemory,
-					Target: autoscalingv2.MetricTarget{Type: autoscalingv2.UtilizationMetricType, AverageUtilization: int32Ptr(75)},
-				}},
-			},
+			Metrics:     metrics,
 			Behavior: &autoscalingv2.HorizontalPodAutoscalerBehavior{
 				ScaleDown: &autoscalingv2.HPAScalingRules{StabilizationWindowSeconds: &stabilizationWindowSeconds},
 			},
 		},
 	}
+}
+
+// externalMetricSpec 将一项安全业务 gauge 转换为 HPA External 指标；target 使用平均值，
+// 使 Kubernetes 按当前副本数均摊积压或在飞压力后计算期望副本数。
+func externalMetricSpec(metric AICCExternalMetricConfig, selector *metav1.LabelSelector) autoscalingv2.MetricSpec {
+	target := metric.TargetAverageValue.DeepCopy()
+	return autoscalingv2.MetricSpec{Type: autoscalingv2.ExternalMetricSourceType, External: &autoscalingv2.ExternalMetricSource{
+		Metric: autoscalingv2.MetricIdentifier{Name: metric.Name, Selector: selector},
+		Target: autoscalingv2.MetricTarget{Type: autoscalingv2.AverageValueMetricType, AverageValue: &target},
+	}}
 }
 
 // int32Ptr 为 HPA 内嵌可选字段构造独立指针，避免多个指标意外共享可变地址。
