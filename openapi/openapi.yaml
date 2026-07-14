@@ -1,5 +1,16 @@
 components:
   schemas:
+    handlers.AICCDispatchMetricsResponse:
+      properties:
+        counters:
+          additionalProperties:
+            type: integer
+          type: object
+        inflight:
+          type: integer
+        queue_wait_ms:
+          type: integer
+      type: object
     handlers.AICCLeadFieldRequest:
       properties:
         field_key:
@@ -11696,6 +11707,33 @@ paths:
       summary: 删除平台库 skill
       tags:
       - platform-skills
+  /platform/aicc/metrics:
+    get:
+      description: 平台管理员读取客服异步消息队列、重试、失败、熔断和租约恢复的安全聚合指标
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.AICCDispatchMetricsResponse'
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+      security:
+      - BearerAuth: []
+      summary: 查询客服异步消息指标
+      tags:
+      - platform
   /platform/organizations/{orgId}/web-publish:
     put:
       description: 平台管理员写入企业 web-publish 的 DNS provider、凭证（service 端加密落库）和配额参数

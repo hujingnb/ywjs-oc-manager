@@ -24,7 +24,7 @@ func TestAICCDispatchMetricsRouteRequiresPlatformAdmin(t *testing.T) {
 	// 企业管理员无权读取跨企业聚合指标。
 	orgToken, err := manager.SignAccessToken(auth.Principal{UserID: "org-user", OrgID: "org", Role: "org_admin"})
 	require.NoError(t, err)
-	orgRequest := httptest.NewRequest(http.MethodGet, "/platform/aicc/metrics", nil)
+	orgRequest := httptest.NewRequest(http.MethodGet, "/api/v1/platform/aicc/metrics", nil)
 	orgRequest.Header.Set("Authorization", "Bearer "+orgToken)
 	orgRecorder := httptest.NewRecorder()
 	router.ServeHTTP(orgRecorder, orgRequest)
@@ -33,10 +33,10 @@ func TestAICCDispatchMetricsRouteRequiresPlatformAdmin(t *testing.T) {
 	// 平台管理员读取到稳定 JSON 指标快照。
 	platformToken, err := manager.SignAccessToken(auth.Principal{UserID: "platform-user", Role: "platform_admin"})
 	require.NoError(t, err)
-	platformRequest := httptest.NewRequest(http.MethodGet, "/platform/aicc/metrics", nil)
+	platformRequest := httptest.NewRequest(http.MethodGet, "/api/v1/platform/aicc/metrics", nil)
 	platformRequest.Header.Set("Authorization", "Bearer "+platformToken)
 	platformRecorder := httptest.NewRecorder()
 	router.ServeHTTP(platformRecorder, platformRequest)
 	assert.Equal(t, http.StatusOK, platformRecorder.Code)
-	assert.Contains(t, platformRecorder.Body.String(), "Counters")
+	assert.Contains(t, platformRecorder.Body.String(), "counters")
 }

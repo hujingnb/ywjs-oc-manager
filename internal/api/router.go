@@ -187,15 +187,7 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	user := router.Group("")
 	user.Use(middleware.RequireUserAuth(dep.TokenManager))
 	if dep.AICCDispatchMetrics != nil {
-		// 指标含多企业聚合标签，仅平台管理员可读取，避免组织间暴露运行状态。
-		user.GET("/platform/aicc/metrics", func(c *gin.Context) {
-			principal, ok := auth.PrincipalFromContext(c.Request.Context())
-			if !ok || !auth.CanViewPlatformUsage(principal) {
-				c.Status(http.StatusForbidden)
-				return
-			}
-			c.JSON(http.StatusOK, dep.AICCDispatchMetrics.Metrics())
-		})
+		handlers.RegisterAICCDispatchMetricsRoutes(user, handlers.NewAICCDispatchMetricsHandler(dep.AICCDispatchMetrics))
 	}
 
 	if dep.AuthService != nil {

@@ -78,7 +78,7 @@ AICC 公开消息任务以 MySQL 的 `aicc_message_tasks` 为事实来源，Redi
 Prometheus，注册表通过 `SlogAICCDispatchObserver.Metrics()` 提供给既有日志或监控桥接层；不得从
 指标中加入访客内容、token、session/message 原文或执行 pod 的非受控名称。
 
-平台管理员可使用 Bearer access token 读取受保护的 `GET /platform/aicc/metrics` JSON 快照；
+平台管理员可使用 Bearer access token 读取受保护的 `GET /api/v1/platform/aicc/metrics` JSON 快照；
 该端点仅用于本地或受控监控采集，不属于健康检查，企业管理员及匿名请求均会被拒绝。
 
 ```bash
