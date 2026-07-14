@@ -16,6 +16,10 @@ const (
 	MsgBootstrapTokenMismatch MsgKey = "err.bootstrap.token_mismatch"
 	// MsgBootstrapAppNotReady app 未就绪。
 	MsgBootstrapAppNotReady MsgKey = "err.bootstrap.app_not_ready"
+	// MsgBootstrapObjectStorageRequired 普通应用 bootstrap 缺少对象存储依赖。
+	MsgBootstrapObjectStorageRequired MsgKey = "err.bootstrap.object_storage_required"
+	// MsgBootstrapUnsupportedAppType bootstrap 不支持该应用类型。
+	MsgBootstrapUnsupportedAppType MsgKey = "err.bootstrap.unsupported_app_type"
 	// MsgBootstrapAssembleFailed bootstrap 组装失败。
 	MsgBootstrapAssembleFailed MsgKey = "err.bootstrap.assemble_failed"
 )
@@ -23,10 +27,12 @@ const (
 // init 把 bootstrap domain 错误译文并入中心 catalog。
 func init() {
 	Register(map[MsgKey]map[string]string{
-		MsgBootstrapMissingToken:   {"zh": "缺少 control token", "en": "Missing control token"},
-		MsgBootstrapInvalidToken:   {"zh": "control token 无效", "en": "Invalid control token"},
-		MsgBootstrapTokenMismatch:  {"zh": "control token 与目标 app 不匹配", "en": "The control token does not match the target app"},
-		MsgBootstrapAppNotReady:    {"zh": "app 未就绪", "en": "The app is not ready"},
-		MsgBootstrapAssembleFailed: {"zh": "bootstrap 组装失败", "en": "Failed to assemble the bootstrap response"},
+		MsgBootstrapMissingToken:          {"zh": "缺少 control token", "en": "Missing control token"},
+		MsgBootstrapInvalidToken:          {"zh": "control token 无效", "en": "Invalid control token"},
+		MsgBootstrapTokenMismatch:         {"zh": "control token 与目标 app 不匹配", "en": "The control token does not match the target app"},
+		MsgBootstrapAppNotReady:           {"zh": "app 未就绪", "en": "The app is not ready"},
+		MsgBootstrapObjectStorageRequired: {"zh": "普通应用启动需要对象存储", "en": "Object storage is required to bootstrap a standard app"},
+		MsgBootstrapUnsupportedAppType:    {"zh": "不支持的应用类型", "en": "Unsupported app type"},
+		MsgBootstrapAssembleFailed:        {"zh": "bootstrap 组装失败", "en": "Failed to assemble the bootstrap response"},
 	})
 }

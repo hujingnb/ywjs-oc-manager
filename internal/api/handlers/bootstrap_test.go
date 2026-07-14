@@ -84,6 +84,38 @@ func TestBootstrapNotReady(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, w.Code)
 }
 
+// TestBootstrapObjectStorageRequired 验证普通应用 bootstrap 缺少对象存储依赖时返回 503，
+// pod 可按稳定错误码识别部署依赖尚未满足，而非将其误判为内部未知异常。
+func TestBootstrapObjectStorageRequired(t *testing.T) {
+	r := newBootstrapTestRouter(&fakeBootstrapAppService{
+		app:      sqlc.App{ID: "a1"},
+		buildErr: service.ErrStandardAppBootstrapRequiresObjectStorage,
+	})
+	req := httptest.NewRequest(http.MethodGet, "/internal/apps/a1/bootstrap", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.Contains(t, w.Body.String(), `"code":"BOOTSTRAP_OBJECT_STORAGE_REQUIRED"`)
+}
+
+// TestBootstrapUnsupportedAppType 验证未知 app_type 返回 422，
+// 调用方可依据稳定错误码停止重试并修正应用数据，而不会收到泛化的 500。
+func TestBootstrapUnsupportedAppType(t *testing.T) {
+	r := newBootstrapTestRouter(&fakeBootstrapAppService{
+		app:      sqlc.App{ID: "a1"},
+		buildErr: service.ErrUnsupportedBootstrapAppType,
+	})
+	req := httptest.NewRequest(http.MethodGet, "/internal/apps/a1/bootstrap", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
+	assert.Contains(t, w.Body.String(), `"code":"UNSUPPORTED_APP_TYPE"`)
+}
+
 // TestBootstrapHappyPath 验证 token 有效、app 匹配、Build 成功时返回 200，
 // 并且响应体包含 manifest_yaml 字段。
 func TestBootstrapHappyPath(t *testing.T) {

@@ -54,7 +54,8 @@ func RegisterBootstrapRoutes(router gin.IRouter, handler *BootstrapHandler) {
 //  2. 对 token 做 hash，调用 service.ResolveByControlToken 反查 app（hash 不匹配即报 401）。
 //  3. 校验 path :id 与 token 所属 app.ID 一致，防止持 A 的 token 拉 B 的配置。
 //
-// 错误映射：缺/无效 token → 401；path id 不一致 → 401；app 未就绪 → 409；其他 → 500。
+// 错误映射：缺/无效 token → 401；path id 不一致 → 401；app 未就绪 → 409；
+// 普通应用缺对象存储 → 503；不支持 app_type → 422；其他组装失败 → 500。
 func (h *BootstrapHandler) Bootstrap(c *gin.Context) {
 	// 取 Bearer token；bearerToken 辅助函数定义于本文件。
 	token, ok := bearerToken(c.GetHeader("Authorization"))
@@ -82,6 +83,16 @@ func (h *BootstrapHandler) Bootstrap(c *gin.Context) {
 		if errors.Is(err, service.ErrAppNotReady) {
 			// app 缺少 api_key / control token 或尚无发布版本，pod 应稍后重试。
 			apierror.JSON(c, http.StatusConflict, "APP_NOT_READY", apierror.MsgBootstrapAppNotReady)
+			return
+		}
+		if errors.Is(err, service.ErrStandardAppBootstrapRequiresObjectStorage) {
+			// 普通应用缺少 S3 / skill 依赖时暂不可启动，调用方可在依赖恢复后重试。
+			apierror.JSON(c, http.StatusServiceUnavailable, "BOOTSTRAP_OBJECT_STORAGE_REQUIRED", apierror.MsgBootstrapObjectStorageRequired)
+			return
+		}
+		if errors.Is(err, service.ErrUnsupportedBootstrapAppType) {
+			// 未知应用类型无法安全推断数据下发权限，调用方必须先修正应用数据。
+			apierror.JSON(c, http.StatusUnprocessableEntity, "UNSUPPORTED_APP_TYPE", apierror.MsgBootstrapUnsupportedAppType)
 			return
 		}
 		// 记录具体内部错误便于运维定位（如 S3 endpoint 缺 scheme、依赖不可达）：对外仍只回
