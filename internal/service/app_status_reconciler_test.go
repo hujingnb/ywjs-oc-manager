@@ -157,6 +157,8 @@ func (f *fakeOrch) WaitReady(_ context.Context, _ string, _ time.Duration, _ fun
 	panic("not used")
 }
 func (f *fakeOrch) Scale(_ context.Context, _ string, _ int32) error { panic("not used") }
+func (f *fakeOrch) Start(_ context.Context, _ string) error          { panic("not used") }
+func (f *fakeOrch) Stop(_ context.Context, _ string) error           { panic("not used") }
 func (f *fakeOrch) UpdateImage(_ context.Context, _, _ string) error { panic("not used") }
 func (f *fakeOrch) Delete(_ context.Context, _ string) error         { panic("not used") }
 

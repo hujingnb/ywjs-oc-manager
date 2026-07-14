@@ -76,6 +76,56 @@ func TestDeleteAICCDeletesHPA(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestStartStopNormalAppKeepsLegacyScaleSemantics 验证普通应用停止和启动仅缩放 Deployment，
+// 不创建 AICC 专属 HPA，保持既有运行时操作语义。
+func TestStartStopNormalAppKeepsLegacyScaleSemantics(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	a := NewKubernetesAdapter(cs, "oc-apps")
+	require.NoError(t, a.EnsureApp(context.Background(), testSpec()))
+
+	require.NoError(t, a.Stop(context.Background(), "a1"))
+	dep, err := cs.AppsV1().Deployments("oc-apps").Get(context.Background(), "app-a1", metav1.GetOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, dep.Spec.Replicas)
+	assert.Equal(t, int32(0), *dep.Spec.Replicas)
+	_, err = cs.AutoscalingV2().HorizontalPodAutoscalers("oc-apps").Get(context.Background(), "app-a1", metav1.GetOptions{})
+	require.Error(t, err)
+
+	require.NoError(t, a.Start(context.Background(), "a1"))
+	dep, err = cs.AppsV1().Deployments("oc-apps").Get(context.Background(), "app-a1", metav1.GetOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, dep.Spec.Replicas)
+	assert.Equal(t, int32(1), *dep.Spec.Replicas)
+}
+
+// TestEnsureAppAICCRestoresHPAAfterStop 验证 AICC 停止后因重试或初始化 reconcile 再次 Ensure 时，
+// HPA 会以 minReplicas=1 恢复，重新接管后续弹性伸缩。
+func TestEnsureAppAICCRestoresHPAAfterStop(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	a := NewAICCKubernetesAdapter(cs, "oc-aicc")
+	spec := testSpec()
+	spec.AppType = domain.AppTypeAICC
+	require.NoError(t, a.EnsureApp(context.Background(), spec))
+	require.NoError(t, a.Stop(context.Background(), spec.AppID))
+
+	require.NoError(t, a.EnsureApp(context.Background(), spec))
+	hpa, err := cs.AutoscalingV2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-a1", metav1.GetOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, hpa.Spec.MinReplicas)
+	assert.Equal(t, int32(1), *hpa.Spec.MinReplicas)
+}
+
+// TestStopAICCDeletesHPAWhenDeploymentAlreadyMissing 验证 Deployment 被带外删除时，
+// Stop 仍幂等清理残留 HPA，避免 minReplicas 控制器在后续资源恢复后意外拉起应用。
+func TestStopAICCDeletesHPAWhenDeploymentAlreadyMissing(t *testing.T) {
+	cs := fake.NewSimpleClientset(&autoscalingv2.HorizontalPodAutoscaler{ObjectMeta: metav1.ObjectMeta{Name: "app-a1", Namespace: "oc-aicc"}})
+	a := NewAICCKubernetesAdapter(cs, "oc-aicc")
+
+	require.NoError(t, a.Stop(context.Background(), "a1"))
+	_, err := cs.AutoscalingV2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-a1", metav1.GetOptions{})
+	require.Error(t, err)
+}
+
 // TestScale 验证 Scale 改 replicas。
 func TestScale(t *testing.T) {
 	cs := fake.NewSimpleClientset()

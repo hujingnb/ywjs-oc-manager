@@ -62,6 +62,10 @@ func (f *fakeOrchestrator) Scale(_ context.Context, _ string, _ int32) error {
 	return nil
 }
 
+func (f *fakeOrchestrator) Start(_ context.Context, _ string) error { return nil }
+
+func (f *fakeOrchestrator) Stop(_ context.Context, _ string) error { return nil }
+
 func (f *fakeOrchestrator) UpdateImage(_ context.Context, _, _ string) error {
 	return nil
 }

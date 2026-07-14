@@ -52,6 +52,8 @@ func TestAppStartContainerHandler_HappyPath(t *testing.T) {
 
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStartContainer, testAppID))
 	require.NoError(t, err)
+	// 业务 handler 必须调用语义化 Start，使 AICC adapter 有机会恢复 HPA。
+	require.Equal(t, 1, orch.startCalls)
 	// Scale(1) 必须被调用一次。
 	require.Equal(t, 1, orch.scaleCalls)
 	require.Equal(t, int32(1), orch.lastScaleReplicas)
@@ -163,6 +165,8 @@ func TestAppStopContainerHandler_HappyPath(t *testing.T) {
 	handler := NewAppStopContainerHandler(stub, orch)
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStopContainer, testAppID))
 	require.NoError(t, err)
+	// 业务 handler 必须调用语义化 Stop，使 AICC adapter 能先移除 HPA。
+	require.Equal(t, 1, orch.stopCalls)
 	// Scale(0) 必须被调用一次。
 	require.Equal(t, 1, orch.scaleCalls)
 	require.Equal(t, int32(0), orch.lastScaleReplicas)
@@ -190,20 +194,20 @@ func TestAppStopContainerHandler_DeploymentExistsScalesZero(t *testing.T) {
 	require.Equal(t, domain.AppStatusStopped, stub.statusUpdates[len(stub.statusUpdates)-1])
 }
 
-// TestAppStopContainerHandler_NotFound_SkipsScaleAndUpdatesStatus 验证
-// Deployment 不存在（orch.Status Phase=="NotFound"）时跳过 Scale(0)，
-// 直接推 stopped 收敛状态机（无 Deployment 可 Scale）。
-func TestAppStopContainerHandler_NotFound_SkipsScaleAndUpdatesStatus(t *testing.T) {
+// TestAppStopContainerHandler_NotFound_StillCallsStopAndUpdatesStatus 验证
+// Deployment 不存在（orch.Status Phase=="NotFound"）时仍调用 Stop 清理 AICC HPA，
+// 再推 stopped 收敛状态机，避免带外删除 Deployment 后遗留自动扩容控制器。
+func TestAppStopContainerHandler_NotFound_StillCallsStopAndUpdatesStatus(t *testing.T) {
 	stub := runtimeStub(t)
 	// Status Phase="NotFound"：Deployment 真不存在（app_initialize 尚未完成或已删除）。
 	orch := &fakeAppOrchestrator{statusPhase: "NotFound"}
 	handler := NewAppStopContainerHandler(stub, orch)
 
 	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppStopContainer, testAppID))
-	// Deployment 不存在等价于已停止，应直接推状态，不返回错误。
-	require.NoError(t, err, "Deployment NotFound 时应直接推 stopped 状态，不返回错误")
-	// Scale 不应被调用（无 Deployment 可 Scale）。
-	require.Equal(t, 0, orch.scaleCalls, "Deployment NotFound 时不应调 Scale")
+	// Deployment 不存在等价于已停止；Stop 应幂等完成 HPA 清理，再推状态，不返回错误。
+	require.NoError(t, err, "Deployment NotFound 时 Stop 清理应幂等，仍可推 stopped 状态")
+	// 必须调用语义 Stop，实际 adapter 会在此路径删除残留 HPA。
+	require.Equal(t, 1, orch.stopCalls, "Deployment NotFound 时仍应调 Stop 清理 HPA")
 	// 状态更新为 stopped。
 	require.Equal(t, domain.AppStatusStopped, stub.statusUpdates[len(stub.statusUpdates)-1])
 }
@@ -644,6 +648,9 @@ type fakeAppOrchestrator struct {
 	lastScaleReplicas int32
 	scaleHistory      []int32 // 按调用顺序记录 replicas，供 Scale(0)→Scale(1) 顺序断言
 	scaleErr          error
+	// start/stop 调用记录：业务 handler 应通过语义方法，让 AICC adapter 管理 HPA 生命周期。
+	startCalls int
+	stopCalls  int
 	// UpdateImage 相关
 	updateImageCalls int
 	lastUpdateImage  string
@@ -665,6 +672,18 @@ func (f *fakeAppOrchestrator) Scale(_ context.Context, _ string, replicas int32)
 	f.lastScaleReplicas = replicas
 	f.scaleHistory = append(f.scaleHistory, replicas)
 	return f.scaleErr
+}
+
+// Start 模拟 adapter 的启动语义，并复用 Scale 记录，保持既有副本数断言有效。
+func (f *fakeAppOrchestrator) Start(ctx context.Context, appID string) error {
+	f.startCalls++
+	return f.Scale(ctx, appID, 1)
+}
+
+// Stop 模拟 adapter 的停止语义，并复用 Scale 记录，保持既有副本数断言有效。
+func (f *fakeAppOrchestrator) Stop(ctx context.Context, appID string) error {
+	f.stopCalls++
+	return f.Scale(ctx, appID, 0)
 }
 
 func (f *fakeAppOrchestrator) UpdateImage(_ context.Context, _ string, hermesImage string) error {
@@ -701,9 +720,9 @@ func (f *fakeAppOrchestrator) RolloutRestart(_ context.Context, _ string) error 
 // fakeObjectStore 是 storage.ObjectStore 的最小测试桩，仅实现 MovePrefix / DeletePrefix。
 type fakeObjectStore struct {
 	// MovePrefix 调用记录
-	movedPrefix bool
-	moveSrc     string
-	moveDst     string
+	movedPrefix   bool
+	moveSrc       string
+	moveDst       string
 	movePrefixErr error
 	// DeletePrefix 调用记录（按 key 细化）
 	deletedSessionsPrefix bool
@@ -764,10 +783,10 @@ func (f *fakeRestartNotifier) Enqueue(_ context.Context, jobID string) error {
 
 // fakeInputRefresher 是 AppInputRefresher 的测试桩。
 type fakeInputRefresher struct {
-	calls        int
-	lastNodeID   string
-	lastAppID    string
-	returnError  error
+	calls       int
+	lastNodeID  string
+	lastAppID   string
+	returnError error
 	// returnResult 是 RefreshAppInput 成功时返回的版本信息。
 	returnResult AppInputRefreshResult
 }

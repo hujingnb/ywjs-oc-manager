@@ -134,6 +134,34 @@ func (a *KubernetesAdapter) Scale(ctx context.Context, appID string, replicas in
 	return wrapK8s("伸缩 Deployment", uerr)
 }
 
+// Start 启动 app。先设置一个初始副本，成功后 AICC 再重建 HPA，避免缩放失败时 HPA 提前拉起实例。
+func (a *KubernetesAdapter) Start(ctx context.Context, appID string) error {
+	if err := a.Scale(ctx, appID, 1); err != nil {
+		return err
+	}
+	if a.aicc {
+		if err := a.applyHPA(ctx, RenderAICCHPA(AppSpec{AppID: appID}, a.namespace)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Stop 停止 app。AICC 必须先删除 HPA，否则其 minReplicas=1 会立即撤销 Scale(0)。
+func (a *KubernetesAdapter) Stop(ctx context.Context, appID string) error {
+	if a.aicc {
+		if err := a.deleteHPA(ctx, appID); err != nil {
+			return err
+		}
+	}
+	err := a.Scale(ctx, appID, 0)
+	// Deployment 已被带外删除时仍视为停止成功；AICC HPA 已在上方清理，避免遗留控制器。
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
 // UpdateImage patch hermes + oc-ops 容器镜像（同镜像）。
 func (a *KubernetesAdapter) UpdateImage(ctx context.Context, appID, hermesImage string) error {
 	api := a.client.AppsV1().Deployments(a.namespace)
@@ -208,8 +236,8 @@ func (a *KubernetesAdapter) PatchSecretKeys(ctx context.Context, appID string, s
 func (a *KubernetesAdapter) Delete(ctx context.Context, appID string) error {
 	del := metav1.DeleteOptions{}
 	if a.aicc {
-		if err := a.client.AutoscalingV2().HorizontalPodAutoscalers(a.namespace).Delete(ctx, hpaName(appID), del); err != nil && !apierrors.IsNotFound(err) {
-			return wrapK8s("删除 HPA", err)
+		if err := a.deleteHPA(ctx, appID); err != nil {
+			return err
 		}
 	}
 	if err := a.client.AppsV1().Deployments(a.namespace).Delete(ctx, deploymentName(appID), del); err != nil && !apierrors.IsNotFound(err) {
@@ -220,6 +248,15 @@ func (a *KubernetesAdapter) Delete(ctx context.Context, appID string) error {
 	}
 	if err := a.client.CoreV1().Secrets(a.namespace).Delete(ctx, secretName(appID), del); err != nil && !apierrors.IsNotFound(err) {
 		return wrapK8s("删除 Secret", err)
+	}
+	return nil
+}
+
+// deleteHPA 幂等删除 AICC HPA；NotFound 表示已停止或已删除，按成功处理。
+func (a *KubernetesAdapter) deleteHPA(ctx context.Context, appID string) error {
+	err := a.client.AutoscalingV2().HorizontalPodAutoscalers(a.namespace).Delete(ctx, hpaName(appID), metav1.DeleteOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return wrapK8s("删除 HPA", err)
 	}
 	return nil
 }

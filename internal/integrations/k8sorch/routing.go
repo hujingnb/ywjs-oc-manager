@@ -75,6 +75,20 @@ func (r *RoutingOrchestrator) Scale(ctx context.Context, id string, n int32) err
 	}
 	return o.Scale(ctx, id, n)
 }
+func (r *RoutingOrchestrator) Start(ctx context.Context, id string) error {
+	o, e := r.target(ctx, id)
+	if e != nil {
+		return e
+	}
+	return o.Start(ctx, id)
+}
+func (r *RoutingOrchestrator) Stop(ctx context.Context, id string) error {
+	o, e := r.target(ctx, id)
+	if e != nil {
+		return e
+	}
+	return o.Stop(ctx, id)
+}
 func (r *RoutingOrchestrator) UpdateImage(ctx context.Context, id, img string) error {
 	o, e := r.target(ctx, id)
 	if e != nil {

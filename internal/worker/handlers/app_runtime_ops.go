@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"time"
 
-	null "github.com/guregu/null/v5"
 	"github.com/google/uuid"
+	null "github.com/guregu/null/v5"
 
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/k8sorch"
@@ -39,8 +39,10 @@ type AppRuntimeStore interface {
 // appOrchestrator 是 k8s 生命周期 handler 消费的窄接口，仅包含运行时操作所需方法。
 // 便于单测注入 fake，不引入整个 k8sorch.Orchestrator 实现。
 type appOrchestrator interface {
-	// Scale 伸缩 pod replicas（0=停止，1=启动）。
-	Scale(ctx context.Context, appID string, replicas int32) error
+	// Start 启动 app；AICC 会恢复 HPA，普通应用保持 Scale(1) 语义。
+	Start(ctx context.Context, appID string) error
+	// Stop 停止 app；AICC 会先移除 HPA，普通应用保持 Scale(0) 语义。
+	Stop(ctx context.Context, appID string) error
 	// UpdateImage patch Deployment 主容器镜像，触发 Recreate 重启（镜像变更时使用）。
 	UpdateImage(ctx context.Context, appID, hermesImage string) error
 	// Delete 删除 Deployment + Service + Secret（幂等，NotFound 视为成功）。
@@ -97,9 +99,9 @@ func loadApp(ctx context.Context, store AppRuntimeStore, payload appOpPayload) (
 	return app, payload.AppID, nil
 }
 
-// AppStartContainerHandler 通过 k8s Scale(1) 拉起 pod 并把状态推到 running。
+// AppStartContainerHandler 通过 k8s Start 拉起 pod 并把状态推到 running。
 //
-// k8s 语义：Scale(1) 是幂等操作，已经 Running 的 Deployment 设 replicas=1 不会重建 pod。
+// k8s 语义：普通应用 Scale(1) 幂等；AICC 同时恢复其 HPA，随后由 HPA 负责弹性副本数。
 type AppStartContainerHandler struct {
 	store AppRuntimeStore
 	orch  appOrchestrator
@@ -110,7 +112,7 @@ func NewAppStartContainerHandler(store AppRuntimeStore, orch appOrchestrator) *A
 	return &AppStartContainerHandler{store: store, orch: orch}
 }
 
-// Handle 执行 app_start_container job：Scale(1) 后推 running 状态。
+// Handle 执行 app_start_container job：Start 后推 running 状态。
 func (h *AppStartContainerHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	if job.Type != domain.JobTypeAppStartContainer {
 		return fmt.Errorf("非 app_start_container 任务: %s", job.Type)
@@ -148,9 +150,9 @@ func (h *AppStartContainerHandler) Handle(ctx context.Context, job sqlc.Job) err
 		slog.ErrorContext(ctx, "启动置 runtime_phase=restarting 失败", "app_id", app.ID, mlog.Err(err))
 	}
 
-	// Scale(1) 等价于"起 pod"，幂等：Deployment 已有 replicas=1 时 k8s 不重建 pod。
-	if err := h.orch.Scale(ctx, payload.AppID, 1); err != nil {
-		return fmt.Errorf("启动应用失败（Scale replicas=1）: %w", err)
+	// Start 对普通应用等价 Scale(1)；AICC 还会恢复停止时移除的 HPA。
+	if err := h.orch.Start(ctx, payload.AppID); err != nil {
+		return fmt.Errorf("启动应用失败: %w", err)
 	}
 	if err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusRunning}); err != nil {
 		return fmt.Errorf("更新应用状态失败: %w", err)
@@ -158,10 +160,10 @@ func (h *AppStartContainerHandler) Handle(ctx context.Context, job sqlc.Job) err
 	return nil
 }
 
-// AppStopContainerHandler 通过 k8s Scale(0) 停止 pod 并把状态推到 stopped。
+// AppStopContainerHandler 通过 k8s Stop 停止 pod 并把状态推到 stopped。
 //
-// k8s 语义：Scale(0) 删除所有 pod 但保留 Deployment，preStop hook 触发 sidecar oc-presync
-// 同步数据到 S3，无需 manager 额外操作。
+// k8s 语义：Stop 删除所有 pod 但保留 Deployment；AICC 会先删除 HPA，普通应用的 preStop
+// hook 触发 sidecar oc-presync 同步数据到 S3，无需 manager 额外操作。
 type AppStopContainerHandler struct {
 	store AppRuntimeStore
 	orch  appOrchestrator
@@ -201,15 +203,19 @@ func (h *AppStopContainerHandler) Handle(ctx context.Context, job sqlc.Job) erro
 		return fmt.Errorf("查询应用状态失败: %w", serr)
 	}
 	if st.Phase == "NotFound" {
-		// Deployment 尚未建立 / 已删除，等价于已停止，直接收敛状态机（无 Deployment 可 Scale）。
+		// Deployment 尚未建立 / 已删除也要调用幂等 Stop：AICC 可能只剩带外遗留的 HPA，
+		// Stop 会先清理它并把 Deployment NotFound 视为已停止，随后再收敛状态机。
+		if err := h.orch.Stop(ctx, payload.AppID); err != nil {
+			return fmt.Errorf("停止应用失败: %w", err)
+		}
 		if err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusStopped}); err != nil {
 			return fmt.Errorf("更新应用状态失败: %w", err)
 		}
 		return nil
 	}
-	// Scale(0) = 停止所有 pod；Deployment 保留，下次 Scale(1) 可以恢复。
-	if err := h.orch.Scale(ctx, payload.AppID, 0); err != nil {
-		return fmt.Errorf("停止应用失败（Scale replicas=0）: %w", err)
+	// Stop 对普通应用等价 Scale(0)；AICC 会先移除 HPA，确保零副本能保持。
+	if err := h.orch.Stop(ctx, payload.AppID); err != nil {
+		return fmt.Errorf("停止应用失败: %w", err)
 	}
 	if err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusStopped}); err != nil {
 		return fmt.Errorf("更新应用状态失败: %w", err)

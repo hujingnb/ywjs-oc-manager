@@ -7,7 +7,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"oc-manager/internal/domain"
 )
@@ -42,6 +44,50 @@ func TestRoutingOrchestratorEnsureAppSeparatesNamespaces(t *testing.T) {
 	require.NoError(t, err)
 	_, err = cs.AutoscalingV2().HorizontalPodAutoscalers("oc-apps").Get(context.Background(), "app-aicc", metav1.GetOptions{})
 	require.Error(t, err)
+}
+
+// TestRoutingOrchestratorAICCStopStartManagesHPA 验证 AICC 停止先移除 HPA 后缩容到零，
+// 启动再恢复 HPA，避免 minReplicas=1 把已停止的客服应用自动拉起。
+func TestRoutingOrchestratorAICCStopStartManagesHPA(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	var operations []string
+	cs.PrependReactor("*", "*", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if action.GetVerb() == "delete" || action.GetVerb() == "create" || action.GetVerb() == "update" {
+			operations = append(operations, action.GetVerb()+"/"+action.GetResource().Resource)
+		}
+		return false, nil, nil
+	})
+	r := NewRoutingOrchestrator(NewKubernetesAdapter(cs, "oc-apps"), NewAICCKubernetesAdapter(cs, "oc-aicc"), routingResolver{"aicc": domain.AppTypeAICC})
+	spec := testSpec()
+	spec.AppID = "aicc"
+	spec.AppType = domain.AppTypeAICC
+	require.NoError(t, r.EnsureApp(context.Background(), spec))
+
+	// 停止后 HPA 不存在，Deployment 必须保持零副本，不能被 minReplicas 自动恢复。
+	operations = nil
+	require.NoError(t, r.Stop(context.Background(), "aicc"))
+	assert.Equal(t, []string{"delete/horizontalpodautoscalers", "update/deployments"}, operations,
+		"停止必须先删除 HPA，再把 Deployment 缩容到零")
+	dep, err := cs.AppsV1().Deployments("oc-aicc").Get(context.Background(), "app-aicc", metav1.GetOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, dep.Spec.Replicas)
+	assert.Equal(t, int32(0), *dep.Spec.Replicas)
+	_, err = cs.AutoscalingV2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-aicc", metav1.GetOptions{})
+	require.Error(t, err)
+
+	// 启动时先恢复 HPA，再将 Deployment 拉到最小副本，确保恢复后可继续弹性扩容。
+	operations = nil
+	require.NoError(t, r.Start(context.Background(), "aicc"))
+	assert.Equal(t, []string{"update/deployments", "create/horizontalpodautoscalers"}, operations,
+		"启动必须先拉起 Deployment，再恢复 HPA，避免缩放失败时 HPA 提前启动实例")
+	hpa, err := cs.AutoscalingV2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-aicc", metav1.GetOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, hpa.Spec.MinReplicas)
+	assert.Equal(t, int32(1), *hpa.Spec.MinReplicas)
+	dep, err = cs.AppsV1().Deployments("oc-aicc").Get(context.Background(), "app-aicc", metav1.GetOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, dep.Spec.Replicas)
+	assert.Equal(t, int32(1), *dep.Spec.Replicas)
 }
 
 // TestRoutingOrchestratorRejectsUnknownAppType 验证状态操作解析到未知类型时必须失败，
