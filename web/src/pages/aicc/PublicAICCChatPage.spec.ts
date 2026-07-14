@@ -251,26 +251,35 @@ describe('PublicAICCChatPage', () => {
 
   // 场景：任务失败后点击重试必须复用原 client_message_id，且页面中只保留原来的访客消息。
   it('retries a failed task with the original client message id without duplicating the visitor message', async () => {
+    vi.useFakeTimers()
     apiState.sendMessage
       .mockResolvedValueOnce({ message_id: 'message-1', status: 'failed' })
-      .mockResolvedValueOnce({ message_id: 'message-1', status: 'completed', text: '重试成功' })
-    const wrapper = mountPublicChat()
-    await flushPromises()
+      .mockResolvedValueOnce({ message_id: 'message-1', status: 'queued' })
+    apiState.fetchMessageStatus.mockResolvedValue({ message_id: 'message-1', status: 'completed', text: '重试成功' })
+    try {
+      const wrapper = mountPublicChat()
+      await flushPromises()
 
-    await wrapper.find('textarea').setValue('失败后重试')
-    await wrapper.find('form.composer').trigger('submit')
-    await flushPromises()
-    const firstPayload = apiState.sendMessage.mock.calls[0][1]
+      await wrapper.find('textarea').setValue('失败后重试')
+      await wrapper.find('form.composer').trigger('submit')
+      await flushPromises()
+      const firstPayload = apiState.sendMessage.mock.calls[0][1]
 
-    expect(wrapper.text()).toContain('回复失败，请重试。')
-    await wrapper.findAll('button').find(button => button.text().includes('重试'))?.trigger('click')
-    await flushPromises()
+      expect(wrapper.text()).toContain('回复失败，请重试。')
+      await wrapper.findAll('button').find(button => button.text().includes('重试'))?.trigger('click')
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(2_000)
+      await flushPromises()
 
-    expect(apiState.sendMessage).toHaveBeenCalledTimes(2)
-    expect(apiState.sendMessage.mock.calls[1][1].client_message_id).toBe(firstPayload.client_message_id)
-    expect(wrapper.findAll('.message-row.visitor')).toHaveLength(1)
-    expect(wrapper.text()).toContain('重试成功')
-    wrapper.unmount()
+      expect(apiState.sendMessage).toHaveBeenCalledTimes(2)
+      expect(apiState.sendMessage.mock.calls[1][1].client_message_id).toBe(firstPayload.client_message_id)
+      expect(apiState.fetchMessageStatus).toHaveBeenCalledWith('session-token', 'message-1')
+      expect(wrapper.findAll('.message-row.visitor')).toHaveLength(1)
+      expect(wrapper.text()).toContain('重试成功')
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   // 场景：隐私提示只在访客刚进入公开页时展示，发送消息后不再占用输入区上方空间。

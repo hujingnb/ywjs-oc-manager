@@ -354,6 +354,8 @@ type Querier interface {
 	ReplaceOrganizationIndustryKnowledgeBases(ctx context.Context, orgID string) error
 	// 覆盖行业库同名文件时按旧远端 document ID 乐观替换本地映射；created_by 表示最近一次覆盖上传人，created_at 仍保留首创时间。
 	ReplaceRAGFlowIndustryDocument(ctx context.Context, arg ReplaceRAGFlowIndustryDocumentParams) error
+	// 访客显式重试仅能恢复终态失败任务；重置尝试计数后 dispatcher 才可按既有领取条件重新执行。
+	RequeueFailedAICCMessageTask(ctx context.Context, messageID string) (int64, error)
 	// reaper 把已 running / succeeded 的 job 重置为 pending。
 	// locked_by / locked_at 一并清空避免被旧 worker 误识别为本机持有。
 	// 注意：jobs 表无 started_at 列，仅清 locked_* / last_error / 状态。

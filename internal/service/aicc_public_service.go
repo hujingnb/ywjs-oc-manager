@@ -80,6 +80,8 @@ type AICCPublicStore interface {
 	GetAICCMessageByClientMessageID(ctx context.Context, arg sqlc.GetAICCMessageByClientMessageIDParams) (sqlc.AiccMessage, error)
 	// GetAICCMessageTaskByMessageID 查询访客消息对应的异步任务，用于幂等重试返回当前处理状态。
 	GetAICCMessageTaskByMessageID(ctx context.Context, messageID string) (sqlc.AiccMessageTask, error)
+	// RequeueFailedAICCMessageTask 原子恢复终态失败任务，供同一访客显式重试复用原消息。
+	RequeueFailedAICCMessageTask(ctx context.Context, messageID string) (int64, error)
 	// GetAICCMessageByID 按消息主键读取访客消息，用于校验状态查询只访问所属会话。
 	GetAICCMessageByID(ctx context.Context, id string) (sqlc.AiccMessage, error)
 	// GetAICCAssistantMessageByVisitorMessageID 按显式回复关联读取任务产出的助手消息。
@@ -432,6 +434,20 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 	if err := s.ensureRateAllowed(ctx, "send_message:"+session.ID, aiccSendMessageRateLimit, time.Minute); err != nil {
 		return AICCPublicMessageResult{}, err
 	}
+	clientMessageID := strings.TrimSpace(input.ClientMessageID)
+	if clientMessageID != "" {
+		existing, err := s.store.GetAICCMessageByClientMessageID(ctx, sqlc.GetAICCMessageByClientMessageIDParams{SessionID: session.ID, Direction: domain.AICCMessageDirectionVisitor, ClientMessageID: nullStr(clientMessageID)})
+		if err == nil {
+			// 仅终态失败任务会被原子恢复；其他状态保持常规幂等语义，不重复排队。
+			if _, requeueErr := s.store.RequeueFailedAICCMessageTask(ctx, existing.ID); requeueErr != nil {
+				return AICCPublicMessageResult{}, fmt.Errorf("恢复失败的 AICC 消息任务失败: %w", requeueErr)
+			}
+			return s.aiccMessageTaskResult(ctx, existing.ID)
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 幂等消息失败: %w", err)
+		}
+	}
 	if agent.PrivacyMode == domain.AICCPrivacyModeConsentRequired && !session.PrivacyConsentedAt.Valid {
 		return AICCPublicMessageResult{}, ErrAICCConsentRequired
 	}
@@ -475,7 +491,6 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 	} else if imageID != "" {
 		contentType = domain.AICCMessageContentTypeMixed
 	}
-	clientMessageID := strings.TrimSpace(input.ClientMessageID)
 	visitorMessage := sqlc.CreateAICCMessageParams{
 		ID:              newUUID(),
 		SessionID:       session.ID,
@@ -493,15 +508,6 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 	if isPromptInjection {
 		message := sqlc.CreateAICCMessageParams{ID: newUUID(), SessionID: session.ID, AgentID: session.AgentID, Direction: domain.AICCMessageDirectionAssistant, ContentType: domain.AICCMessageContentTypeText, TextContent: nullStr(aiccPromptInjectionReply), ClientMessageID: nullStr(clientMessageID), ReplyToMessageID: null.StringFrom(visitorMessage.ID)}
 		assistantMessage = &message
-	}
-	if clientMessageID != "" {
-		existing, err := s.store.GetAICCMessageByClientMessageID(ctx, sqlc.GetAICCMessageByClientMessageIDParams{SessionID: session.ID, Direction: domain.AICCMessageDirectionVisitor, ClientMessageID: nullStr(clientMessageID)})
-		if err == nil {
-			return s.aiccMessageTaskResult(ctx, existing.ID)
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 幂等消息失败: %w", err)
-		}
 	}
 	existingMessageID, err := s.reserveAICCVisitorMessage(ctx, session, settings.MessageLimitPerSession, visitorMessage, agent.AppID, !isPromptInjection, assistantMessage)
 	if err != nil {

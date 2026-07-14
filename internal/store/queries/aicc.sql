@@ -190,6 +190,18 @@ SELECT *
 FROM aicc_message_tasks
 WHERE message_id = ?;
 
+-- name: RequeueFailedAICCMessageTask :execrows
+-- 访客显式重试仅能恢复终态失败任务；重置尝试计数后 dispatcher 才可按既有领取条件重新执行。
+UPDATE aicc_message_tasks
+SET status = 'queued',
+    attempts = 0,
+    run_after = NOW(6),
+    lease_token = NULL,
+    lease_expires_at = NULL,
+    last_error = NULL,
+    updated_at = NOW(6)
+WHERE message_id = ? AND status = 'failed';
+
 -- name: ListReadyAICCMessageTasks :many
 -- 只返回当前到期且所在会话没有执行中任务的任务；租约时仍会再次原子校验，列表结果不能视作所有权。
 SELECT task.*

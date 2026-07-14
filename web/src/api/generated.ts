@@ -13699,7 +13699,7 @@ export interface paths {
         put?: never;
         /**
          * 发送 AICC 公开消息
-         * @description 访客通过 session token 发送消息，manager 异步受理并由后台任务转发隐藏 app runtime
+         * @description 访客通过 session token 发送消息，manager 异步受理并由后台任务转发隐藏 app runtime；相同 client_message_id 可恢复终态失败任务
          */
         post: {
             parameters: {

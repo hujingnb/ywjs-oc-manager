@@ -203,7 +203,7 @@ func (h *PublicAICCHandler) Consent(c *gin.Context) {
 // SendMessage 异步受理访客消息并返回任务标识。
 //
 // @Summary      发送 AICC 公开消息
-// @Description  访客通过 session token 发送消息，manager 异步受理并由后台任务转发隐藏 app runtime
+// @Description  访客通过 session token 发送消息，manager 异步受理并由后台任务转发隐藏 app runtime；相同 client_message_id 可恢复终态失败任务
 // @Tags         public-aicc
 // @Accept       json
 // @Produce      json

@@ -2345,6 +2345,27 @@ func (q *Queries) RenewAICCMessageTaskLease(ctx context.Context, arg RenewAICCMe
 	return result.RowsAffected()
 }
 
+const requeueFailedAICCMessageTask = `-- name: RequeueFailedAICCMessageTask :execrows
+UPDATE aicc_message_tasks
+SET status = 'queued',
+    attempts = 0,
+    run_after = NOW(6),
+    lease_token = NULL,
+    lease_expires_at = NULL,
+    last_error = NULL,
+    updated_at = NOW(6)
+WHERE message_id = ? AND status = 'failed'
+`
+
+// 访客显式重试仅能恢复终态失败任务；重置尝试计数后 dispatcher 才可按既有领取条件重新执行。
+func (q *Queries) RequeueFailedAICCMessageTask(ctx context.Context, messageID string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, requeueFailedAICCMessageTask, messageID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const retryAICCMessageTask = `-- name: RetryAICCMessageTask :execrows
 UPDATE aicc_message_tasks
 SET status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'retry_wait' END,

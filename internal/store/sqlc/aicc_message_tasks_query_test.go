@@ -18,3 +18,13 @@ func TestAICCMessageTaskQueriesStopAtMaxAttempts(t *testing.T) {
 	assert.Contains(t, normalizedSQL(retryAICCMessageTask), "case when attempts >= max_attempts then 'failed' else 'retry_wait' end")
 	assert.Contains(t, normalizedSQL(retryAICCMessageTask), "last_error = ?")
 }
+
+// TestRequeueFailedAICCMessageTaskOnlyResetsTerminalFailure 验证访客手动重试只恢复 failed 任务，
+// 并清空已耗尽的尝试计数和错误摘要，让 dispatcher 可按原有领取规则重新执行。
+func TestRequeueFailedAICCMessageTaskOnlyResetsTerminalFailure(t *testing.T) {
+	query := normalizedSQL(requeueFailedAICCMessageTask)
+	assert.Contains(t, query, "set status = 'queued'")
+	assert.Contains(t, query, "attempts = 0")
+	assert.Contains(t, query, "last_error = null")
+	assert.Contains(t, query, "where message_id = ? and status = 'failed'")
+}

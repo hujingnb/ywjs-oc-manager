@@ -296,6 +296,37 @@ func TestAICCPublicSendMessageReturnsExistingTask(t *testing.T) {
 	assert.Empty(t, chat.text)
 }
 
+// TestAICCPublicSendMessageRequeuesFailedExistingTask 覆盖访客手动重试：
+// 相同 client_message_id 命中终态失败任务时必须恢复原任务，不能新建访客消息或助手回复。
+func TestAICCPublicSendMessageRequeuesFailedExistingTask(t *testing.T) {
+	store := newAICCPublicMessageStore()
+	service := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	service.now = func() time.Time { return aiccPublicTestNow }
+	input := AICCPublicMessageInput{SessionToken: "tok", ClientMessageID: "message-retry", Text: "报价多少"}
+
+	first, err := service.SendMessage(context.Background(), input)
+	require.NoError(t, err)
+	assert.Equal(t, "queued", first.Status)
+	store.taskStatus = "failed"
+
+	retried, err := service.SendMessage(context.Background(), input)
+
+	require.NoError(t, err)
+	assert.Equal(t, first.MessageID, retried.MessageID)
+	assert.Equal(t, "queued", retried.Status)
+	assert.Equal(t, first.MessageID, store.requeuedMessageID)
+	assert.Len(t, store.createdMessages, 1)
+	assert.Len(t, store.createdTasks, 1)
+	// 任务被 dispatcher 完成后，仍通过原访客消息关联读取唯一一条助手回复。
+	store.message = sqlc.AiccMessage{ID: first.MessageID, SessionID: "session-1", Direction: domain.AICCMessageDirectionVisitor}
+	store.taskStatus = "completed"
+	store.messages = append(store.messages, sqlc.AiccMessage{ID: "assistant-retry", SessionID: "session-1", Direction: domain.AICCMessageDirectionAssistant, ReplyToMessageID: null.StringFrom(first.MessageID), TextContent: null.StringFrom("重试后的回复")})
+	completed, err := service.GetMessageStatus(context.Background(), "tok", first.MessageID)
+	require.NoError(t, err)
+	assert.Equal(t, "completed", completed.Status)
+	assert.Equal(t, "重试后的回复", completed.Text)
+}
+
 // TestAICCPublicSendMessageConcurrentClientMessageIDReusesLockedTask 覆盖并发幂等边界：
 // 两个请求都在事务外查不到同一消息时，后获得会话锁的请求必须复用先提交的任务，不能暴露唯一键错误。
 func TestAICCPublicSendMessageConcurrentClientMessageIDReusesLockedTask(t *testing.T) {
@@ -1179,6 +1210,7 @@ type fakeAICCPublicStore struct {
 	sessionErr                error
 	message                   sqlc.AiccMessage
 	taskStatus                string
+	requeuedMessageID         string
 	messages                  []sqlc.AiccMessage
 	image                     sqlc.AiccImage
 	settings                  sqlc.AiccAgentSetting
@@ -1405,6 +1437,19 @@ func (f *fakeAICCPublicStore) GetAICCMessageTaskByMessageID(_ context.Context, m
 		}
 	}
 	return sqlc.AiccMessageTask{}, sql.ErrNoRows
+}
+
+// RequeueFailedAICCMessageTask 模拟数据库条件更新：只有 failed 任务会重置为 queued。
+func (f *fakeAICCPublicStore) RequeueFailedAICCMessageTask(_ context.Context, messageID string) (int64, error) {
+	for _, task := range f.createdTasks {
+		if task.MessageID != messageID || f.taskStatus != "failed" {
+			continue
+		}
+		f.taskStatus = "queued"
+		f.requeuedMessageID = messageID
+		return 1, nil
+	}
+	return 0, nil
 }
 
 func (f *fakeAICCPublicStore) GetAICCMessageByID(_ context.Context, id string) (sqlc.AiccMessage, error) {
