@@ -107,7 +107,11 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 	// 租约起止由 SQL 的 NOW(6) 计算，worker 本地时钟只用于熔断和退避，不参与所有权判定。
 	claimed, err := d.store.LeaseAICCMessageTask(ctx, sqlc.LeaseAICCMessageTaskParams{ID: task.ID, LeaseToken: null.StringFrom(token)})
 	if err != nil || claimed == 0 {
-		d.releaseHalfOpenProbe()
+		if d.circuit != nil {
+			_ = d.circuit.Reopen(ctx, "hermes")
+		} else {
+			d.releaseHalfOpenProbe()
+		}
 		return err
 	}
 	if d.limiter == nil {
@@ -154,11 +158,15 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 		return heartbeatErr
 	}
 	if txErr != nil {
-		d.reopenHalfOpenProbe(d.now())
+		if d.circuit != nil {
+			_ = d.circuit.Reopen(ctx, "hermes")
+		} else {
+			d.reopenHalfOpenProbe(d.now())
+		}
 		return txErr
 	}
 	if d.circuit != nil {
-		_ = d.circuit.Record(ctx, "hermes", false)
+		_ = d.circuit.RecordSuccess(ctx, "hermes")
 	} else {
 		d.recordSuccess()
 	}
@@ -176,7 +184,13 @@ func (d *AICCDispatcher) RecoverExpiredLeases(ctx context.Context) (int64, error
 }
 
 func (d *AICCDispatcher) finishError(ctx context.Context, task sqlc.AiccMessageTask, token string, err error) error {
-	d.reopenHalfOpenProbe(d.now())
+	if d.circuit != nil {
+		if !errors.Is(err, ErrAICCConcurrencyLimited) && !isAICCRetryable(err) {
+			_ = d.circuit.Reopen(ctx, "hermes")
+		}
+	} else {
+		d.reopenHalfOpenProbe(d.now())
+	}
 	if isAICCRetryable(err) {
 		// Lease SQL 会先将 attempts 加一；重试退避必须使用本轮实际失败后的计数。
 		attempts := task.Attempts + 1
@@ -187,8 +201,8 @@ func (d *AICCDispatcher) finishError(ctx context.Context, task sqlc.AiccMessageT
 		if rows != 1 {
 			return ErrAICCLeaseLost
 		}
-		if d.circuit != nil {
-			_ = d.circuit.Record(ctx, "hermes", true)
+		if d.circuit != nil && !errors.Is(err, ErrAICCConcurrencyLimited) {
+			_ = d.circuit.RecordOverload(ctx, "hermes")
 		} else {
 			d.recordOverload(d.now())
 		}
@@ -214,7 +228,7 @@ func (d *AICCDispatcher) finishError(ctx context.Context, task sqlc.AiccMessageT
 // observe 统一构造受限标签集，任何调用点都不能将访客文本或租约 token 写入观测系统。
 func (d *AICCDispatcher) observe(ctx context.Context, task sqlc.AiccMessageTask, event, result string) {
 	if d != nil && d.observer != nil {
-		d.observer.Observe(ctx, NewAICCDispatchObservation(event, task.AgentID, task.OrgID, "hermes", result, 0, 0))
+		d.observer.Observe(ctx, NewAICCDispatchObservation(event, task.AppID, task.AgentID, task.OrgID, "hermes", result, 0, 0))
 	}
 }
 

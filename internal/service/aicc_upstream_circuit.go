@@ -12,7 +12,9 @@ import (
 // AICCUpstreamCircuit 是按上游共享的熔断状态，允许多 manager 副本共用失败窗口和半开探测。
 type AICCUpstreamCircuit interface {
 	Allow(context.Context, string) (bool, error)
-	Record(context.Context, string, bool) error
+	RecordSuccess(context.Context, string) error
+	RecordOverload(context.Context, string) error
+	Reopen(context.Context, string) error
 }
 
 // RedisAICCUpstreamCircuit 将每个 upstream 的连续失败、30 秒滑窗及半开探测持久化到 Redis。
@@ -38,6 +40,8 @@ redis.call('ZADD', KEYS[1], now, ARGV[7]); if overload=='1' then redis.call('ZAD
 local total=redis.call('ZCARD', KEYS[1]); local failed=redis.call('ZCARD', KEYS[2]); local cons=tonumber(redis.call('HGET', KEYS[3], 'consecutive') or '0')
 if cons>=threshold or (total>0 and failed*100>=total*pct) then redis.call('HSET', KEYS[3], 'open_until', now+cooldown); redis.call('DEL', KEYS[4]) end
 redis.call('PEXPIRE', KEYS[1], window*2); redis.call('PEXPIRE', KEYS[2], window*2); redis.call('PEXPIRE', KEYS[3], cooldown*2); return 1`
+const aiccCircuitSuccessLua = `redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4]); return 1`
+const aiccCircuitReopenLua = `redis.call('HSET', KEYS[1], 'open_until', ARGV[1]); redis.call('PEXPIRE', KEYS[1], ARGV[2]); redis.call('DEL', KEYS[2]); return 1`
 
 func (c *RedisAICCUpstreamCircuit) Allow(ctx context.Context, upstream string) (bool, error) {
 	if c == nil || c.client == nil {
@@ -58,15 +62,17 @@ func (c *RedisAICCUpstreamCircuit) Allow(ctx context.Context, upstream string) (
 	ok, err := c.client.SetNX(ctx, c.key(upstream, "probe"), "1", c.cooldown).Result()
 	return ok, err
 }
-func (c *RedisAICCUpstreamCircuit) Record(ctx context.Context, upstream string, overload bool) error {
+func (c *RedisAICCUpstreamCircuit) RecordOverload(ctx context.Context, upstream string) error {
 	now := time.Now().UnixMilli()
 	id := fmt.Sprintf("%d-%d", now, time.Now().UnixNano())
-	_, err := c.client.Eval(ctx, aiccCircuitRecordLua, []string{c.key(upstream, "outcomes"), c.key(upstream, "failures"), c.key(upstream, "state"), c.key(upstream, "probe")}, now, c.window.Milliseconds(), c.consecutive, c.percent, c.cooldown.Milliseconds(), boolToInt(overload), id).Result()
+	_, err := c.client.Eval(ctx, aiccCircuitRecordLua, []string{c.key(upstream, "outcomes"), c.key(upstream, "failures"), c.key(upstream, "state"), c.key(upstream, "probe")}, now, c.window.Milliseconds(), c.consecutive, c.percent, c.cooldown.Milliseconds(), 1, id).Result()
 	return err
 }
-func boolToInt(v bool) int {
-	if v {
-		return 1
-	}
-	return 0
+func (c *RedisAICCUpstreamCircuit) RecordSuccess(ctx context.Context, upstream string) error {
+	_, err := c.client.Eval(ctx, aiccCircuitSuccessLua, []string{c.key(upstream, "outcomes"), c.key(upstream, "failures"), c.key(upstream, "state"), c.key(upstream, "probe")}).Result()
+	return err
+}
+func (c *RedisAICCUpstreamCircuit) Reopen(ctx context.Context, upstream string) error {
+	_, err := c.client.Eval(ctx, aiccCircuitReopenLua, []string{c.key(upstream, "state"), c.key(upstream, "probe")}, time.Now().Add(c.cooldown).UnixMilli(), c.cooldown.Milliseconds()*2).Result()
+	return err
 }

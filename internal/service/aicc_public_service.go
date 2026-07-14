@@ -485,8 +485,8 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 				return AICCPublicMessageResult{}, fmt.Errorf("%w: 已保存消息内容不能为空", ErrInvalidArgument)
 			}
 			// 已完成当前会话、风控与持久化内容校验后，才允许终态失败任务恢复；其他状态继续保持幂等读取。
-			if _, requeueErr := s.store.RequeueFailedAICCMessageTask(ctx, existing.ID); requeueErr != nil {
-				return AICCPublicMessageResult{}, fmt.Errorf("恢复失败的 AICC 消息任务失败: %w", requeueErr)
+			if requeueErr := s.requeueFailedTaskWithAdmission(ctx, existing.ID); requeueErr != nil {
+				return AICCPublicMessageResult{}, requeueErr
 			}
 			return s.aiccMessageTaskResult(ctx, existing.ID)
 		}
@@ -547,6 +547,29 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 		return AICCPublicMessageResult{MessageID: visitorMessage.ID, Status: "queued"}, nil
 	}
 	return AICCPublicMessageResult{MessageID: visitorMessage.ID, Status: "completed", Text: aiccPromptInjectionReply}, nil
+}
+
+// requeueFailedTaskWithAdmission 在同一事务内取得全局锁、检查容量并恢复失败任务，不能让重试绕过队列上限。
+func (s *AICCPublicService) requeueFailedTaskWithAdmission(ctx context.Context, messageID string) error {
+	if s.queueCapacity <= 0 {
+		return ErrAICCQueueBusy
+	}
+	return s.withAICCPublicTx(ctx, func(store AICCPublicStore) error {
+		if _, err := store.LockAICCQueueGovernance(ctx); err != nil {
+			return fmt.Errorf("锁定 AICC 全局队列失败: %w", err)
+		}
+		active, err := store.CountActiveAICCMessageTasks(ctx)
+		if err != nil {
+			return fmt.Errorf("统计 AICC 全局队列失败: %w", err)
+		}
+		if active >= s.queueCapacity {
+			return ErrAICCQueueBusy
+		}
+		if _, err := store.RequeueFailedAICCMessageTask(ctx, messageID); err != nil {
+			return fmt.Errorf("恢复失败的 AICC 消息任务失败: %w", err)
+		}
+		return nil
+	})
 }
 
 // GetMessageStatus 按 session token 查询一条已受理访客消息的异步处理状态。
