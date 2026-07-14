@@ -52,6 +52,11 @@ type AICCDispatchMetrics interface {
 	Snapshot() AICCDispatchMetricSnapshot
 }
 
+// AICCDispatchMetricSource 向受控 HTTP 或监控桥接层提供只读指标快照。
+type AICCDispatchMetricSource interface {
+	Metrics() AICCDispatchMetricSnapshot
+}
+
 // InMemoryAICCDispatchMetrics 保存进程内可读取指标，供日志桥接或未来监控适配器安全导出。
 type InMemoryAICCDispatchMetrics struct {
 	mu          sync.Mutex
