@@ -8,7 +8,7 @@
 
 manager 定义 `DefaultInstanceSystemPromptTemplate` 与 `DefaultAICCSystemPromptTemplate`。普通实例定位为可交付文件的通用工作助手，保留 workspace 约束；AICC 定位为面向外部访客的智能客服，要求专业、如实、不承诺无法保证的结果且不暴露内部实现。两者都保留完整的技能发现规则。
 
-Bootstrap 依据 `app.AiccHidden` 选择 prompt，写入 `platform-rules.md`。`PlatformPromptHash` 也依据同一标识计算，概览和 bootstrap stamp 因而始终对应实例实际使用的文本。
+Bootstrap 依据 `app_type='aicc'` 选择 AICC prompt，其他类型选择普通实例 prompt，并将结果写入 `platform-rules.md`。`PlatformPromptHash` 也依据同一类型计算，概览和 bootstrap stamp 因而始终对应实例实际使用的文本。旧实现曾使用 `aicc_hidden` 布尔字段；该字段仅作为历史迁移来源，不再参与当前判断。
 
 ## 验证
 

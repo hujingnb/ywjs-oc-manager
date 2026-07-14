@@ -31,6 +31,11 @@
 ## `/opt/data` 持久化边界
 
 Hermes app 的运行时数据根目录是 `/opt/data`。镜像更新时必须区分以下数据类别。
+本节定义的 S3 持久化、恢复与文件过渡约束**仅适用于**
+`app_type='standard'` 的应用。`app_type='aicc'` 是无状态运行时：每次 Pod 启动均由
+初始化容器通过 bootstrap 写入启动所需 manifest，并由当前 AICC 镜像重新生成运行时文件；
+其 `/opt/data` 不跨 Pod 保留，不得执行 `oc-restore`、`oc-sync` 或 `oc-presync`，也不得
+因 S3 恢复、同步或临时凭证失败阻塞启动。
 
 ### 必须保留的长期记忆
 
@@ -91,7 +96,7 @@ renderer 只拥有这些由它生成的输出；不得把 `MEMORY.md`、`USER.md
 
 这些值由 manager bootstrap 通过认证通道下发，DB 加密字段是持久真相源。
 
-## S3 保存与恢复
+## S3 保存与恢复（仅 `app_type='standard'`）
 
 app 级运行时数据使用 `apps/<appID>/` S3 前缀。
 
@@ -103,6 +108,10 @@ app 级运行时数据使用 `apps/<appID>/` S3 前缀。
 - Cron、kanban、`.oc-state.json` 与 `skills/.bundled_manifest` 属于非会话运行时状态，也必须纳入同步和恢复范围。
 - S3 恢复失败时应让 initContainer 失败，不得静默启动一个空记忆实例。
 - `sessions/` 与 `state.db*` 可以同步为会话快照，但不能被描述或处理为长期记忆。
+
+`app_type='aicc'` 不适用本节：其初始化容器只完成 bootstrap manifest 与必要目录的
+初始化，不恢复 `/opt/data`；Pod 中不创建同步 sidecar，也不配置调用 `oc-presync` 的
+preStop hook。
 
 ## 对外暴露能力契约
 

@@ -2,13 +2,13 @@
 
 ## 背景
 
-普通实例和 AICC 隐藏应用当前都由 manager-api 编排到 `oc-apps`。AICC 已使用独立镜像和发布流程，运行时资源也应独立到 `oc-aicc`，以便后续分别设置资源配额、网络策略和观测规则。
+普通实例和 `app_type='aicc'` 的 AICC 应用当前都由 manager-api 编排到 `oc-apps`。AICC 已使用独立镜像和发布流程，运行时资源也应独立到 `oc-aicc`，以便后续分别设置资源配额、网络策略和观测规则。
 
 本次尚未发布生产环境，不迁移历史 AICC 应用。本地环境允许重置既有 AICC 测试数据。
 
 ## 目标与边界
 
-- 新建 AICC 隐藏应用的 Deployment、Service、Secret、Pod 全部位于 `oc-aicc`。
+- 新建 `app_type='aicc'` 应用的 Deployment、Service、Secret、Pod 全部位于 `oc-aicc`。
 - 普通实例继续位于 `oc-apps`，现有行为和镜像选择不变。
 - AICC 公开入口仍由 `ocm` 中的 manager-api 提供，不新增 Ingress。
 - 不迁移已有 AICC 资源，不修改数据库结构，不复制对象存储数据。
@@ -22,7 +22,7 @@ manager 启动时构造两个 KubernetesAdapter：
 | Adapter | 适用应用 | 命名空间 |
 | --- | --- | --- |
 | 普通 Adapter | 非 AICC 应用 | `k8s.namespace` |
-| AICC Adapter | `aicc_hidden=true` 应用 | `k8s.aicc_namespace` |
+| AICC Adapter | `app_type='aicc'` 应用 | `k8s.aicc_namespace` |
 
 应用初始化、启动、停止、删除、镜像升级和渠道凭证 Secret 更新必须按应用类型选择对应 Adapter。AICC OcOps 服务地址使用 `http://app-<app-id>-ocops.oc-aicc.svc:8080`；普通实例保留 `oc-apps.svc` 地址。
 

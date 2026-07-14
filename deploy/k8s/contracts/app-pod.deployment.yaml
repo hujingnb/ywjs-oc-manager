@@ -54,3 +54,70 @@ metadata:
 type: Opaque
 stringData:
   control-token: "<RANDOM_PER_APP_TOKEN>"
+---
+# AICC 契约样例（不 apply）：仅适用于 app_type='aicc'，由 manager 渲染并 apply 到 oc-aicc ns。
+# AICC 是无状态运行时：oc-bootstrap 初始化 + hermes + oc-ops，共享 emptyDir；没有 S3 恢复或同步容器。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-<APP_ID>
+  namespace: oc-aicc
+  labels:
+    app: "<APP_ID>"
+    app.kubernetes.io/part-of: oc-manager
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector: { matchLabels: { app: "<APP_ID>" } }
+  template:
+    metadata:
+      labels: { app: "<APP_ID>" }
+    spec:
+      imagePullSecrets:
+        - name: acr-pull
+      initContainers:
+        # 只请求 bootstrap manifest 并创建运行目录；不读取或写入 S3。
+        - name: oc-bootstrap
+          image: "<OPS_IMAGE_REF>"
+          command: ["oc-bootstrap"]
+          env:
+            - name: OC_CONTROL_TOKEN
+              valueFrom: { secretKeyRef: { name: app-<APP_ID>-token, key: control-token } }
+            - name: OC_BOOTSTRAP_URL
+              value: "<OC_BOOTSTRAP_URL>"
+          volumeMounts:
+            - { name: oc-input, mountPath: /opt/oc-input }
+            - { name: data, mountPath: /opt/data }
+      containers:
+        - name: hermes
+          image: "<AICC_HERMES_IMAGE_REF>"
+          env:
+            - name: HERMES_HOME
+              value: /opt/data
+          volumeMounts:
+            - { name: oc-input, mountPath: /opt/oc-input }
+            - { name: data, mountPath: /opt/data }
+        - name: oc-ops
+          image: "<AICC_OC_OPS_IMAGE_REF>"
+          ports:
+            - containerPort: 8080
+          env:
+            - name: OC_OPS_TOKEN
+              valueFrom: { secretKeyRef: { name: app-<APP_ID>-token, key: control-token } }
+          volumeMounts:
+            - { name: data, mountPath: /opt/data }
+      volumes:
+        - name: oc-input
+          emptyDir: {}          # bootstrap manifest 仅在本次 Pod 生命周期内可见
+        - name: data
+          emptyDir: {}          # AICC 无状态运行时数据；不恢复到 S3，也不向 S3 同步
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-<APP_ID>-token
+  namespace: oc-aicc
+type: Opaque
+stringData:
+  control-token: "<RANDOM_PER_APP_TOKEN>"
