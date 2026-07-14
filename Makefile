@@ -50,7 +50,7 @@ HERMES_VARIANT       ?= hermes-v2026.7.1
 # HERMES_VARIANT_DIR 只能由 HERMES_VARIANT 派生，避免命令行直接指向任意目录绕过版本校验。
 override HERMES_VARIANT_DIR := runtime/hermes/$(HERMES_VARIANT)
 override HERMES_VERSION := $(strip $(shell if [ -f "$(HERMES_VARIANT_DIR)/version.txt" ]; then cat "$(HERMES_VARIANT_DIR)/version.txt"; fi))
-HERMES_IMAGE_REPO    ?= $(PROD_REGISTRY)/$(PROD_APP_NS)/oc-manager-hermes
+HERMES_IMAGE_REPO    ?= $(PROD_REGISTRY)/$(PROD_APP_NS)/oc-manager-aigowork
 # hermes tag 形如 v2026.5.16-2026-05-21-12-00-00-be70e40a，便于从镜像引用直接看出上游版本和源码提交。
 override HERMES_IMAGE := $(HERMES_IMAGE_REPO):$(HERMES_VERSION)-$(IMAGE_TAG)
 
@@ -59,7 +59,7 @@ override HERMES_IMAGE := $(HERMES_IMAGE_REPO):$(HERMES_VERSION)-$(IMAGE_TAG)
 override AICC_RUNTIME_DIR := runtime/hermes/hermes-aicc
 override AICC_RUNTIME_VERSION := $(strip $(shell if [ -f "$(AICC_RUNTIME_DIR)/version.txt" ]; then cat "$(AICC_RUNTIME_DIR)/version.txt"; fi))
 override AICC_RUNTIME_HERMES_REF := $(strip $(shell if [ -f "$(AICC_RUNTIME_DIR)/hermes-ref.txt" ]; then cat "$(AICC_RUNTIME_DIR)/hermes-ref.txt"; fi))
-AICC_RUNTIME_IMAGE_REPO ?= $(PROD_REGISTRY)/$(PROD_APP_NS)/oc-manager-hermes-aicc
+AICC_RUNTIME_IMAGE_REPO ?= $(PROD_REGISTRY)/$(PROD_APP_NS)/oc-manager-aigowork-aicc
 override AICC_RUNTIME_IMAGE := $(AICC_RUNTIME_IMAGE_REPO):$(AICC_RUNTIME_VERSION)-$(IMAGE_TAG)
 # HERMES_VERSION 的正则转义版（点号转义）：prod-deploy-hermes 用它把 secret.yaml 中
 # runtime_images 里「同版本」那一条 ref 精确替换为新 tag，不能误伤其它版本条目
@@ -214,7 +214,7 @@ local-build-ops: ## 构建 ops 镜像推 k3d registry（本地联调用）
 local-build-aicc-runtime: aicc-runtime-inject-contract ## 构建客服专用 runtime 镜像推 k3d registry（本地联调用）
 	status=0; \
 	docker build $(HERMES_BUILD_FLAGS) \
-	  -t $(K3D_REGISTRY_HOST)/oc-manager-hermes-aicc:dev \
+	  -t $(K3D_REGISTRY_HOST)/oc-manager-aigowork-aicc:dev \
 	  --build-arg DOCKER_HUB_MIRROR=$(PROD_PUBLIC_REPO) \
 	  --build-arg "HERMES_REF=$(AICC_RUNTIME_HERMES_REF)" \
 	  --build-arg "OC_IMAGE_VARIANT=hermes-aicc" \
@@ -222,9 +222,9 @@ local-build-aicc-runtime: aicc-runtime-inject-contract ## 构建客服专用 run
 	  $(AICC_RUNTIME_DIR) || status=$$?; \
 	rm -rf $(AICC_RUNTIME_DIR)/ocops-contract $(AICC_RUNTIME_DIR)/kanban-contract $(AICC_RUNTIME_DIR)/cron-contract; \
 	if [ $$status -ne 0 ]; then exit $$status; fi
-	docker push $(K3D_REGISTRY_HOST)/oc-manager-hermes-aicc:dev
+	docker push $(K3D_REGISTRY_HOST)/oc-manager-aigowork-aicc:dev
 	# 本地 k3d 节点使用固定 :dev 标签时，直接导入节点以避免 registry 临时不可达导致旧镜像继续运行。
-	docker save --platform linux/amd64 $(K3D_REGISTRY_HOST)/oc-manager-hermes-aicc:dev | docker exec -i k3d-$(K3D_CLUSTER)-server-0 ctr images import -
+	docker save --platform linux/amd64 $(K3D_REGISTRY_HOST)/oc-manager-aigowork-aicc:dev | docker exec -i k3d-$(K3D_CLUSTER)-server-0 ctr images import -
 
 # LOCAL_PRELOAD_IMAGES：local-up 需要的 docker.io 重镜像。节点 containerd 经镜像源拉这些镜像
 # 时快时卡（mysql/es 曾致 rollout 超时，ragflow 几 GB 更易卡），故改为宿主 docker 拉取（走宿主
@@ -549,7 +549,7 @@ prod-deploy-hermes: .prod-deploy-hermes-one ## 构建推送单个 hermes 镜像(
 .prod-deploy-hermes-one: build-hermes-image
 	# 只替换 tag 版本号为本次部署版本（$(HERMES_VERSION)）的那条 ref，保留 runtime_images
 	# 列表中其它版本条目不动；否则多版本列表会被全部覆盖成同一镜像（曾误伤旧版回退条目）。
-	sed -i -E 's#ref: "[^"]*oc-manager-hermes:$(HERMES_VERSION_RE)-[^"]*"#ref: "$(HERMES_IMAGE)"#' deploy/k8s/prod/secret.yaml
+	sed -i -E 's#ref: "[^"]*oc-manager-aigowork:$(HERMES_VERSION_RE)-[^"]*"#ref: "$(HERMES_IMAGE)"#' deploy/k8s/prod/secret.yaml
 	@echo "✅ secret.yaml 的 hermes 镜像（$(HERMES_VERSION)）已更新为 $(HERMES_IMAGE)"
 
 # prod-deploy-hermes-all：遍历 runtime/hermes/ 下全部 versioned variant（HERMES_VARIANTS_ALL），
