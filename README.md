@@ -165,7 +165,7 @@ make release-agent-image
 make release-hermes-image
 ```
 
-`manager-api` / `runtime-agent` / `manager-web` 的 tag 格式为 `YYYY-MM-DD-HH-MM-SS-<commit8>`；`oc-manager-hermes` 的 tag 格式为 `<HERMES_VERSION>-YYYY-MM-DD-HH-MM-SS-<commit8>`，例如 `v2026.5.16-2026-05-21-12-00-00-be70e40a`。该规则只覆盖本仓库发布的四个镜像，外部基础镜像和依赖镜像不在此规则内。
+`manager-api` / `runtime-agent` / `manager-web` 的 tag 格式为 `YYYY-MM-DD-HH-MM-SS-<commit8>`；`oc-manager-aigowork` 的 tag 格式为 `<HERMES_VERSION>-YYYY-MM-DD-HH-MM-SS-<commit8>`，例如 `v2026.5.16-2026-05-21-12-00-00-be70e40a`。该规则只覆盖本仓库发布的四个镜像，外部基础镜像和依赖镜像不在此规则内。
 
 上述 Makefile 构建入口都已经默认走国内源，本地或 CI 环境无需额外配置：
 
@@ -207,7 +207,7 @@ docker build \
 注意：`calciumion/new-api` 与 `ollama/ollama` 不在 Docker Hub `library/` 下，切回官方源时需要手工指定完整路径（`docker.io/calciumion/new-api:<tag>` 等），`DOCKER_HUB_MIRROR=docker.io/library` 的覆盖只适用于 `library/` 命名空间的基础镜像。
 
 推送到镜像仓库后，写入对应运行包配置：普通三镜像使用 Makefile 生成的
-`YYYY-MM-DD-HH-MM-SS-<commit8>` tag，`oc-manager-hermes` 使用
+`YYYY-MM-DD-HH-MM-SS-<commit8>` tag，`oc-manager-aigowork` 使用
 `<HERMES_VERSION>-YYYY-MM-DD-HH-MM-SS-<commit8>` tag；更严格的环境可进一步固定到
 `@sha256:` digest。**生产禁止使用 `:latest`、分支 tag 或版本族 tag**。
 
@@ -221,7 +221,7 @@ docker build \
 crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-api
 crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-web
 crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-agent
-crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-hermes
+crpi-nu3ibz4f07feyghi.cn-beijing.personal.cr.aliyuncs.com/ywjs_app/oc-manager-aigowork
 ```
 
 各字段含义见 [deploy/README.md](./deploy/README.md) 与子运行包 README。

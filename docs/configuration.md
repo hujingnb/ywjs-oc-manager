@@ -138,7 +138,7 @@ Hermes Agent runtime 容器相关配置。
 |---|---|---|---|
 | `runtime_image` | string | — | AICC 隐藏应用唯一允许使用的客服专用镜像引用。必须使用独立仓库路径以及非 `latest` 的 tag 或 digest；缺失或非法时 manager 启动 fail-fast，绝不回退到 `hermes.runtime_images`。 |
 
-客服运行时使用 `runtime/hermes/hermes-aicc` 构建上下文和 `oc-manager-hermes-aicc` 镜像仓库。生产发布使用 `make prod-deploy-aicc-runtime`：该命令构建并推送不可变镜像、更新 `aicc.runtime_image`，随后由 leader-only 协调器逐个重建镜像漂移的客服隐藏应用。回滚时将该配置恢复为上一条不可变镜像引用，协调器按相同顺序逐个回滚。
+客服运行时使用 `runtime/hermes/hermes-aicc` 构建上下文和 `oc-manager-aigowork-aicc` 镜像仓库。生产发布使用 `make prod-deploy-aicc-runtime`：该命令构建并推送不可变镜像、更新 `aicc.runtime_image`，随后由 leader-only 协调器逐个重建镜像漂移的客服隐藏应用。回滚时将该配置恢复为上一条不可变镜像引用，协调器按相同顺序逐个回滚。
 
 ### 1.12 `agent`
 
