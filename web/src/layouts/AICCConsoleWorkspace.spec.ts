@@ -286,6 +286,17 @@ describe('AICCConsoleWorkspace', () => {
     expect(wrapper.text()).toContain('新建智能体')
   })
 
+  // 覆盖顶部创建入口：创建态必须进入设置页展示可填写、可保存的智能体表单，不能只清空当前选择。
+  it('opens settings while entering create mode from the topbar action', async () => {
+    const wrapper = mountWorkspace()
+    const createButton = wrapper.findAll('button').find(button => button.text().includes('新建智能体'))
+
+    await createButton!.trigger('click')
+
+    expect(wrapper.find('[data-test="context-selected-id"]').text()).toBe('none')
+    expect(routerPush).toHaveBeenCalledWith('/aicc-console/settings')
+  })
+
   // 覆盖无智能体空态：列表为空时仍挂载子路由，并给出创建智能体入口。
   it('shows an empty agent context when no agents exist', () => {
     agentsState.data.value = []

@@ -271,6 +271,8 @@ function selectAgent(agentId?: string) {
 function startCreateAgent() {
   selectedAgentIdState.value = undefined
   isCreatingAgent.value = true
+  // 新建表单只在设置模块展示；统一入口必须同步切换路由，避免用户停留在接待台而误以为点击无效。
+  void router.push('/aicc-console/settings')
 }
 
 function resolveNavTarget(item: WorkspaceNavItem) {
