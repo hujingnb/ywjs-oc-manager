@@ -220,6 +220,43 @@ describe('PublicAICCChatPage', () => {
     expect(wrapper.text()).not.toContain('您好，请问有什么可以帮您？')
   })
 
+  // 场景：刷新恢复的服务端历史消息必须在各自气泡下方显示浏览器本地时区的发送时分。
+  it('renders local timestamps below restored message bubbles', async () => {
+    const sentAt = new Date(2026, 6, 14, 9, 5).toISOString()
+    apiState.readStoredSession.mockReturnValue('stored-session-token')
+    apiState.fetchSession.mockResolvedValue({
+      resolution_status: 'unknown',
+      messages: [
+        { id: 'msg-1', direction: 'visitor', text: '历史问题', created_at: sentAt },
+        { id: 'msg-2', direction: 'assistant', text: '历史回复', created_at: sentAt },
+      ],
+    })
+
+    const wrapper = mountPublicChat()
+    await flushPromises()
+
+    expect(wrapper.findAll('.message-time')).toHaveLength(2)
+    expect(wrapper.findAll('.message-time').map(time => time.text())).toEqual(['09:05', '09:05'])
+  })
+
+  // 场景：欢迎语、当前发送的访客消息和客服回复无需刷新，也必须立即显示发送时分。
+  it('renders timestamps for greeting and newly exchanged messages', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 6, 14, 14, 30))
+    try {
+      const wrapper = mountPublicChat()
+      await flushPromises()
+
+      await wrapper.find('textarea').setValue('报价多少')
+      await wrapper.find('form.composer').trigger('submit')
+      await flushPromises()
+
+      expect(wrapper.findAll('.message-time').map(time => time.text())).toEqual(['14:30', '14:30', '14:30'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   // 场景：公开页刷新恢复已完成留资的会话时，不能因为当前客服配置了必填字段而重复展示留资表单。
   it('does not show the lead form when the restored session already completed lead capture', async () => {
     apiState.readStoredSession.mockReturnValue('stored-session-token')

@@ -38,6 +38,7 @@
             <p v-if="message.text">{{ message.text }}</p>
             <img v-if="message.imageUrl" :src="message.imageUrl" :alt="t('aicc.publicChat.uploadedImageAlt')" />
           </div>
+          <time v-if="formatMessageTime(message.sentAt)" class="message-time">{{ formatMessageTime(message.sentAt) }}</time>
         </article>
         <article v-if="isSending" class="message-row assistant">
           <div class="bubble typing">{{ t('aicc.publicChat.typing') }}</div>
@@ -139,6 +140,8 @@ interface ChatMessage {
   role: 'visitor' | 'assistant'
   text?: string
   imageUrl?: string
+  // sentAt 是用于公开聊天页展示的发送时间；服务端历史消息沿用 created_at，即时消息在浏览器创建。
+  sentAt?: string
 }
 
 interface PendingImage {
@@ -264,6 +267,7 @@ async function submitMessage() {
     role: 'visitor',
     text,
     imageUrl: image?.previewUrl,
+    sentAt: new Date().toISOString(),
   })
   await scrollToBottom()
   try {
@@ -278,6 +282,7 @@ async function submitMessage() {
       id: crypto.randomUUID(),
       role: 'assistant',
       text: response.text || t('aicc.publicChat.defaultAssistantReply'),
+      sentAt: new Date().toISOString(),
     })
   } catch (err) {
     errorMessage.value = publicMessageErrorText(err)
@@ -331,6 +336,7 @@ function resetMessagesToGreeting() {
     id: crypto.randomUUID(),
     role: 'assistant',
     text: config.value?.greeting || t('aicc.publicChat.defaultGreeting'),
+    sentAt: new Date().toISOString(),
   }]
 }
 
@@ -355,7 +361,16 @@ function toChatMessage(message: AICCMessage): ChatMessage | null {
     id: message.id,
     role: message.direction === 'visitor' ? 'visitor' : 'assistant',
     text: message.text,
+    sentAt: message.created_at,
   }
+}
+
+// formatMessageTime 将服务端 ISO 时间或浏览器即时记录按访客本地时区收敛为 HH:mm；无效值不展示，避免暴露 Invalid Date。
+function formatMessageTime(value?: string): string {
+  if (!value) return ''
+  const time = new Date(value)
+  if (!Number.isFinite(time.getTime())) return ''
+  return time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
 function leadFieldInputProps(field: AICCLeadField) {
@@ -529,10 +544,12 @@ async function scrollToBottom() {
 
 .message-row {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 .message-row.visitor {
-  justify-content: flex-end;
+  align-items: flex-end;
 }
 
 .bubble {
@@ -552,6 +569,13 @@ async function scrollToBottom() {
   color: #ffffff;
   background: #1f2937;
   border-color: #1f2937;
+}
+
+.message-time {
+  margin-top: 4px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1;
 }
 
 .bubble img {
