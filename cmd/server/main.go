@@ -226,6 +226,21 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		}
 		normalOrch = k8sorch.NewKubernetesAdapter(cs, cfg.Kubernetes.Namespace)
 		aiccOrch := k8sorch.NewAICCKubernetesAdapter(cs, cfg.Kubernetes.AICCNamespace)
+		if cfg.Kubernetes.AICCHPABusinessMetrics.Enabled {
+			// 配置层已校验完整性；这里仅把 quantity 字符串转换为 client-go HPA 所需类型。
+			businessMetrics, metricErr := k8sorch.NewAICCBusinessMetricsConfig(
+				cfg.Kubernetes.AICCHPABusinessMetrics.Provider,
+				cfg.Kubernetes.AICCHPABusinessMetrics.AppLabel,
+				cfg.Kubernetes.AICCHPABusinessMetrics.QueueDepth.Name,
+				cfg.Kubernetes.AICCHPABusinessMetrics.QueueDepth.TargetAverageValue,
+				cfg.Kubernetes.AICCHPABusinessMetrics.Inflight.Name,
+				cfg.Kubernetes.AICCHPABusinessMetrics.Inflight.TargetAverageValue,
+			)
+			if metricErr != nil {
+				return fmt.Errorf("解析 AICC HPA 业务指标配置失败: %w", metricErr)
+			}
+			aiccOrch.WithAICCBusinessMetrics(businessMetrics)
+		}
 		orch = k8sorch.NewRoutingOrchestrator(normalOrch, aiccOrch, appKindResolver{store: dbStore.Queries})
 	}
 	// k8sInitCfg 供 app_initialize 渲染 AppSpec 使用，从 cfg.Kubernetes 提取最小子集。
@@ -273,6 +288,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	aiccPublicChat := service.NewAICCPublicHermesChat(ocopsClient, aiccOcOpsResolver)
 	aiccPublicService := service.NewAICCPublicService(dbStore.Queries, aiccPublicChat)
 	aiccPublicService.SetTxRunner(store.NewAICCPublicRunner(dbStore))
+	// 全局容量由 MySQL 事务中的单行锁与任务状态共同裁决，所有 manager 副本共享该事实。
+	aiccPublicService.SetQueueCapacity(cfg.AICC.Governance.GlobalQueueCapacity)
 	aiccPublicService.SetRateLimiter(service.NewRedisAICCRateLimiter(imagecoordRedis, cfg.Redis.KeyPrefix))
 	aiccGeoIPResolver := service.NewAICCIP2RegionResolver()
 	aiccPublicService.SetGeoIPResolver(aiccGeoIPResolver)

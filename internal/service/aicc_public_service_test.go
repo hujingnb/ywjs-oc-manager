@@ -21,6 +21,22 @@ import (
 
 var aiccPublicTestNow = time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
 
+// TestAICCPublicSendMessageRejectsFullGlobalQueue 验证全局队列已满时事务回滚，不能留下访客消息或任务孤儿。
+func TestAICCPublicSendMessageRejectsFullGlobalQueue(t *testing.T) {
+	store := newAICCPublicMessageStore()
+	store.activeTaskCount = 1
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+	svc.SetQueueCapacity(1)
+	svc.SetTxRunner(&fakeAICCPublicTxRunner{store: store})
+
+	_, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "排队测试"})
+
+	require.ErrorIs(t, err, ErrAICCQueueBusy)
+	assert.Empty(t, store.createdMessages)
+	assert.Empty(t, store.createdTasks)
+}
+
 // TestAICCPublicChatRequiresConsent 覆盖隐私强同意模式：未同意前拒绝访客继续聊天。
 func TestAICCPublicChatRequiresConsent(t *testing.T) {
 	store := &fakeAICCPublicStore{
@@ -1314,6 +1330,7 @@ type fakeAICCPublicStore struct {
 	createAssistantMessageErr error
 	idempotencyReadBarrier    *fakeAICCIdempotencyReadBarrier
 	visitorMessageCount       int64
+	activeTaskCount           int64
 	leads                     []sqlc.AiccLead
 	leadValues                []sqlc.UpsertAICCLeadValueParams
 	attachedLeadID            string
@@ -1465,6 +1482,14 @@ func (f *fakeAICCPublicStore) CountAICCVisitorMessagesBySession(_ context.Contex
 		return 0, sql.ErrNoRows
 	}
 	return f.visitorMessageCount, nil
+}
+
+// LockAICCQueueGovernance 模拟事务内的全局 admission 单行锁；串行 runner 已覆盖竞争语义。
+func (f *fakeAICCPublicStore) LockAICCQueueGovernance(_ context.Context) (int8, error) { return 1, nil }
+
+// CountActiveAICCMessageTasks 返回测试指定的全局在途任务数，供容量满和释放场景断言。
+func (f *fakeAICCPublicStore) CountActiveAICCMessageTasks(_ context.Context) (int64, error) {
+	return f.activeTaskCount, nil
 }
 
 func (f *fakeAICCPublicStore) ListAICCMessagesBySession(_ context.Context, sessionID string) ([]sqlc.AiccMessage, error) {

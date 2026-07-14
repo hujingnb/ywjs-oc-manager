@@ -321,6 +321,18 @@ func (q *Queries) CountActiveAICCBlockedVisitorsByAgent(ctx context.Context, age
 	return count, err
 }
 
+const countActiveAICCMessageTasks = `-- name: CountActiveAICCMessageTasks :one
+SELECT COUNT(*) FROM aicc_message_tasks WHERE status NOT IN ('completed', 'failed')
+`
+
+// completed/failed 已释放队列名额；queued、retry_wait 与 processing 都仍占用容量。
+func (q *Queries) CountActiveAICCMessageTasks(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countActiveAICCMessageTasks)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createAICCAgent = `-- name: CreateAICCAgent :exec
 INSERT INTO aicc_agents (
     id, org_id, app_id, name, status, scenario, greeting, answer_boundary,
@@ -2257,6 +2269,18 @@ func (q *Queries) ListRequiredAICCLeadFieldsMissing(ctx context.Context, id stri
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockAICCQueueGovernance = `-- name: LockAICCQueueGovernance :one
+SELECT id FROM aicc_queue_governance WHERE id = 1 FOR UPDATE
+`
+
+// 全局单行锁只覆盖 admission 检查与消息/任务写入，确保所有 manager 副本观察同一容量事实。
+func (q *Queries) LockAICCQueueGovernance(ctx context.Context) (int8, error) {
+	row := q.db.QueryRowContext(ctx, lockAICCQueueGovernance)
+	var id int8
+	err := row.Scan(&id)
+	return id, err
 }
 
 const lockAICCSessionForUpdate = `-- name: LockAICCSessionForUpdate :one

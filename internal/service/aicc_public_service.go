@@ -62,6 +62,10 @@ type AICCPublicStore interface {
 	GetAICCAgentSettings(ctx context.Context, agentID string) (sqlc.AiccAgentSetting, error)
 	// CountAICCVisitorMessagesBySession 统计当前会话已写入的访客消息数量，用于发送前拦截。
 	CountAICCVisitorMessagesBySession(ctx context.Context, sessionID string) (int64, error)
+	// LockAICCQueueGovernance 串行化所有副本的全局队列 admission 判断。
+	LockAICCQueueGovernance(ctx context.Context) (int8, error)
+	// CountActiveAICCMessageTasks 返回仍占据全局队列容量的非终态任务数。
+	CountActiveAICCMessageTasks(ctx context.Context) (int64, error)
 	// ListAICCMessagesBySession 读取当前会话消息，用于访客刷新页面后恢复对话内容。
 	ListAICCMessagesBySession(ctx context.Context, sessionID string) ([]sqlc.AiccMessage, error)
 	// GetActiveAICCBlockedVisitor 按匿名访客 hash 查询有效封禁记录，避免公开端继续消耗模型。
@@ -256,18 +260,19 @@ type aiccPublicSettings struct {
 
 // AICCPublicService 负责匿名访客侧 AICC 会话状态机。
 type AICCPublicService struct {
-	store AICCPublicStore
-	tx    AICCPublicTxRunner
-	blob  AICCPublicImageBlob
-	chat  AICCHermesChat
-	limit AICCRateLimiter
-	geo   AICCGeoIPResolver
-	now   func() time.Time
+	store         AICCPublicStore
+	tx            AICCPublicTxRunner
+	blob          AICCPublicImageBlob
+	chat          AICCHermesChat
+	limit         AICCRateLimiter
+	geo           AICCGeoIPResolver
+	queueCapacity int64
+	now           func() time.Time
 }
 
 // NewAICCPublicService 创建公开访客服务。
 func NewAICCPublicService(store AICCPublicStore, chat AICCHermesChat) *AICCPublicService {
-	return &AICCPublicService{store: store, chat: chat, now: time.Now}
+	return &AICCPublicService{store: store, chat: chat, now: time.Now, queueCapacity: 64}
 }
 
 // SetTxRunner 注入公开 AICC 写操作事务 runner。
@@ -281,6 +286,9 @@ func (s *AICCPublicService) SetRateLimiter(limiter AICCRateLimiter) { s.limit = 
 
 // SetGeoIPResolver 注入公开会话地域解析器；未注入时地域为空，不影响访客对话。
 func (s *AICCPublicService) SetGeoIPResolver(resolver AICCGeoIPResolver) { s.geo = resolver }
+
+// SetQueueCapacity 注入有限的全局持久队列上限；未装配时 SendMessage 以明确错误拒绝写入。
+func (s *AICCPublicService) SetQueueCapacity(capacity int64) { s.queueCapacity = capacity }
 
 // PublicConfig 返回访客端可展示的公开智能体配置。
 func (s *AICCPublicService) PublicConfig(ctx context.Context, publicToken, channel string) (AICCPublicConfigResult, error) {
@@ -595,6 +603,21 @@ func (s *AICCPublicService) reserveAICCVisitorMessage(ctx context.Context, sessi
 		}
 		if err := ensureMessageLimit(ctx, store, session.ID, limit); err != nil {
 			return err
+		}
+		if createTask {
+			if s.queueCapacity <= 0 {
+				return ErrAICCQueueBusy
+			}
+			if _, err := store.LockAICCQueueGovernance(ctx); err != nil {
+				return fmt.Errorf("锁定 AICC 全局队列失败: %w", err)
+			}
+			active, err := store.CountActiveAICCMessageTasks(ctx)
+			if err != nil {
+				return fmt.Errorf("统计 AICC 全局队列失败: %w", err)
+			}
+			if active >= s.queueCapacity {
+				return ErrAICCQueueBusy
+			}
 		}
 		if err := store.CreateAICCMessage(ctx, visitorMessage); err != nil {
 			return fmt.Errorf("保存 AICC 访客消息失败: %w", err)

@@ -185,6 +185,14 @@ INSERT INTO aicc_message_tasks (
     id, message_id, session_id, agent_id, org_id, app_id, run_after
 ) VALUES (?, ?, ?, ?, ?, ?, ?);
 
+-- name: LockAICCQueueGovernance :one
+-- 全局单行锁只覆盖 admission 检查与消息/任务写入，确保所有 manager 副本观察同一容量事实。
+SELECT id FROM aicc_queue_governance WHERE id = 1 FOR UPDATE;
+
+-- name: CountActiveAICCMessageTasks :one
+-- completed/failed 已释放队列名额；queued、retry_wait 与 processing 都仍占用容量。
+SELECT COUNT(*) FROM aicc_message_tasks WHERE status NOT IN ('completed', 'failed');
+
 -- name: GetAICCMessageTaskByMessageID :one
 SELECT *
 FROM aicc_message_tasks

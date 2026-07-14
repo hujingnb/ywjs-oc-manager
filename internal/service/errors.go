@@ -58,6 +58,9 @@ var ErrAICCSensitiveWord = errors.New("aicc sensitive word")
 // ErrAICCMessageLimitExceeded 表示当前公开会话已达到运营侧配置的访客消息上限。
 var ErrAICCMessageLimitExceeded = errors.New("aicc message limit exceeded")
 
+// ErrAICCQueueBusy 表示全局持久化任务队列已满；必须在创建访客消息前返回 429，避免孤儿消息。
+var ErrAICCQueueBusy = errors.New("aicc queue busy")
+
 // ErrAICCVisitorBlocked 表示当前访客命中了智能体有效封禁名单。
 var ErrAICCVisitorBlocked = errors.New("aicc visitor blocked")
 

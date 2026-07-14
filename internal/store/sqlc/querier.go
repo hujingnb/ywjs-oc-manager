@@ -39,6 +39,8 @@ type Querier interface {
 	CountAICCUnreadLeads(ctx context.Context, orgID string) (int64, error)
 	CountAICCVisitorMessagesBySession(ctx context.Context, sessionID string) (int64, error)
 	CountActiveAICCBlockedVisitorsByAgent(ctx context.Context, agentID string) (int64, error)
+	// completed/failed 已释放队列名额；queued、retry_wait 与 processing 都仍占用容量。
+	CountActiveAICCMessageTasks(ctx context.Context) (int64, error)
 	// 统计企业当前未删除普通实例数；AICC app 使用独立 aicc_agent_limit，不占用普通实例上限。
 	CountActiveAppsByOrg(ctx context.Context, orgID string) (int64, error)
 	// 平台总览组织计数：剔除 soft-deleted；status='active' 与 'disabled' 都算入册组织。
@@ -320,6 +322,8 @@ type Querier interface {
 	ListVisibleCustomSkills(ctx context.Context, arg ListVisibleCustomSkillsParams) ([]ListVisibleCustomSkillsRow, error)
 	// 平台管理员全局视图：列出所有企业的发布能力配置。
 	ListWebPublishConfigs(ctx context.Context) ([]OrgWebPublishConfig, error)
+	// 全局单行锁只覆盖 admission 检查与消息/任务写入，确保所有 manager 副本观察同一容量事实。
+	LockAICCQueueGovernance(ctx context.Context) (int8, error)
 	LockAICCSessionForUpdate(ctx context.Context, id string) (AiccSession, error)
 	LockJobForUpdate(ctx context.Context, id string) (Job, error)
 	MarkAICCLeadRead(ctx context.Context, arg MarkAICCLeadReadParams) (int64, error)

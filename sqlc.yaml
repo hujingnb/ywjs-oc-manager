@@ -35,6 +35,7 @@ sql:
       - internal/migrations/000033_apps_app_type.up.sql
       - internal/migrations/000034_aicc_message_tasks.up.sql
       - internal/migrations/000035_aicc_message_reply_link.up.sql
+      - internal/migrations/000036_aicc_queue_governance.up.sql
     queries: internal/store/queries
     gen:
       go:

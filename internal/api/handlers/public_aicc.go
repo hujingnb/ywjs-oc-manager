@@ -433,6 +433,8 @@ func writePublicAICCError(c *gin.Context, err error) {
 		apierror.JSON(c, http.StatusBadRequest, "AICC_SENSITIVE_WORD", "消息包含暂不支持发送的内容")
 	case errors.Is(err, service.ErrAICCMessageLimitExceeded):
 		apierror.JSON(c, http.StatusTooManyRequests, "AICC_MESSAGE_LIMIT_EXCEEDED", "本次会话消息数量已达上限")
+	case errors.Is(err, service.ErrAICCQueueBusy):
+		apierror.JSON(c, http.StatusTooManyRequests, "AICC_QUEUE_BUSY", "客服繁忙，请稍后再试")
 	case errors.Is(err, service.ErrAICCVisitorBlocked):
 		apierror.JSON(c, http.StatusForbidden, "AICC_VISITOR_BLOCKED", "当前访客暂不能继续咨询")
 	case errors.Is(err, service.ErrRateLimited):

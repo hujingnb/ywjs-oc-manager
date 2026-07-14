@@ -167,6 +167,10 @@ type AiccMessageTask struct {
 	UpdatedAt            time.Time   `db:"updated_at" json:"updated_at"`
 }
 
+type AiccQueueGovernance struct {
+	ID int8 `db:"id" json:"id"`
+}
+
 type AiccSession struct {
 	ID                 string      `db:"id" json:"id"`
 	AgentID            string      `db:"agent_id" json:"agent_id"`
