@@ -13,21 +13,28 @@ import (
 // AICCDispatchObservation 是异步客服消息的安全观测载荷。
 // 仅保留智能体、企业、上游和结果四类标签；不允许承载访客原文、会话标识或任何令牌。
 type AICCDispatchObservation struct {
-	// Event 表示固定生命周期阶段，如 queued、retry、completed 或 circuit_open。
-	Event string
-	// AgentID 是智能体归属标签，用于按客服配置聚合任务健康度。
-	AgentID string
-	// OrgID 是企业归属标签，用于在多租户之间定位排队或故障范围。
-	OrgID string
-	// Upstream 是稳定上游名称；当前异步回复统一为 hermes。
-	Upstream string
-	// Result 是固定结果枚举，不承载动态错误文本。
-	Result string
-	// QueueWaitMS 是任务从创建到本轮扫描的等待时长，仅作为数值观测值输出。
-	QueueWaitMS int64
-	// Inflight 是当前循环已占用的并发槽位数，仅作为数值观测值输出。
-	Inflight int
+	event       string
+	agentID     string
+	orgID       string
+	upstream    string
+	result      string
+	queueWaitMS int64
+	inflight    int
 }
+
+// NewAICCDispatchObservation 构造唯一允许传给 observer 的安全载荷。
+// 该类型不暴露字段，调用方无法把访客文本、消息体或 token 作为额外属性塞入观测出口。
+func NewAICCDispatchObservation(event, agentID, orgID, upstream, result string, queueWaitMS int64, inflight int) AICCDispatchObservation {
+	return AICCDispatchObservation{event: event, agentID: agentID, orgID: orgID, upstream: upstream, result: result, queueWaitMS: queueWaitMS, inflight: inflight}
+}
+
+func (o AICCDispatchObservation) Event() string      { return o.event }
+func (o AICCDispatchObservation) AgentID() string    { return o.agentID }
+func (o AICCDispatchObservation) OrgID() string      { return o.orgID }
+func (o AICCDispatchObservation) Upstream() string   { return o.upstream }
+func (o AICCDispatchObservation) Result() string     { return o.result }
+func (o AICCDispatchObservation) QueueWaitMS() int64 { return o.queueWaitMS }
+func (o AICCDispatchObservation) Inflight() int      { return o.inflight }
 
 // AICCDispatchMetricSnapshot 是可由现有日志/监控桥接层读取的安全指标快照。
 // key 由固定指标名和低基数标签组成，不包含访客内容、会话或消息原文。
@@ -66,7 +73,7 @@ func (m *InMemoryAICCDispatchMetrics) Observe(event AICCDispatchObservation) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	name := "aicc_message_transitions_total"
-	switch event.Event {
+	switch event.Event() {
 	case "retry":
 		name = "aicc_message_retries_total"
 	case "failed":
@@ -76,10 +83,10 @@ func (m *InMemoryAICCDispatchMetrics) Observe(event AICCDispatchObservation) {
 	case "lease_recovered":
 		name = "aicc_message_lease_recoveries_total"
 	}
-	m.counters[fmt.Sprintf("%s{org=%q,agent=%q,upstream=%q,result=%q}", name, event.OrgID, event.AgentID, event.Upstream, event.Result)]++
-	m.queueWaitMS += event.QueueWaitMS
-	if int64(event.Inflight) > m.inflight {
-		m.inflight = int64(event.Inflight)
+	m.counters[fmt.Sprintf("%s{org=%q,agent=%q,upstream=%q,result=%q}", name, event.OrgID(), event.AgentID(), event.Upstream(), event.Result())]++
+	m.queueWaitMS += event.QueueWaitMS()
+	if int64(event.Inflight()) > m.inflight {
+		m.inflight = int64(event.Inflight())
 	}
 }
 
@@ -167,13 +174,13 @@ func (o *SlogAICCDispatchObserver) Observe(ctx context.Context, event AICCDispat
 	}
 	o.metrics.Observe(event)
 	o.logger.InfoContext(ctx, "AICC 异步消息任务事件",
-		slog.String("aicc_event", event.Event),
-		slog.String("agent_id", event.AgentID),
-		slog.String(managerlog.KeyOrgID, event.OrgID),
-		slog.String("upstream", event.Upstream),
-		slog.String("result", event.Result),
-		slog.Int64("queue_wait_ms", event.QueueWaitMS),
-		slog.Int("inflight", event.Inflight),
+		slog.String("aicc_event", event.Event()),
+		slog.String("agent_id", event.AgentID()),
+		slog.String(managerlog.KeyOrgID, event.OrgID()),
+		slog.String("upstream", event.Upstream()),
+		slog.String("result", event.Result()),
+		slog.Int64("queue_wait_ms", event.QueueWaitMS()),
+		slog.Int("inflight", event.Inflight()),
 	)
 }
 

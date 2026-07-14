@@ -191,7 +191,7 @@ func (d *AICCDispatcher) finishError(ctx context.Context, task sqlc.AiccMessageT
 // observe 统一构造受限标签集，任何调用点都不能将访客文本或租约 token 写入观测系统。
 func (d *AICCDispatcher) observe(ctx context.Context, task sqlc.AiccMessageTask, event, result string) {
 	if d != nil && d.observer != nil {
-		d.observer.Observe(ctx, AICCDispatchObservation{Event: event, AgentID: task.AgentID, OrgID: task.OrgID, Upstream: "hermes", Result: result})
+		d.observer.Observe(ctx, NewAICCDispatchObservation(event, task.AgentID, task.OrgID, "hermes", result, 0, 0))
 	}
 }
 

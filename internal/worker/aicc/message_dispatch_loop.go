@@ -144,7 +144,7 @@ func (l *MessageDispatchLoop) tryDispatch(ctx context.Context, task sqlc.AiccMes
 			}()
 			if err := l.dispatcher.Dispatch(ctx, task); err != nil {
 				// 单个任务失败由 dispatcher 写入重试或失败状态，不能阻塞同批其他会话。
-				l.observe(ctx, service.AICCDispatchObservation{Event: "dispatch_error", AgentID: task.AgentID, OrgID: task.OrgID, Upstream: "hermes", Result: service.AICCSafeDispatchResult(err), Inflight: len(l.slots)})
+				l.observe(ctx, service.NewAICCDispatchObservation("dispatch_error", task.AgentID, task.OrgID, "hermes", service.AICCSafeDispatchResult(err), 0, len(l.slots)))
 			}
 		}()
 		return true

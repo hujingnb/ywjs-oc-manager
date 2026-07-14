@@ -76,10 +76,10 @@ func TestAICCDispatcherObservabilityIntegration(t *testing.T) {
 	assert.True(t, hasAICCDispatchResult(events, "retry_http_503"))
 	assert.True(t, hasAICCDispatchResult(events, "retry_timeout"))
 	for _, event := range events {
-		assert.Equal(t, "hermes", event.Upstream)
-		if event.Event != "lease_recovered" {
-			assert.NotEmpty(t, event.AgentID)
-			assert.NotEmpty(t, event.OrgID)
+		assert.Equal(t, "hermes", event.Upstream())
+		if event.Event() != "lease_recovered" {
+			assert.NotEmpty(t, event.AgentID())
+			assert.NotEmpty(t, event.OrgID())
 		}
 	}
 }
@@ -87,7 +87,7 @@ func TestAICCDispatcherObservabilityIntegration(t *testing.T) {
 // hasAICCDispatchResult 判断稳定结果枚举是否被观测到，避免测试依赖动态错误文本。
 func hasAICCDispatchResult(events []AICCDispatchObservation, result string) bool {
 	for _, event := range events {
-		if event.Result == result {
+		if event.Result() == result {
 			return true
 		}
 	}
@@ -118,7 +118,7 @@ func (r *aiccDispatchObservationRecorder) events() []AICCDispatchObservation {
 func countAICCDispatchEvents(events []AICCDispatchObservation, name string) int {
 	count := 0
 	for _, event := range events {
-		if event.Event == name {
+		if event.Event() == name {
 			count++
 		}
 	}

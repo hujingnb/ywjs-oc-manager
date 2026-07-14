@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/guregu/null/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -83,6 +84,41 @@ func TestMessageDispatchLoopRecoveryUsesDispatcherAsSingleObserverOwner(t *testi
 
 	require.NoError(t, loop.Tick(context.Background()))
 	assert.Equal(t, 1, observer.eventCount("lease_recovered"))
+}
+
+// TestMessageDispatchLoopWithRealDispatcherRecordsLifecycleMetrics 覆盖共享 loop、真实 dispatcher 与内存队列：
+// 就绪任务必须更新 queue gauge，并在成功、429 重试和确定性失败时记录对应安全生命周期指标。
+func TestMessageDispatchLoopWithRealDispatcherRecordsLifecycleMetrics(t *testing.T) {
+	for _, scenario := range []struct {
+		name       string
+		chatErr    error
+		metricName string
+	}{
+		{name: "completed", metricName: "aicc_message_transitions_total"},                                                         // 正常完成。
+		{name: "retry_429", chatErr: &service.AICCUpstreamStatusError{StatusCode: 429}, metricName: "aicc_message_retries_total"}, // 上游限流重试。
+		{name: "failed", chatErr: errors.New("visitor-content token=secret"), metricName: "aicc_message_failures_total"},          // 包含敏感字样的确定性失败。
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			var output bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&output, nil))
+			observer := service.NewSlogAICCDispatchObserver(logger)
+			store := &loopRealDispatcherStore{task: sqlc.AiccMessageTask{ID: "task", MessageID: "message", SessionID: "session", AgentID: "agent", OrgID: "org", AppID: "app", MaxAttempts: 5, CreatedAt: time.Now().Add(-time.Second)}}
+			dispatcher := service.NewAICCDispatcher(store, loopRealDispatcherTx{store: store}, loopRealDispatcherChat{err: scenario.chatErr, reply: "reply"}, nil)
+			dispatcher.SetObserver(observer)
+			loop := NewMessageDispatchLoop(store, redis.NewMemoryQueue(), dispatcher, logger)
+			loop.SetObserver(observer)
+
+			require.NoError(t, loop.Tick(context.Background()))
+			loop.Wait()
+
+			metrics := observer.Metrics()
+			assert.Equal(t, uint64(1), metrics.Counters["aicc_message_queue_depth"])
+			assert.Positive(t, metrics.QueueWaitMS)
+			assert.True(t, hasMetricPrefix(metrics.Counters, scenario.metricName))
+			assert.NotContains(t, output.String(), "visitor-content")
+			assert.NotContains(t, output.String(), "secret")
+		})
+	}
 }
 
 // TestMessageDispatchLoopTickSweepsReservesAndDispatches 覆盖任务运行循环：
@@ -202,6 +238,67 @@ type realDispatcherRecoveryStore struct {
 	recovered int64
 }
 
+// loopRealDispatcherStore 提供真实 dispatcher 生命周期所需的最小内存持久化行为。
+type loopRealDispatcherStore struct {
+	service.AICCDispatcherStore
+	task sqlc.AiccMessageTask
+}
+
+func (s *loopRealDispatcherStore) ListReadyAICCMessageTasks(context.Context, int32) ([]sqlc.AiccMessageTask, error) {
+	return []sqlc.AiccMessageTask{s.task}, nil
+}
+func (*loopRealDispatcherStore) RecoverExpiredAICCMessageTaskLeases(context.Context) (int64, error) {
+	return 0, nil
+}
+func (*loopRealDispatcherStore) LeaseAICCMessageTask(context.Context, sqlc.LeaseAICCMessageTaskParams) (int64, error) {
+	return 1, nil
+}
+func (*loopRealDispatcherStore) GetAICCMessageByID(context.Context, string) (sqlc.AiccMessage, error) {
+	return sqlc.AiccMessage{TextContent: null.StringFrom("visitor-content token=secret")}, nil
+}
+func (*loopRealDispatcherStore) GetAICCAgent(context.Context, string) (sqlc.AiccAgent, error) {
+	return sqlc.AiccAgent{}, nil
+}
+func (*loopRealDispatcherStore) CompleteAICCMessageTask(context.Context, sqlc.CompleteAICCMessageTaskParams) (int64, error) {
+	return 1, nil
+}
+func (*loopRealDispatcherStore) RetryAICCMessageTask(context.Context, sqlc.RetryAICCMessageTaskParams) (int64, error) {
+	return 1, nil
+}
+func (*loopRealDispatcherStore) FailAICCMessageTask(context.Context, sqlc.FailAICCMessageTaskParams) (int64, error) {
+	return 1, nil
+}
+func (*loopRealDispatcherStore) RenewAICCMessageTaskLease(context.Context, sqlc.RenewAICCMessageTaskLeaseParams) (int64, error) {
+	return 1, nil
+}
+func (*loopRealDispatcherStore) CreateAICCMessage(context.Context, sqlc.CreateAICCMessageParams) error {
+	return nil
+}
+
+type loopRealDispatcherTx struct{ store *loopRealDispatcherStore }
+
+func (t loopRealDispatcherTx) WithAICCDispatcherTx(ctx context.Context, fn func(service.AICCDispatcherStore) error) error {
+	return fn(t.store)
+}
+
+type loopRealDispatcherChat struct {
+	err   error
+	reply string
+}
+
+func (c loopRealDispatcherChat) ChatAICC(context.Context, string, string, string) (string, error) {
+	return c.reply, c.err
+}
+
+func hasMetricPrefix(counters map[string]uint64, prefix string) bool {
+	for key := range counters {
+		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *realDispatcherRecoveryStore) ListReadyAICCMessageTasks(context.Context, int32) ([]sqlc.AiccMessageTask, error) {
 	return nil, nil
 }
@@ -227,7 +324,7 @@ func (r *aiccObservationRecorder) eventCount(name string) int {
 	defer r.mu.Unlock()
 	count := 0
 	for _, event := range r.events {
-		if event.Event == name {
+		if event.Event() == name {
 			count++
 		}
 	}
