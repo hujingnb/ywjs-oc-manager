@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# oc-bootstrap — 应用主容器启动前的无状态初始化入口。
+# 仅从 manager bootstrap 响应写入 manifest 与平台资源；持久化恢复、S3 凭证和技能下载
+# 分别由其他容器职责处理，避免主容器启动阶段接触对象存储或不受控的远程 URL。
+set -euo pipefail
+# shellcheck source=/usr/local/bin/oc-lib.sh
+# shellcheck disable=SC1091
+# OC_LIB_PATH 仅供仓库内 shell 单测注入 mock fetch_bootstrap；镜像运行时始终使用默认路径。
+source "${OC_LIB_PATH:-/usr/local/bin/oc-lib.sh}"
+
+# manager 控制令牌和 bootstrap 地址缺失时必须直接失败，不能写入不完整的启动输入。
+require_env OC_CONTROL_TOKEN OC_BOOTSTRAP_URL
+# INPUT_DIR 是主容器读取启动配置的 emptyDir；DATA_DIR 由主容器后续写入运行时数据。
+INPUT_DIR=${OC_INPUT_DIR:-/opt/oc-input}
+DATA_DIR=${OC_DATA_DIR:-/opt/data}
+
+# bootstrap 响应仅短暂保留在临时文件中，退出时无论成功或失败均删除，避免敏感配置遗留。
+bs=$(mktemp)
+trap 'rm -f "$bs"' EXIT
+fetch_bootstrap "$bs"
+
+# 只提取主容器所需的启动输入。jq -e 会在字段不存在或为 null 时失败，阻止不完整配置启动。
+# 不遍历 skills、restore 或 s3_write，以保持此命令与下载及对象存储操作完全隔离。
+mkdir -p "$INPUT_DIR/resources" "$DATA_DIR"
+jq -er '.manifest_yaml' "$bs" > "$INPUT_DIR/manifest.yaml"
+jq -er '.persona' "$bs" > "$INPUT_DIR/resources/persona.md"
+jq -er '.platform_rule' "$bs" > "$INPUT_DIR/resources/platform-rules.md"
+log "启动 manifest/resources 已写入 $INPUT_DIR"

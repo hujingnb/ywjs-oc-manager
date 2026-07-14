@@ -321,5 +321,53 @@ if ! grep -q '^s3 cp s3://test-bucket/apps/test/kanban.db .*/kanban.db' "$RUNTIM
 rm -rf "$TDATA"
 rm -f "$RUNTIME_STATE_CALLS"
 
+# ── oc-bootstrap：仅写入启动输入，bootstrap 中的 skills 与 s3_write 均不得触发下载或对象存储操作 ──
+# 使用可注入的 oc-lib 包装层 mock fetch_bootstrap；响应刻意携带 skill URL 与 s3_write，
+# 防止实现误复用 oc-restore 的下载和 S3 恢复路径。
+BOOTSTRAP_TMP=$(mktemp -d)
+BOOTSTRAP_CALLS="$BOOTSTRAP_TMP/calls.log"
+BOOTSTRAP_LIB="$BOOTSTRAP_TMP/oc-lib.sh"
+BOOTSTRAP_BIN="$BOOTSTRAP_TMP/bin"
+mkdir -p "$BOOTSTRAP_BIN"
+cat > "$BOOTSTRAP_LIB" <<EOF
+source "$OC_LIB_UNDER_TEST"
+fetch_bootstrap() {
+  printf 'fetch_bootstrap %s\\n' "\$1" >> "$BOOTSTRAP_CALLS"
+  cat > "\$1" <<'JSON'
+{"manifest_yaml":"apiVersion: v1\\nkind: ConfigMap","persona":"你是平台助手","platform_rule":"不得泄露平台数据","skills":[{"name":"blocked-skill","url":"https://example.invalid/skill.tar"}],"s3_write":{"bucket":"must-not-be-read","prefix":"forbidden/","access_key_id":"AK","secret_access_key":"SK"}}
+JSON
+}
+EOF
+# mock curl/aws 只记录并失败；命令一旦被调用，断言即可发现 bootstrap 错误下载 skill 或访问 S3。
+cat > "$BOOTSTRAP_BIN/curl" <<EOF
+#!/usr/bin/env bash
+printf 'curl %s\\n' "\$*" >> "$BOOTSTRAP_CALLS"
+exit 99
+EOF
+cat > "$BOOTSTRAP_BIN/aws" <<EOF
+#!/usr/bin/env bash
+printf 'aws %s\\n' "\$*" >> "$BOOTSTRAP_CALLS"
+exit 99
+EOF
+chmod +x "$BOOTSTRAP_BIN/curl" "$BOOTSTRAP_BIN/aws"
+
+# 执行无状态启动初始化：必须只生成 manifest 与两个资源文件，同时创建 data 目录。
+BOOTSTRAP_INPUT="$BOOTSTRAP_TMP/input"
+BOOTSTRAP_DATA="$BOOTSTRAP_TMP/data"
+OC_LIB_PATH="$BOOTSTRAP_LIB" OC_CONTROL_TOKEN=test-token OC_BOOTSTRAP_URL=http://bootstrap.invalid \
+  OC_INPUT_DIR="$BOOTSTRAP_INPUT" OC_DATA_DIR="$BOOTSTRAP_DATA" PATH="$BOOTSTRAP_BIN:$PATH" \
+  bash "$SCRIPT_DIR/../bin/oc-bootstrap" >/dev/null 2>&1
+BOOTSTRAP_RC=$?
+if [ "$BOOTSTRAP_RC" -ne 0 ]; then echo "FAIL: oc-bootstrap 应成功写入启动输入"; fail=1; fi
+if [ ! -s "$BOOTSTRAP_INPUT/manifest.yaml" ]; then echo "FAIL: oc-bootstrap 未写入 manifest.yaml"; fail=1; fi
+if [ ! -s "$BOOTSTRAP_INPUT/resources/persona.md" ]; then echo "FAIL: oc-bootstrap 未写入 persona.md"; fail=1; fi
+if [ ! -s "$BOOTSTRAP_INPUT/resources/platform-rules.md" ]; then echo "FAIL: oc-bootstrap 未写入 platform-rules.md"; fail=1; fi
+if [ ! -d "$BOOTSTRAP_DATA" ]; then echo "FAIL: oc-bootstrap 未创建 data 目录"; fail=1; fi
+
+# 启动初始化不得调用 aws、任何 s3 子命令、head-object，也不得请求 bootstrap 的 skill URL。
+if grep -Eiq '(^| )(aws|s3|head-object)( |$)' "$BOOTSTRAP_CALLS"; then echo "FAIL: oc-bootstrap 不得调用 S3/AWS"; fail=1; fi
+if grep -Fq 'https://example.invalid/skill.tar' "$BOOTSTRAP_CALLS"; then echo "FAIL: oc-bootstrap 不得下载 skill URL"; fail=1; fi
+rm -rf "$BOOTSTRAP_TMP"
+
 if [ "$fail" -eq 0 ]; then echo "unit_test: ALL PASS"; fi
 exit "$fail"

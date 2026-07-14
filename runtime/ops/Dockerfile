@@ -9,7 +9,7 @@ FROM ${ALPINE_MIRROR}/alpine:3.20
 # bash：脚本解释器。coreutils：GNU date（-d RFC3339 解析过期时间）。tar：兼容性。ca-certificates：HTTPS。
 RUN apk add --no-cache aws-cli sqlite jq curl bash coreutils tar ca-certificates
 
-COPY bin/oc-lib.sh bin/oc-restore bin/oc-sync bin/oc-presync /usr/local/bin/
-RUN chmod +x /usr/local/bin/oc-restore /usr/local/bin/oc-sync /usr/local/bin/oc-presync
+COPY bin/oc-lib.sh bin/oc-bootstrap bin/oc-restore bin/oc-sync bin/oc-presync /usr/local/bin/
+RUN chmod +x /usr/local/bin/oc-bootstrap /usr/local/bin/oc-restore /usr/local/bin/oc-sync /usr/local/bin/oc-presync
 
 # 默认无 CMD：pod spec 按容器角色覆盖 command 为 oc-restore / oc-sync。
