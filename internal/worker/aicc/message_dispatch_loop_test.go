@@ -50,6 +50,7 @@ func TestMessageDispatchLoopTelemetryCoversQueueAndConcurrency(t *testing.T) {
 	assert.NotContains(t, logs, "token")
 	close(dispatcher.release)
 	loop.Wait()
+	assert.Zero(t, observer.Metrics().Inflight)
 }
 
 // TestMessageDispatchLoopTelemetryClassifiesDispatchError 覆盖分派失败日志：

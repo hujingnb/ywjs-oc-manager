@@ -762,6 +762,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			AppService:                    appService,
 			AICCService:                   aiccService,
 			AICCPublicService:             aiccPublicService,
+			AICCDispatchMetrics:           aiccMessageObserver,
 			UsageService:                  usageService,
 			RechargeService:               rechargeService,
 			PlatformOverview:              platformOverviewService,

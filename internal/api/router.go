@@ -48,6 +48,8 @@ type Dependencies struct {
 	AICCService *service.AICCService
 	// AICCPublicService 提供匿名访客 AICC 公开路由；nil 时不注册。
 	AICCPublicService *service.AICCPublicService
+	// AICCDispatchMetrics 提供异步客服的只读安全指标快照；nil 时不注册平台指标端点。
+	AICCDispatchMetrics service.AICCDispatchMetricSource
 	// RechargeService 提供组织充值、充值记录和余额查询路由。
 	RechargeService *service.RechargeService
 	// AssistantVersionService 提供助手版本目录管理路由。
@@ -184,6 +186,17 @@ func NewRouter(deps ...Dependencies) http.Handler {
 	// ── user：RequireUserAuth 注入 principal，所有业务路由挂载在此组 ──
 	user := router.Group("")
 	user.Use(middleware.RequireUserAuth(dep.TokenManager))
+	if dep.AICCDispatchMetrics != nil {
+		// 指标含多企业聚合标签，仅平台管理员可读取，避免组织间暴露运行状态。
+		user.GET("/platform/aicc/metrics", func(c *gin.Context) {
+			principal, ok := auth.PrincipalFromContext(c.Request.Context())
+			if !ok || !auth.CanViewPlatformUsage(principal) {
+				c.Status(http.StatusForbidden)
+				return
+			}
+			c.JSON(http.StatusOK, dep.AICCDispatchMetrics.Metrics())
+		})
+	}
 
 	if dep.AuthService != nil {
 		authHandler := handlers.NewAuthHandler(dep.AuthService, dep.Captcha)

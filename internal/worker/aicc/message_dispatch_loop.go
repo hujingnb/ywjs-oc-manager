@@ -140,6 +140,8 @@ func (l *MessageDispatchLoop) tryDispatch(ctx context.Context, task sqlc.AiccMes
 		go func() {
 			defer func() {
 				<-l.slots
+				// 槽位释放必须立即回写 gauge；错误、取消和正常完成均走该 defer。
+				l.recordInflightMetrics(len(l.slots))
 				l.dispatchWG.Done()
 			}()
 			if err := l.dispatcher.Dispatch(ctx, task); err != nil {
@@ -182,5 +184,7 @@ func (l *MessageDispatchLoop) observe(ctx context.Context, event service.AICCDis
 func (l *MessageDispatchLoop) Wait() {
 	if l != nil {
 		l.dispatchWG.Wait()
+		// Wait 返回时已无已提交调用，显式归零可消除并发 defer 交错留下的陈旧 gauge。
+		l.recordInflightMetrics(0)
 	}
 }

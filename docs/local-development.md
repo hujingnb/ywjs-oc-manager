@@ -64,8 +64,8 @@ make local-reset   # 删集群并清空 .k3d-data，干净重建（随后再 mak
 ## AICC 异步消息观测（仅本地 k3d）
 
 AICC 公开消息任务以 MySQL 的 `aicc_message_tasks` 为事实来源，Redis 只负责低延迟唤醒。
-本地可在发送一条公开客服消息后查看 manager-api 日志，确认 `aicc_event` 依次出现
-`queued`、`completed`；上游 429、503 或超时会记录 `retry`，连续过载会记录
+本地可在发送一条公开客服消息后查看 manager-api 日志，确认任务完成时出现 `completed`；
+就绪扫描仅更新队列 gauge，不会为每次扫描输出 `queued`。上游 429、503 或超时会记录 `retry`，连续过载会记录
 `circuit_open`，进程重启后回收过期租约会记录 `lease_recovered`。日志只含 `agent_id`、
 `org_id`、`upstream`、`result` 标签及 `queue_wait_ms`、`inflight` 等数值，绝不应包含访客
 原文、会话标识或令牌。
@@ -77,6 +77,9 @@ AICC 公开消息任务以 MySQL 的 `aicc_message_tasks` 为事实来源，Redi
 扫描就绪任务只更新 gauge，不产生 `queued` 日志事件，避免积压时产生日志风暴。当前项目未部署
 Prometheus，注册表通过 `SlogAICCDispatchObserver.Metrics()` 提供给既有日志或监控桥接层；不得从
 指标中加入访客内容、token、session/message 原文或执行 pod 的非受控名称。
+
+平台管理员可使用 Bearer access token 读取受保护的 `GET /platform/aicc/metrics` JSON 快照；
+该端点仅用于本地或受控监控采集，不属于健康检查，企业管理员及匿名请求均会被拒绝。
 
 ```bash
 make local-logs svc=manager-api
