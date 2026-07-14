@@ -386,7 +386,7 @@ func TestAICCMigrationExecutesOnMySQL(t *testing.T) {
 		require.NoError(t, databaseErr)
 	}()
 
-	// 该测试只验证截至 000030 的 AICC 表与回滚语义，固定目标版本可避免后续新增 migration 改变 rollback 覆盖范围。
+	// 先迁移到 000030 准备既有 AICC 归属数据；任务表在末尾单独升级到 000034，便于覆盖其新增约束和 down。
 	err = migrator.Migrate(30)
 	require.NoError(t, err)
 
@@ -566,8 +566,54 @@ func TestAICCMigrationExecutesOnMySQL(t *testing.T) {
 	assert.False(t, leadOrgID.Valid)
 	mustExecMigrationSQL(t, testDB, "DELETE FROM aicc_leads WHERE id = ? AND org_id = ?", "lead-a", "org-a")
 
-	// 从 000030 连续回滚到 000027，既验证新增 settings 表 down，也保留原 000028 down 的 parent 索引/FK 依赖覆盖。
-	require.NoError(t, migrator.Steps(-3))
+	// 升级任务表前会连续应用 000031 至 000034，真实 MySQL 必须接受生成列、复合外键与微秒时间字段。
+	require.NoError(t, migrator.Migrate(34))
+	mustExecMigrationSQL(t, testDB, `INSERT INTO aicc_messages (
+		id, session_id, agent_id, direction, content_type, text_content
+	) VALUES (?, ?, ?, ?, ?, ?)`,
+		"message-task-a", "session-a", "agent-a", "visitor", "text", "任务消息 A",
+	)
+
+	// 正常消息可创建任务；message_id 唯一键阻止同一消息被 Redis 重复通知时重复入队。
+	mustExecMigrationSQL(t, testDB, `INSERT INTO aicc_message_tasks (
+		id, message_id, session_id, agent_id, org_id, app_id
+	) VALUES (?, ?, ?, ?, ?, ?)`,
+		"task-a", "message-task-a", "session-a", "agent-a", "org-a", "app-a",
+	)
+	_, err = testDB.Exec(`INSERT INTO aicc_message_tasks (
+		id, message_id, session_id, agent_id, org_id, app_id
+	) VALUES (?, ?, ?, ?, ?, ?)`,
+		"task-a-duplicate", "message-task-a", "session-a", "agent-a", "org-a", "app-a",
+	)
+	require.Error(t, err)
+
+	// 同一会话最多存在一个 processing 任务，数据库唯一键为并发 dispatcher 提供最终串行化保障。
+	mustExecMigrationSQL(t, testDB, `INSERT INTO aicc_messages (
+		id, session_id, agent_id, direction, content_type, text_content
+	) VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)`,
+		"message-task-processing-a", "session-a", "agent-a", "visitor", "text", "任务消息 processing A",
+		"message-task-processing-b", "session-a", "agent-a", "visitor", "text", "任务消息 processing B",
+	)
+	mustExecMigrationSQL(t, testDB, `INSERT INTO aicc_message_tasks (
+		id, message_id, session_id, agent_id, org_id, app_id, status
+	) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"task-processing-a", "message-task-processing-a", "session-a", "agent-a", "org-a", "app-a", "processing",
+	)
+	_, err = testDB.Exec(`INSERT INTO aicc_message_tasks (
+		id, message_id, session_id, agent_id, org_id, app_id, status
+	) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"task-processing-b", "message-task-processing-b", "session-a", "agent-a", "org-a", "app-a", "processing",
+	)
+	require.Error(t, err)
+
+	// 单步回滚 000034 后任务表必须消失，证明回滚不残留依赖表。
+	require.NoError(t, migrator.Steps(-1))
+	var taskTable string
+	err = testDB.QueryRow("SHOW TABLES LIKE 'aicc_message_tasks'").Scan(&taskTable)
+	require.ErrorIs(t, err, sql.ErrNoRows)
+
+	// 再从 000033 连续回滚到 000027，保留既有 settings 与 AICC parent 表的回滚依赖覆盖。
+	require.NoError(t, migrator.Steps(-6))
 }
 
 // parseMigrationTestDSN 把 mysql:// URL 规整为 go-sql-driver/mysql 可直接使用的 DSN。

@@ -194,7 +194,7 @@ ORDER BY task.run_after ASC, task.id ASC
 LIMIT ?;
 
 -- name: LeaseAICCMessageTask :execrows
--- status、到期时间和会话无 processing 任务均在同一 UPDATE 中判断，避免 dispatcher 先读后写造成重复租约。
+-- status、尝试上限、到期时间和会话无 processing 任务均在同一 UPDATE 中判断，避免 dispatcher 先读后写造成重复租约。
 UPDATE aicc_message_tasks AS task
 LEFT JOIN aicc_message_tasks AS processing
   ON processing.session_id = task.session_id
@@ -206,6 +206,7 @@ SET status = 'processing',
     updated_at = NOW(6)
 WHERE task.id = sqlc.arg(id)
   AND task.status IN ('queued', 'retry_wait')
+  AND task.attempts < task.max_attempts
   AND task.run_after <= NOW(6)
   AND processing.id IS NULL;
 
@@ -215,9 +216,10 @@ SET status = 'completed', lease_token = NULL, lease_expires_at = NULL, updated_a
 WHERE id = sqlc.arg(id) AND status = 'processing' AND lease_token = sqlc.arg(lease_token);
 
 -- name: RetryAICCMessageTask :execrows
+-- 重试请求会在同一更新内判定上限；最后一次失败直接终态化，且继续记录 worker 返回的错误摘要。
 UPDATE aicc_message_tasks
-SET status = 'retry_wait',
-    run_after = sqlc.arg(run_after),
+SET status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'retry_wait' END,
+    run_after = CASE WHEN attempts >= max_attempts THEN run_after ELSE sqlc.arg(run_after) END,
     lease_token = NULL,
     lease_expires_at = NULL,
     last_error = sqlc.narg(last_error),

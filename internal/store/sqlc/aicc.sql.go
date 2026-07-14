@@ -1037,6 +1037,7 @@ SET status = 'processing',
     updated_at = NOW(6)
 WHERE task.id = ?
   AND task.status IN ('queued', 'retry_wait')
+  AND task.attempts < task.max_attempts
   AND task.run_after <= NOW(6)
   AND processing.id IS NULL
 `
@@ -1047,7 +1048,7 @@ type LeaseAICCMessageTaskParams struct {
 	ID             string      `db:"id" json:"id"`
 }
 
-// status、到期时间和会话无 processing 任务均在同一 UPDATE 中判断，避免 dispatcher 先读后写造成重复租约。
+// status、尝试上限、到期时间和会话无 processing 任务均在同一 UPDATE 中判断，避免 dispatcher 先读后写造成重复租约。
 func (q *Queries) LeaseAICCMessageTask(ctx context.Context, arg LeaseAICCMessageTaskParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, leaseAICCMessageTask, arg.LeaseToken, arg.LeaseExpiresAt, arg.ID)
 	if err != nil {
@@ -2259,8 +2260,8 @@ func (q *Queries) RecoverExpiredAICCMessageTaskLeases(ctx context.Context) (int6
 
 const retryAICCMessageTask = `-- name: RetryAICCMessageTask :execrows
 UPDATE aicc_message_tasks
-SET status = 'retry_wait',
-    run_after = ?,
+SET status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'retry_wait' END,
+    run_after = CASE WHEN attempts >= max_attempts THEN run_after ELSE ? END,
     lease_token = NULL,
     lease_expires_at = NULL,
     last_error = ?,
@@ -2275,6 +2276,7 @@ type RetryAICCMessageTaskParams struct {
 	LeaseToken null.String `db:"lease_token" json:"lease_token"`
 }
 
+// 重试请求会在同一更新内判定上限；最后一次失败直接终态化，且继续记录 worker 返回的错误摘要。
 func (q *Queries) RetryAICCMessageTask(ctx context.Context, arg RetryAICCMessageTaskParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, retryAICCMessageTask,
 		arg.RunAfter,

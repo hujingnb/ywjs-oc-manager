@@ -200,7 +200,7 @@ type Querier interface {
 	// 用于组织创建链路失败时回滚刚刚 INSERT 的孤儿记录。
 	// 正常生命周期不可见此查询；普通"删除"必须走 SoftDeleteOrganization。
 	HardDeleteOrganization(ctx context.Context, id string) error
-	// status、到期时间和会话无 processing 任务均在同一 UPDATE 中判断，避免 dispatcher 先读后写造成重复租约。
+	// status、尝试上限、到期时间和会话无 processing 任务均在同一 UPDATE 中判断，避免 dispatcher 先读后写造成重复租约。
 	LeaseAICCMessageTask(ctx context.Context, arg LeaseAICCMessageTaskParams) (int64, error)
 	ListAICCAgentKnowledge(ctx context.Context, agentID string) ([]AiccAgentKnowledge, error)
 	ListAICCAgentsByOrg(ctx context.Context, arg ListAICCAgentsByOrgParams) ([]AiccAgent, error)
@@ -354,6 +354,7 @@ type Querier interface {
 	RequeueJob(ctx context.Context, id string) error
 	// 整库 embedding 模型切换后，把该 dataset 下所有本地 document 状态重置为 queued，交给现有刷新任务继续推进。
 	ResetRAGFlowDocumentsParseStatusByDataset(ctx context.Context, datasetID string) error
+	// 重试请求会在同一更新内判定上限；最后一次失败直接终态化，且继续记录 worker 返回的错误摘要。
 	RetryAICCMessageTask(ctx context.Context, arg RetryAICCMessageTaskParams) (int64, error)
 	RetryJob(ctx context.Context, arg RetryJobParams) error
 	RevokeRefreshToken(ctx context.Context, id string) error
