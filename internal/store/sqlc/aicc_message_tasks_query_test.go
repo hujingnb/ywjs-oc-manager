@@ -19,6 +19,13 @@ func TestAICCMessageTaskQueriesStopAtMaxAttempts(t *testing.T) {
 	assert.Contains(t, normalizedSQL(retryAICCMessageTask), "last_error = ?")
 }
 
+// TestAICCMessageTaskLeaseRequiresEarliestSessionMessage 验证同会话后续任务不能绕过更早的持久化消息取得租约。
+func TestAICCMessageTaskLeaseRequiresEarliestSessionMessage(t *testing.T) {
+	query := normalizedSQL(leaseAICCMessageTask)
+	assert.Contains(t, query, "join aicc_messages as task_message")
+	assert.Contains(t, query, "earlier_message.created_at < task_message.created_at")
+}
+
 // TestRequeueFailedAICCMessageTaskOnlyResetsTerminalFailure 验证访客手动重试只恢复 failed 任务，
 // 并清空已耗尽的尝试计数和错误摘要，让 dispatcher 可按原有领取规则重新执行。
 func TestRequeueFailedAICCMessageTaskOnlyResetsTerminalFailure(t *testing.T) {

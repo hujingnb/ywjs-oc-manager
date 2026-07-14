@@ -206,6 +206,7 @@ WHERE message_id = ? AND status = 'failed';
 -- 只返回当前到期且所在会话没有执行中任务的任务；租约时仍会再次原子校验，列表结果不能视作所有权。
 SELECT task.*
 FROM aicc_message_tasks AS task
+JOIN aicc_messages AS task_message ON task_message.id = task.message_id
 WHERE task.status IN ('queued', 'retry_wait')
   AND task.run_after <= NOW(6)
   AND NOT EXISTS (
@@ -214,15 +215,33 @@ WHERE task.status IN ('queued', 'retry_wait')
       WHERE processing.session_id = task.session_id
         AND processing.status = 'processing'
   )
-ORDER BY task.run_after ASC, task.id ASC
+  AND NOT EXISTS (
+      -- 同会话只允许最早的未终态访客消息进入候选集，不能依赖 goroutine 或 Redis 信号顺序。
+      SELECT 1
+      FROM aicc_message_tasks AS earlier
+      JOIN aicc_messages AS earlier_message ON earlier_message.id = earlier.message_id
+      WHERE earlier.session_id = task.session_id
+        AND earlier.status NOT IN ('completed', 'failed')
+        AND (earlier_message.created_at < task_message.created_at
+             OR (earlier_message.created_at = task_message.created_at AND earlier_message.id < task_message.id))
+  )
+ORDER BY task.run_after ASC, task_message.created_at ASC, task_message.id ASC
 LIMIT ?;
 
 -- name: LeaseAICCMessageTask :execrows
 -- status、尝试上限、到期时间和会话无 processing 任务均在同一 UPDATE 中判断，避免 dispatcher 先读后写造成重复租约。
 UPDATE aicc_message_tasks AS task
+JOIN aicc_messages AS task_message ON task_message.id = task.message_id
 LEFT JOIN aicc_message_tasks AS processing
   ON processing.session_id = task.session_id
  AND processing.status = 'processing'
+LEFT JOIN (
+    aicc_message_tasks AS earlier
+    JOIN aicc_messages AS earlier_message ON earlier_message.id = earlier.message_id
+) ON earlier.session_id = task.session_id
+ AND earlier.status NOT IN ('completed', 'failed')
+ AND (earlier_message.created_at < task_message.created_at
+      OR (earlier_message.created_at = task_message.created_at AND earlier_message.id < task_message.id))
 SET status = 'processing',
     lease_token = sqlc.arg(lease_token),
     -- 初次领取与续租都以数据库时间计算，避免 worker 时钟漂移产生错误过期时间。
@@ -233,7 +252,8 @@ WHERE task.id = sqlc.arg(id)
   AND task.status IN ('queued', 'retry_wait')
   AND task.attempts < task.max_attempts
   AND task.run_after <= NOW(6)
-  AND processing.id IS NULL;
+  AND processing.id IS NULL
+  AND earlier.id IS NULL;
 
 -- name: CompleteAICCMessageTask :execrows
 UPDATE aicc_message_tasks

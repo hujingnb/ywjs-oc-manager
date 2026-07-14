@@ -1093,9 +1093,17 @@ func (q *Queries) GetActiveAICCBlockedVisitor(ctx context.Context, arg GetActive
 
 const leaseAICCMessageTask = `-- name: LeaseAICCMessageTask :execrows
 UPDATE aicc_message_tasks AS task
+JOIN aicc_messages AS task_message ON task_message.id = task.message_id
 LEFT JOIN aicc_message_tasks AS processing
   ON processing.session_id = task.session_id
  AND processing.status = 'processing'
+LEFT JOIN (
+    aicc_message_tasks AS earlier
+    JOIN aicc_messages AS earlier_message ON earlier_message.id = earlier.message_id
+) ON earlier.session_id = task.session_id
+ AND earlier.status NOT IN ('completed', 'failed')
+ AND (earlier_message.created_at < task_message.created_at
+      OR (earlier_message.created_at = task_message.created_at AND earlier_message.id < task_message.id))
 SET status = 'processing',
     lease_token = ?,
     -- 初次领取与续租都以数据库时间计算，避免 worker 时钟漂移产生错误过期时间。
@@ -1107,6 +1115,7 @@ WHERE task.id = ?
   AND task.attempts < task.max_attempts
   AND task.run_after <= NOW(6)
   AND processing.id IS NULL
+  AND earlier.id IS NULL
 `
 
 type LeaseAICCMessageTaskParams struct {
@@ -2142,6 +2151,7 @@ func (q *Queries) ListExpiredAICCSessions(ctx context.Context, limit int32) ([]A
 const listReadyAICCMessageTasks = `-- name: ListReadyAICCMessageTasks :many
 SELECT task.id, task.message_id, task.session_id, task.agent_id, task.org_id, task.app_id, task.status, task.attempts, task.max_attempts, task.run_after, task.lease_token, task.lease_expires_at, task.last_error, task.processing_session_key, task.created_at, task.updated_at
 FROM aicc_message_tasks AS task
+JOIN aicc_messages AS task_message ON task_message.id = task.message_id
 WHERE task.status IN ('queued', 'retry_wait')
   AND task.run_after <= NOW(6)
   AND NOT EXISTS (
@@ -2150,7 +2160,17 @@ WHERE task.status IN ('queued', 'retry_wait')
       WHERE processing.session_id = task.session_id
         AND processing.status = 'processing'
   )
-ORDER BY task.run_after ASC, task.id ASC
+  AND NOT EXISTS (
+      -- 同会话只允许最早的未终态访客消息进入候选集，不能依赖 goroutine 或 Redis 信号顺序。
+      SELECT 1
+      FROM aicc_message_tasks AS earlier
+      JOIN aicc_messages AS earlier_message ON earlier_message.id = earlier.message_id
+      WHERE earlier.session_id = task.session_id
+        AND earlier.status NOT IN ('completed', 'failed')
+        AND (earlier_message.created_at < task_message.created_at
+             OR (earlier_message.created_at = task_message.created_at AND earlier_message.id < task_message.id))
+  )
+ORDER BY task.run_after ASC, task_message.created_at ASC, task_message.id ASC
 LIMIT ?
 `
 
