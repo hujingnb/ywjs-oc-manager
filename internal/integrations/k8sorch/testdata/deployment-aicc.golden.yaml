@@ -1,0 +1,160 @@
+metadata:
+  creationTimestamp: null
+  labels:
+    app: a1
+    app.kubernetes.io/part-of: oc-manager
+  name: app-a1
+  namespace: oc-apps
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: a1
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: a1
+        app.kubernetes.io/part-of: oc-manager
+    spec:
+      containers:
+      - env:
+        - name: HERMES_HOME
+          value: /opt/data
+        - name: API_SERVER_ENABLED
+          value: "true"
+        - name: API_SERVER_KEY
+          valueFrom:
+            secretKeyRef:
+              key: control-token
+              name: app-a1-token
+        - name: FEISHU_APP_ID
+          valueFrom:
+            secretKeyRef:
+              key: feishu-app-id
+              name: app-a1-token
+              optional: true
+        - name: FEISHU_APP_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: feishu-app-secret
+              name: app-a1-token
+              optional: true
+        - name: FEISHU_DOMAIN
+          valueFrom:
+            secretKeyRef:
+              key: feishu-domain
+              name: app-a1-token
+              optional: true
+        - name: WECOM_BOT_ID
+          valueFrom:
+            secretKeyRef:
+              key: wecom-bot-id
+              name: app-a1-token
+              optional: true
+        - name: WECOM_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: wecom-secret
+              name: app-a1-token
+              optional: true
+        - name: DINGTALK_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              key: dingtalk-client-id
+              name: app-a1-token
+              optional: true
+        - name: DINGTALK_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: dingtalk-client-secret
+              name: app-a1-token
+              optional: true
+        image: registry/hermes:v1
+        name: hermes
+        readinessProbe:
+          exec:
+            command:
+            - hermes
+            - gateway
+            - status
+          failureThreshold: 6
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: "1"
+            memory: 2Gi
+          requests:
+            cpu: 250m
+            memory: 512Mi
+        volumeMounts:
+        - mountPath: /opt/oc-input
+          name: oc-input
+          readOnly: true
+        - mountPath: /opt/data
+          name: data
+      - command:
+        - /usr/local/lib/hermes-agent/venv/bin/python
+        - -m
+        - uvicorn
+        - ocops.server:app
+        - --host
+        - 0.0.0.0
+        - --port
+        - "8080"
+        env:
+        - name: OC_OPS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: control-token
+              name: app-a1-token
+        - name: API_SERVER_KEY
+          valueFrom:
+            secretKeyRef:
+              key: control-token
+              name: app-a1-token
+        - name: PYTHONPATH
+          value: /usr/local/lib
+        image: registry/hermes:v1
+        name: oc-ops
+        ports:
+        - containerPort: 8080
+        readinessProbe:
+          failureThreshold: 6
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        resources: {}
+        volumeMounts:
+        - mountPath: /opt/data
+          name: data
+      imagePullSecrets:
+      - name: acr-pull
+      initContainers:
+      - command:
+        - oc-bootstrap
+        env:
+        - name: OC_CONTROL_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: control-token
+              name: app-a1-token
+        - name: OC_BOOTSTRAP_URL
+          value: http://manager-api.ocm.svc:8080/internal/apps/a1/bootstrap
+        image: registry/ops:dev
+        name: restore
+        resources: {}
+        volumeMounts:
+        - mountPath: /opt/oc-input
+          name: oc-input
+      volumes:
+      - emptyDir: {}
+        name: oc-input
+      - emptyDir: {}
+        name: data
+status: {}

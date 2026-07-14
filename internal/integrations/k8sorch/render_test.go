@@ -56,6 +56,27 @@ func TestRenderDeployment(t *testing.T) {
 	assertGolden(t, "deployment.golden.yaml", RenderDeployment(testSpec(), "oc-apps"))
 }
 
+// TestRenderDeploymentAICC 验证 AICC 运行时使用无状态启动方式：由 oc-bootstrap 初始化，
+// Pod 仅保留 hermes 与 oc-ops，不得携带标准应用的 S3 恢复和同步配置。
+func TestRenderDeploymentAICC(t *testing.T) {
+	spec := testSpec()
+	spec.AppType = domain.AppTypeAICC
+
+	dep := RenderDeployment(spec, "oc-apps")
+	require.Len(t, dep.Spec.Template.Spec.InitContainers, 1, "AICC 必须只渲染一个初始化容器")
+	assert.Equal(t, []string{"oc-bootstrap"}, dep.Spec.Template.Spec.InitContainers[0].Command)
+	require.Len(t, dep.Spec.Template.Spec.Containers, 2, "AICC Pod 只能包含 hermes 与 oc-ops")
+	assert.NotNil(t, containerByName(dep, "hermes"))
+	assert.NotNil(t, containerByName(dep, "oc-ops"))
+	assert.Nil(t, containerByName(dep, "s3-sync"))
+	for _, c := range append(dep.Spec.Template.Spec.InitContainers, dep.Spec.Template.Spec.Containers...) {
+		assert.Nil(t, envByName(&c, "AWS_ACCESS_KEY_ID"), "%s 不得注入 AWS 凭证", c.Name)
+		assert.Nil(t, envByName(&c, "AWS_SECRET_ACCESS_KEY"), "%s 不得注入 AWS 凭证", c.Name)
+		assert.Nil(t, envByName(&c, "AWS_ENDPOINT_URL"), "%s 不得注入 AWS/S3 endpoint", c.Name)
+	}
+	assertGolden(t, "deployment-aicc.golden.yaml", dep)
+}
+
 // TestRenderDeploymentOmitsEmptyImagePullSecret 覆盖本地公开镜像：空 secret 不能渲染为无效列表项。
 func TestRenderDeploymentOmitsEmptyImagePullSecret(t *testing.T) {
 	spec := testSpec()

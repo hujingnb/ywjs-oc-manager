@@ -1,6 +1,8 @@
 package k8sorch
 
 import (
+	"oc-manager/internal/domain"
+
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -62,8 +64,8 @@ func RenderService(spec AppSpec, namespace string) *corev1.Service {
 	}
 }
 
-// RenderDeployment 渲染 app Deployment（replicas=1, Recreate, initContainer restore +
-// hermes + oc-ops + sidecar s3-sync，emptyDir oc-input + data）。
+// RenderDeployment 渲染 app Deployment（replicas=1, Recreate）。普通应用使用 restore 与
+// s3-sync 持久化运行时数据；AICC 使用 oc-bootstrap 初始化且不挂载 S3 同步 sidecar。
 func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 	replicas := int32(1)
 	// ctrlTokenEnv 从 Secret 挂载 per-app control token，供多个容器复用。
@@ -98,6 +100,104 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 	if spec.ImagePullSecret != "" {
 		imagePullSecrets = []corev1.LocalObjectReference{{Name: spec.ImagePullSecret}}
 	}
+	// AICC 运行时由专用镜像在启动期一次性 bootstrap，不依赖标准应用的 S3 恢复与同步。
+	// 两种应用都需要 control token 与 manager bootstrap URL 取得 per-app 运行时配置。
+	initContainer := corev1.Container{
+		Name:         "restore",
+		Image:        spec.OpsImage,
+		Command:      []string{"oc-restore"},
+		Env:          []corev1.EnvVar{ctrlTokenEnv, bootstrapEnv},
+		VolumeMounts: []corev1.VolumeMount{inputMount, dataMount},
+	}
+	if domain.IsAICCAppType(spec.AppType) {
+		initContainer.Command = []string{"oc-bootstrap"}
+		// AICC bootstrap 只生成 hermes 消费的输入配置，不恢复标准应用的数据目录。
+		initContainer.VolumeMounts = []corev1.VolumeMount{inputMount}
+	}
+	containers := []corev1.Container{
+		{
+			// hermes：主业务容器，负责 AI 网关逻辑，资源配额受限。
+			Name:  "hermes",
+			Image: spec.HermesImage,
+			// API_SERVER_ENABLED=true：启动 hermes 内置 api_server（127.0.0.1:8642，与 gateway 同进程），
+			// 供 oc-ops 触发 POST /oc/skills/reload 免重启热加载 skill 与会话端点转发。
+			// API_SERVER_KEY：上游 api_server 即使 enabled 也**硬性要求**配置 key，否则
+			// 拒绝启动（含 loopback-only 绑定）。复用 per-app control-token 作为 key——
+			// api_server 仅绑 127.0.0.1、只有同 pod 内 oc-ops 可达，per-app 密钥安全足够；
+			// oc-ops 容器注入同一 key（见下）后即可鉴权调用 /api/sessions。
+			// 飞书三条 env 永久注入 hermes 容器；未绑定时 Secret 无对应 key，optional=true 使
+			// env 不注入，引擎 getenv 为空 → 飞书平台不启用。Deployment 模板永不因绑定变化。
+			Env: append(append(append(append([]corev1.EnvVar{
+				{Name: "HERMES_HOME", Value: "/opt/data"},
+				{Name: "API_SERVER_ENABLED", Value: "true"},
+				{Name: "API_SERVER_KEY", ValueFrom: ctrlTokenEnv.ValueFrom},
+			}, feishuOptionalEnv(spec.AppID)...), workWechatOptionalEnv(spec.AppID)...), dingtalkOptionalEnv(spec.AppID)...), proxyEnv...),
+			VolumeMounts: []corev1.VolumeMount{inputMountRO, dataMount},
+			Resources:    corev1.ResourceRequirements{Requests: reqs, Limits: lims},
+			// readinessProbe：exec hermes gateway status，验证网关真正就绪。
+			ReadinessProbe: &corev1.Probe{
+				ProbeHandler: corev1.ProbeHandler{
+					Exec: &corev1.ExecAction{Command: []string{"hermes", "gateway", "status"}},
+				},
+				InitialDelaySeconds: 10,
+				PeriodSeconds:       10,
+				FailureThreshold:    6,
+			},
+		},
+		{
+			// oc-ops：控制平面 API sidecar，复用 hermes 镜像，覆盖 CMD 启动 uvicorn。
+			Name:  "oc-ops",
+			Image: spec.HermesImage,
+			Command: []string{
+				"/usr/local/lib/hermes-agent/venv/bin/python",
+				"-m", "uvicorn",
+				"ocops.server:app",
+				"--host", "0.0.0.0",
+				"--port", "8080",
+			},
+			// OC_OPS_TOKEN 复用 ctrlTokenEnv 的 SecretKeyRef 来源。
+			// PYTHONPATH=/usr/local/lib：ocops 包在镜像内落点 /usr/local/lib/ocops，
+			// 但 uvicorn 直接 `python -m uvicorn ocops.server:app` 启动、不经 oc-* shim
+			// 的 sys.path.insert("/usr/local/lib")，故须显式置 PYTHONPATH 让 venv python
+			// 能解析 `import ocops`，否则 sidecar 起不来（ModuleNotFoundError: ocops）。
+			// API_SERVER_KEY 与 hermes 容器同源（control-token），让 oc-ops 调
+			// hermes api_server /api/sessions 时带 Bearer 鉴权（conversation._api_server_key
+			// 优先读此 env）；两容器同 key 才能互通。
+			Env: append([]corev1.EnvVar{
+				{Name: "OC_OPS_TOKEN", ValueFrom: ctrlTokenEnv.ValueFrom},
+				{Name: "API_SERVER_KEY", ValueFrom: ctrlTokenEnv.ValueFrom},
+				{Name: "PYTHONPATH", Value: "/usr/local/lib"},
+			}, proxyEnv...),
+			Ports: []corev1.ContainerPort{{ContainerPort: 8080}},
+			// readinessProbe：healthz 仅验证同 Pod api_server 的轻量会话读取，
+			// 不触发模型或渠道请求。TCP listen 早于 api_server 状态恢复，若只探端口，
+			// Pod 会在会话 API 仍返回 500 时提前进入 Service endpoints。
+			ReadinessProbe: &corev1.Probe{
+				ProbeHandler: corev1.ProbeHandler{
+					HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromInt(8080)},
+				},
+				InitialDelaySeconds: 10,
+				PeriodSeconds:       10,
+				FailureThreshold:    6,
+			},
+			VolumeMounts: []corev1.VolumeMount{dataMount},
+		},
+	}
+	if !domain.IsAICCAppType(spec.AppType) {
+		// s3-sync：标准应用的数据持久化 sidecar，preStop 执行最终同步防止数据丢失。
+		containers = append(containers, corev1.Container{
+			Name:         "s3-sync",
+			Image:        spec.OpsImage,
+			Command:      []string{"oc-sync"},
+			Env:          []corev1.EnvVar{ctrlTokenEnv, bootstrapEnv},
+			VolumeMounts: []corev1.VolumeMount{dataMount},
+			Lifecycle: &corev1.Lifecycle{
+				PreStop: &corev1.LifecycleHandler{
+					Exec: &corev1.ExecAction{Command: []string{"oc-presync"}},
+				},
+			},
+		})
+	}
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      deploymentName(spec.AppID),
@@ -114,96 +214,8 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 				Spec: corev1.PodSpec{
 					// imagePullSecrets 用于拉取私有镜像仓库。
 					ImagePullSecrets: imagePullSecrets,
-					// initContainer restore：从 manager bootstrap 拉取运行时配置写入 oc-input。
-					InitContainers: []corev1.Container{{
-						Name:         "restore",
-						Image:        spec.OpsImage,
-						Command:      []string{"oc-restore"},
-						Env:          []corev1.EnvVar{ctrlTokenEnv, bootstrapEnv},
-						VolumeMounts: []corev1.VolumeMount{inputMount, dataMount},
-					}},
-					Containers: []corev1.Container{
-						{
-							// hermes：主业务容器，负责 AI 网关逻辑，资源配额受限。
-							Name:  "hermes",
-							Image: spec.HermesImage,
-							// API_SERVER_ENABLED=true：启动 hermes 内置 api_server（127.0.0.1:8642，与 gateway 同进程），
-							// 供 oc-ops 触发 POST /oc/skills/reload 免重启热加载 skill 与会话端点转发。
-							// API_SERVER_KEY：上游 api_server 即使 enabled 也**硬性要求**配置 key，否则
-							// 拒绝启动（含 loopback-only 绑定）。复用 per-app control-token 作为 key——
-							// api_server 仅绑 127.0.0.1、只有同 pod 内 oc-ops 可达，per-app 密钥安全足够；
-							// oc-ops 容器注入同一 key（见下）后即可鉴权调用 /api/sessions。
-							// 飞书三条 env 永久注入 hermes 容器；未绑定时 Secret 无对应 key，optional=true 使
-							// env 不注入，引擎 getenv 为空 → 飞书平台不启用。Deployment 模板永不因绑定变化。
-							Env: append(append(append(append([]corev1.EnvVar{
-								{Name: "HERMES_HOME", Value: "/opt/data"},
-								{Name: "API_SERVER_ENABLED", Value: "true"},
-								{Name: "API_SERVER_KEY", ValueFrom: ctrlTokenEnv.ValueFrom},
-							}, feishuOptionalEnv(spec.AppID)...), workWechatOptionalEnv(spec.AppID)...), dingtalkOptionalEnv(spec.AppID)...), proxyEnv...),
-							VolumeMounts: []corev1.VolumeMount{inputMountRO, dataMount},
-							Resources:    corev1.ResourceRequirements{Requests: reqs, Limits: lims},
-							// readinessProbe：exec hermes gateway status，验证网关真正就绪。
-							ReadinessProbe: &corev1.Probe{
-								ProbeHandler: corev1.ProbeHandler{
-									Exec: &corev1.ExecAction{Command: []string{"hermes", "gateway", "status"}},
-								},
-								InitialDelaySeconds: 10,
-								PeriodSeconds:       10,
-								FailureThreshold:    6,
-							},
-						},
-						{
-							// oc-ops：控制平面 API sidecar，复用 hermes 镜像，覆盖 CMD 启动 uvicorn。
-							Name:  "oc-ops",
-							Image: spec.HermesImage,
-							Command: []string{
-								"/usr/local/lib/hermes-agent/venv/bin/python",
-								"-m", "uvicorn",
-								"ocops.server:app",
-								"--host", "0.0.0.0",
-								"--port", "8080",
-							},
-							// OC_OPS_TOKEN 复用 ctrlTokenEnv 的 SecretKeyRef 来源。
-							// PYTHONPATH=/usr/local/lib：ocops 包在镜像内落点 /usr/local/lib/ocops，
-							// 但 uvicorn 直接 `python -m uvicorn ocops.server:app` 启动、不经 oc-* shim
-							// 的 sys.path.insert("/usr/local/lib")，故须显式置 PYTHONPATH 让 venv python
-							// 能解析 `import ocops`，否则 sidecar 起不来（ModuleNotFoundError: ocops）。
-							// API_SERVER_KEY 与 hermes 容器同源（control-token），让 oc-ops 调
-							// hermes api_server /api/sessions 时带 Bearer 鉴权（conversation._api_server_key
-							// 优先读此 env）；两容器同 key 才能互通。
-							Env: append([]corev1.EnvVar{
-								{Name: "OC_OPS_TOKEN", ValueFrom: ctrlTokenEnv.ValueFrom},
-								{Name: "API_SERVER_KEY", ValueFrom: ctrlTokenEnv.ValueFrom},
-								{Name: "PYTHONPATH", Value: "/usr/local/lib"},
-							}, proxyEnv...),
-							Ports: []corev1.ContainerPort{{ContainerPort: 8080}},
-							// readinessProbe：healthz 仅验证同 Pod api_server 的轻量会话读取，
-							// 不触发模型或渠道请求。TCP listen 早于 api_server 状态恢复，若只探端口，
-							// Pod 会在会话 API 仍返回 500 时提前进入 Service endpoints。
-							ReadinessProbe: &corev1.Probe{
-								ProbeHandler: corev1.ProbeHandler{
-									HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromInt(8080)},
-								},
-								InitialDelaySeconds: 10,
-								PeriodSeconds:       10,
-								FailureThreshold:    6,
-							},
-							VolumeMounts: []corev1.VolumeMount{dataMount},
-						},
-						{
-							// s3-sync：数据持久化 sidecar，preStop 执行最终同步防止数据丢失。
-							Name:         "s3-sync",
-							Image:        spec.OpsImage,
-							Command:      []string{"oc-sync"},
-							Env:          []corev1.EnvVar{ctrlTokenEnv, bootstrapEnv},
-							VolumeMounts: []corev1.VolumeMount{dataMount},
-							Lifecycle: &corev1.Lifecycle{
-								PreStop: &corev1.LifecycleHandler{
-									Exec: &corev1.ExecAction{Command: []string{"oc-presync"}},
-								},
-							},
-						},
-					},
+					InitContainers:   []corev1.Container{initContainer},
+					Containers:       containers,
 					Volumes: []corev1.Volume{
 						// oc-input：initContainer restore 输出 → hermes/oc-ops 消费，生命周期与 pod 同步。
 						{Name: "oc-input", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
