@@ -271,6 +271,21 @@ func TestAppsAppTypeMigrationGuardrails(t *testing.T) {
 	down := string(downBytes)
 	// 回滚必须恢复旧标记列，供退回旧代码版本后继续识别 AICC 应用。
 	assert.Contains(t, down, "ADD COLUMN aicc_hidden BOOLEAN NOT NULL DEFAULT FALSE")
+	// AICC 类型回滚时恢复隐藏标记，保证旧代码仍会将客服应用排除在普通列表外。
+	assert.Contains(t, down, "WHEN app_type = 'aicc' THEN TRUE")
+	// 普通类型回滚时明确写入 FALSE，恢复旧 owner 唯一约束的参与条件。
+	assert.Contains(t, down, "WHEN app_type = 'standard' THEN FALSE")
+	// 未知类型不能被静默降级为普通应用；NULL 写入 NOT NULL 列会中止回滚。
+	assert.Contains(t, down, "ELSE NULL")
+	// 回滚时恢复旧生成列表达式和唯一索引，保持旧版本的普通应用 owner 唯一语义。
+	assert.Contains(t, down, "CASE WHEN deleted_at IS NULL AND aicc_hidden = FALSE THEN owner_user_id END")
+	assert.Contains(t, down, "ADD UNIQUE KEY uk_apps_owner_active (owner_active_key)")
+	// app_type 检查约束在回填后才移除，约束与 ELSE NULL 共同阻止未知类型被静默回滚。
+	dropCheckIndex := strings.Index(down, "DROP CHECK apps_app_type_check")
+	updateIndex := strings.Index(down, "UPDATE apps")
+	require.NotEqual(t, -1, dropCheckIndex)
+	require.NotEqual(t, -1, updateIndex)
+	assert.Greater(t, dropCheckIndex, updateIndex)
 }
 
 // TestAICCSettingsMigrationContainsOperationalTables 覆盖 AICC 运营配置表：
