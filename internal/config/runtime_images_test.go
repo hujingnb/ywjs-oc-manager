@@ -62,7 +62,7 @@ func TestValidateAICCRuntimeImageRejectsInvalid(t *testing.T) {
 		// 引用中含空白会导致 container runtime 无法解析。
 		{name: "包含空白", ref: "registry.example.com/app/aicc runtime:v1"},
 		// 仅镜像名没有仓库路径，无法满足客服镜像必须独立仓库管理的约束。
-		{name: "缺少仓库路径", ref: "oc-manager-hermes-aicc:v1"},
+		{name: "缺少仓库路径", ref: "oc-manager-aigowork-aicc:v1"},
 		// latest 是可变 tag，无法追溯客服运行时实际发布版本。
 		{name: "使用浮动 latest 标签", ref: "registry.example.com/app/oc-manager-aigowork-aicc:latest"},
 	}
