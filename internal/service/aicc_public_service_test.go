@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -216,6 +217,39 @@ func TestAICCPublicSendMessageReturnsExistingTask(t *testing.T) {
 	assert.Len(t, store.createdMessages, 1)
 	assert.Len(t, store.createdTasks, 1)
 	assert.Empty(t, chat.text)
+}
+
+// TestAICCPublicSendMessageConcurrentClientMessageIDReusesLockedTask 覆盖并发幂等边界：
+// 两个请求都在事务外查不到同一消息时，后获得会话锁的请求必须复用先提交的任务，不能暴露唯一键错误。
+func TestAICCPublicSendMessageConcurrentClientMessageIDReusesLockedTask(t *testing.T) {
+	store := newAICCPublicMessageStore()
+	store.idempotencyReadBarrier = &fakeAICCIdempotencyReadBarrier{firstRead: make(chan struct{}), release: make(chan struct{})}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+	svc.SetTxRunner(&fakeAICCPublicSerializedTxRunner{store: store})
+	input := AICCPublicMessageInput{SessionToken: "tok", ClientMessageID: "same-client-message", Text: "报价多少"}
+	results := make(chan AICCPublicMessageResult, 2)
+	errs := make(chan error, 2)
+
+	// 两个并发请求在各自进入事务前都读取到不存在，复现原实现的竞态窗口。
+	for range 2 {
+		go func() {
+			result, err := svc.SendMessage(context.Background(), input)
+			results <- result
+			errs <- err
+		}()
+	}
+
+	for range 2 {
+		require.NoError(t, <-errs)
+	}
+	first := <-results
+	second := <-results
+	assert.Equal(t, first.MessageID, second.MessageID)
+	assert.Equal(t, "queued", first.Status)
+	assert.Equal(t, "queued", second.Status)
+	assert.Len(t, store.createdMessages, 1)
+	assert.Len(t, store.createdTasks, 1)
 }
 
 // TestAICCPublicSendMessageRollsBackVisitorMessageWhenTaskWriteFails 覆盖任务写入失败：事务必须回滚已写入的访客消息，避免产生永远无法处理的孤儿消息。
@@ -1062,31 +1096,32 @@ func (f fakeAICCGeoIPResolver) Resolve(_ context.Context, _ string) string {
 }
 
 type fakeAICCPublicStore struct {
-	org                 sqlc.Organization
-	agent               sqlc.AiccAgent
-	session             sqlc.AiccSession
-	sessionErr          error
-	message             sqlc.AiccMessage
-	messages            []sqlc.AiccMessage
-	image               sqlc.AiccImage
-	settings            sqlc.AiccAgentSetting
-	blockedVisitor      sqlc.AiccBlockedVisitor
-	leadFields          []sqlc.AiccLeadField
-	requiredLeadFields  []sqlc.AiccLeadField
-	createdSession      sqlc.CreateAICCSessionParams
-	createdSessionCount int
-	createdMessages     []sqlc.CreateAICCMessageParams
-	createdTasks        []sqlc.CreateAICCMessageTaskParams
-	createTaskErr       error
-	visitorMessageCount int64
-	leads               []sqlc.AiccLead
-	leadValues          []sqlc.UpsertAICCLeadValueParams
-	attachedLeadID      string
-	attachedLeadOrgID   string
-	feedback            sqlc.UpsertAICCFeedbackParams
-	resolutionStatus    string
-	touchedSessionID    string
-	touchNoRows         bool
+	org                    sqlc.Organization
+	agent                  sqlc.AiccAgent
+	session                sqlc.AiccSession
+	sessionErr             error
+	message                sqlc.AiccMessage
+	messages               []sqlc.AiccMessage
+	image                  sqlc.AiccImage
+	settings               sqlc.AiccAgentSetting
+	blockedVisitor         sqlc.AiccBlockedVisitor
+	leadFields             []sqlc.AiccLeadField
+	requiredLeadFields     []sqlc.AiccLeadField
+	createdSession         sqlc.CreateAICCSessionParams
+	createdSessionCount    int
+	createdMessages        []sqlc.CreateAICCMessageParams
+	createdTasks           []sqlc.CreateAICCMessageTaskParams
+	createTaskErr          error
+	idempotencyReadBarrier *fakeAICCIdempotencyReadBarrier
+	visitorMessageCount    int64
+	leads                  []sqlc.AiccLead
+	leadValues             []sqlc.UpsertAICCLeadValueParams
+	attachedLeadID         string
+	attachedLeadOrgID      string
+	feedback               sqlc.UpsertAICCFeedbackParams
+	resolutionStatus       string
+	touchedSessionID       string
+	touchNoRows            bool
 }
 
 // newAICCPublicMessageStore 构造可接收公开消息的最小有效会话，避免队列测试重复维护无关前置条件。
@@ -1102,6 +1137,41 @@ func newAICCPublicMessageStore() *fakeAICCPublicStore {
 // fakeAICCPublicTxRunner 模拟数据库事务；回调失败时恢复测试可观察到的写入状态。
 type fakeAICCPublicTxRunner struct {
 	store *fakeAICCPublicStore
+}
+
+// fakeAICCPublicSerializedTxRunner 在测试中模拟数据库按会话行串行执行事务的行为。
+type fakeAICCPublicSerializedTxRunner struct {
+	store *fakeAICCPublicStore
+	mu    sync.Mutex
+}
+
+func (r *fakeAICCPublicSerializedTxRunner) WithAICCPublicTx(ctx context.Context, fn func(AICCPublicStore) error) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return fn(r.store)
+}
+
+// fakeAICCIdempotencyReadBarrier 确保两个请求都完成事务外幂等读取后才允许继续，稳定复现并发窗口。
+type fakeAICCIdempotencyReadBarrier struct {
+	mu        sync.Mutex
+	reads     int
+	firstRead chan struct{}
+	release   chan struct{}
+}
+
+func (b *fakeAICCIdempotencyReadBarrier) wait() {
+	b.mu.Lock()
+	b.reads++
+	read := b.reads
+	b.mu.Unlock()
+	if read == 1 {
+		close(b.firstRead)
+		<-b.release
+		return
+	}
+	if read == 2 {
+		close(b.release)
+	}
 }
 
 func (r *fakeAICCPublicTxRunner) WithAICCPublicTx(ctx context.Context, fn func(AICCPublicStore) error) error {
@@ -1220,6 +1290,13 @@ func (f *fakeAICCPublicStore) MarkAICCSessionConsented(_ context.Context, sessio
 }
 
 func (f *fakeAICCPublicStore) CreateAICCMessage(_ context.Context, arg sqlc.CreateAICCMessageParams) error {
+	if arg.Direction == domain.AICCMessageDirectionVisitor && arg.ClientMessageID.Valid {
+		for _, existing := range f.createdMessages {
+			if existing.SessionID == arg.SessionID && existing.Direction == arg.Direction && existing.ClientMessageID == arg.ClientMessageID {
+				return errors.New("aicc_messages client_message_id 唯一键冲突")
+			}
+		}
+	}
 	f.createdMessages = append(f.createdMessages, arg)
 	if arg.Direction == domain.AICCMessageDirectionVisitor {
 		f.visitorMessageCount++
@@ -1254,6 +1331,9 @@ func (f *fakeAICCPublicStore) GetAICCMessageByClientMessageID(_ context.Context,
 		if message.SessionID == arg.SessionID && message.Direction == arg.Direction && message.ClientMessageID == arg.ClientMessageID {
 			return sqlc.AiccMessage{ID: message.ID, SessionID: message.SessionID, AgentID: message.AgentID, Direction: message.Direction, TextContent: message.TextContent, ClientMessageID: message.ClientMessageID}, nil
 		}
+	}
+	if f.idempotencyReadBarrier != nil && arg.Direction == domain.AICCMessageDirectionVisitor && arg.ClientMessageID.Valid {
+		f.idempotencyReadBarrier.wait()
 	}
 	return sqlc.AiccMessage{}, sql.ErrNoRows
 }

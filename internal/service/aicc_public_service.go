@@ -493,13 +493,13 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 		if !errors.Is(err, sql.ErrNoRows) {
 			return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 幂等消息失败: %w", err)
 		}
-	} else if err := s.reserveAICCVisitorMessage(ctx, session, settings.MessageLimitPerSession, visitorMessage, agent.AppID, !isPromptInjection); err != nil {
+	}
+	existingMessageID, err := s.reserveAICCVisitorMessage(ctx, session, settings.MessageLimitPerSession, visitorMessage, agent.AppID, !isPromptInjection)
+	if err != nil {
 		return AICCPublicMessageResult{}, err
 	}
-	if clientMessageID != "" {
-		if err := s.reserveAICCVisitorMessage(ctx, session, settings.MessageLimitPerSession, visitorMessage, agent.AppID, !isPromptInjection); err != nil {
-			return AICCPublicMessageResult{}, err
-		}
+	if existingMessageID != "" {
+		return s.aiccMessageTaskResult(ctx, session.ID, clientMessageID, existingMessageID)
 	}
 	if !isPromptInjection {
 		return AICCPublicMessageResult{MessageID: visitorMessage.ID, Status: "queued"}, nil
@@ -512,8 +512,9 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 	return AICCPublicMessageResult{MessageID: visitorMessage.ID, Status: "completed", Text: aiccPromptInjectionReply}, nil
 }
 
-func (s *AICCPublicService) reserveAICCVisitorMessage(ctx context.Context, session sqlc.AiccSession, limit int32, visitorMessage sqlc.CreateAICCMessageParams, appID string, createTask bool) error {
-	return s.withAICCPublicTx(ctx, func(store AICCPublicStore) error {
+func (s *AICCPublicService) reserveAICCVisitorMessage(ctx context.Context, session sqlc.AiccSession, limit int32, visitorMessage sqlc.CreateAICCMessageParams, appID string, createTask bool) (string, error) {
+	var existingMessageID string
+	err := s.withAICCPublicTx(ctx, func(store AICCPublicStore) error {
 		locked, err := store.LockAICCSessionForUpdate(ctx, session.ID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrAICCInvalidSession
@@ -523,6 +524,16 @@ func (s *AICCPublicService) reserveAICCVisitorMessage(ctx context.Context, sessi
 		}
 		if locked.AgentID != session.AgentID {
 			return ErrAICCInvalidSession
+		}
+		if visitorMessage.ClientMessageID.Valid {
+			existing, err := store.GetAICCMessageByClientMessageID(ctx, sqlc.GetAICCMessageByClientMessageIDParams{SessionID: session.ID, Direction: domain.AICCMessageDirectionVisitor, ClientMessageID: visitorMessage.ClientMessageID})
+			if err == nil {
+				existingMessageID = existing.ID
+				return nil
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("查询 AICC 事务内幂等消息失败: %w", err)
+			}
 		}
 		if err := ensureMessageLimit(ctx, store, session.ID, limit); err != nil {
 			return err
@@ -541,6 +552,10 @@ func (s *AICCPublicService) reserveAICCVisitorMessage(ctx context.Context, sessi
 		}
 		return nil
 	})
+	if err != nil {
+		return "", err
+	}
+	return existingMessageID, nil
 }
 
 // aiccMessageTaskResult 将已存在访客消息映射为当前异步任务状态，避免幂等重试重复创建任务。
