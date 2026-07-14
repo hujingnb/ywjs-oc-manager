@@ -20,6 +20,7 @@ const aiccMessageDispatchConcurrency = 4
 // MySQL 保存任务事实与租约，Redis 只提供低延迟的唤醒信号。
 type messageTaskStore interface {
 	ListReadyAICCMessageTasks(context.Context, int32) ([]sqlc.AiccMessageTask, error)
+	CountReadyAICCMessageTasksByApp(context.Context) ([]sqlc.CountReadyAICCMessageTasksByAppRow, error)
 }
 
 // messageTaskDispatcher 抽象单条任务执行，便于循环独立测试调度顺序和故障降级。
@@ -98,20 +99,30 @@ func (l *MessageDispatchLoop) Tick(ctx context.Context) error {
 	if _, err := l.dispatcher.RecoverExpiredLeases(ctx); err != nil {
 		return fmt.Errorf("回收过期 AICC 消息租约失败: %w", err)
 	}
+	// queue gauge 必须先读取不带 LIMIT 的分组真值；后续 ready 仅用于本轮最多 32 条的实际分派。
+	queueDepthRows, err := l.store.CountReadyAICCMessageTasksByApp(ctx)
+	if err != nil {
+		return fmt.Errorf("统计 AICC 就绪任务队列深度失败: %w", err)
+	}
+	queueDepthByApp := make(map[string]int64, len(queueDepthRows))
+	var queueDepth int64
+	for _, row := range queueDepthRows {
+		if row.AppID == "" || row.QueueDepth <= 0 {
+			// 任务表 app_id 是 HPA 标签契约；异常数据或零值都不能产生空/无意义的指标序列。
+			continue
+		}
+		queueDepthByApp[row.AppID] = row.QueueDepth
+		queueDepth += row.QueueDepth
+	}
 	// dispatcher 是租约恢复事件的唯一所有者；循环只负责调用入口，避免同一批恢复重复计数。
 	ready, err := l.store.ListReadyAICCMessageTasks(ctx, l.batchSize)
 	if err != nil {
 		return fmt.Errorf("扫描就绪 AICC 消息任务失败: %w", err)
 	}
 	byID := make(map[string]sqlc.AiccMessageTask, len(ready))
-	queueDepthByApp := make(map[string]int64)
 	var queueWaitMS int64
 	for _, task := range ready {
 		byID[task.ID] = task
-		// app_id 是 HPA selector 的固定标签；异常旧数据缺失 app ID 时不能导出空标签序列。
-		if task.AppID != "" {
-			queueDepthByApp[task.AppID]++
-		}
 		queueWait := time.Duration(0)
 		if !task.CreatedAt.IsZero() {
 			queueWait = time.Since(task.CreatedAt)
@@ -136,7 +147,7 @@ func (l *MessageDispatchLoop) Tick(ctx context.Context) error {
 			l.recordInflightMetrics(len(l.slots))
 		}
 	}
-	l.recordQueueMetrics(len(ready), queueWaitMS, queueDepthByApp)
+	l.recordQueueMetrics(int(queueDepth), queueWaitMS, queueDepthByApp)
 	return nil
 }
 

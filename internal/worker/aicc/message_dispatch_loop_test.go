@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -26,11 +27,11 @@ func TestMessageDispatchLoopTelemetryCoversQueueAndConcurrency(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(&output, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	queue := redis.NewMemoryQueue()
 	store := &messageTaskStoreStub{ready: []sqlc.AiccMessageTask{
-		{ID: "task-1", AgentID: "agent-1", OrgID: "org-1", CreatedAt: time.Now().Add(-time.Second)}, // 首个在飞任务。
-		{ID: "task-2", AgentID: "agent-1", OrgID: "org-1", CreatedAt: time.Now().Add(-time.Second)}, // 第二个在飞任务。
-		{ID: "task-3", AgentID: "agent-1", OrgID: "org-1", CreatedAt: time.Now().Add(-time.Second)}, // 第三个在飞任务。
-		{ID: "task-4", AgentID: "agent-1", OrgID: "org-1", CreatedAt: time.Now().Add(-time.Second)}, // 第四个在飞任务。
-		{ID: "task-5", AgentID: "agent-1", OrgID: "org-1", CreatedAt: time.Now().Add(-time.Second)}, // 并发满后等待下轮。
+		{ID: "task-1", AppID: "app-1", AgentID: "agent-1", OrgID: "org-1", CreatedAt: time.Now().Add(-time.Second)}, // 首个在飞任务。
+		{ID: "task-2", AppID: "app-1", AgentID: "agent-1", OrgID: "org-1", CreatedAt: time.Now().Add(-time.Second)}, // 第二个在飞任务。
+		{ID: "task-3", AppID: "app-1", AgentID: "agent-1", OrgID: "org-1", CreatedAt: time.Now().Add(-time.Second)}, // 第三个在飞任务。
+		{ID: "task-4", AppID: "app-1", AgentID: "agent-1", OrgID: "org-1", CreatedAt: time.Now().Add(-time.Second)}, // 第四个在飞任务。
+		{ID: "task-5", AppID: "app-1", AgentID: "agent-1", OrgID: "org-1", CreatedAt: time.Now().Add(-time.Second)}, // 并发满后等待下轮。
 	}}
 	dispatcher := &concurrentMessageTaskDispatcher{release: make(chan struct{})}
 	loop := NewMessageDispatchLoop(store, queue, dispatcher, logger)
@@ -77,6 +78,33 @@ func TestMessageDispatchLoopTelemetrySeparatesBusinessGaugesByHiddenApp(t *testi
 	assert.Equal(t, int64(1), metrics.InflightByApp["app-b1"])
 	close(dispatcher.release)
 	loop.Wait()
+}
+
+// TestMessageDispatchLoopTelemetryUsesFullQueueDepthBeyondDispatchBatch 验证 HPA 队列 gauge
+// 必须读取分组计数真值而不是 LIMIT 32 的分派候选集，避免首个 app 挤占批次时后续 app 饿死。
+func TestMessageDispatchLoopTelemetryUsesFullQueueDepthBeyondDispatchBatch(t *testing.T) {
+	ready := make([]sqlc.AiccMessageTask, aiccMessageDispatchBatchSize)
+	for index := range ready {
+		ready[index] = sqlc.AiccMessageTask{ID: fmt.Sprintf("task-a-%d", index), AppID: "app-a", CreatedAt: time.Now().Add(-time.Second)}
+	}
+	store := &messageTaskStoreStub{
+		ready: ready,
+		readyDepthByApp: []sqlc.CountReadyAICCMessageTasksByAppRow{
+			{AppID: "app-a", QueueDepth: 40}, // 首个 app 的真实待处理数超过单轮分派上限。
+			{AppID: "app-b", QueueDepth: 7},  // 未进入本轮候选集的 app 仍必须暴露给自己的 HPA。
+		},
+	}
+	loop := NewMessageDispatchLoop(store, redis.NewMemoryQueue(), &messageTaskDispatcherStub{}, slog.Default())
+	observer := service.NewSlogAICCDispatchObserver(slog.Default())
+	loop.SetObserver(observer)
+
+	require.NoError(t, loop.Tick(context.Background()))
+	loop.Wait()
+
+	metrics := observer.Metrics()
+	assert.Equal(t, int64(40), metrics.QueueDepthByApp["app-a"])
+	assert.Equal(t, int64(7), metrics.QueueDepthByApp["app-b"])
+	assert.Equal(t, int32(32), store.limit)
 }
 
 // TestMessageDispatchLoopTelemetryClassifiesDispatchError 覆盖分派失败日志：
@@ -254,8 +282,9 @@ func TestMessageDispatchLoopRunWaitsForSubmittedDispatchOnShutdown(t *testing.T)
 
 // messageTaskStoreStub 记录运行循环对 MySQL 就绪任务扫描和租约回收的调用。
 type messageTaskStoreStub struct {
-	ready []sqlc.AiccMessageTask
-	limit int32
+	ready           []sqlc.AiccMessageTask
+	readyDepthByApp []sqlc.CountReadyAICCMessageTasksByAppRow
+	limit           int32
 }
 
 // realDispatcherRecoveryStore 通过嵌入完整 store 接口复用 dispatcher 的真实恢复方法，
@@ -273,6 +302,9 @@ type loopRealDispatcherStore struct {
 
 func (s *loopRealDispatcherStore) ListReadyAICCMessageTasks(context.Context, int32) ([]sqlc.AiccMessageTask, error) {
 	return []sqlc.AiccMessageTask{s.task}, nil
+}
+func (s *loopRealDispatcherStore) CountReadyAICCMessageTasksByApp(context.Context) ([]sqlc.CountReadyAICCMessageTasksByAppRow, error) {
+	return []sqlc.CountReadyAICCMessageTasksByAppRow{{AppID: s.task.AppID, QueueDepth: 1}}, nil
 }
 func (*loopRealDispatcherStore) RecoverExpiredAICCMessageTaskLeases(context.Context) (int64, error) {
 	return 0, nil
@@ -329,6 +361,9 @@ func hasMetricPrefix(counters map[string]uint64, prefix string) bool {
 func (s *realDispatcherRecoveryStore) ListReadyAICCMessageTasks(context.Context, int32) ([]sqlc.AiccMessageTask, error) {
 	return nil, nil
 }
+func (*realDispatcherRecoveryStore) CountReadyAICCMessageTasksByApp(context.Context) ([]sqlc.CountReadyAICCMessageTasksByAppRow, error) {
+	return nil, nil
+}
 
 func (s *realDispatcherRecoveryStore) RecoverExpiredAICCMessageTaskLeases(context.Context) (int64, error) {
 	return s.recovered, nil
@@ -361,6 +396,25 @@ func (r *aiccObservationRecorder) eventCount(name string) int {
 func (s *messageTaskStoreStub) ListReadyAICCMessageTasks(_ context.Context, limit int32) ([]sqlc.AiccMessageTask, error) {
 	s.limit = limit
 	return s.ready, nil
+}
+
+// CountReadyAICCMessageTasksByApp 模拟独立于分派 LIMIT 的 MySQL 分组计数；未显式设置时
+// 从 ready 构造，保留普通循环测试的最小 fixture。
+func (s *messageTaskStoreStub) CountReadyAICCMessageTasksByApp(context.Context) ([]sqlc.CountReadyAICCMessageTasksByAppRow, error) {
+	if s.readyDepthByApp != nil {
+		return s.readyDepthByApp, nil
+	}
+	depthByApp := make(map[string]int64)
+	for _, task := range s.ready {
+		if task.AppID != "" {
+			depthByApp[task.AppID]++
+		}
+	}
+	rows := make([]sqlc.CountReadyAICCMessageTasksByAppRow, 0, len(depthByApp))
+	for appID, depth := range depthByApp {
+		rows = append(rows, sqlc.CountReadyAICCMessageTasksByAppRow{AppID: appID, QueueDepth: depth})
+	}
+	return rows, nil
 }
 
 // errorMessageTaskDispatcher 模拟包含敏感上下文的运行时错误，验证循环不会原样记录。

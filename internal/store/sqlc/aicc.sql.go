@@ -333,6 +333,60 @@ func (q *Queries) CountActiveAICCMessageTasks(ctx context.Context) (int64, error
 	return count, err
 }
 
+const countReadyAICCMessageTasksByApp = `-- name: CountReadyAICCMessageTasksByApp :many
+SELECT task.app_id, COUNT(*) AS queue_depth
+FROM aicc_message_tasks AS task
+JOIN aicc_messages AS task_message ON task_message.id = task.message_id
+WHERE task.status IN ('queued', 'retry_wait')
+  AND task.run_after <= NOW(6)
+  AND NOT EXISTS (
+      SELECT 1
+      FROM aicc_message_tasks AS processing
+      WHERE processing.session_id = task.session_id
+        AND processing.status = 'processing'
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM aicc_message_tasks AS earlier
+      JOIN aicc_messages AS earlier_message ON earlier_message.id = earlier.message_id
+      WHERE earlier.session_id = task.session_id
+        AND earlier.status NOT IN ('completed', 'failed')
+        AND (earlier_message.created_at < task_message.created_at
+             OR (earlier_message.created_at = task_message.created_at AND earlier_message.id < task_message.id))
+  )
+GROUP BY task.app_id
+`
+
+type CountReadyAICCMessageTasksByAppRow struct {
+	AppID      string `db:"app_id" json:"app_id"`
+	QueueDepth int64  `db:"queue_depth" json:"queue_depth"`
+}
+
+// 与 ListReadyAICCMessageTasks 使用完全相同的可领取条件，但不带分派 LIMIT；
+// 该分组真值专供 app 级 HPA queue gauge，不能从单轮领取候选集推断。
+func (q *Queries) CountReadyAICCMessageTasksByApp(ctx context.Context) ([]CountReadyAICCMessageTasksByAppRow, error) {
+	rows, err := q.db.QueryContext(ctx, countReadyAICCMessageTasksByApp)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountReadyAICCMessageTasksByAppRow{}
+	for rows.Next() {
+		var i CountReadyAICCMessageTasksByAppRow
+		if err := rows.Scan(&i.AppID, &i.QueueDepth); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createAICCAgent = `-- name: CreateAICCAgent :exec
 INSERT INTO aicc_agents (
     id, org_id, app_id, name, status, scenario, greeting, answer_boundary,

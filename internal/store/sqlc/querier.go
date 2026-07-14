@@ -70,6 +70,9 @@ type Querier interface {
 	CountRAGFlowDocumentsByScope(ctx context.Context, arg CountRAGFlowDocumentsByScopeParams) (int64, error)
 	// 统计行业知识库文件总数，过滤条件必须与 ListRAGFlowIndustryDocuments 保持一致。
 	CountRAGFlowIndustryDocuments(ctx context.Context, arg CountRAGFlowIndustryDocumentsParams) (int64, error)
+	// 与 ListReadyAICCMessageTasks 使用完全相同的可领取条件，但不带分派 LIMIT；
+	// 该分组真值专供 app 级 HPA queue gauge，不能从单轮领取候选集推断。
+	CountReadyAICCMessageTasksByApp(ctx context.Context) ([]CountReadyAICCMessageTasksByAppRow, error)
 	CreateAICCAgent(ctx context.Context, arg CreateAICCAgentParams) error
 	CreateAICCImage(ctx context.Context, arg CreateAICCImageParams) error
 	CreateAICCMessage(ctx context.Context, arg CreateAICCMessageParams) error

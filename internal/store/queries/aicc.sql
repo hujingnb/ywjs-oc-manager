@@ -236,6 +236,31 @@ WHERE task.status IN ('queued', 'retry_wait')
 ORDER BY task.run_after ASC, task_message.created_at ASC, task_message.id ASC
 LIMIT ?;
 
+-- name: CountReadyAICCMessageTasksByApp :many
+-- 与 ListReadyAICCMessageTasks 使用完全相同的可领取条件，但不带分派 LIMIT；
+-- 该分组真值专供 app 级 HPA queue gauge，不能从单轮领取候选集推断。
+SELECT task.app_id, COUNT(*) AS queue_depth
+FROM aicc_message_tasks AS task
+JOIN aicc_messages AS task_message ON task_message.id = task.message_id
+WHERE task.status IN ('queued', 'retry_wait')
+  AND task.run_after <= NOW(6)
+  AND NOT EXISTS (
+      SELECT 1
+      FROM aicc_message_tasks AS processing
+      WHERE processing.session_id = task.session_id
+        AND processing.status = 'processing'
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM aicc_message_tasks AS earlier
+      JOIN aicc_messages AS earlier_message ON earlier_message.id = earlier.message_id
+      WHERE earlier.session_id = task.session_id
+        AND earlier.status NOT IN ('completed', 'failed')
+        AND (earlier_message.created_at < task_message.created_at
+             OR (earlier_message.created_at = task_message.created_at AND earlier_message.id < task_message.id))
+  )
+GROUP BY task.app_id;
+
 -- name: LeaseAICCMessageTask :execrows
 -- status、尝试上限、到期时间和会话无 processing 任务均在同一 UPDATE 中判断，避免 dispatcher 先读后写造成重复租约。
 UPDATE aicc_message_tasks AS task
