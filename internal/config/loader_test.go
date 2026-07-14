@@ -569,6 +569,58 @@ k8s:
 	assert.Equal(t, "2", cfg.Kubernetes.AICCHPABusinessMetrics.Inflight.TargetAverageValue)
 }
 
+// TestKubernetesAICCHPABusinessMetricsRequiresAppIDLabel 验证 HPA selector 必须使用
+// 指标桥接器固定导出的 app_id 标签，不能接受没有实际指标来源的任意标签键。
+func TestKubernetesAICCHPABusinessMetricsRequiresAppIDLabel(t *testing.T) {
+	yaml := fullValidYAML() + `
+k8s:
+  enabled: true
+  ops_image: registry/ops:v1
+  bootstrap_base_url: http://manager-api:8080
+  aicc_hpa_business_metrics:
+    enabled: true
+    provider: prometheus-adapter
+    app_label: unsupported_label
+    queue_depth:
+      name: aicc_message_queue_depth
+      target_average_value: "5"
+    inflight:
+      name: aicc_dispatch_inflight
+      target_average_value: "2"
+`
+
+	_, err := loadConfigFromStringErr(t, yaml)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "app_label 必须为 app_id")
+}
+
+// TestKubernetesAICCHPABusinessMetricsRequiresSupportedProvider 验证只有实现本文档聚合
+// 规则的 prometheus-adapter 能启用业务 HPA，避免任意 provider 名称造成错误扩缩。
+func TestKubernetesAICCHPABusinessMetricsRequiresSupportedProvider(t *testing.T) {
+	yaml := fullValidYAML() + `
+k8s:
+  enabled: true
+  ops_image: registry/ops:v1
+  bootstrap_base_url: http://manager-api:8080
+  aicc_hpa_business_metrics:
+    enabled: true
+    provider: unknown-adapter
+    app_label: app_id
+    queue_depth:
+      name: aicc_message_queue_depth
+      target_average_value: "5"
+    inflight:
+      name: aicc_dispatch_inflight
+      target_average_value: "2"
+`
+
+	_, err := loadConfigFromStringErr(t, yaml)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "provider 必须为 prometheus-adapter")
+}
+
 func writeTempConfig(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")

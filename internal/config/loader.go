@@ -12,7 +12,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // LoadFile 从 YAML 文件读取配置，并执行启动前校验。
@@ -275,8 +274,13 @@ func (c AICCHPABusinessMetricsConfig) validate() error {
 	if strings.TrimSpace(c.Provider) == "" || strings.TrimSpace(c.AppLabel) == "" {
 		return fmt.Errorf("k8s.aicc_hpa_business_metrics 已启用但 provider / app_label 不完整")
 	}
-	if problems := validation.IsQualifiedName(c.AppLabel); len(problems) > 0 {
-		return fmt.Errorf("k8s.aicc_hpa_business_metrics.app_label 非法: %s", strings.Join(problems, "; "))
+	if c.Provider != "prometheus-adapter" {
+		// 只有此 adapter 契约明确了 queue=max、inflight=sum 的跨副本聚合，其他名称不能猜测兼容。
+		return fmt.Errorf("k8s.aicc_hpa_business_metrics.provider 必须为 prometheus-adapter")
+	}
+	if c.AppLabel != "app_id" {
+		// 当前安全指标桥接契约只导出 app_id；允许任意标签会让 HPA 渲染无法查询到的指标。
+		return fmt.Errorf("k8s.aicc_hpa_business_metrics.app_label 必须为 app_id")
 	}
 	for _, metric := range []struct {
 		name  string

@@ -42,6 +42,9 @@ type MessageDispatchLoop struct {
 	slots chan struct{}
 	// dispatchWG 让 shutdown 等待已启动任务退出，避免主进程提前关闭依赖连接。
 	dispatchWG sync.WaitGroup
+	// inflightByApp 只统计本进程已提交的调用；跨副本总量由指标 adapter 按 app_id 求和。
+	inflightMu    sync.Mutex
+	inflightByApp map[string]int64
 }
 
 // NewMessageDispatchLoop 创建一秒一次的运行循环；每轮限制领取数量，避免长任务饿死其他后台任务。
@@ -52,8 +55,9 @@ func NewMessageDispatchLoop(store messageTaskStore, queue redis.Queue, dispatche
 	return &MessageDispatchLoop{
 		store: store, queue: queue, dispatcher: dispatcher, logger: logger,
 		interval: time.Second, batchSize: aiccMessageDispatchBatchSize,
-		slots:    make(chan struct{}, aiccMessageDispatchConcurrency),
-		observer: service.NewSlogAICCDispatchObserver(logger),
+		slots:         make(chan struct{}, aiccMessageDispatchConcurrency),
+		observer:      service.NewSlogAICCDispatchObserver(logger),
+		inflightByApp: make(map[string]int64),
 	}
 }
 
@@ -100,9 +104,14 @@ func (l *MessageDispatchLoop) Tick(ctx context.Context) error {
 		return fmt.Errorf("扫描就绪 AICC 消息任务失败: %w", err)
 	}
 	byID := make(map[string]sqlc.AiccMessageTask, len(ready))
+	queueDepthByApp := make(map[string]int64)
 	var queueWaitMS int64
 	for _, task := range ready {
 		byID[task.ID] = task
+		// app_id 是 HPA selector 的固定标签；异常旧数据缺失 app ID 时不能导出空标签序列。
+		if task.AppID != "" {
+			queueDepthByApp[task.AppID]++
+		}
 		queueWait := time.Duration(0)
 		if !task.CreatedAt.IsZero() {
 			queueWait = time.Since(task.CreatedAt)
@@ -127,7 +136,7 @@ func (l *MessageDispatchLoop) Tick(ctx context.Context) error {
 			l.recordInflightMetrics(len(l.slots))
 		}
 	}
-	l.recordQueueMetrics(len(ready), queueWaitMS)
+	l.recordQueueMetrics(len(ready), queueWaitMS, queueDepthByApp)
 	return nil
 }
 
@@ -136,17 +145,19 @@ func (l *MessageDispatchLoop) tryDispatch(ctx context.Context, task sqlc.AiccMes
 	select {
 	case l.slots <- struct{}{}:
 		l.recordInflightMetrics(len(l.slots))
+		l.adjustInflightByApp(task.AppID, 1)
 		l.dispatchWG.Add(1)
 		go func() {
 			defer func() {
 				<-l.slots
 				// 槽位释放必须立即回写 gauge；错误、取消和正常完成均走该 defer。
 				l.recordInflightMetrics(len(l.slots))
+				l.adjustInflightByApp(task.AppID, -1)
 				l.dispatchWG.Done()
 			}()
 			if err := l.dispatcher.Dispatch(ctx, task); err != nil {
 				// 单个任务失败由 dispatcher 写入重试或失败状态，不能阻塞同批其他会话。
-				l.observe(ctx, service.NewAICCDispatchObservation("dispatch_error", task.AgentID, task.OrgID, "hermes", service.AICCSafeDispatchResult(err), 0, len(l.slots)))
+				l.observe(ctx, service.NewAICCDispatchObservation("dispatch_error", task.AppID, task.AgentID, task.OrgID, "hermes", service.AICCSafeDispatchResult(err), 0, len(l.slots)))
 			}
 		}()
 		return true
@@ -159,11 +170,34 @@ func (l *MessageDispatchLoop) tryDispatch(ctx context.Context, task sqlc.AiccMes
 type aiccDispatchMetricRecorder interface {
 	RecordQueueMetrics(depth int, queueWaitMS int64)
 	RecordInflightMetrics(inflight int)
+	RecordQueueMetricsByApp(depthByApp map[string]int64)
+	RecordInflightMetricsByApp(inflightByApp map[string]int64)
 }
 
-func (l *MessageDispatchLoop) recordQueueMetrics(depth int, queueWaitMS int64) {
+func (l *MessageDispatchLoop) recordQueueMetrics(depth int, queueWaitMS int64, depthByApp map[string]int64) {
 	if recorder, ok := l.observer.(aiccDispatchMetricRecorder); ok {
 		recorder.RecordQueueMetrics(depth, queueWaitMS)
+		recorder.RecordQueueMetricsByApp(depthByApp)
+	}
+}
+
+// adjustInflightByApp 在任务提交和退出时维护本进程 app 级 in-flight 快照。
+func (l *MessageDispatchLoop) adjustInflightByApp(appID string, delta int64) {
+	if l == nil || appID == "" {
+		return
+	}
+	l.inflightMu.Lock()
+	l.inflightByApp[appID] += delta
+	if l.inflightByApp[appID] <= 0 {
+		delete(l.inflightByApp, appID)
+	}
+	snapshot := make(map[string]int64, len(l.inflightByApp))
+	for id, value := range l.inflightByApp {
+		snapshot[id] = value
+	}
+	l.inflightMu.Unlock()
+	if recorder, ok := l.observer.(aiccDispatchMetricRecorder); ok {
+		recorder.RecordInflightMetricsByApp(snapshot)
 	}
 }
 

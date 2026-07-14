@@ -341,7 +341,7 @@ type KubernetesConfig struct {
 type AICCHPABusinessMetricsConfig struct {
 	// Enabled 是业务指标总开关；false 时即便集群没有 adapter 也能安全运行。
 	Enabled bool `yaml:"enabled"`
-	// Provider 是部署者安装的 adapter 标识（如 prometheus-adapter），用于明确运行契约和排障责任。
+	// Provider 当前必须为 prometheus-adapter；该 adapter 契约定义了跨副本 queue/in-flight 聚合方式。
 	Provider string `yaml:"provider"`
 	// AppLabel 是 adapter 返回的 hidden app ID 标签键，HPA 用该标签隔离各客服应用的负载。
 	AppLabel string `yaml:"app_label"`

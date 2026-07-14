@@ -39,4 +39,7 @@ func TestAICCDispatchMetricsRouteRequiresPlatformAdmin(t *testing.T) {
 	router.ServeHTTP(platformRecorder, platformRequest)
 	assert.Equal(t, http.StatusOK, platformRecorder.Code)
 	assert.Contains(t, platformRecorder.Body.String(), "counters")
+	// app_id 是 HPA External 指标 selector 的唯一隔离键，受控桥接层据此导出带标签的 gauge。
+	assert.Contains(t, platformRecorder.Body.String(), "queue_depth_by_app")
+	assert.Contains(t, platformRecorder.Body.String(), "inflight_by_app")
 }

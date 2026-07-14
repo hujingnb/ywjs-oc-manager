@@ -15562,6 +15562,14 @@ export interface components {
                 [key: string]: number;
             };
             inflight?: number;
+            /** @description InflightByApp 的 map key 与 QueueDepthByApp 一致，使 HPA 用同一 app_id selector 查询。 */
+            inflight_by_app?: {
+                [key: string]: number;
+            };
+            /** @description QueueDepthByApp 的 map key 是隐藏 app ID；受控指标桥接器将其转换为 app_id 标签。 */
+            queue_depth_by_app?: {
+                [key: string]: number;
+            };
             queue_wait_ms?: number;
         };
         "handlers.AICCLeadFieldRequest": {

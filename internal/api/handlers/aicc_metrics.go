@@ -16,6 +16,10 @@ type AICCDispatchMetricsResponse struct {
 	Counters    map[string]uint64 `json:"counters"`
 	QueueWaitMS int64             `json:"queue_wait_ms"`
 	Inflight    int64             `json:"inflight"`
+	// QueueDepthByApp 的 map key 是隐藏 app ID；受控指标桥接器将其转换为 app_id 标签。
+	QueueDepthByApp map[string]int64 `json:"queue_depth_by_app"`
+	// InflightByApp 的 map key 与 QueueDepthByApp 一致，使 HPA 用同一 app_id selector 查询。
+	InflightByApp map[string]int64 `json:"inflight_by_app"`
 }
 
 // AICCDispatchMetricsHandler 提供只读的异步客服指标快照。
@@ -51,5 +55,5 @@ func (h *AICCDispatchMetricsHandler) Get(c *gin.Context) {
 		return
 	}
 	snapshot := h.metrics.Metrics()
-	c.JSON(http.StatusOK, AICCDispatchMetricsResponse{Counters: snapshot.Counters, QueueWaitMS: snapshot.QueueWaitMS, Inflight: snapshot.Inflight})
+	c.JSON(http.StatusOK, AICCDispatchMetricsResponse{Counters: snapshot.Counters, QueueWaitMS: snapshot.QueueWaitMS, Inflight: snapshot.Inflight, QueueDepthByApp: snapshot.QueueDepthByApp, InflightByApp: snapshot.InflightByApp})
 }

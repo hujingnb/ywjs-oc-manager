@@ -150,8 +150,8 @@ ID 隔离的队列深度与在飞调用 gauge 时，才开启此段：
 k8s:
   aicc_hpa_business_metrics:
     enabled: true
-    provider: prometheus-adapter # 部署者安装的 external metrics adapter 标识
-    app_label: app_id            # adapter 返回的隐藏 app ID 标签键
+    provider: prometheus-adapter # 固定值：实现本文档跨副本聚合规则的 adapter
+    app_label: app_id            # 固定值：桥接器导出的隐藏 app ID 标签键
     queue_depth:
       name: aicc_message_queue_depth
       target_average_value: "5"
@@ -161,12 +161,17 @@ k8s:
 ```
 
 开启后，manager 为每个 AICC HPA 添加两项 External metric，并以
-`app_label=<隐藏 app ID>` selector 查询。adapter 必须把受控 AICC 指标桥接为这两个 metric，
-每条时间序列都携带该标签；队列深度表示等待任务数，在飞表示上游调用数。`provider` 是部署契约
-和排障标识，HPA 实际经 Kubernetes 聚合 API 查询 adapter，manager 不会也不应使用平台管理员
-Bearer token 调用 `/api/v1/platform/aicc/metrics`。两个 metric、正数阈值、provider 和 app_label
-任一缺失都会使 manager 在启动阶段 fail-fast，防止渲染无法工作的 HPA；关闭时不会请求或授权
-custom/external metrics API。
+`app_id=<隐藏 app ID>` selector 查询。`app_label` 目前必须固定为 `app_id`：受控桥接器读取
+`queue_depth_by_app` 与 `inflight_by_app` 安全快照的 map key，并分别导出
+`aicc_message_queue_depth{app_id="..."}`、`aicc_dispatch_inflight{app_id="..."}`。
+
+多个 manager 副本下，队列 gauge 是每个副本从同一 MySQL 事实表扫描得到的全局就绪任务数，
+adapter 必须按 `app_id` **取最大值**，不能求和；在飞 gauge 只统计当前副本实际已租约并开始执行的
+调用，adapter 必须按 `app_id` **求和**。这两个聚合规则是 provider 兼容性前提：不支持它们的
+adapter 不得开启此配置。当前 `provider` 必须为 `prometheus-adapter`，HPA 实际经 Kubernetes 聚合 API 查询
+adapter，manager 不会也不应使用平台管理员 Bearer token 调用 `/api/v1/platform/aicc/metrics`。
+两个 metric、正数阈值、provider 和 `app_id` 任一缺失都会使 manager 在启动阶段 fail-fast，防止
+渲染无法工作的 HPA；关闭时不会请求或授权 custom/external metrics API。
 
 ### 1.13 `agent`
 

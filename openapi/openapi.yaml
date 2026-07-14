@@ -8,6 +8,17 @@ components:
           type: object
         inflight:
           type: integer
+        inflight_by_app:
+          additionalProperties:
+            type: integer
+          description: InflightByApp 的 map key 与 QueueDepthByApp 一致，使 HPA 用同一 app_id
+            selector 查询。
+          type: object
+        queue_depth_by_app:
+          additionalProperties:
+            type: integer
+          description: QueueDepthByApp 的 map key 是隐藏 app ID；受控指标桥接器将其转换为 app_id 标签。
+          type: object
         queue_wait_ms:
           type: integer
       type: object

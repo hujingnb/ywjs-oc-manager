@@ -11,9 +11,10 @@ import (
 )
 
 // AICCDispatchObservation 是异步客服消息的安全观测载荷。
-// 仅保留智能体、企业、上游和结果四类标签；不允许承载访客原文、会话标识或任何令牌。
+// 仅保留隐藏应用、智能体、企业、上游和结果等低基数标签；不允许承载访客原文、会话标识或任何令牌。
 type AICCDispatchObservation struct {
 	event       string
+	appID       string
 	agentID     string
 	orgID       string
 	upstream    string
@@ -24,11 +25,12 @@ type AICCDispatchObservation struct {
 
 // NewAICCDispatchObservation 构造唯一允许传给 observer 的安全载荷。
 // 该类型不暴露字段，调用方无法把访客文本、消息体或 token 作为额外属性塞入观测出口。
-func NewAICCDispatchObservation(event, agentID, orgID, upstream, result string, queueWaitMS int64, inflight int) AICCDispatchObservation {
-	return AICCDispatchObservation{event: event, agentID: agentID, orgID: orgID, upstream: upstream, result: result, queueWaitMS: queueWaitMS, inflight: inflight}
+func NewAICCDispatchObservation(event, appID, agentID, orgID, upstream, result string, queueWaitMS int64, inflight int) AICCDispatchObservation {
+	return AICCDispatchObservation{event: event, appID: appID, agentID: agentID, orgID: orgID, upstream: upstream, result: result, queueWaitMS: queueWaitMS, inflight: inflight}
 }
 
 func (o AICCDispatchObservation) Event() string      { return o.event }
+func (o AICCDispatchObservation) AppID() string      { return o.appID }
 func (o AICCDispatchObservation) AgentID() string    { return o.agentID }
 func (o AICCDispatchObservation) OrgID() string      { return o.orgID }
 func (o AICCDispatchObservation) Upstream() string   { return o.upstream }
@@ -37,11 +39,14 @@ func (o AICCDispatchObservation) QueueWaitMS() int64 { return o.queueWaitMS }
 func (o AICCDispatchObservation) Inflight() int      { return o.inflight }
 
 // AICCDispatchMetricSnapshot 是可由现有日志/监控桥接层读取的安全指标快照。
-// key 由固定指标名和低基数标签组成，不包含访客内容、会话或消息原文。
+// key 由固定指标名和低基数标签组成；app 级 gauge 的 map key 是 HPA 约定的 app_id，
+// 不包含访客内容、会话或消息原文。
 type AICCDispatchMetricSnapshot struct {
-	Counters    map[string]uint64
-	QueueWaitMS int64
-	Inflight    int64
+	Counters        map[string]uint64
+	QueueWaitMS     int64
+	Inflight        int64
+	QueueDepthByApp map[string]int64
+	InflightByApp   map[string]int64
 }
 
 // AICCDispatchMetrics 是最小的指标出口；项目尚未部署 Prometheus，因此保持为可替换接口。
@@ -49,6 +54,8 @@ type AICCDispatchMetrics interface {
 	Observe(AICCDispatchObservation)
 	RecordQueue(depth int, queueWaitMS int64)
 	RecordInflight(inflight int)
+	RecordQueueByApp(depthByApp map[string]int64)
+	RecordInflightByApp(inflightByApp map[string]int64)
 	Snapshot() AICCDispatchMetricSnapshot
 }
 
@@ -59,15 +66,17 @@ type AICCDispatchMetricSource interface {
 
 // InMemoryAICCDispatchMetrics 保存进程内可读取指标，供日志桥接或未来监控适配器安全导出。
 type InMemoryAICCDispatchMetrics struct {
-	mu          sync.Mutex
-	counters    map[string]uint64
-	queueWaitMS int64
-	inflight    int64
+	mu              sync.Mutex
+	counters        map[string]uint64
+	queueWaitMS     int64
+	inflight        int64
+	queueDepthByApp map[string]int64
+	inflightByApp   map[string]int64
 }
 
 // NewInMemoryAICCDispatchMetrics 创建零依赖的指标注册表。
 func NewInMemoryAICCDispatchMetrics() *InMemoryAICCDispatchMetrics {
-	return &InMemoryAICCDispatchMetrics{counters: make(map[string]uint64)}
+	return &InMemoryAICCDispatchMetrics{counters: make(map[string]uint64), queueDepthByApp: make(map[string]int64), inflightByApp: make(map[string]int64)}
 }
 
 // Observe 记录生命周期计数、排队等待累计值和当前在飞值。
@@ -116,6 +125,28 @@ func (m *InMemoryAICCDispatchMetrics) RecordInflight(inflight int) {
 	m.inflight = int64(inflight)
 }
 
+// RecordQueueByApp 记录本进程本轮从 MySQL 事实表读取的各隐藏应用就绪任务数。
+// 多副本都可能扫到同一任务，外部 adapter 必须对该 gauge 按 app_id 取 max，不能跨副本求和。
+func (m *InMemoryAICCDispatchMetrics) RecordQueueByApp(depthByApp map[string]int64) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.queueDepthByApp = copyAICCAppGauge(depthByApp)
+}
+
+// RecordInflightByApp 记录当前进程已实际开始调度的各隐藏应用调用数。
+// 租约保证一项任务只由一个副本执行，外部 adapter 应按 app_id 对该 gauge 跨副本求和。
+func (m *InMemoryAICCDispatchMetrics) RecordInflightByApp(inflightByApp map[string]int64) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.inflightByApp = copyAICCAppGauge(inflightByApp)
+}
+
 // Snapshot 返回独立副本，调用方不能修改注册表内部状态。
 func (m *InMemoryAICCDispatchMetrics) Snapshot() AICCDispatchMetricSnapshot {
 	if m == nil {
@@ -127,7 +158,16 @@ func (m *InMemoryAICCDispatchMetrics) Snapshot() AICCDispatchMetricSnapshot {
 	for key, value := range m.counters {
 		counters[key] = value
 	}
-	return AICCDispatchMetricSnapshot{Counters: counters, QueueWaitMS: m.queueWaitMS, Inflight: m.inflight}
+	return AICCDispatchMetricSnapshot{Counters: counters, QueueWaitMS: m.queueWaitMS, Inflight: m.inflight, QueueDepthByApp: copyAICCAppGauge(m.queueDepthByApp), InflightByApp: copyAICCAppGauge(m.inflightByApp)}
+}
+
+// copyAICCAppGauge 返回独立 map，防止监控桥接层改写进程内 gauge 状态。
+func copyAICCAppGauge(source map[string]int64) map[string]int64 {
+	copy := make(map[string]int64, len(source))
+	for appID, value := range source {
+		copy[appID] = value
+	}
+	return copy
 }
 
 // AICCDispatchObserver 接收 dispatcher 生命周期事件，便于接入项目既有 slog 或测试接收端。
@@ -169,6 +209,20 @@ func (o *SlogAICCDispatchObserver) RecordQueueMetrics(depth int, queueWaitMS int
 func (o *SlogAICCDispatchObserver) RecordInflightMetrics(inflight int) {
 	if o != nil && o.metrics != nil {
 		o.metrics.RecordInflight(inflight)
+	}
+}
+
+// RecordQueueMetricsByApp 把当前 MySQL 扫描得到的 app 级 queue gauge 交给监控桥接层。
+func (o *SlogAICCDispatchObserver) RecordQueueMetricsByApp(depthByApp map[string]int64) {
+	if o != nil && o.metrics != nil {
+		o.metrics.RecordQueueByApp(depthByApp)
+	}
+}
+
+// RecordInflightMetricsByApp 把当前进程实际执行的 app 级 in-flight gauge 交给监控桥接层。
+func (o *SlogAICCDispatchObserver) RecordInflightMetricsByApp(inflightByApp map[string]int64) {
+	if o != nil && o.metrics != nil {
+		o.metrics.RecordInflightByApp(inflightByApp)
 	}
 }
 

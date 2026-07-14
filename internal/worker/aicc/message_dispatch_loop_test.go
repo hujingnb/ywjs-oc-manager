@@ -53,6 +53,32 @@ func TestMessageDispatchLoopTelemetryCoversQueueAndConcurrency(t *testing.T) {
 	assert.Zero(t, observer.Metrics().Inflight)
 }
 
+// TestMessageDispatchLoopTelemetrySeparatesBusinessGaugesByHiddenApp 验证同一 manager
+// 副本扫描多个客服应用时，队列深度和在飞调用必须按隐藏 app ID 分开导出，供 HPA selector 使用。
+func TestMessageDispatchLoopTelemetrySeparatesBusinessGaugesByHiddenApp(t *testing.T) {
+	queue := redis.NewMemoryQueue()
+	store := &messageTaskStoreStub{ready: []sqlc.AiccMessageTask{
+		{ID: "task-a1-1", AppID: "app-a1", AgentID: "agent-a1", OrgID: "org-1", CreatedAt: time.Now().Add(-time.Second)}, // app-a1 的首个积压任务。
+		{ID: "task-a1-2", AppID: "app-a1", AgentID: "agent-a1", OrgID: "org-1", CreatedAt: time.Now().Add(-time.Second)}, // app-a1 的第二个积压任务。
+		{ID: "task-b1-1", AppID: "app-b1", AgentID: "agent-b1", OrgID: "org-1", CreatedAt: time.Now().Add(-time.Second)}, // app-b1 的独立积压任务。
+	}}
+	dispatcher := &concurrentMessageTaskDispatcher{release: make(chan struct{})}
+	loop := NewMessageDispatchLoop(store, queue, dispatcher, slog.Default())
+	observer := service.NewSlogAICCDispatchObserver(slog.Default())
+	loop.SetObserver(observer)
+
+	require.NoError(t, loop.Tick(context.Background()))
+	require.Eventually(t, func() bool { return dispatcher.activeCount() == 3 }, time.Second, 10*time.Millisecond)
+
+	metrics := observer.Metrics()
+	assert.Equal(t, int64(2), metrics.QueueDepthByApp["app-a1"])
+	assert.Equal(t, int64(1), metrics.QueueDepthByApp["app-b1"])
+	assert.Equal(t, int64(2), metrics.InflightByApp["app-a1"])
+	assert.Equal(t, int64(1), metrics.InflightByApp["app-b1"])
+	close(dispatcher.release)
+	loop.Wait()
+}
+
 // TestMessageDispatchLoopTelemetryClassifiesDispatchError 覆盖分派失败日志：
 // 运行时错误即使包含访客内容或令牌字样，也只能输出固定错误分类，不得直接写出错误文本。
 func TestMessageDispatchLoopTelemetryClassifiesDispatchError(t *testing.T) {
