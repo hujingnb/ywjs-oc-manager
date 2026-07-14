@@ -170,31 +170,84 @@ func TestAICCPublicChatRespondsToPromptInjectionWithoutCallingRuntime(t *testing
 	assert.Equal(t, "该请求包含无法处理的指令内容，请提出产品、价格或售后相关问题。", store.createdMessages[1].TextContent.String)
 }
 
-// TestAICCPublicChatStoresVisitorAndAssistantMessages 覆盖正常路径：访客消息转发 hermes 后保存问答镜像。
-func TestAICCPublicChatStoresVisitorAndAssistantMessages(t *testing.T) {
+// TestAICCPublicSendMessageQueuesVisitorMessage 覆盖正常路径：访客消息和待处理任务原子写入，公开入口不再同步调用 Hermes。
+func TestAICCPublicSendMessageQueuesVisitorMessage(t *testing.T) {
 	store := &fakeAICCPublicStore{
 		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
 		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice, Scenario: null.StringFrom("官网售前咨询"), AnswerBoundary: null.StringFrom("不承诺最终成交价格")},
 		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 	}
-	chat := &fakeAICCHermesChat{reply: "您好，这是报价说明。"}
+	chat := &fakeAICCHermesChat{reply: "不应调用"}
 	svc := NewAICCPublicService(store, chat)
 	svc.now = func() time.Time { return aiccPublicTestNow }
 
 	result, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "报价多少"})
 
 	require.NoError(t, err)
-	assert.Equal(t, "您好，这是报价说明。", result.Text)
-	assert.Equal(t, 2, len(store.createdMessages))
+	assert.Equal(t, "queued", result.Status)
+	assert.Empty(t, result.Text)
+	assert.Len(t, store.createdMessages, 1)
 	assert.Equal(t, "报价多少", store.createdMessages[0].TextContent.String)
-	assert.Equal(t, "app-1", chat.appID)
-	assert.Contains(t, chat.text, "AICC（AI Contact Center）在线客服智能体")
-	assert.Contains(t, chat.text, "必须调用 oc-kb skill 的 oc-kb search")
-	assert.Contains(t, chat.text, "唯一允许的第一个动作是执行 oc-kb search")
-	assert.Contains(t, chat.text, "不要自行编写脚本或代码来检索知识库")
-	assert.Contains(t, chat.text, "官网售前咨询")
-	assert.Contains(t, chat.text, "不承诺最终成交价格")
-	assert.Contains(t, chat.text, "访客问题：\n报价多少")
+	assert.Len(t, store.createdTasks, 1)
+	assert.Equal(t, store.createdMessages[0].ID, store.createdTasks[0].MessageID)
+	assert.Equal(t, "session-1", store.createdTasks[0].SessionID)
+	assert.Equal(t, "agent-1", store.createdTasks[0].AgentID)
+	assert.Equal(t, "org-1", store.createdTasks[0].OrgID)
+	assert.Equal(t, "app-1", store.createdTasks[0].AppID)
+	assert.Equal(t, aiccPublicTestNow, store.createdTasks[0].RunAfter)
+	assert.Empty(t, chat.text)
+}
+
+// TestAICCPublicSendMessageReturnsExistingTask 覆盖幂等重试：相同 client_message_id 必须复用原任务，不重复写访客消息或任务。
+func TestAICCPublicSendMessageReturnsExistingTask(t *testing.T) {
+	store := newAICCPublicMessageStore()
+	chat := &fakeAICCHermesChat{reply: "不应调用"}
+	svc := NewAICCPublicService(store, chat)
+	svc.now = func() time.Time { return aiccPublicTestNow }
+	input := AICCPublicMessageInput{SessionToken: "tok", ClientMessageID: "message-1", Text: "报价多少"}
+
+	first, err := svc.SendMessage(context.Background(), input)
+	require.NoError(t, err)
+	second, err := svc.SendMessage(context.Background(), input)
+
+	require.NoError(t, err)
+	assert.Equal(t, first.MessageID, second.MessageID)
+	assert.Equal(t, "queued", second.Status)
+	assert.Len(t, store.createdMessages, 1)
+	assert.Len(t, store.createdTasks, 1)
+	assert.Empty(t, chat.text)
+}
+
+// TestAICCPublicSendMessageRollsBackVisitorMessageWhenTaskWriteFails 覆盖任务写入失败：事务必须回滚已写入的访客消息，避免产生永远无法处理的孤儿消息。
+func TestAICCPublicSendMessageRollsBackVisitorMessageWhenTaskWriteFails(t *testing.T) {
+	store := newAICCPublicMessageStore()
+	store.createTaskErr = errors.New("任务表不可用")
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+	svc.SetTxRunner(&fakeAICCPublicTxRunner{store: store})
+
+	_, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "报价多少"})
+
+	require.Error(t, err)
+	assert.Empty(t, store.createdMessages)
+	assert.Empty(t, store.createdTasks)
+}
+
+// TestAICCPublicSendMessageQueuesSecondMessage 覆盖同会话连续发送：前一任务尚未完成时，后一访客消息仍应独立排队。
+func TestAICCPublicSendMessageQueuesSecondMessage(t *testing.T) {
+	store := newAICCPublicMessageStore()
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	_, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "第一个问题"})
+	require.NoError(t, err)
+	second, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "第二个问题"})
+
+	require.NoError(t, err)
+	assert.Equal(t, "queued", second.Status)
+	assert.Len(t, store.createdMessages, 2)
+	assert.Len(t, store.createdTasks, 2)
+	assert.Equal(t, store.createdMessages[1].ID, store.createdTasks[1].MessageID)
 }
 
 // TestAICCPublicChatTouchesSessionLastActive 覆盖会话活跃时间刷新：
@@ -233,61 +286,51 @@ func TestAICCPublicChatTouchesSessionLastActive(t *testing.T) {
 	assert.Equal(t, 0, store.createdSessionCount)
 }
 
-// TestAICCPublicChatReservesVisitorMessageBeforeHermes 覆盖并发上限保护：
-// Hermes 调用前必须先写入访客消息作为占位，后续并发请求才能看到已消耗的消息额度。
-func TestAICCPublicChatReservesVisitorMessageBeforeHermes(t *testing.T) {
+// TestAICCPublicSendMessageReservesVisitorMessageBeforeQueue 覆盖并发上限保护：
+// 创建任务前必须先写入访客消息作为占位，后续并发请求才能看到已消耗的消息额度。
+func TestAICCPublicSendMessageReservesVisitorMessageBeforeQueue(t *testing.T) {
 	store := &fakeAICCPublicStore{
 		org:      sqlc.Organization{ID: "org-1", AiccEnabled: true},
 		agent:    sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		settings: sqlc.AiccAgentSetting{AgentID: "agent-1", MessageLimitPerSession: 2, BlockedVisitorEnabled: true, SessionResumeTtlMinutes: 30},
 		session:  sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 	}
-	chat := &fakeAICCHermesChat{reply: "您好"}
-	chat.onChat = func() {
-		// Hermes 调用时已经写入访客消息，证明额度在模型调用前被占用。
-		assert.Equal(t, int64(1), store.visitorMessageCount)
-		require.Len(t, store.createdMessages, 1)
-		assert.Equal(t, domain.AICCMessageDirectionVisitor, store.createdMessages[0].Direction)
-	}
-	svc := NewAICCPublicService(store, chat)
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
 	svc.now = func() time.Time { return aiccPublicTestNow }
 
 	_, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "报价多少"})
 
 	require.NoError(t, err)
-	require.Len(t, store.createdMessages, 2)
-	assert.Equal(t, domain.AICCMessageDirectionAssistant, store.createdMessages[1].Direction)
+	assert.Equal(t, int64(1), store.visitorMessageCount)
+	require.Len(t, store.createdMessages, 1)
+	assert.Equal(t, domain.AICCMessageDirectionVisitor, store.createdMessages[0].Direction)
+	require.Len(t, store.createdTasks, 1)
 }
 
-// TestAICCPublicChatRetriesClientMessageWithoutDuplicatingVisitorMessage 覆盖运行时恢复窗口：
-// 首次请求已保留访客消息但 Hermes 不可用时，同一 client_message_id 重试只能补全原消息。
-func TestAICCPublicChatRetriesClientMessageWithoutDuplicatingVisitorMessage(t *testing.T) {
+// TestAICCPublicSendMessageRetriesClientMessageWithoutDuplicatingTask 覆盖客户端重试：
+// 首次请求已受理后，同一 client_message_id 重试只能返回原任务，不能重复占用消息额度。
+func TestAICCPublicSendMessageRetriesClientMessageWithoutDuplicatingTask(t *testing.T) {
 	store := &fakeAICCPublicStore{
 		org:      sqlc.Organization{ID: "org-1", AiccEnabled: true},
 		agent:    sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		settings: sqlc.AiccAgentSetting{AgentID: "agent-1", MessageLimitPerSession: 100, SessionResumeTtlMinutes: 30},
 		session:  sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 	}
-	attempts := 0
-	chat := &fakeAICCHermesChat{reply: "恢复后的回复"}
-	chat.onChat = func() { attempts++ }
-	svc := NewAICCPublicService(store, chat)
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
 	svc.now = func() time.Time { return aiccPublicTestNow }
 	input := AICCPublicMessageInput{SessionToken: "tok", ClientMessageID: "b0664a26-4181-42a8-8ea3-6f886c5e4ddd", Text: "恢复后继续"}
 
-	chat.err = errors.New("runtime unavailable")
-	_, err := svc.SendMessage(context.Background(), input)
-	require.Error(t, err)
+	first, err := svc.SendMessage(context.Background(), input)
+	require.NoError(t, err)
 	require.Len(t, store.createdMessages, 1)
 
-	chat.err = nil
 	result, err := svc.SendMessage(context.Background(), input)
 	require.NoError(t, err)
-	assert.Equal(t, "恢复后的回复", result.Text)
-	require.Len(t, store.createdMessages, 2)
+	assert.Equal(t, first.MessageID, result.MessageID)
+	assert.Equal(t, "queued", result.Status)
+	require.Len(t, store.createdMessages, 1)
 	assert.Equal(t, domain.AICCMessageDirectionVisitor, store.createdMessages[0].Direction)
-	assert.Equal(t, domain.AICCMessageDirectionAssistant, store.createdMessages[1].Direction)
-	assert.Equal(t, 2, attempts)
+	require.Len(t, store.createdTasks, 1)
 }
 
 // TestAICCPublicChatRejectsMissingSessionOnTouch 覆盖会话刷新受影响行校验：
@@ -310,26 +353,26 @@ func TestAICCPublicChatRejectsMissingSessionOnTouch(t *testing.T) {
 	assert.Empty(t, chat.text)
 }
 
-// TestAICCPublicChatStoresImageMessage 覆盖图片消息路径：已上传图片可作为访客消息镜像保存。
-func TestAICCPublicChatStoresImageMessage(t *testing.T) {
+// TestAICCPublicSendMessageQueuesImageMessage 覆盖图片消息路径：已上传图片可作为访客消息镜像保存并排队。
+func TestAICCPublicSendMessageQueuesImageMessage(t *testing.T) {
 	store := &fakeAICCPublicStore{
 		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
 		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 		image:   sqlc.AiccImage{ID: "image-1", SessionID: "session-1", ObjectKey: "apps/app-1/aicc/session-1/image-1/a.png", Mime: "image/png", SizeBytes: 12},
 	}
-	chat := &fakeAICCHermesChat{reply: "已收到图片。"}
-	svc := NewAICCPublicService(store, chat)
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
 	svc.now = func() time.Time { return aiccPublicTestNow }
 
 	result, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", ImageFileID: "image-1"})
 
 	require.NoError(t, err)
-	assert.Equal(t, "已收到图片。", result.Text)
-	require.Len(t, store.createdMessages, 2)
+	assert.Equal(t, "queued", result.Status)
+	assert.Empty(t, result.Text)
+	require.Len(t, store.createdMessages, 1)
 	assert.Equal(t, domain.AICCMessageContentTypeImage, store.createdMessages[0].ContentType)
 	assert.Equal(t, "apps/app-1/aicc/session-1/image-1/a.png", store.createdMessages[0].ImageObjectKey.String)
-	assert.Contains(t, chat.text, "访客问题：\n[访客发送了一张图片]")
+	require.Len(t, store.createdTasks, 1)
 }
 
 // TestAICCPublicSendMessageRejectsSensitiveWord 覆盖敏感词拦截：
@@ -1033,6 +1076,8 @@ type fakeAICCPublicStore struct {
 	createdSession      sqlc.CreateAICCSessionParams
 	createdSessionCount int
 	createdMessages     []sqlc.CreateAICCMessageParams
+	createdTasks        []sqlc.CreateAICCMessageTaskParams
+	createTaskErr       error
 	visitorMessageCount int64
 	leads               []sqlc.AiccLead
 	leadValues          []sqlc.UpsertAICCLeadValueParams
@@ -1042,6 +1087,38 @@ type fakeAICCPublicStore struct {
 	resolutionStatus    string
 	touchedSessionID    string
 	touchNoRows         bool
+}
+
+// newAICCPublicMessageStore 构造可接收公开消息的最小有效会话，避免队列测试重复维护无关前置条件。
+func newAICCPublicMessageStore() *fakeAICCPublicStore {
+	return &fakeAICCPublicStore{
+		org:      sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:    sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		settings: sqlc.AiccAgentSetting{AgentID: "agent-1", MessageLimitPerSession: 100, BlockedVisitorEnabled: true, SessionResumeTtlMinutes: 30},
+		session:  sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+	}
+}
+
+// fakeAICCPublicTxRunner 模拟数据库事务；回调失败时恢复测试可观察到的写入状态。
+type fakeAICCPublicTxRunner struct {
+	store *fakeAICCPublicStore
+}
+
+func (r *fakeAICCPublicTxRunner) WithAICCPublicTx(ctx context.Context, fn func(AICCPublicStore) error) error {
+	createdMessages := append([]sqlc.CreateAICCMessageParams(nil), r.store.createdMessages...)
+	createdTasks := append([]sqlc.CreateAICCMessageTaskParams(nil), r.store.createdTasks...)
+	visitorMessageCount := r.store.visitorMessageCount
+	touchedSessionID := r.store.touchedSessionID
+	lastActiveAt := r.store.session.LastActiveAt
+	if err := fn(r.store); err != nil {
+		r.store.createdMessages = createdMessages
+		r.store.createdTasks = createdTasks
+		r.store.visitorMessageCount = visitorMessageCount
+		r.store.touchedSessionID = touchedSessionID
+		r.store.session.LastActiveAt = lastActiveAt
+		return err
+	}
+	return nil
 }
 
 func (f *fakeAICCPublicStore) GetOrganization(_ context.Context, id string) (sqlc.Organization, error) {
@@ -1148,6 +1225,23 @@ func (f *fakeAICCPublicStore) CreateAICCMessage(_ context.Context, arg sqlc.Crea
 		f.visitorMessageCount++
 	}
 	return nil
+}
+
+func (f *fakeAICCPublicStore) CreateAICCMessageTask(_ context.Context, arg sqlc.CreateAICCMessageTaskParams) error {
+	if f.createTaskErr != nil {
+		return f.createTaskErr
+	}
+	f.createdTasks = append(f.createdTasks, arg)
+	return nil
+}
+
+func (f *fakeAICCPublicStore) GetAICCMessageTaskByMessageID(_ context.Context, messageID string) (sqlc.AiccMessageTask, error) {
+	for _, task := range f.createdTasks {
+		if task.MessageID == messageID {
+			return sqlc.AiccMessageTask{ID: task.ID, MessageID: task.MessageID, SessionID: task.SessionID, AgentID: task.AgentID, OrgID: task.OrgID, AppID: task.AppID, Status: "queued", Attempts: 0, MaxAttempts: 5, RunAfter: task.RunAfter}, nil
+		}
+	}
+	return sqlc.AiccMessageTask{}, sql.ErrNoRows
 }
 
 func (f *fakeAICCPublicStore) GetAICCMessageByClientMessageID(_ context.Context, arg sqlc.GetAICCMessageByClientMessageIDParams) (sqlc.AiccMessage, error) {

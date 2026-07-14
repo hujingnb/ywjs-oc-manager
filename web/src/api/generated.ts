@@ -16503,7 +16503,13 @@ export interface components {
             missing_required_keys?: string[];
         };
         "service.AICCPublicMessageResult": {
+            /** @description MessageID 是访客消息 ID，也是异步任务的幂等关联键。 */
             message_id?: string;
+            /** @description RetryAfterSeconds 仅在 retry_wait 时返回，表示建议客户端下次查询前等待的秒数。 */
+            retry_after_seconds?: number;
+            /** @description Status 为 queued、processing、retry_wait、completed 或 failed。 */
+            status?: string;
+            /** @description Text 仅在本地拒答或已完成且已持久化助手回复时返回。 */
             text?: string;
         };
         "service.AICCPublicResolutionResult": {
