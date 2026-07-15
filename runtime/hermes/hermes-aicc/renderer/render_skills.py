@@ -175,12 +175,18 @@ def _extract_version_skills(
             shutil.rmtree(skill_dir)
         skill_dir.mkdir(parents=True, exist_ok=True)
         # 按扩展名决定解压方式；Path.suffix 返回含点的后缀，如 ".zip"、".tar"。
-        if archive_path.suffix.lower() == ".zip":
-            _extract_zip(archive_path, skill_dir, rel)
-        else:
-            _extract_tar(archive_path, skill_dir, rel)
-        # 解压成功不代表可启用：声明越权的 Skill 在进入 Hermes 扫描目录前必须失败关闭。
-        _validate_skill_capabilities(skill_dir, manifest_capabilities)
+        try:
+            if archive_path.suffix.lower() == ".zip":
+                _extract_zip(archive_path, skill_dir, rel)
+            else:
+                _extract_tar(archive_path, skill_dir, rel)
+            # 解压成功不代表可启用：声明越权的 Skill 在进入 Hermes 扫描目录前必须失败关闭。
+            _validate_skill_capabilities(skill_dir, manifest_capabilities)
+        except Exception:
+            # 校验失败的目录尚未写入 .oc-managed，下一次 _wipe_managed_skills 无法识别；
+            # 必须立即清理，避免 Hermes 在本轮失败或下次启动时扫描到未经授权的 Skill。
+            shutil.rmtree(skill_dir, ignore_errors=True)
+            raise
         _write_marker(skill_dir, "version-skill")
         outputs.append(f"skills/{name}/")
     return outputs

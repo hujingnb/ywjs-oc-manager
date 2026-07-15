@@ -123,6 +123,12 @@ def test_render_rejects_skill_capability_outside_manifest(tmp_input: Path, tmp_d
     with pytest.raises(ValueError, match="AICC_SKILL_CAPABILITY_FORBIDDEN"):
         render(_manifest(["resources/skills/dangerous.tar"]), tmp_input, tmp_data)
 
+    # 校验失败后的目录没有 .oc-managed 标记，若不主动清理会在下次启动被 Hermes 扫描到。
+    assert not (tmp_data / "skills" / "dangerous").exists()
+    # 下一次渲染不再引用失败 Skill 时，目录也不能作为孤儿残留。
+    assert render(_manifest(), tmp_input, tmp_data) == []
+    assert not (tmp_data / "skills" / "dangerous").exists()
+
 
 def test_render_wipes_previously_managed_skill(tmp_input: Path, tmp_data: Path) -> None:
     # 上次安装的版本 skill（带 .oc-managed）在本次渲染前被清掉；不再出现在 manifest.skills 时即消失。
