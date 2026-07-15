@@ -128,6 +128,7 @@ type Querier interface {
 	DeleteExpiredRefreshTokens(ctx context.Context) error
 	DeleteOrphanAICCLeadsByOrg(ctx context.Context, orgID string) error
 	DeletePlatformSkill(ctx context.Context, id string) error
+	DeleteProcessedAICCIntentAnalysisRetry(ctx context.Context, arg DeleteProcessedAICCIntentAnalysisRetryParams) (int64, error)
 	// 删除本地 dataset 映射；document 缓存通过外键级联清理。
 	DeleteRAGFlowDatasetMapping(ctx context.Context, id string) error
 	// 删除本地 document 缓存；RAGFlow 远端删除由 service 在同一业务流程中处理。

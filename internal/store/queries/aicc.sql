@@ -441,7 +441,11 @@ WHERE session_id = ? AND message_id = ?
 -- name: MarkAICCIntentAnalysisRetryProcessed :execrows
 UPDATE aicc_intent_analysis_retries
 SET processed_at = NOW(), lease_token = NULL, lease_expires_at = NULL
-WHERE session_id = ? AND message_id = ?;
+WHERE session_id = ? AND message_id = ? AND lease_token = ? AND processed_at IS NULL;
+
+-- name: DeleteProcessedAICCIntentAnalysisRetry :execrows
+DELETE FROM aicc_intent_analysis_retries
+WHERE session_id = ? AND message_id = ? AND processed_at IS NOT NULL;
 
 -- name: DeleteAICCIntentAnalysisRetry :exec
 DELETE FROM aicc_intent_analysis_retries WHERE session_id = ? AND message_id = ?;

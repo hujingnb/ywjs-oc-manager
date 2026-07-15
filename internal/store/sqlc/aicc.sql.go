@@ -754,6 +754,24 @@ func (q *Queries) DeleteOrphanAICCLeadsByOrg(ctx context.Context, orgID string) 
 	return err
 }
 
+const deleteProcessedAICCIntentAnalysisRetry = `-- name: DeleteProcessedAICCIntentAnalysisRetry :execrows
+DELETE FROM aicc_intent_analysis_retries
+WHERE session_id = ? AND message_id = ? AND processed_at IS NOT NULL
+`
+
+type DeleteProcessedAICCIntentAnalysisRetryParams struct {
+	SessionID string `db:"session_id" json:"session_id"`
+	MessageID string `db:"message_id" json:"message_id"`
+}
+
+func (q *Queries) DeleteProcessedAICCIntentAnalysisRetry(ctx context.Context, arg DeleteProcessedAICCIntentAnalysisRetryParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteProcessedAICCIntentAnalysisRetry, arg.SessionID, arg.MessageID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const failAICCMessageTask = `-- name: FailAICCMessageTask :execrows
 UPDATE aicc_message_tasks
 SET status = 'failed',
@@ -2698,16 +2716,17 @@ func (q *Queries) LockAICCSessionForUpdate(ctx context.Context, id string) (Aicc
 const markAICCIntentAnalysisRetryProcessed = `-- name: MarkAICCIntentAnalysisRetryProcessed :execrows
 UPDATE aicc_intent_analysis_retries
 SET processed_at = NOW(), lease_token = NULL, lease_expires_at = NULL
-WHERE session_id = ? AND message_id = ?
+WHERE session_id = ? AND message_id = ? AND lease_token = ? AND processed_at IS NULL
 `
 
 type MarkAICCIntentAnalysisRetryProcessedParams struct {
-	SessionID string `db:"session_id" json:"session_id"`
-	MessageID string `db:"message_id" json:"message_id"`
+	SessionID  string      `db:"session_id" json:"session_id"`
+	MessageID  string      `db:"message_id" json:"message_id"`
+	LeaseToken null.String `db:"lease_token" json:"lease_token"`
 }
 
 func (q *Queries) MarkAICCIntentAnalysisRetryProcessed(ctx context.Context, arg MarkAICCIntentAnalysisRetryProcessedParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, markAICCIntentAnalysisRetryProcessed, arg.SessionID, arg.MessageID)
+	result, err := q.db.ExecContext(ctx, markAICCIntentAnalysisRetryProcessed, arg.SessionID, arg.MessageID, arg.LeaseToken)
 	if err != nil {
 		return 0, err
 	}
