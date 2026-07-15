@@ -1048,9 +1048,9 @@ func TestAppInitialize_AICCHiddenAppUsesDedicatedRuntimeImage(t *testing.T) {
 	assert.Equal(t, aiccImageRef, store.lastAppliedVersion.AppliedImageRef)
 }
 
-// TestAppInitialize_AICCRejectsMissingEgressProxy 验证 AICC 在编排已启用但未配置受控网页检索
-// 代理时失败关闭，不能创建会被迫直连公网或无审计出口的客服 Pod。
-func TestAppInitialize_AICCRejectsMissingEgressProxy(t *testing.T) {
+// TestAppInitialize_AICCAllowsDirectPublicEgress 验证 AICC 未配置专属网页检索代理时仍可初始化，
+// 并创建使用客服专用镜像的 AppSpec，由运行时直接访问公网。
+func TestAppInitialize_AICCAllowsDirectPublicEgress(t *testing.T) {
 	store := newAppInitStub(t)
 	store.app.AppType = string(domain.AppTypeAICC)
 	handler := NewAppInitializeHandler(store, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}, AppInitializeConfig{
@@ -1063,10 +1063,12 @@ func TestAppInitialize_AICCRejectsMissingEgressProxy(t *testing.T) {
 	orch := &fakeOrchestrator{}
 	handler.SetOrchestrator(orch, AppInitializeK8sConfig{})
 
-	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))
-
-	require.ErrorContains(t, err, "AICC 受控网页检索代理未配置")
-	assert.Empty(t, orch.ensureAppCalls)
+	require.NoError(t, handler.Handle(context.Background(), buildJob(t, testAppID, "")))
+	require.Len(t, orch.ensureAppCalls, 1, "未配置专属代理时仍应创建 AICC AppSpec")
+	assert.Equal(t, domain.AppTypeAICC, orch.ensureAppCalls[0].AppType,
+		"创建的 AppSpec 必须保留 AICC 应用类型")
+	assert.Equal(t, "registry.example.com/app/oc-manager-aigowork-aicc:v1", orch.ensureAppCalls[0].HermesImage,
+		"创建的 AppSpec 必须使用 AICC 专用运行时镜像")
 }
 
 // TestAppInitialize_AICCHiddenAppFailsWithoutDedicatedRuntimeImage 验证客服专用镜像缺失时，

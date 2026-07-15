@@ -330,9 +330,6 @@ type KubernetesConfig struct {
 	// ilinkai.weixin.qq.com）注入 HTTP(S)_PROXY/NO_PROXY。本地 k3d 无外网出口、
 	// 须经宿主代理；生产 pod 有正常出口则全部留空、不注入任何代理 env。
 	PodProxy K8sPodProxy `yaml:"pod_proxy"`
-	// AICCEgressProxyURL 是客服网页检索专用的受控代理 URL（可携带认证信息）；留空时 AICC
-	// 初始化拒绝创建运行时，避免在没有审计出口的集群中意外直连公网。
-	AICCEgressProxyURL string `yaml:"aicc_egress_proxy_url"`
 	// AICCHPABusinessMetrics 是 AICC HPA 的可选 external metrics adapter 合同；默认关闭，
 	// 未安装 custom/external metrics adapter 的集群仍只使用 metrics-server 的 CPU/内存指标。
 	AICCHPABusinessMetrics AICCHPABusinessMetricsConfig `yaml:"aicc_hpa_business_metrics"`
