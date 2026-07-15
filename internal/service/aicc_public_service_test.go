@@ -29,11 +29,18 @@ func TestBuildAICCRuntimePromptRestrictsToolsAndFinalSchema(t *testing.T) {
 	assert.Contains(t, prompt, "aicc_knowledge_search")
 	assert.Contains(t, prompt, "web_search")
 	assert.Contains(t, prompt, "web_extract")
+	assert.Contains(t, prompt, "skills_list")
+	assert.Contains(t, prompt, "skill_view")
+	assert.Contains(t, prompt, "审批的客服 Skill")
+	assert.Contains(t, prompt, "vision_analyze")
+	assert.Contains(t, prompt, "manager 已验证且仅属于当前轮的图片")
+	assert.Contains(t, prompt, "clarify")
 	assert.Contains(t, prompt, "aicc_response_sources")
 	assert.Contains(t, prompt, `{"text":"","sources":[],"next_action":"none","flags":{}}`)
 	assert.NotContains(t, prompt, "oc-kb")
 	assert.NotContains(t, prompt, "执行 oc-kb")
 	assert.Contains(t, prompt, "不得调用或建议调用命令、终端、代码、文件、进程")
+	assert.Contains(t, prompt, "Skill 管理")
 }
 
 // TestAICCPublicSendMessageRejectsFullGlobalQueue 验证全局队列已满时事务回滚，不能留下访客消息或任务孤儿。
