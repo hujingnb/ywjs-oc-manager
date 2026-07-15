@@ -14412,6 +14412,15 @@ export interface paths {
                         "application/json": components["schemas"]["handlers.ErrorResponse"];
                     };
                 };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
                 /** @description Conflict */
                 409: {
                     headers: {
