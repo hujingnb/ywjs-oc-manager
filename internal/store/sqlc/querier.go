@@ -23,6 +23,7 @@ type Querier interface {
 	// 重新扫码），则直接把 status 推到 running，避免概览页长期卡在「待绑定」。
 	AppHasBoundChannelBinding(ctx context.Context, appID string) (bool, error)
 	AttachAICCLeadValuesToLead(ctx context.Context, arg AttachAICCLeadValuesToLeadParams) error
+	// 意向分析可能等待上游模型，租约需覆盖主请求超时和一次网络抖动，避免 30 秒后重复分析。
 	ClaimAICCIntentAnalysisRetry(ctx context.Context, arg ClaimAICCIntentAnalysisRetryParams) (int64, error)
 	// 抢占 failed 或超时 creating 的 dataset 创建租约；只有成功更新行的调用方允许访问 RAGFlow 创建远端 dataset。
 	ClaimRAGFlowDatasetCreation(ctx context.Context, arg ClaimRAGFlowDatasetCreationParams) error
