@@ -13,8 +13,8 @@
 
 | ID | 需求 | 正向 | 拒绝/边界 | 故障/恢复 | 并发/隔离 | 自动化证据 | 结果 |
 |---|---|---|---|---|---|---|---|
-| AICC-CAP-001 | AICC 不暴露 terminal、process、execute_code、文件读写、cron、kanban、发布和外部写工具 | `knowledge.read`、`web.search`、Skill 查看，以及仅接收 manager 验证的当前轮次图片理解可用 | 伪造或未声明工具调用返回 `AICC_TOOL_FORBIDDEN`；图片不得开放文件系统或历史附件读取 | policy 缺失、损坏或审计失败时不 Ready | 多 Pod 使用相同不可变工具集合 | `test_aicc_tool_policy.py`、镜像契约 | BASELINE-FAIL |
-| AICC-CAP-002 | AICC 不强制枚举全部 Skill，只能选择审核通过的客服 Skill | 白名单 Skill 可被发现和查看 | 普通或未审核 Skill 不可见且不可调用 | manifest 声明越权 capability 时启动失败关闭 | 企业启用项只能缩小镜像上限 | `platform_prompt_test.go`、`test_render_skills.py` | BASELINE-FAIL |
+| AICC-CAP-001 | AICC 不暴露 terminal、process、execute_code、文件读写、cron、kanban、发布和外部写工具 | `knowledge.read`、`web.search`、Skill 查看，以及仅接收 manager 验证的当前轮次图片理解可用 | 伪造或未声明工具调用返回 `AICC_TOOL_FORBIDDEN`；图片不得开放文件系统或历史附件读取 | policy 缺失、损坏或审计失败时不 Ready | 多 Pod 使用相同不可变工具集合 | `test_aicc_tool_policy.py`、镜像契约 | PASS：2026-07-16 `pytest -q ...test_render_config_yaml.py ...test_aicc_tool_policy.py` 23 passed。历史失败基线保留在下方。 |
+| AICC-CAP-002 | AICC 不强制枚举全部 Skill，只能选择审核通过的客服 Skill | 白名单 Skill 可被发现和查看 | 普通或未审核 Skill 不可见且不可调用 | manifest 声明越权 capability 时启动失败关闭 | 企业启用项只能缩小镜像上限 | `platform_prompt_test.go`、`test_render_skills.py` | PASS：2026-07-16 `go test ./internal/config -run TestPlatformPrompts_Invariants -count=1` 通过；历史失败基线保留在下方。 |
 | AICC-CAP-003 | capability 同时经过镜像、Skill、运行时和 manager API 四层校验 | 合法只读检索完成 | 非法工具、伪造 Skill 和 AICC token 写请求均拒绝 | Broker 或 manager 校验不可用时拒绝执行 | 并发请求不能借用其他 Skill 或 app 权限 | `test_aicc_tool_policy.py`、`knowledge_service_test.go` | PENDING |
 | AICC-CAP-004 | 普通 Hermes 应用保留现有通用能力 | standard app 保持 terminal、S3 和原有 Skill | AICC 配置不得回退为 standard 配置 | AICC 校验失败不自动降级为普通运行时 | 两类 app 配置和 token 不串用 | Go/Python 回归、部署契约 | PENDING |
 | AICC-SRC-001 | 企业知识按客服、企业、授权行业顺序优先回答 | 各层命中时返回正确企业资料 | 无命中、模糊命中和恶意知识内容不被当作事实 | 知识库失败时明确说明，不能伪装为企业事实 | 不同企业和客服检索范围隔离 | 知识 service、RAGFlow 集成、Chrome 问答 | PENDING |
@@ -32,7 +32,7 @@
 | AICC-STATE-004 | 前端在合适时机询问会话是否解决 | 多轮、结束意图或离开前展示确认动作 | 不在首条、处理中或安全拒绝后强迫确认 | 动作解析失败时继续对话 | 刷新后同一提示状态一致 | response action、Chrome Stable | PENDING |
 | AICC-BOOT-001 | 任意全新 Pod 能使用 manager 上下文续聊 | 删除 Pod 后下一轮保持受控摘要和近期消息 | 不读取本地 Hermes session、profile 或长期 memory | bootstrap 失败关闭，恢复后可从 manager 重新启动 | 同 session 落到不同 Pod 不丢上下文 | `aicc_context_test.go`、runtime Chrome | PENDING |
 | AICC-BOOT-002 | AICC 启动是幂等的无状态渲染 | 同镜像与 manifest 重复启动得到等价配置 | 半成品目录、未知本地状态均不能影响结果 | 临时渲染失败不留下可被读取半成品 | 多副本同时 bootstrap 不需分布式锁 | entrypoint/renderer 测试 | PENDING |
-| AICC-BOOT-003 | AICC 禁用跨 session memory 与 user profile | 当前 session 受 manager 输入控制 | config 中不能启用 memory、profile、workspace session 恢复 | 配置缺失或非法时不 Ready | 访客、客服和企业之间零记忆泄漏 | `test_render_config_yaml.py`、隔离集成 | BASELINE-FAIL |
+| AICC-BOOT-003 | AICC 禁用跨 session memory 与 user profile | 当前 session 受 manager 输入控制 | config 中不能启用 memory、profile、workspace session 恢复 | 配置缺失或非法时不 Ready | 访客、客服和企业之间零记忆泄漏 | `test_render_config_yaml.py`、隔离集成 | PASS：2026-07-16 Python AICC 配置/策略测试 23 passed；历史失败基线保留在下方。 |
 | AICC-BOOT-004 | AICC 不保存或恢复 S3 运行时数据 | 容器仅使用 bootstrap manifest 与内置 Skill | 无 S3 credential、restore、sync 或 preStop 保存 | bootstrap 凭证失败安全终止 | 扩缩容不依赖共享磁盘或 S3 状态 | k8s render、Pod 生命周期测试 | PENDING |
 | AICC-CH-001 | 输入轮次与响应信封渠道无关 | web、widget 通过 adapter 交给同一服务 | 渠道不可伪造内部 capability 或动作 | adapter 失败返回渠道安全错误 | 两渠道 session/token 不串用 | `aicc_channel_test.go`、契约测试 | PENDING |
 | AICC-CH-002 | 留资邀请和解决确认以结构化动作交付 | web 渲染卡片/确认按钮 | 动作不能由模型任意伪造或绕过策略 | 解析失败使用安全文本兜底 | 同动作幂等消费一次 | response action、Vue Vitest | PENDING |

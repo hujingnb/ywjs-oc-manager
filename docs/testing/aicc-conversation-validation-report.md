@@ -77,7 +77,13 @@ done
 
 ```text
 cd web && npm run typecheck                              # PASS
+npx tsc --noEmit                                         # FAIL：5 个既有 Vue spec 类型错误，见下文
 npx playwright test --list --project=chrome-headed ...  # PASS，34 tests
 OCM_E2E_NO_SEED=1 npx playwright test --project=chrome-headed tests/e2e/login.spec.ts # PASS
 OCM_E2E_NO_SEED=1 npx playwright test --project=chrome-headed tests/e2e/aicc-conversation-*.spec.ts # 34 skipped（保护开关，非 PASS）
 ```
+
+`npm run typecheck` 执行项目配置的 `vue-tsc --noEmit`，本次通过。裸 `npx tsc --noEmit` 在 2026-07-16
+报告 5 个既有测试文件类型错误：`SkillDetailDrawer.spec.ts`、`LocaleSwitcher.spec.ts`（2 项）、
+`TicketTargetsEditor.spec.ts`、`AppKnowledgeTab.spec.ts`。这些文件不在本轮 AICC 改动范围，因此不能将
+裸 `tsc` 结果写为 PASS；同时也不影响已记录的 `vue-tsc` 项目类型检查结果。
