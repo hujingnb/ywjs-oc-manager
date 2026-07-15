@@ -137,7 +137,7 @@ def test_knowledge_search_raises_runtime_error_for_manager_failure(monkeypatch: 
         search_knowledge("售后政策")
 
 
-# 覆盖：构建期补丁对上游四个插入点各替换一次，且补丁结果可编译、dispatcher 守卫先于桥接工具分支。
+# 覆盖：构建期补丁对上游五个插入点各替换一次，且补丁结果可编译、dispatcher 守卫先于桥接工具分支。
 def test_patch_requires_exactly_one_anchor_for_each_injection() -> None:
     patch_path = Path(__file__).resolve().parents[1] / "patches" / "patch_aicc_tool_policy.py"
     spec = importlib.util.spec_from_file_location("patch_aicc_tool_policy", patch_path)
@@ -149,10 +149,11 @@ def test_patch_requires_exactly_one_anchor_for_each_injection() -> None:
         module.IMPORT_ANCHOR
         + module.DISCOVERY_ANCHOR
         + module.DEFINITIONS_ANCHOR
+        + module.ASSEMBLY_ANCHOR
         + module.DISPATCH_ANCHOR
     )
     patched = module.patch(source)
-    assert patched.count("filtered_tools = filter_aicc_tool_definitions(filtered_tools, current_manifest_capabilities())") == 1
+    assert patched.count("filtered_tools = filter_aicc_tool_definitions(filtered_tools, current_manifest_capabilities())") == 2
     assert patched.count("authorize_aicc_tool") == 2  # import 与 dispatcher guard 各一处。
 
     with pytest.raises(RuntimeError, match="expected exactly one"):
@@ -161,6 +162,7 @@ def test_patch_requires_exactly_one_anchor_for_each_injection() -> None:
             + module.DISCOVERY_ANCHOR
             + module.DEFINITIONS_ANCHOR
             + module.DEFINITIONS_ANCHOR
+            + module.ASSEMBLY_ANCHOR
             + module.DISPATCH_ANCHOR
         )
 
@@ -177,6 +179,8 @@ def test_patch_places_guard_before_tool_search_bridge_and_compiles(tmp_path: Pat
 discover_builtin_tools()
 def get_tools():
     filtered_tools = registry.get_definitions(tools_to_include, quiet=quiet_mode)
+    if enabled:
+            filtered_tools = assembly.tool_defs
     return filtered_tools
 def handle(function_name):
     function_args = {}
@@ -196,3 +200,31 @@ def handle(function_name):
     py_compile.compile(str(result), doraise=True)
     assert patched.index("authorize_aicc_tool(function_name, current_manifest_capabilities())") < patched.index("Tool Search bridge dispatch")
     assert patched.index("authorize_aicc_tool(function_name, current_manifest_capabilities())") < patched.index("tool_call")
+
+
+# 覆盖：Tool Search assembly 重新加入 bridge 工具后，最终返回模型的定义仍严格落在 AICC 白名单内。
+def test_patch_filters_bridge_definitions_after_tool_search_assembly() -> None:
+    patch_path = Path(__file__).resolve().parents[1] / "patches" / "patch_aicc_tool_policy.py"
+    spec = importlib.util.spec_from_file_location("patch_aicc_tool_policy", patch_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    source = (
+        module.IMPORT_ANCHOR
+        + module.DISCOVERY_ANCHOR
+        + module.DEFINITIONS_ANCHOR
+        + module.ASSEMBLY_ANCHOR
+        + "    return filtered_tools\n"
+        + module.DISPATCH_ANCHOR
+    )
+    patched = module.patch(source)
+    assert patched.index("filtered_tools = filter_aicc_tool_definitions(filtered_tools, current_manifest_capabilities())", patched.index(module.ASSEMBLY_ANCHOR)) > patched.index(module.ASSEMBLY_ANCHOR)
+
+    assembled = [
+        {"function": {"name": "aicc_knowledge_search"}},
+        {"function": {"name": "tool_search"}},
+        {"function": {"name": "tool_describe"}},
+        {"function": {"name": "tool_call"}},
+    ]
+    assert [item["function"]["name"] for item in filter_definitions(assembled)] == ["aicc_knowledge_search"]

@@ -16,6 +16,8 @@ TARGET = Path("/usr/local/lib/hermes-agent/model_tools.py")
 IMPORT_ANCHOR = "from tools.registry import discover_builtin_tools, registry\n"
 DISCOVERY_ANCHOR = "discover_builtin_tools()\n"
 DEFINITIONS_ANCHOR = "    filtered_tools = registry.get_definitions(tools_to_include, quiet=quiet_mode)\n"
+# Tool Search assembly 会以 bridge 定义替换 filtered_tools，必须在此之后再次裁剪。
+ASSEMBLY_ANCHOR = "            filtered_tools = assembly.tool_defs\n"
 DISPATCH_ANCHOR = "    _tool_middleware_trace = list(tool_request_middleware_trace or [])\n"
 
 IMPORT_INJECT = (
@@ -25,6 +27,7 @@ IMPORT_INJECT = (
 )
 DISCOVERY_INJECT = "register_with_hermes_registry(registry)\n"
 DEFINITIONS_INJECT = "    filtered_tools = filter_aicc_tool_definitions(filtered_tools, current_manifest_capabilities())\n"
+ASSEMBLY_INJECT = "            filtered_tools = filter_aicc_tool_definitions(filtered_tools, current_manifest_capabilities())\n"
 DISPATCH_INJECT = "    authorize_aicc_tool(function_name, current_manifest_capabilities())\n"
 
 
@@ -43,6 +46,7 @@ def patch(content: str) -> str:
     content = _inject_once(content, IMPORT_ANCHOR, IMPORT_INJECT, "import")
     content = _inject_once(content, DISCOVERY_ANCHOR, DISCOVERY_INJECT, "discovery")
     content = _inject_once(content, DEFINITIONS_ANCHOR, DEFINITIONS_INJECT, "definitions")
+    content = _inject_once(content, ASSEMBLY_ANCHOR, ASSEMBLY_INJECT, "tool-search assembly")
     return _inject_once(content, DISPATCH_ANCHOR, DISPATCH_INJECT, "dispatcher")
 
 
