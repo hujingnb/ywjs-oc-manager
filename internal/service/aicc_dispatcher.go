@@ -187,6 +187,9 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 	} else {
 		d.recordSuccess()
 	}
+	// 主回复已经原子写入并完成任务后，才启动独立意向分析。分析只消费当前会话访客文本，
+	// 任何故障均不回滚已交付的客服答复。
+	d.persistAICCIntent(ctx, task, visitor)
 	d.observe(ctx, task, "completed", "completed")
 	return nil
 }

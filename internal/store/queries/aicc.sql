@@ -402,6 +402,12 @@ ON DUPLICATE KEY UPDATE
     invite_status = VALUES(invite_status),
     updated_at = now();
 
+-- name: UpdateAICCSessionIntentInviteStatus :execrows
+-- 访客的拒绝或显式提交只改变本会话的邀约状态，绝不能影响其它匿名会话。
+UPDATE aicc_session_intents
+SET invite_status = ?, updated_at = now()
+WHERE session_id = ?;
+
 -- name: ListAICCAnonymousIntentCandidates :many
 -- 已关联正式线索的会话不再作为匿名候选，避免后台对同一客户出现两份待跟进记录。
 SELECT i.*

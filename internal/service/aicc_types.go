@@ -120,6 +120,21 @@ type AICCSessionListResult struct {
 	Offset int32 `json:"offset"`
 }
 
+// AICCSessionIntentResult 是会话级意向画像的可解释视图。字段和值均由当前会话访客原话证据约束，
+// 其中不包含自动提取的联系方式等敏感数据。
+type AICCSessionIntentResult struct {
+	// IntentLevel 是 low、medium 或 high 三档意向等级。
+	IntentLevel string `json:"intent_level"`
+	// Fields 是审核白名单内的业务意向字段。
+	Fields map[string]string `json:"fields"`
+	// Confidence 表示各字段的分析置信度，取值范围为 0 到 1。
+	Confidence map[string]float64 `json:"confidence"`
+	// Evidence 是字段在访客原话中的直接证据，供运营回溯核验。
+	Evidence map[string]string `json:"evidence"`
+	// InviteStatus 表示 not_invited、invited、declined 或 submitted。
+	InviteStatus string `json:"invite_status"`
+}
+
 // AICCMessageResult 是管理端会话详情中的消息镜像。
 type AICCMessageResult struct {
 	// ID 是消息主键。

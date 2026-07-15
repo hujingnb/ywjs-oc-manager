@@ -74,8 +74,8 @@ func TestAICCPublicChatRequiresConsent(t *testing.T) {
 	require.ErrorIs(t, err, ErrAICCConsentRequired)
 }
 
-// TestAICCPublicChatRequiresLeadFields 覆盖必填留资阻断：必填字段未完成时不能继续提问。
-func TestAICCPublicChatRequiresLeadFields(t *testing.T) {
+// TestAICCPublicChatDoesNotRequireLeadFields 覆盖对话优先边界：访客未填写表单时仍可继续咨询。
+func TestAICCPublicChatDoesNotRequireLeadFields(t *testing.T) {
 	store := &fakeAICCPublicStore{
 		org:                sqlc.Organization{ID: "org-1", AiccEnabled: true},
 		agent:              sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
@@ -86,9 +86,10 @@ func TestAICCPublicChatRequiresLeadFields(t *testing.T) {
 	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
 	svc.now = func() time.Time { return aiccPublicTestNow }
 
-	_, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "报价多少"})
+	result, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "报价多少"})
 
-	require.ErrorIs(t, err, ErrAICCLeadRequired)
+	require.NoError(t, err)
+	assert.Equal(t, "queued", result.Status)
 }
 
 // TestAICCPublicGetSessionReturnsMessages 覆盖公开页刷新恢复：
@@ -188,6 +189,7 @@ func TestAICCPublicSubmitLeadValuesCompletesRequiredFields(t *testing.T) {
 	assert.Equal(t, "session-1", store.leads[0].LatestSessionID.String)
 	assert.Equal(t, store.leads[0].ID, store.attachedLeadID)
 	assert.Equal(t, "org-1", store.attachedLeadOrgID)
+	assert.Equal(t, "submitted", store.intentInviteStatus)
 }
 
 // TestAICCPublicSubmitLeadValuesRejectsUnknownField 覆盖留资字段配置边界：未配置的 field_key 不能写入。
@@ -205,6 +207,20 @@ func TestAICCPublicSubmitLeadValuesRejectsUnknownField(t *testing.T) {
 
 	require.ErrorIs(t, err, ErrInvalidArgument)
 	assert.Empty(t, store.leadValues)
+}
+
+// TestAICCPublicDeclineLeadInvitationOnlyUpdatesCurrentSession 验证访客拒绝仅写当前会话的邀约状态。
+func TestAICCPublicDeclineLeadInvitationOnlyUpdatesCurrentSession(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive},
+		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	require.NoError(t, svc.DeclineLeadInvitation(context.Background(), "tok"))
+	assert.Equal(t, "declined", store.intentInviteStatus)
 }
 
 // TestAICCPublicChatRespondsToPromptInjectionWithoutCallingRuntime 覆盖公开客服的提示词注入边界：
@@ -420,9 +436,9 @@ func TestAICCPublicSendMessageDoesNotRequeueFailedTaskWithoutConsent(t *testing.
 	assert.Empty(t, store.requeuedMessageID)
 }
 
-// TestAICCPublicSendMessageDoesNotRequeueFailedTaskWithNewRequiredLead 覆盖动态留资规则：
-// 已失败消息重试时若管理员新增必填字段，缺失留资必须阻止任务恢复。
-func TestAICCPublicSendMessageDoesNotRequeueFailedTaskWithNewRequiredLead(t *testing.T) {
+// TestAICCPublicSendMessageRequeuesFailedTaskWithNewRequiredLead 覆盖动态留资规则：
+// 已失败消息重试时即使管理员新增必填字段，也必须允许继续咨询并恢复既有任务。
+func TestAICCPublicSendMessageRequeuesFailedTaskWithNewRequiredLead(t *testing.T) {
 	store := newAICCPublicMessageStore()
 	store.requiredLeadFields = []sqlc.AiccLeadField{{ID: "field-phone", Required: true, FieldKey: "phone", Label: "手机号"}}
 	store.messages = []sqlc.AiccMessage{{ID: "message-1", SessionID: "session-1", Direction: domain.AICCMessageDirectionVisitor, ClientMessageID: null.StringFrom("retry-client"), TextContent: null.StringFrom("报价多少")}}
@@ -433,8 +449,8 @@ func TestAICCPublicSendMessageDoesNotRequeueFailedTaskWithNewRequiredLead(t *tes
 
 	_, err := service.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", ClientMessageID: "retry-client", Text: "报价多少"})
 
-	require.ErrorIs(t, err, ErrAICCLeadRequired)
-	assert.Empty(t, store.requeuedMessageID)
+	require.NoError(t, err)
+	assert.Equal(t, "message-1", store.requeuedMessageID)
 }
 
 // TestAICCPublicSendMessageDoesNotRequeueFailedTaskWithNewSensitiveWord 覆盖内容策略变化：
@@ -1357,6 +1373,7 @@ type fakeAICCPublicStore struct {
 	leadValues                []sqlc.UpsertAICCLeadValueParams
 	attachedLeadID            string
 	attachedLeadOrgID         string
+	intentInviteStatus        string
 	feedback                  sqlc.UpsertAICCFeedbackParams
 	resolutionStatus          string
 	touchedSessionID          string
@@ -1709,6 +1726,15 @@ func (f *fakeAICCPublicStore) AttachAICCLeadValuesToLead(_ context.Context, arg 
 	f.attachedLeadID = arg.LeadID.String
 	f.attachedLeadOrgID = arg.LeadOrgID.String
 	return nil
+}
+
+// UpdateAICCSessionIntentInviteStatus 模拟访客只影响自身会话的邀约选择。
+func (f *fakeAICCPublicStore) UpdateAICCSessionIntentInviteStatus(_ context.Context, arg sqlc.UpdateAICCSessionIntentInviteStatusParams) (int64, error) {
+	if arg.SessionID != f.session.ID {
+		return 0, nil
+	}
+	f.intentInviteStatus = arg.InviteStatus
+	return 1, nil
 }
 
 func (f *fakeAICCPublicStore) ListRequiredAICCLeadFieldsMissing(_ context.Context, _ string) ([]sqlc.AiccLeadField, error) {

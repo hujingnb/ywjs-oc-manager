@@ -454,6 +454,8 @@ type Querier interface {
 	TouchApp(ctx context.Context, id string) error
 	TouchSkillTicket(ctx context.Context, id string) error
 	UpdateAICCAgentProfile(ctx context.Context, arg UpdateAICCAgentProfileParams) error
+	// 访客的拒绝或显式提交只改变本会话的邀约状态，绝不能影响其它匿名会话。
+	UpdateAICCSessionIntentInviteStatus(ctx context.Context, arg UpdateAICCSessionIntentInviteStatusParams) (int64, error)
 	UpdateAICCSessionLeadStatus(ctx context.Context, arg UpdateAICCSessionLeadStatusParams) error
 	UpdateAICCSessionResolutionStatus(ctx context.Context, arg UpdateAICCSessionResolutionStatusParams) error
 	// 更新实例语言偏好（hermes 对终端用户说话的语言）。locale 由 service 层校验合法取值后传入。

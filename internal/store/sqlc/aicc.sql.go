@@ -2801,6 +2801,26 @@ func (q *Queries) UpdateAICCAgentProfile(ctx context.Context, arg UpdateAICCAgen
 	return err
 }
 
+const updateAICCSessionIntentInviteStatus = `-- name: UpdateAICCSessionIntentInviteStatus :execrows
+UPDATE aicc_session_intents
+SET invite_status = ?, updated_at = now()
+WHERE session_id = ?
+`
+
+type UpdateAICCSessionIntentInviteStatusParams struct {
+	InviteStatus string `db:"invite_status" json:"invite_status"`
+	SessionID    string `db:"session_id" json:"session_id"`
+}
+
+// 访客的拒绝或显式提交只改变本会话的邀约状态，绝不能影响其它匿名会话。
+func (q *Queries) UpdateAICCSessionIntentInviteStatus(ctx context.Context, arg UpdateAICCSessionIntentInviteStatusParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateAICCSessionIntentInviteStatus, arg.InviteStatus, arg.SessionID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const updateAICCSessionLeadStatus = `-- name: UpdateAICCSessionLeadStatus :exec
 UPDATE aicc_sessions
 SET lead_status = ?, updated_at = now()

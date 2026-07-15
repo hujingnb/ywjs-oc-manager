@@ -456,13 +456,8 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 	if agent.PrivacyMode == domain.AICCPrivacyModeConsentRequired && !session.PrivacyConsentedAt.Valid {
 		return AICCPublicMessageResult{}, ErrAICCConsentRequired
 	}
-	missing, err := s.store.ListRequiredAICCLeadFieldsMissing(ctx, session.ID)
-	if err != nil {
-		return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 必填留资字段失败: %w", err)
-	}
-	if len(missing) > 0 {
-		return AICCPublicMessageResult{}, ErrAICCLeadRequired
-	}
+	// 留资仅在访客明确选择提交时校验。客服对话不能因表单尚未填写而被阻断，
+	// 否则会把高意向识别误变成强制留资。
 	settings, err := s.loadPublicSettings(ctx, session.AgentID)
 	if err != nil {
 		return AICCPublicMessageResult{}, err
@@ -1058,6 +1053,10 @@ func (s *AICCPublicService) submitLeadValues(ctx context.Context, input AICCPubl
 	status := domain.AICCLeadStatusPending
 	if len(missing) == 0 {
 		status = domain.AICCLeadStatusComplete
+	}
+	// 联系方式是访客主动提交的显式字段，优先级高于模型画像；即使其它可选或必填字段
+	// 尚未补齐，也应立即归并正式线索，避免高意向客户在后续刷新前丢失。
+	if primaryAICCContactValue(fieldsByKey, input.Values) != "" {
 		if err := s.upsertLeadForCompletedSession(ctx, session, fieldsByKey, input.Values); err != nil {
 			return AICCPublicLeadValuesResult{}, err
 		}
@@ -1068,7 +1067,34 @@ func (s *AICCPublicService) submitLeadValues(ctx context.Context, input AICCPubl
 	}); err != nil {
 		return AICCPublicLeadValuesResult{}, fmt.Errorf("更新 AICC 留资状态失败: %w", err)
 	}
+	// 已提交联系方式后，匿名候选应退出邀约流程；没有意向画像时保持兼容旧会话。
+	if intentStore, ok := s.store.(interface {
+		UpdateAICCSessionIntentInviteStatus(context.Context, sqlc.UpdateAICCSessionIntentInviteStatusParams) (int64, error)
+	}); ok {
+		if _, err := intentStore.UpdateAICCSessionIntentInviteStatus(ctx, sqlc.UpdateAICCSessionIntentInviteStatusParams{SessionID: session.ID, InviteStatus: "submitted"}); err != nil {
+			return AICCPublicLeadValuesResult{}, fmt.Errorf("更新 AICC 意向邀约状态失败: %w", err)
+		}
+	}
 	return AICCPublicLeadValuesResult{LeadStatus: status, MissingRequiredKeys: aiccLeadFieldKeys(missing)}, nil
+}
+
+// DeclineLeadInvitation 仅记录当前访客明确拒绝留资，后续高意向分析不得再次弹出邀约。
+func (s *AICCPublicService) DeclineLeadInvitation(ctx context.Context, sessionToken string) error {
+	session, err := s.store.GetAICCSessionByToken(ctx, strings.TrimSpace(sessionToken))
+	if err != nil || !session.ExpiresAt.After(s.now()) {
+		return ErrAICCInvalidSession
+	}
+	intentStore, ok := s.store.(interface {
+		UpdateAICCSessionIntentInviteStatus(context.Context, sqlc.UpdateAICCSessionIntentInviteStatusParams) (int64, error)
+	})
+	if !ok {
+		return ErrAICCSessionStoreUnavailable
+	}
+	_, err = intentStore.UpdateAICCSessionIntentInviteStatus(ctx, sqlc.UpdateAICCSessionIntentInviteStatusParams{SessionID: session.ID, InviteStatus: "declined"})
+	if err != nil {
+		return fmt.Errorf("拒绝 AICC 留资邀约失败: %w", err)
+	}
+	return nil
 }
 
 func (s *AICCPublicService) upsertLeadForCompletedSession(ctx context.Context, session sqlc.AiccSession, fieldsByKey map[string]sqlc.AiccLeadField, values map[string]string) error {
