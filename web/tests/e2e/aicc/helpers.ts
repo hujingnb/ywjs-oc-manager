@@ -74,6 +74,7 @@ export interface AICCConversationFixture {
   appID: string
   name: string
   publicToken: string
+  widgetToken: string
 }
 
 // createStartedAICCConversationFixture 走真实管理页面创建并启动一名客服，供公开页 E2E 使用。
@@ -101,7 +102,7 @@ export async function createStartedAICCConversationFixture(page: Page, prefix: s
   await page.getByPlaceholder('例如：售前咨询接待员').fill(name)
   const created = page.waitForResponse(response => response.url().includes('/api/v1/aicc/agents') && response.request().method() === 'POST')
   await page.getByRole('button', { name: '保存配置' }).click()
-  const payload = await (await created).json() as { agent: { id: string, app_id: string, name: string, public_token: string } }
+  const payload = await (await created).json() as { agent: { id: string, app_id: string, name: string, public_token: string, widget_token: string } }
   await waitForAICCRuntime(payload.agent.app_id)
   // 高意向动作只有配置了可提交字段时才渲染为公开页留资卡；在统一 fixture 中配置最小手机号字段，
   // 让意向场景验证真实的邀请/拒绝/合并链路，而不是因空表单静默跳过。
@@ -116,7 +117,7 @@ export async function createStartedAICCConversationFixture(page: Page, prefix: s
   const started = page.waitForResponse(response => response.url().includes('/start') && response.request().method() === 'POST')
   await page.getByRole('button', { name: '启动接待' }).click()
   expect((await started).ok()).toBeTruthy()
-  return { id: payload.agent.id, appID: payload.agent.app_id, name: payload.agent.name, publicToken: payload.agent.public_token }
+  return { id: payload.agent.id, appID: payload.agent.app_id, name: payload.agent.name, publicToken: payload.agent.public_token, widgetToken: payload.agent.widget_token }
 }
 
 // sendPublicAICCMessage 只通过公开页面表单发言，并等待异步轮询得到实际客服回复。
