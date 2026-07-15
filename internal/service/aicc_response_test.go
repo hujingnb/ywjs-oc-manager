@@ -80,3 +80,38 @@ func TestParseAndValidateAICCResponseEnvelopeRejectsUnknownFlag(t *testing.T) {
 
 	require.ErrorIs(t, err, ErrAICCResponsePolicy)
 }
+
+// TestParseAndValidateAICCResponseEnvelopeRequiresSourcesAndFlags 覆盖严格 wire schema：
+// 即使来源为空，模型也必须显式输出 sources 和 flags，不能以 null 或省略绕过结构约束。
+func TestParseAndValidateAICCResponseEnvelopeRequiresSourcesAndFlags(t *testing.T) {
+	for _, raw := range []string{
+		`{"text":"您好。","next_action":"none","flags":{}}`,                // 缺少 sources。
+		`{"text":"您好。","sources":null,"next_action":"none","flags":{}}`, // sources 不能为 null。
+		`{"text":"您好。","sources":[],"next_action":"none"}`,              // 缺少 flags。
+		`{"text":"您好。","sources":[],"next_action":"none","flags":null}`, // flags 不能为 null。
+	} {
+		_, err := ParseAndValidateAICCResponse(raw, nil)
+		require.ErrorIs(t, err, ErrAICCResponsePolicy)
+	}
+}
+
+// TestParseAndValidateAICCResponseEnvelopeRejectsEnterpriseNetworkWhenKnowledgeExists 覆盖冲突裁决：
+// 企业知识已经命中时，答复不得再采纳未经企业确认的企业网络材料。
+func TestParseAndValidateAICCResponseEnvelopeRejectsEnterpriseNetworkWhenKnowledgeExists(t *testing.T) {
+	audit := AICCResponseToolAudit{
+		"kb-1":  {Type: "knowledge", Title: "企业手册", ReferenceID: "kb-1"},
+		"web-1": {Type: "web", Title: "第三方报道", URL: "https://example.com/news", Scope: "enterprise_network", ReferenceID: "web-1", Unconfirmed: true},
+	}
+	_, err := ParseAndValidateAICCResponse(`{"text":"请以企业手册为准。","sources":[{"type":"knowledge","title":"企业手册","reference_id":"kb-1"},{"type":"web","title":"第三方报道","url":"https://example.com/news","scope":"enterprise_network","reference_id":"web-1","unconfirmed":true}],"next_action":"none","flags":{}}`, audit)
+
+	require.ErrorIs(t, err, ErrAICCResponsePolicy)
+}
+
+// TestParseAndValidateAICCResponseEnvelopeRejectsChineseOperationalVariants 覆盖常见中文操作完成声称：
+// 客服不能因账号开通或重置密码等表达而伪装完成外部操作。
+func TestParseAndValidateAICCResponseEnvelopeRejectsChineseOperationalVariants(t *testing.T) {
+	for _, text := range []string{"已为您开通账号。", "已为你重置密码。", "您的密码已重置。"} {
+		_, err := ParseAndValidateAICCResponse(`{"text":"`+text+`","sources":[],"next_action":"none","flags":{}}`, nil)
+		require.ErrorIs(t, err, ErrAICCResponsePolicy)
+	}
+}

@@ -57,7 +57,93 @@ func (c *AICCPublicHermesChat) ChatAICC(ctx context.Context, turn AICCInboundTur
 	// Raw 交由 dispatcher 统一解析并执行来源政策；Text 保留原文兼容当前调用方的运行时诊断与观测测试，
 	// 但绝不能直接持久化为公开回复。
 	content := conversationContentText(out.Message.Content)
-	return AICCResponseEnvelope{Text: content, Raw: content}, nil
+	// 非流式 chat 完成响应只携带最终文本；本轮工具转录需从临时会话读取，才能让来源
+	// reference_id 绑定实际执行过的受控工具，而不是由模型在最终 JSON 中自行声称。
+	messages, err := c.ops.SessionMessages(ctx, loc.Endpoint, created.ID)
+	if err != nil {
+		return AICCResponseEnvelope{}, mapAICCOpsConversationErr(err)
+	}
+	return AICCResponseEnvelope{Text: content, Raw: content, ToolAudit: extractAICCResponseToolAudit(messages)}, nil
+}
+
+// aiccToolAuditPayload 是 Hermes AICC 受控工具在 tool transcript 中返回的最小审计载荷。
+// 只有 aicc_response_sources 字段会被采纳，普通模型文本、tool_call 参数及未知工具一律无权生成来源。
+type aiccToolAuditPayload struct {
+	Sources []AICCResponseSource `json:"aicc_response_sources"`
+}
+
+// extractAICCResponseToolAudit 从当前临时会话的 tool transcript 中构造来源白名单。
+// 每轮创建独立 Hermes 会话，因此此处天然不会混入历史轮次的工具结果。
+func extractAICCResponseToolAudit(messages []ocops.ConversationMessage) AICCResponseToolAudit {
+	audit := AICCResponseToolAudit{}
+	for _, message := range messages {
+		if message.Role != "tool" || !isAICCResponseAuditTool(message.ToolName) {
+			continue
+		}
+		payload, ok := decodeAICCToolAuditPayload(message.Content)
+		if !ok {
+			continue
+		}
+		for _, source := range payload.Sources {
+			if !isWellFormedAICCResponseAuditSource(source) || source.ReferenceID == "" {
+				continue
+			}
+			// 同一 reference_id 的重复声明会使审计边界不确定，直接剔除，避免后出现的
+			// 工具文本覆盖先前记录。
+			if _, exists := audit[source.ReferenceID]; !exists {
+				audit[source.ReferenceID] = source
+			}
+		}
+	}
+	return audit
+}
+
+// isAICCResponseAuditTool 是可输出来源审计的最小工具白名单；这与模型可见工具列表分离，
+// 因为 skills_list/vision 等即使可调用也不能成为企业事实来源。
+func isAICCResponseAuditTool(toolName string) bool {
+	return toolName == "aicc_knowledge_search" || toolName == "web_search" || toolName == "web_extract"
+}
+
+// decodeAICCToolAuditPayload 将 oc-ops 解码后的任意 content 重新规范为 JSON；工具转录格式异常
+// 仅意味着本轮没有可引用来源，绝不降级为信任模型提供的 sources。
+func decodeAICCToolAuditPayload(content any) (aiccToolAuditPayload, bool) {
+	var raw []byte
+	switch value := content.(type) {
+	case string:
+		raw = []byte(value)
+	case []byte:
+		raw = value
+	case json.RawMessage:
+		raw = value
+	default:
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return aiccToolAuditPayload{}, false
+		}
+		raw = encoded
+	}
+	var payload aiccToolAuditPayload
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.Sources == nil {
+		return aiccToolAuditPayload{}, false
+	}
+	return payload, true
+}
+
+// isWellFormedAICCResponseAuditSource 在进入白名单前校验受控工具回传的最小形态，
+// 后续 response validator 还会将模型回显字段逐项与该白名单比较。
+func isWellFormedAICCResponseAuditSource(source AICCResponseSource) bool {
+	if (source.Type != "knowledge" && source.Type != "web") || strings.TrimSpace(source.Title) == "" {
+		return false
+	}
+	if source.Type == "web" {
+		if source.Scope != "public_network" && source.Scope != "enterprise_network" {
+			return false
+		}
+		if source.URL == "" || !source.Unconfirmed && source.Scope == "enterprise_network" {
+			return false
+		}
+	}
+	return true
 }
 
 var aiccRuntimeStatusPattern = regexp.MustCompile(`(?i)\b(429|503|529)\b`)

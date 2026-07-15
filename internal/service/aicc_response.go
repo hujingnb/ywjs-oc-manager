@@ -50,6 +50,9 @@ func ParseAndValidateAICCResponse(raw string, audit AICCResponseToolAudit) (AICC
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return AICCResponseEnvelope{}, fmt.Errorf("%w: trailing JSON", ErrAICCResponsePolicy)
 	}
+	if wire.Sources == nil || wire.Flags == nil {
+		return AICCResponseEnvelope{}, fmt.Errorf("%w: sources and flags are required", ErrAICCResponsePolicy)
+	}
 	for name := range wire.Flags {
 		if name != "refusal" && name != "fallback" {
 			return AICCResponseEnvelope{}, fmt.Errorf("%w: unknown flag", ErrAICCResponsePolicy)
@@ -76,6 +79,9 @@ func validateAICCResponseEnvelope(reply AICCResponseEnvelope, audit AICCResponse
 			return AICCResponseEnvelope{}, err
 		}
 	}
+	if aiccResponseHasKnowledgeSource(reply.Sources) && aiccResponseHasEnterpriseNetworkSource(reply.Sources) {
+		return AICCResponseEnvelope{}, fmt.Errorf("%w: enterprise knowledge takes precedence over enterprise network", ErrAICCResponsePolicy)
+	}
 	if aiccResponseClaimsEnterprisePrice(reply.Text) && !aiccResponseHasKnowledgeSource(reply.Sources) {
 		return AICCResponseEnvelope{}, fmt.Errorf("%w: enterprise price needs knowledge source", ErrAICCResponsePolicy)
 	}
@@ -83,6 +89,17 @@ func validateAICCResponseEnvelope(reply AICCResponseEnvelope, audit AICCResponse
 		return AICCResponseEnvelope{}, fmt.Errorf("%w: operational completion claim", ErrAICCResponsePolicy)
 	}
 	return reply, nil
+}
+
+// aiccResponseHasEnterpriseNetworkSource 识别未确认的企业相关网络资料。只要本轮已有企业知识，
+// 就不允许同一答复引用该类资料，避免模型把冲突结论混入企业确认答案。
+func aiccResponseHasEnterpriseNetworkSource(sources []AICCResponseSource) bool {
+	for _, source := range sources {
+		if source.Type == "web" && source.Scope == "enterprise_network" {
+			return true
+		}
+	}
+	return false
 }
 
 func validateAICCResponseSource(source *AICCResponseSource, audit AICCResponseToolAudit) error {
@@ -129,7 +146,12 @@ func aiccResponseClaimsEnterprisePrice(text string) bool {
 }
 
 func aiccResponseClaimsOperationCompleted(text string) bool {
-	for _, phrase := range []string{"已为您创建", "已为您修改", "已为您删除", "已为您执行", "已经创建", "已经修改", "已经删除", "already created", "already updated", "already deleted"} {
+	for _, phrase := range []string{
+		"已为您创建", "已为你创建", "已为您修改", "已为你修改", "已为您删除", "已为你删除", "已为您执行", "已为你执行",
+		"已经创建", "已经修改", "已经删除", "已为您开通账号", "已为你开通账号", "账号已开通", "已开通账号",
+		"已为您重置密码", "已为你重置密码", "密码已重置", "已经重置密码",
+		"already created", "already updated", "already deleted", "account has been opened", "password has been reset",
+	} {
 		if strings.Contains(strings.ToLower(text), strings.ToLower(phrase)) {
 			return true
 		}

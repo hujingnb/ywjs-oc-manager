@@ -15,6 +15,7 @@ import (
 // fakeConversationOps 是 conversationOps 的假实现，记录入参并返回预设值。
 type fakeConversationOps struct {
 	sessions    []ocops.ConversationSession
+	messages    []ocops.ConversationMessage
 	chatOut     ocops.ConversationChatResult
 	chatErr     error
 	gotSID      string
@@ -30,7 +31,7 @@ func (f *fakeConversationOps) ListSessions(_ context.Context, _ ocops.Endpoint, 
 }
 func (f *fakeConversationOps) SessionMessages(_ context.Context, _ ocops.Endpoint, sid string) ([]ocops.ConversationMessage, error) {
 	f.gotSID = sid
-	return nil, nil
+	return f.messages, nil
 }
 func (f *fakeConversationOps) CreateSession(_ context.Context, _ ocops.Endpoint, req ocops.ConversationCreateReq) (ocops.ConversationSession, error) {
 	f.createCalls++

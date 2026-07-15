@@ -27,7 +27,7 @@ def _runtime_configuration() -> tuple[str, str]:
 
 
 def search_knowledge(question: str) -> dict[str, Any]:
-    """检索当前客服所属企业的知识库，并返回 manager 原样 JSON 结果。"""
+    """检索当前客服所属企业的知识库，并附带 manager 可审计的稳定来源引用。"""
     if not isinstance(question, str) or not question.strip():
         raise ValueError("AICC_KNOWLEDGE_SEARCH_INVALID_QUESTION")
     base_url, app_token = _runtime_configuration()
@@ -53,7 +53,38 @@ def search_knowledge(question: str) -> dict[str, Any]:
         raise RuntimeError("AICC_KNOWLEDGE_SEARCH_INVALID_RESPONSE") from exc
     if not isinstance(parsed, dict):
         raise RuntimeError("AICC_KNOWLEDGE_SEARCH_INVALID_RESPONSE")
+    parsed["aicc_response_sources"] = _response_sources(parsed.get("results"))
     return parsed
+
+
+def _response_sources(results: Any) -> list[dict[str, Any]]:
+    """把 manager 检索命中转换为最终答复可引用的审计来源。
+
+    ``reference_id`` 由本轮工具结果中的 scope、document_id 和稳定索引组成；模型只能
+    回显该值，manager 会从 Hermes 的 tool transcript 重建相同白名单后才允许持久化。
+    """
+    if not isinstance(results, list):
+        return []
+    sources: list[dict[str, Any]] = []
+    for index, item in enumerate(results):
+        if not isinstance(item, dict):
+            continue
+        document_id = item.get("document_id")
+        scope = item.get("scope")
+        if not isinstance(document_id, str) or not document_id or not isinstance(scope, str) or not scope:
+            continue
+        title = item.get("document_name")
+        if not isinstance(title, str) or not title.strip():
+            title = document_id
+        sources.append(
+            {
+                "type": "knowledge",
+                "title": title.strip(),
+                "scope": scope,
+                "reference_id": f"knowledge:{scope}:{document_id}:{index}",
+            }
+        )
+    return sources
 
 
 def register_with_hermes_registry(registry: Any) -> None:

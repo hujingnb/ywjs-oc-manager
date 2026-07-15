@@ -28,8 +28,10 @@ type ConversationMessage struct {
 	Content any    `json:"content"` // 字符串或 [{type,text|image_url}]
 	// Timestamp 用 any 承载：api_server 的时间戳为数字（Unix 秒），用 any 避免
 	// 「数字→字符串」解码失败（与 session 时间戳同源问题）；前端不渲染此字段。
-	Timestamp    any    `json:"timestamp,omitempty"`
-	ToolCalls    any    `json:"tool_calls,omitempty"` // 工具调用（透传，前端可忽略）
+	Timestamp any `json:"timestamp,omitempty"`
+	ToolCalls any `json:"tool_calls,omitempty"` // 工具调用（透传，前端可忽略）
+	// ToolName 仅在 role=tool 的受控运行时转录中出现；AICC 用它限定哪些工具结果可形成来源审计。
+	ToolName     string `json:"tool_name,omitempty"`
 	FinishReason string `json:"finish_reason,omitempty"`
 }
 
