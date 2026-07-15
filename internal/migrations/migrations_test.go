@@ -308,6 +308,41 @@ func TestAICCMessageTasksMigrationDeclaresDurableDispatchState(t *testing.T) {
 	assert.Contains(t, up, "KEY idx_aicc_message_tasks_lease (status, lease_expires_at, id)")
 }
 
+// TestAICCConversationIntelligenceMigration 验证无状态续聊、回复来源和匿名意向画像的
+// 唯一事实均落在 manager 数据库，并由外键在会话或消息清理时同步删除。
+func TestAICCConversationIntelligenceMigration(t *testing.T) {
+	upBytes, err := FS.ReadFile("000037_aicc_conversation_intelligence.up.sql")
+	require.NoError(t, err)
+	up := string(upBytes)
+
+	// 每个会话只保留一份可递进更新的摘要，避免运行时容器本地状态成为续聊依赖。
+	assert.Contains(t, up, "CREATE TABLE aicc_session_contexts")
+	assert.Contains(t, up, "UNIQUE KEY uk_aicc_session_contexts_session (session_id)")
+	assert.Contains(t, up, "summarized_through_message_id CHAR(36) NULL")
+	assert.Contains(t, up, "summary_version INT NOT NULL DEFAULT 1")
+	assert.Contains(t, up, "CONSTRAINT fk_aicc_session_contexts_session FOREIGN KEY (session_id) REFERENCES aicc_sessions(id) ON DELETE CASCADE")
+
+	// 每条助手消息可持久化多个知识或公开网络来源，企业公开网络结果必须另行标记未确认。
+	assert.Contains(t, up, "CREATE TABLE aicc_message_sources")
+	assert.Contains(t, up, "CONSTRAINT aicc_message_sources_type_check CHECK (source_type IN ('knowledge','web'))")
+	assert.Contains(t, up, "unconfirmed BOOLEAN NOT NULL DEFAULT FALSE")
+	assert.Contains(t, up, "CONSTRAINT fk_aicc_message_sources_message FOREIGN KEY (message_id) REFERENCES aicc_messages(id) ON DELETE CASCADE")
+
+	// 意向画像以 session 为唯一锚点，分析消息和会话删除时均不能留下孤儿候选。
+	assert.Contains(t, up, "CREATE TABLE aicc_session_intents")
+	assert.Contains(t, up, "UNIQUE KEY uk_aicc_session_intents_session (session_id)")
+	assert.Contains(t, up, "CONSTRAINT aicc_session_intents_level_check CHECK (intent_level IN ('low','medium','high'))")
+	assert.Contains(t, up, "CONSTRAINT aicc_session_intents_invite_check CHECK (invite_status IN ('not_invited','invited','declined','submitted'))")
+	assert.Contains(t, up, "CONSTRAINT fk_aicc_session_intents_session FOREIGN KEY (session_id) REFERENCES aicc_sessions(id) ON DELETE CASCADE")
+	assert.Contains(t, up, "CONSTRAINT fk_aicc_session_intents_message FOREIGN KEY (analyzed_message_id) REFERENCES aicc_messages(id) ON DELETE CASCADE")
+
+	downBytes, err := FS.ReadFile("000037_aicc_conversation_intelligence.down.sql")
+	require.NoError(t, err)
+	down := string(downBytes)
+	// 回滚按依赖关系删除，避免 message/source 与 session/context 的外键阻止回退。
+	assert.Less(t, strings.Index(down, "DROP TABLE IF EXISTS aicc_message_sources;"), strings.Index(down, "DROP TABLE IF EXISTS aicc_session_contexts;"))
+}
+
 // TestAICCSettingsMigrationContainsOperationalTables 覆盖 AICC 运营配置表：
 // 新增表必须按 agent 维度保存安全与续接策略，并用访客哈希记录封禁，避免保存明文 IP。
 func TestAICCSettingsMigrationContainsOperationalTables(t *testing.T) {

@@ -42,3 +42,17 @@ func TestRequeueFailedAICCMessageTaskOnlyResetsTerminalFailure(t *testing.T) {
 	assert.Contains(t, query, "last_error = null")
 	assert.Contains(t, query, "where message_id = ? and status = 'failed'")
 }
+
+// TestAICCConversationIntelligenceQueriesUseStableOrdering 验证上下文、来源和匿名意向候选
+// 都显式使用时间与主键排序，避免同一时间写入的记录在不同数据库执行计划下顺序漂移。
+func TestAICCConversationIntelligenceQueriesUseStableOrdering(t *testing.T) {
+	// 上下文构建器需要按完整会话消息流截取最近窗口，升序结果可直接保留自然对话顺序。
+	assert.Contains(t, normalizedSQL(listAICCContextMessages), "order by created_at asc, id asc")
+	// 一条回复的多条引用必须稳定显示，防止相同来源在前端每次刷新时重排。
+	assert.Contains(t, normalizedSQL(listAICCMessageSources), "order by created_at asc, id asc")
+	// 匿名候选排除已形成正式线索的会话，并以可复现顺序供后台分页或导出。
+	candidates := normalizedSQL(listAICCAnonymousIntentCandidates)
+	assert.Contains(t, candidates, "where s.org_id = ?")
+	assert.Contains(t, candidates, "v.lead_id is not null")
+	assert.Contains(t, candidates, "order by i.created_at asc, i.id asc")
+}

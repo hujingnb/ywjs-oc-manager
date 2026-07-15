@@ -148,6 +148,19 @@ type AiccMessage struct {
 	ReplyToMessageID null.String `db:"reply_to_message_id" json:"reply_to_message_id"`
 }
 
+type AiccMessageSource struct {
+	ID          string      `db:"id" json:"id"`
+	MessageID   string      `db:"message_id" json:"message_id"`
+	SourceType  string      `db:"source_type" json:"source_type"`
+	Title       null.String `db:"title" json:"title"`
+	Url         null.String `db:"url" json:"url"`
+	Scope       null.String `db:"scope" json:"scope"`
+	ReferenceID null.String `db:"reference_id" json:"reference_id"`
+	Unconfirmed bool        `db:"unconfirmed" json:"unconfirmed"`
+	RetrievedAt time.Time   `db:"retrieved_at" json:"retrieved_at"`
+	CreatedAt   time.Time   `db:"created_at" json:"created_at"`
+}
+
 type AiccMessageTask struct {
 	ID                   string      `db:"id" json:"id"`
 	MessageID            string      `db:"message_id" json:"message_id"`
@@ -190,6 +203,30 @@ type AiccSession struct {
 	ExpiresAt          time.Time   `db:"expires_at" json:"expires_at"`
 	CreatedAt          time.Time   `db:"created_at" json:"created_at"`
 	UpdatedAt          time.Time   `db:"updated_at" json:"updated_at"`
+}
+
+type AiccSessionContext struct {
+	ID                         string      `db:"id" json:"id"`
+	SessionID                  string      `db:"session_id" json:"session_id"`
+	Summary                    string      `db:"summary" json:"summary"`
+	SummarizedThroughMessageID null.String `db:"summarized_through_message_id" json:"summarized_through_message_id"`
+	SummaryVersion             int32       `db:"summary_version" json:"summary_version"`
+	CreatedAt                  time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt                  time.Time   `db:"updated_at" json:"updated_at"`
+}
+
+type AiccSessionIntent struct {
+	ID                string      `db:"id" json:"id"`
+	SessionID         string      `db:"session_id" json:"session_id"`
+	IntentLevel       string      `db:"intent_level" json:"intent_level"`
+	FieldsJson        []byte      `db:"fields_json" json:"fields_json"`
+	ConfidenceJson    []byte      `db:"confidence_json" json:"confidence_json"`
+	EvidenceJson      []byte      `db:"evidence_json" json:"evidence_json"`
+	AnalyzerVersion   string      `db:"analyzer_version" json:"analyzer_version"`
+	AnalyzedMessageID null.String `db:"analyzed_message_id" json:"analyzed_message_id"`
+	InviteStatus      string      `db:"invite_status" json:"invite_status"`
+	CreatedAt         time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt         time.Time   `db:"updated_at" json:"updated_at"`
 }
 
 type App struct {

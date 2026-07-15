@@ -513,6 +513,39 @@ func (q *Queries) CreateAICCMessage(ctx context.Context, arg CreateAICCMessagePa
 	return err
 }
 
+const createAICCMessageSource = `-- name: CreateAICCMessageSource :exec
+INSERT INTO aicc_message_sources (
+    id, message_id, source_type, title, url, scope, reference_id, unconfirmed, retrieved_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type CreateAICCMessageSourceParams struct {
+	ID          string      `db:"id" json:"id"`
+	MessageID   string      `db:"message_id" json:"message_id"`
+	SourceType  string      `db:"source_type" json:"source_type"`
+	Title       null.String `db:"title" json:"title"`
+	Url         null.String `db:"url" json:"url"`
+	Scope       null.String `db:"scope" json:"scope"`
+	ReferenceID null.String `db:"reference_id" json:"reference_id"`
+	Unconfirmed bool        `db:"unconfirmed" json:"unconfirmed"`
+	RetrievedAt time.Time   `db:"retrieved_at" json:"retrieved_at"`
+}
+
+func (q *Queries) CreateAICCMessageSource(ctx context.Context, arg CreateAICCMessageSourceParams) error {
+	_, err := q.db.ExecContext(ctx, createAICCMessageSource,
+		arg.ID,
+		arg.MessageID,
+		arg.SourceType,
+		arg.Title,
+		arg.Url,
+		arg.Scope,
+		arg.ReferenceID,
+		arg.Unconfirmed,
+		arg.RetrievedAt,
+	)
+	return err
+}
+
 const createAICCMessageTask = `-- name: CreateAICCMessageTask :exec
 INSERT INTO aicc_message_tasks (
     id, message_id, session_id, agent_id, org_id, app_id, run_after
@@ -1129,6 +1162,52 @@ func (q *Queries) GetAICCSessionByToken(ctx context.Context, sessionToken string
 	return i, err
 }
 
+const getAICCSessionContext = `-- name: GetAICCSessionContext :one
+SELECT id, session_id, summary, summarized_through_message_id, summary_version, created_at, updated_at
+FROM aicc_session_contexts
+WHERE session_id = ?
+`
+
+func (q *Queries) GetAICCSessionContext(ctx context.Context, sessionID string) (AiccSessionContext, error) {
+	row := q.db.QueryRowContext(ctx, getAICCSessionContext, sessionID)
+	var i AiccSessionContext
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.Summary,
+		&i.SummarizedThroughMessageID,
+		&i.SummaryVersion,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAICCSessionIntent = `-- name: GetAICCSessionIntent :one
+SELECT id, session_id, intent_level, fields_json, confidence_json, evidence_json, analyzer_version, analyzed_message_id, invite_status, created_at, updated_at
+FROM aicc_session_intents
+WHERE session_id = ?
+`
+
+func (q *Queries) GetAICCSessionIntent(ctx context.Context, sessionID string) (AiccSessionIntent, error) {
+	row := q.db.QueryRowContext(ctx, getAICCSessionIntent, sessionID)
+	var i AiccSessionIntent
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.IntentLevel,
+		&i.FieldsJson,
+		&i.ConfidenceJson,
+		&i.EvidenceJson,
+		&i.AnalyzerVersion,
+		&i.AnalyzedMessageID,
+		&i.InviteStatus,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getActiveAICCBlockedVisitor = `-- name: GetActiveAICCBlockedVisitor :one
 SELECT id, agent_id, org_id, visitor_hash, reason, expires_at, created_at, updated_at
 FROM aicc_blocked_visitors
@@ -1297,6 +1376,56 @@ func (q *Queries) ListAICCAgentsByOrg(ctx context.Context, arg ListAICCAgentsByO
 	return items, nil
 }
 
+const listAICCAnonymousIntentCandidates = `-- name: ListAICCAnonymousIntentCandidates :many
+SELECT i.id, i.session_id, i.intent_level, i.fields_json, i.confidence_json, i.evidence_json, i.analyzer_version, i.analyzed_message_id, i.invite_status, i.created_at, i.updated_at
+FROM aicc_session_intents i
+JOIN aicc_sessions s ON s.id = i.session_id
+WHERE s.org_id = ?
+  AND i.intent_level = 'high'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM aicc_lead_values v
+      WHERE v.session_id = i.session_id AND v.lead_id IS NOT NULL
+  )
+ORDER BY i.created_at ASC, i.id ASC
+`
+
+// 已关联正式线索的会话不再作为匿名候选，避免后台对同一客户出现两份待跟进记录。
+func (q *Queries) ListAICCAnonymousIntentCandidates(ctx context.Context, orgID string) ([]AiccSessionIntent, error) {
+	rows, err := q.db.QueryContext(ctx, listAICCAnonymousIntentCandidates, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AiccSessionIntent{}
+	for rows.Next() {
+		var i AiccSessionIntent
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.IntentLevel,
+			&i.FieldsJson,
+			&i.ConfidenceJson,
+			&i.EvidenceJson,
+			&i.AnalyzerVersion,
+			&i.AnalyzedMessageID,
+			&i.InviteStatus,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAICCBlockedVisitorsByAgent = `-- name: ListAICCBlockedVisitorsByAgent :many
 SELECT id, agent_id, org_id, visitor_hash, reason, expires_at, created_at, updated_at
 FROM aicc_blocked_visitors
@@ -1329,6 +1458,54 @@ func (q *Queries) ListAICCBlockedVisitorsByAgent(ctx context.Context, arg ListAI
 			&i.ExpiresAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAICCContextMessages = `-- name: ListAICCContextMessages :many
+SELECT id, session_id, agent_id, direction, content_type, text_content, image_object_key, image_mime, image_size_bytes, hermes_message_id, is_fallback, is_refusal, error_summary, created_at, client_message_id, reply_to_message_id
+FROM aicc_messages
+WHERE session_id = ?
+ORDER BY created_at ASC, id ASC
+`
+
+// 上下文构建器从稳定升序消息流中截取最近窗口，不能依赖数据库未声明的自然顺序。
+func (q *Queries) ListAICCContextMessages(ctx context.Context, sessionID string) ([]AiccMessage, error) {
+	rows, err := q.db.QueryContext(ctx, listAICCContextMessages, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AiccMessage{}
+	for rows.Next() {
+		var i AiccMessage
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.AgentID,
+			&i.Direction,
+			&i.ContentType,
+			&i.TextContent,
+			&i.ImageObjectKey,
+			&i.ImageMime,
+			&i.ImageSizeBytes,
+			&i.HermesMessageID,
+			&i.IsFallback,
+			&i.IsRefusal,
+			&i.ErrorSummary,
+			&i.CreatedAt,
+			&i.ClientMessageID,
+			&i.ReplyToMessageID,
 		); err != nil {
 			return nil, err
 		}
@@ -1571,6 +1748,47 @@ func (q *Queries) ListAICCLeadsByOrg(ctx context.Context, arg ListAICCLeadsByOrg
 			&i.LatestSessionOrgID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAICCMessageSources = `-- name: ListAICCMessageSources :many
+SELECT id, message_id, source_type, title, url, scope, reference_id, unconfirmed, retrieved_at, created_at
+FROM aicc_message_sources
+WHERE message_id = ?
+ORDER BY created_at ASC, id ASC
+`
+
+func (q *Queries) ListAICCMessageSources(ctx context.Context, messageID string) ([]AiccMessageSource, error) {
+	rows, err := q.db.QueryContext(ctx, listAICCMessageSources, messageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AiccMessageSource{}
+	for rows.Next() {
+		var i AiccMessageSource
+		if err := rows.Scan(
+			&i.ID,
+			&i.MessageID,
+			&i.SourceType,
+			&i.Title,
+			&i.Url,
+			&i.Scope,
+			&i.ReferenceID,
+			&i.Unconfirmed,
+			&i.RetrievedAt,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -2799,6 +3017,79 @@ func (q *Queries) UpsertAICCLeadValue(ctx context.Context, arg UpsertAICCLeadVal
 		arg.FieldID,
 		arg.ValueText,
 		arg.ValueHash,
+	)
+	return err
+}
+
+const upsertAICCSessionContext = `-- name: UpsertAICCSessionContext :exec
+INSERT INTO aicc_session_contexts (
+    id, session_id, summary, summarized_through_message_id, summary_version
+) VALUES (?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+    summary = VALUES(summary),
+    summarized_through_message_id = VALUES(summarized_through_message_id),
+    summary_version = VALUES(summary_version),
+    updated_at = now()
+`
+
+type UpsertAICCSessionContextParams struct {
+	ID                         string      `db:"id" json:"id"`
+	SessionID                  string      `db:"session_id" json:"session_id"`
+	Summary                    string      `db:"summary" json:"summary"`
+	SummarizedThroughMessageID null.String `db:"summarized_through_message_id" json:"summarized_through_message_id"`
+	SummaryVersion             int32       `db:"summary_version" json:"summary_version"`
+}
+
+func (q *Queries) UpsertAICCSessionContext(ctx context.Context, arg UpsertAICCSessionContextParams) error {
+	_, err := q.db.ExecContext(ctx, upsertAICCSessionContext,
+		arg.ID,
+		arg.SessionID,
+		arg.Summary,
+		arg.SummarizedThroughMessageID,
+		arg.SummaryVersion,
+	)
+	return err
+}
+
+const upsertAICCSessionIntent = `-- name: UpsertAICCSessionIntent :exec
+INSERT INTO aicc_session_intents (
+    id, session_id, intent_level, fields_json, confidence_json, evidence_json,
+    analyzer_version, analyzed_message_id, invite_status
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+    intent_level = VALUES(intent_level),
+    fields_json = VALUES(fields_json),
+    confidence_json = VALUES(confidence_json),
+    evidence_json = VALUES(evidence_json),
+    analyzer_version = VALUES(analyzer_version),
+    analyzed_message_id = VALUES(analyzed_message_id),
+    invite_status = VALUES(invite_status),
+    updated_at = now()
+`
+
+type UpsertAICCSessionIntentParams struct {
+	ID                string      `db:"id" json:"id"`
+	SessionID         string      `db:"session_id" json:"session_id"`
+	IntentLevel       string      `db:"intent_level" json:"intent_level"`
+	FieldsJson        []byte      `db:"fields_json" json:"fields_json"`
+	ConfidenceJson    []byte      `db:"confidence_json" json:"confidence_json"`
+	EvidenceJson      []byte      `db:"evidence_json" json:"evidence_json"`
+	AnalyzerVersion   string      `db:"analyzer_version" json:"analyzer_version"`
+	AnalyzedMessageID null.String `db:"analyzed_message_id" json:"analyzed_message_id"`
+	InviteStatus      string      `db:"invite_status" json:"invite_status"`
+}
+
+func (q *Queries) UpsertAICCSessionIntent(ctx context.Context, arg UpsertAICCSessionIntentParams) error {
+	_, err := q.db.ExecContext(ctx, upsertAICCSessionIntent,
+		arg.ID,
+		arg.SessionID,
+		arg.IntentLevel,
+		arg.FieldsJson,
+		arg.ConfidenceJson,
+		arg.EvidenceJson,
+		arg.AnalyzerVersion,
+		arg.AnalyzedMessageID,
+		arg.InviteStatus,
 	)
 	return err
 }

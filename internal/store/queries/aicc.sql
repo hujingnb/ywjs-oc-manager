@@ -348,6 +348,73 @@ FROM aicc_messages
 WHERE session_id = ?
 ORDER BY created_at ASC, id ASC;
 
+-- name: GetAICCSessionContext :one
+SELECT *
+FROM aicc_session_contexts
+WHERE session_id = ?;
+
+-- name: UpsertAICCSessionContext :exec
+INSERT INTO aicc_session_contexts (
+    id, session_id, summary, summarized_through_message_id, summary_version
+) VALUES (?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+    summary = VALUES(summary),
+    summarized_through_message_id = VALUES(summarized_through_message_id),
+    summary_version = VALUES(summary_version),
+    updated_at = now();
+
+-- name: ListAICCContextMessages :many
+-- 上下文构建器从稳定升序消息流中截取最近窗口，不能依赖数据库未声明的自然顺序。
+SELECT *
+FROM aicc_messages
+WHERE session_id = ?
+ORDER BY created_at ASC, id ASC;
+
+-- name: CreateAICCMessageSource :exec
+INSERT INTO aicc_message_sources (
+    id, message_id, source_type, title, url, scope, reference_id, unconfirmed, retrieved_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: ListAICCMessageSources :many
+SELECT *
+FROM aicc_message_sources
+WHERE message_id = ?
+ORDER BY created_at ASC, id ASC;
+
+-- name: GetAICCSessionIntent :one
+SELECT *
+FROM aicc_session_intents
+WHERE session_id = ?;
+
+-- name: UpsertAICCSessionIntent :exec
+INSERT INTO aicc_session_intents (
+    id, session_id, intent_level, fields_json, confidence_json, evidence_json,
+    analyzer_version, analyzed_message_id, invite_status
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+    intent_level = VALUES(intent_level),
+    fields_json = VALUES(fields_json),
+    confidence_json = VALUES(confidence_json),
+    evidence_json = VALUES(evidence_json),
+    analyzer_version = VALUES(analyzer_version),
+    analyzed_message_id = VALUES(analyzed_message_id),
+    invite_status = VALUES(invite_status),
+    updated_at = now();
+
+-- name: ListAICCAnonymousIntentCandidates :many
+-- 已关联正式线索的会话不再作为匿名候选，避免后台对同一客户出现两份待跟进记录。
+SELECT i.*
+FROM aicc_session_intents i
+JOIN aicc_sessions s ON s.id = i.session_id
+WHERE s.org_id = ?
+  AND i.intent_level = 'high'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM aicc_lead_values v
+      WHERE v.session_id = i.session_id AND v.lead_id IS NOT NULL
+  )
+ORDER BY i.created_at ASC, i.id ASC;
+
 -- name: ListAICCLeadFieldsByAgent :many
 SELECT *
 FROM aicc_lead_fields

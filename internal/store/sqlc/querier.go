@@ -76,6 +76,7 @@ type Querier interface {
 	CreateAICCAgent(ctx context.Context, arg CreateAICCAgentParams) error
 	CreateAICCImage(ctx context.Context, arg CreateAICCImageParams) error
 	CreateAICCMessage(ctx context.Context, arg CreateAICCMessageParams) error
+	CreateAICCMessageSource(ctx context.Context, arg CreateAICCMessageSourceParams) error
 	CreateAICCMessageTask(ctx context.Context, arg CreateAICCMessageTaskParams) error
 	CreateAICCSession(ctx context.Context, arg CreateAICCSessionParams) error
 	// k8s 模型下 app 对应 Deployment，pod 落点由调度器决定，不再写 runtime_node_id。
@@ -144,6 +145,8 @@ type Querier interface {
 	GetAICCMessageTaskByMessageID(ctx context.Context, messageID string) (AiccMessageTask, error)
 	GetAICCSession(ctx context.Context, id string) (AiccSession, error)
 	GetAICCSessionByToken(ctx context.Context, sessionToken string) (AiccSession, error)
+	GetAICCSessionContext(ctx context.Context, sessionID string) (AiccSessionContext, error)
+	GetAICCSessionIntent(ctx context.Context, sessionID string) (AiccSessionIntent, error)
 	GetActiveAICCBlockedVisitor(ctx context.Context, arg GetActiveAICCBlockedVisitorParams) (AiccBlockedVisitor, error)
 	GetActiveAppByOwner(ctx context.Context, ownerUserID string) (App, error)
 	GetApp(ctx context.Context, id string) (App, error)
@@ -213,12 +216,17 @@ type Querier interface {
 	LeaseAICCMessageTask(ctx context.Context, arg LeaseAICCMessageTaskParams) (int64, error)
 	ListAICCAgentKnowledge(ctx context.Context, agentID string) ([]AiccAgentKnowledge, error)
 	ListAICCAgentsByOrg(ctx context.Context, arg ListAICCAgentsByOrgParams) ([]AiccAgent, error)
+	// 已关联正式线索的会话不再作为匿名候选，避免后台对同一客户出现两份待跟进记录。
+	ListAICCAnonymousIntentCandidates(ctx context.Context, orgID string) ([]AiccSessionIntent, error)
 	ListAICCBlockedVisitorsByAgent(ctx context.Context, arg ListAICCBlockedVisitorsByAgentParams) ([]AiccBlockedVisitor, error)
+	// 上下文构建器从稳定升序消息流中截取最近窗口，不能依赖数据库未声明的自然顺序。
+	ListAICCContextMessages(ctx context.Context, sessionID string) ([]AiccMessage, error)
 	ListAICCImageObjectKeysBySession(ctx context.Context, sessionID string) ([]string, error)
 	ListAICCLeadFieldsByAgent(ctx context.Context, agentID string) ([]AiccLeadField, error)
 	ListAICCLeadValuesByLead(ctx context.Context, arg ListAICCLeadValuesByLeadParams) ([]ListAICCLeadValuesByLeadRow, error)
 	ListAICCLeadValuesBySession(ctx context.Context, sessionID string) ([]ListAICCLeadValuesBySessionRow, error)
 	ListAICCLeadsByOrg(ctx context.Context, arg ListAICCLeadsByOrgParams) ([]AiccLead, error)
+	ListAICCMessageSources(ctx context.Context, messageID string) ([]AiccMessageSource, error)
 	ListAICCMessagesBySession(ctx context.Context, sessionID string) ([]AiccMessage, error)
 	ListAICCRegionsInRange(ctx context.Context, arg ListAICCRegionsInRangeParams) ([]ListAICCRegionsInRangeRow, error)
 	ListAICCSessionTrendByDay(ctx context.Context, arg ListAICCSessionTrendByDayParams) ([]ListAICCSessionTrendByDayRow, error)
@@ -475,6 +483,8 @@ type Querier interface {
 	UpsertAICCLead(ctx context.Context, arg UpsertAICCLeadParams) error
 	UpsertAICCLeadField(ctx context.Context, arg UpsertAICCLeadFieldParams) error
 	UpsertAICCLeadValue(ctx context.Context, arg UpsertAICCLeadValueParams) error
+	UpsertAICCSessionContext(ctx context.Context, arg UpsertAICCSessionContextParams) error
+	UpsertAICCSessionIntent(ctx context.Context, arg UpsertAICCSessionIntentParams) error
 	// 飞书无预建绑定行，BeginAuth 时 create-on-demand（已存在则忽略）。
 	// app_active_key 是 VIRTUAL 生成列（非 deleted 行 = app_id），不能显式赋值，
 	// ON DUPLICATE KEY 命中唯一约束 (app_active_key, channel_type) 时做 no-op。
