@@ -25,6 +25,14 @@ var ErrAICCResponsePolicy = errors.New("aicc response policy violation")
 // “价格是多少”并不是模型作出的价格声明，不能因此误触发固定兜底。
 var aiccEnterprisePriceClaimPattern = regexp.MustCompile(`(?i)(价格|报价|price).{0,24}(\d|元|人民币|rmb|usd|美元|每月|/month)|(\d|元|人民币|rmb|usd|美元|每月|/month).{0,24}(价格|报价|price)`)
 
+// aiccOperationCompletedPatterns 覆盖常见的完成式、被动式和替代说法。匹配目标是
+// “已完成某项外部操作”的断言，不能因为客服复述访客的操作诉求而误判。
+var aiccOperationCompletedPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?:已|已经|成功)(?:帮|替)?(?:您|你)?.{0,12}(?:创建|新建|修改|更新|删除|执行|写入|部署|发布|启动|开通|重置)`),
+	regexp.MustCompile(`(?:订单|网站|文件|服务|账号|密码).{0,12}(?:已|已经|成功).{0,6}(?:创建|新建|修改|更新|删除|执行|写入|部署|发布|启动|开通|重置|完成|上线)`),
+	regexp.MustCompile(`(?:部署|发布).{0,6}(?:已|已经|成功).{0,6}(?:完成|上线)`),
+}
+
 // AICCResponseToolAudit 是 manager 从当前轮受信任工具执行记录构造的引用白名单。
 // key 是工具返回的稳定 reference_id，value 是该记录允许回显的来源事实。
 type AICCResponseToolAudit map[string]AICCResponseSource
@@ -146,11 +154,16 @@ func aiccResponseClaimsEnterprisePrice(text string) bool {
 }
 
 func aiccResponseClaimsOperationCompleted(text string) bool {
+	for _, pattern := range aiccOperationCompletedPatterns {
+		if pattern.MatchString(text) {
+			return true
+		}
+	}
 	for _, phrase := range []string{
 		"已为您创建", "已为你创建", "已为您修改", "已为你修改", "已为您删除", "已为你删除", "已为您执行", "已为你执行",
 		"已为您写入", "已为你写入", "已为您部署", "已为你部署", "已为您启动", "已为你启动",
 		"已经创建", "已经修改", "已经删除", "已经执行", "已经写入", "已经部署", "已经启动",
-		"创建网站并启动服务", "已创建网站并启动服务", "文件写好了", "文件已经写好", "服务已启动", "网站已部署",
+		"创建网站并启动服务", "已创建网站并启动服务", "文件写好了", "文件已经写好", "服务已启动", "网站已部署", "替你把服务跑起来",
 		"已为您开通账号", "已为你开通账号", "账号已开通", "已开通账号",
 		"已为您重置密码", "已为你重置密码", "密码已重置", "已经重置密码",
 		"already created", "already updated", "already deleted", "already deployed", "service started", "account has been opened", "password has been reset",

@@ -110,20 +110,27 @@ func TestParseAndValidateAICCResponseEnvelopeRejectsEnterpriseNetworkWhenKnowled
 // TestParseAndValidateAICCResponseEnvelopeRejectsChineseOperationalVariants 覆盖常见中文操作完成声称：
 // 客服不能因账号开通或重置密码等表达而伪装完成外部操作。
 func TestParseAndValidateAICCResponseEnvelopeRejectsChineseOperationalVariants(t *testing.T) {
-	for _, text := range []string{
-		"已为您创建订单。",   // 创建操作。
-		"已为你修改配置。",   // 修改操作。
-		"已经删除临时文件。",  // 删除操作。
-		"已为您执行部署命令。", // 执行操作。
-		"文件写好了。",     // 文件写入完成。
-		"网站已部署。",     // 部署完成。
-		"服务已启动。",     // 进程启动完成。
-		"创建网站并启动服务。", // 组合越权操作。
-		"已为您开通账号。",   // 账号开通。
-		"已为你重置密码。",   // 密码重置。
-		"您的密码已重置。",   // 被动语态密码重置。
-	} {
-		_, err := ParseAndValidateAICCResponse(`{"text":"`+text+`","sources":[],"next_action":"none","flags":{}}`, nil)
+	cases := []struct {
+		text string
+	}{
+		{text: "已为您创建订单。"},   // 创建操作。
+		{text: "已为你修改配置。"},   // 修改操作。
+		{text: "已经删除临时文件。"},  // 删除操作。
+		{text: "已为您执行部署命令。"}, // 执行操作。
+		{text: "文件写好了。"},     // 文件写入完成。
+		{text: "网站已部署。"},     // 部署完成。
+		{text: "服务已启动。"},     // 进程启动完成。
+		{text: "创建网站并启动服务。"}, // 组合越权操作。
+		{text: "已为您开通账号。"},   // 账号开通。
+		{text: "已为你重置密码。"},   // 密码重置。
+		{text: "您的密码已重置。"},   // 被动语态密码重置。
+		{text: "已帮创建订单。"},    // 省略受益人的完成式。
+		{text: "订单已成功创建。"},   // 被动完成式。
+		{text: "部署已经完成。"},    // 语序倒置的部署完成式。
+		{text: "替你把服务跑起来。"},  // “跑起来”同义启动表达。
+	}
+	for _, tc := range cases {
+		_, err := ParseAndValidateAICCResponse(`{"text":"`+tc.text+`","sources":[],"next_action":"none","flags":{}}`, nil)
 		require.ErrorIs(t, err, ErrAICCResponsePolicy)
 	}
 }

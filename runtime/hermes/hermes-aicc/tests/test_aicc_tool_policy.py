@@ -118,7 +118,7 @@ def test_knowledge_search_posts_only_question_and_fixed_top_k(monkeypatch: pytes
     monkeypatch.setenv("OC_KB_APP_TOKEN", "app-scoped-token")
     monkeypatch.setattr("aicc_tools.aicc_knowledge_tool.urlopen", fake_urlopen)
 
-	assert search_knowledge("套餐价格") == {"results": [{"content": "answer"}], "aicc_response_sources": []}
+    assert search_knowledge("套餐价格") == {"results": [{"content": "answer"}], "aicc_response_sources": []}
     assert captured["url"] == "http://manager-runtime/api/v1/runtime/knowledge/search"
     assert captured["method"] == "POST"
     assert captured["body"] == {"question": "套餐价格", "top_k": 8}
@@ -129,7 +129,7 @@ def test_knowledge_search_posts_only_question_and_fixed_top_k(monkeypatch: pytes
 def test_knowledge_search_returns_auditable_response_sources(monkeypatch: pytest.MonkeyPatch) -> None:
     class Response:
         def read(self) -> bytes:
-            return b'{"results":[{"scope":"app","document_id":"doc-1","document_name":"企业手册"}]}'
+            return '{"results":[{"scope":"app","document_id":"doc-1","document_name":"企业手册"}]}'.encode("utf-8")
 
         def __enter__(self) -> "Response":
             return self
