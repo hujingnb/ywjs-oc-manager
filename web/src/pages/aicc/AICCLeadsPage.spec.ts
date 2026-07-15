@@ -130,4 +130,14 @@ describe('AICCLeadsPage', () => {
     expect(wrapper.text()).toContain('您好，请问需要哪个版本？')
     expect(wrapper.text()).toContain('联系电话')
   })
+
+  // 场景：未留联系方式的高意向访客仍应作为匿名线索展示，运营可从对话依据回看判断。
+  it('labels a lead without contact values as an anonymous interested visitor', async () => {
+    queryState.leads.data.value = [{
+      id: 'lead-anonymous', latest_session_id: 'session-2', unread: true, values: [], updated_at: '2026-07-11T10:00:00Z',
+    }]
+    const wrapper = mountLeadsPage()
+
+    expect(wrapper.text()).toContain('匿名意向访客')
+  })
 })

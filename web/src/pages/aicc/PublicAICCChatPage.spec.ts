@@ -18,7 +18,7 @@ const apiState = vi.hoisted(() => ({
   fetchSession: vi.fn(),
   consent: vi.fn(),
   submitLeadValues: vi.fn(),
-  submitFeedback: vi.fn(),
+  declineLead: vi.fn(),
   updateResolution: vi.fn(),
   uploadImage: vi.fn(),
   readStoredSession: vi.fn(),
@@ -39,7 +39,7 @@ vi.mock('@/api/hooks/useAICC', () => ({
   fetchAICCPublicMessageStatus: apiState.fetchMessageStatus,
   consentAICCPublicSession: apiState.consent,
   submitAICCPublicLeadValues: apiState.submitLeadValues,
-  submitAICCPublicFeedback: apiState.submitFeedback,
+  declineAICCPublicLeadInvitation: apiState.declineLead,
   updateAICCPublicSessionResolution: apiState.updateResolution,
   uploadAICCPublicImage: apiState.uploadImage,
 }))
@@ -112,7 +112,7 @@ describe('PublicAICCChatPage', () => {
     apiState.fetchSession.mockReset()
     apiState.consent.mockReset()
     apiState.submitLeadValues.mockReset()
-    apiState.submitFeedback.mockReset()
+    apiState.declineLead.mockReset()
     apiState.updateResolution.mockReset()
     apiState.uploadImage.mockReset()
     apiState.readStoredSession.mockReset()
@@ -551,15 +551,58 @@ describe('PublicAICCChatPage', () => {
 
     expect(wrapper.text()).toContain('收到')
     expect(wrapper.find('.feedback-row').exists()).toBe(false)
-    expect(apiState.submitFeedback).not.toHaveBeenCalled()
+    expect(apiState.declineLead).not.toHaveBeenCalled()
   })
 
-  // 场景：访客点击顶部“已解决/未解决”时，只标记当前会话，不依赖任何 message id。
-  it('marks the current session resolved or unresolved from header actions', async () => {
-    apiState.readStoredSession.mockReturnValue('stored-session-token')
+  // 场景：高意向回复才展示留资邀请；访客拒绝后仍可继续匿名咨询，且不再阻塞输入框。
+  it('shows a server-driven lead invitation with a decline path', async () => {
+    apiState.fetchConfig.mockResolvedValue({
+      name: '售前接待', greeting: '您好', privacy_mode: 'notice', lead_fields: [
+        { field_key: 'phone', label: '联系电话', field_type: 'phone', required: true },
+      ],
+    })
+    apiState.sendMessage.mockResolvedValue({ message_id: 'message-1', status: 'completed', text: '可以为您安排演示', next_action: 'offer_lead' })
     const wrapper = mountPublicChat()
     await flushPromises()
 
+    expect(wrapper.find('textarea').attributes('disabled')).toBeUndefined()
+    await wrapper.find('textarea').setValue('想预约演示')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('暂不留资，继续咨询')
+    await wrapper.findAll('button').find(button => button.text().includes('暂不留资'))?.trigger('click')
+    await flushPromises()
+    expect(apiState.declineLead).toHaveBeenCalledWith('session-token')
+    expect(wrapper.find('.lead-gate').exists()).toBe(false)
+    expect(wrapper.find('textarea').attributes('disabled')).toBeUndefined()
+  })
+
+  // 场景：公开网络补充内容必须贴上“未经企业确认”标签，避免访客误以为是企业承诺。
+  it('labels unconfirmed web sources on an assistant reply', async () => {
+    apiState.sendMessage.mockResolvedValue({
+      message_id: 'message-1', status: 'completed', text: '公开资料显示',
+      sources: [{ reference_id: 'web-1', title: '公开网页', unconfirmed: true }],
+    })
+    const wrapper = mountPublicChat()
+    await flushPromises()
+    await wrapper.find('textarea').setValue('查询')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('公开网页')
+    expect(wrapper.text()).toContain('公开网络，未经企业确认')
+  })
+
+  // 场景：服务端要求确认解决状态时，访客可从会话级卡片标记结果或继续咨询。
+  it('marks resolution from the server-driven resolution card and can dismiss it', async () => {
+    apiState.sendMessage.mockResolvedValue({ message_id: 'message-1', status: 'completed', text: '已回答', next_action: 'ask_resolution' })
+    const wrapper = mountPublicChat()
+    await flushPromises()
+
+    await wrapper.find('textarea').setValue('问题')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
     expect(wrapper.text()).toContain('已解决')
     expect(wrapper.text()).toContain('未解决')
 
@@ -567,16 +610,9 @@ describe('PublicAICCChatPage', () => {
     await flushPromises()
     await nextTick()
 
-    expect(apiState.updateResolution).toHaveBeenLastCalledWith('stored-session-token', 'unresolved')
-    expect(apiState.submitFeedback).not.toHaveBeenCalled()
-    expect(wrapper.findAll('button').find(button => button.text().includes('未解决'))?.attributes('disabled')).toBeDefined()
-
-    await wrapper.findAll('button').find(button => button.text().includes('已解决'))?.trigger('click')
-    await flushPromises()
-    await nextTick()
-
-    expect(apiState.updateResolution).toHaveBeenLastCalledWith('stored-session-token', 'resolved')
-    expect(apiState.submitFeedback).not.toHaveBeenCalled()
+    expect(apiState.updateResolution).toHaveBeenLastCalledWith('session-token', 'unresolved')
+    expect(apiState.declineLead).not.toHaveBeenCalled()
+    expect(wrapper.find('.resolution-card').exists()).toBe(false)
   })
 
   // 场景：访客主动新建对话时只清除当前会话，下一次发送才懒创建新 session，避免空会话。

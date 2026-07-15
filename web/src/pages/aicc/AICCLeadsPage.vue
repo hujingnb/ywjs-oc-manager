@@ -25,7 +25,7 @@
       <div v-else class="lead-list">
         <article v-for="lead in leads" :key="lead.id" class="lead-row">
           <div class="lead-main">
-            <strong>{{ lead.display_name || t('aicc.leads.unnamedVisitor') }}</strong>
+            <strong>{{ lead.display_name || t('aicc.leads.anonymousIntentLead') }}</strong>
             <small>{{ t('aicc.leads.sessionPrefix', { id: formatShortId(lead.latest_session_id) }) }} · {{ formatDate(lead.updated_at || lead.created_at) }}</small>
             <div v-if="lead.values?.length" class="lead-values">
               <span v-for="value in lead.values" :key="`${lead.id}-${value.field_key}`">
@@ -89,6 +89,12 @@
               <n-tag v-if="message.is_fallback" size="small" type="warning" :bordered="false">{{ t('aicc.leads.fallbackTag') }}</n-tag>
               <n-tag v-if="message.is_refusal" size="small" type="warning" :bordered="false">{{ t('aicc.leads.refusalTag') }}</n-tag>
               <n-tag v-if="message.error_summary" size="small" type="error" :bordered="false">{{ message.error_summary }}</n-tag>
+              <div v-if="message.sources?.length" class="message-sources">
+                <span v-for="source in message.sources" :key="source.reference_id || source.url || source.title">
+                  {{ source.title || t('aicc.leads.sourceLabel') }}
+                  <em v-if="source.unconfirmed">{{ t('aicc.leads.unconfirmedNetwork') }}</em>
+                </span>
+              </div>
             </article>
           </div>
         </n-spin>
@@ -261,6 +267,26 @@ function roleLabel(role?: string) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.message-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.message-sources span {
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+  background: var(--color-surface-muted);
+  font-size: 12px;
+}
+
+.message-sources em {
+  margin-left: 4px;
+  color: var(--color-warning-text);
+  font-style: normal;
 }
 
 .lead-main small,

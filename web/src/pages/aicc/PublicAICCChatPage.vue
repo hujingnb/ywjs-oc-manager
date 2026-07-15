@@ -13,14 +13,6 @@
           <n-tag :type="sessionToken ? 'success' : 'default'" :bordered="false">
             {{ sessionToken ? t('aicc.publicChat.online') : t('aicc.publicChat.ready') }}
           </n-tag>
-          <n-button size="small" secondary :type="isResolved ? 'success' : 'default'" :disabled="!sessionToken || isResolved || isSending" :loading="resolutionBusy === 'resolved'" @click="markSessionResolution('resolved')">
-            <template #icon><CheckCircle2 :size="14" /></template>
-            {{ t('aicc.publicChat.resolved') }}
-          </n-button>
-          <n-button size="small" secondary :type="isUnresolved ? 'warning' : 'default'" :disabled="!sessionToken || isUnresolved || isSending" :loading="resolutionBusy === 'unresolved'" @click="markSessionResolution('unresolved')">
-            <template #icon><CircleAlert :size="14" /></template>
-            {{ t('aicc.publicChat.unresolved') }}
-          </n-button>
           <n-button size="small" secondary :disabled="isSending" @click="startNewConversation">
             <template #icon><Plus :size="14" /></template>
             {{ t('aicc.publicChat.newConversation') }}
@@ -36,6 +28,12 @@
         <article v-for="message in messages" :key="message.id" class="message-row" :class="message.role">
           <div class="bubble">
             <p v-if="message.text">{{ message.text }}</p>
+            <div v-if="message.sources?.length" class="source-list">
+              <span v-for="source in message.sources" :key="source.reference_id || source.url || source.title" class="source-label">
+                {{ source.title || t('aicc.publicChat.sourceLabel') }}
+                <em v-if="source.unconfirmed">{{ t('aicc.publicChat.unconfirmedNetwork') }}</em>
+              </span>
+            </div>
             <img v-if="message.imageUrl" :src="message.imageUrl" :alt="t('aicc.publicChat.uploadedImageAlt')" />
             <p v-if="message.status" class="message-status">{{ messageStatusText(message.status, Boolean(message.clientMessageId)) }}</p>
             <n-button v-if="message.status === 'failed' && message.clientMessageId" size="small" secondary @click="retryPendingMessage(message.pendingKey)">
@@ -70,8 +68,19 @@
             />
           </label>
         </div>
-        <n-button type="primary" attr-type="submit" :loading="leadBusy">{{ t('aicc.publicChat.submitLead') }}</n-button>
+        <div class="action-buttons">
+          <n-button type="primary" attr-type="submit" :loading="leadBusy">{{ t('aicc.publicChat.submitLead') }}</n-button>
+          <n-button secondary :disabled="leadBusy" @click="declineLeadInvitation">{{ t('aicc.publicChat.declineLead') }}</n-button>
+        </div>
       </form>
+      <section v-else-if="showResolutionCard" class="resolution-card">
+        <strong>{{ t('aicc.publicChat.resolutionTitle') }}</strong>
+        <div class="action-buttons">
+          <n-button type="primary" :loading="resolutionBusy === 'resolved'" @click="markSessionResolution('resolved')">{{ t('aicc.publicChat.resolved') }}</n-button>
+          <n-button secondary :loading="resolutionBusy === 'unresolved'" @click="markSessionResolution('unresolved')">{{ t('aicc.publicChat.unresolved') }}</n-button>
+          <n-button quaternary @click="hideResolutionCard">{{ t('aicc.publicChat.continueChat') }}</n-button>
+        </div>
+      </section>
       <p v-else-if="showPrivacyNotice" class="privacy-copy">{{ privacyText }}</p>
 
       <form class="composer" @submit.prevent="submitMessage">
@@ -114,7 +123,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { NAlert, NButton, NInput, NTag } from 'naive-ui'
 import {
-  CheckCircle2, CircleAlert, ImagePlus, MessageCircle, Plus, Send, ShieldCheck, X,
+  ImagePlus, MessageCircle, Plus, Send, ShieldCheck, X,
 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
@@ -122,6 +131,7 @@ import {
   consentAICCPublicSession,
   createAICCPublicSession,
   clearAICCPublicStoredSessionToken,
+  declineAICCPublicLeadInvitation,
   fetchAICCPublicConfig,
   fetchAICCPublicMessageStatus,
   fetchAICCPublicSession,
@@ -132,7 +142,7 @@ import {
   uploadAICCPublicImage,
 } from '@/api/hooks/useAICC'
 import type { ApiError } from '@/api/client'
-import type { AICCLeadField, AICCMessage, AICCPublicConfig, AICCPublicMessageResult } from '@/domain/aicc'
+import type { AICCLeadField, AICCMessage, AICCPublicConfig, AICCPublicMessageResult, AICCResponseSource } from '@/domain/aicc'
 import { normalizeAICCPublicChannel } from '@/domain/aicc'
 
 // PublicAICCChatPage 是访客公开客服页，不依赖后台登录态。
@@ -150,6 +160,8 @@ interface ChatMessage {
   clientMessageId?: string
   // pendingKey 是浏览器内存中的任务索引；旧消息没有幂等键时以消息 ID 继续轮询。
   pendingKey?: string
+  nextAction?: string
+  sources?: AICCResponseSource[]
 }
 
 interface PendingImage {
@@ -189,6 +201,7 @@ const hasConsent = ref(false)
 const leadValues = ref<Record<string, string>>({})
 const pendingImage = ref<PendingImage | null>(null)
 const resolutionStatus = ref<'resolved' | 'unresolved' | 'unknown' | string>('unknown')
+const resolutionCardDismissed = ref(false)
 const messageListEl = ref<HTMLElement | null>(null)
 const fileInputEl = ref<HTMLInputElement | null>(null)
 const pendingPublicMessages = new Map<string, PendingPublicMessage>()
@@ -203,13 +216,13 @@ const aiccPublicMaxPollSeconds = 30
 const privacyText = computed(() => config.value?.privacy_text || t('aicc.publicChat.defaultPrivacyText'))
 const needsConsent = computed(() => config.value?.privacy_mode === 'consent_required' && !hasConsent.value)
 const leadFields = computed<AICCLeadField[]>(() => config.value?.lead_fields ?? [])
-const needsLead = computed(() => leadFields.value.some(field => field.required) && !leadComplete.value)
-const showLeadForm = computed(() => leadFields.value.length > 0 && !leadComplete.value && !needsConsent.value)
-const canSend = computed(() => Boolean(config.value) && !needsConsent.value && !needsLead.value && !isSending.value)
+const lastAssistantMessage = computed(() => [...messages.value].reverse().find(message => message.role === 'assistant' && !message.status))
+// 留资只在服务端明确给出 offer_lead 后展示，不能在对话开始前阻塞访客输入。
+const showLeadForm = computed(() => lastAssistantMessage.value?.nextAction === 'offer_lead' && leadFields.value.length > 0 && !leadComplete.value && !needsConsent.value)
+const showResolutionCard = computed(() => lastAssistantMessage.value?.nextAction === 'ask_resolution' && !resolutionCardDismissed.value && !needsConsent.value && resolutionStatus.value === 'unknown')
+const canSend = computed(() => Boolean(config.value) && !needsConsent.value && !isSending.value)
 const canSubmit = computed(() => canSend.value && (draft.value.trim().length > 0 || Boolean(pendingImage.value)))
 const hasVisitorMessage = computed(() => messages.value.some(message => message.role === 'visitor'))
-const isResolved = computed(() => resolutionStatus.value === 'resolved')
-const isUnresolved = computed(() => resolutionStatus.value === 'unresolved')
 // notice 模式的隐私说明只用于进入页面时告知访客，访客开始对话后隐藏以减少输入区占用。
 const showPrivacyNotice = computed(() => Boolean(privacyText.value) && !hasVisitorMessage.value)
 
@@ -373,6 +386,8 @@ function applyPublicMessageStatus(pending: PendingPublicMessage, result: AICCPub
     if (message) {
       message.status = undefined
       message.text = result.text || ''
+      message.nextAction = result.next_action
+      message.sources = result.sources
     }
     stopMessagePolling(pending.key)
     pendingPublicMessages.delete(pending.key)
@@ -465,6 +480,7 @@ function startNewConversation() {
   isSending.value = false
   resolutionBusy.value = ''
   resolutionStatus.value = 'unknown'
+  resolutionCardDismissed.value = false
   deferredLeadValues.value = null
   leadValues.value = Object.fromEntries(leadFields.value.map(field => [field.field_key, '']))
   leadComplete.value = !leadFields.value.some(field => field.required)
@@ -541,6 +557,8 @@ function toChatMessage(message: AICCMessage): ChatMessage | null {
     role: message.direction === 'visitor' ? 'visitor' : 'assistant',
     text: message.text,
     sentAt: message.created_at,
+    nextAction: message.next_action,
+    sources: message.sources,
   }
 }
 
@@ -601,11 +619,30 @@ async function markSessionResolution(status: 'resolved' | 'unresolved') {
   try {
     const result = await updateAICCPublicSessionResolution(sessionToken.value, status)
     resolutionStatus.value = result.resolution_status || status
+    resolutionCardDismissed.value = true
   } catch (err) {
     errorMessage.value = friendlyAICCError(err)
   } finally {
     resolutionBusy.value = ''
   }
+}
+
+// declineLeadInvitation 只在访客明确拒绝时调用，保留匿名继续咨询的能力。
+async function declineLeadInvitation() {
+  if (!sessionToken.value || leadBusy.value) return
+  leadBusy.value = true
+  try {
+    await declineAICCPublicLeadInvitation(sessionToken.value)
+    leadComplete.value = true
+  } catch (err) {
+    errorMessage.value = friendlyAICCError(err)
+  } finally {
+    leadBusy.value = false
+  }
+}
+
+function hideResolutionCard() {
+  resolutionCardDismissed.value = true
 }
 
 function onFileChange(event: Event) {
@@ -773,6 +810,31 @@ async function scrollToBottom() {
   object-fit: cover;
 }
 
+.source-list,
+.action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.source-label {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+  background: var(--color-surface-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-label em {
+  margin-left: 4px;
+  color: var(--color-warning-text);
+  font-style: normal;
+}
+
 .typing {
   color: var(--color-text-secondary);
 }
@@ -798,6 +860,16 @@ async function scrollToBottom() {
   border-radius: 8px;
   color: var(--color-warning-text);
   background: var(--color-warning-soft);
+}
+
+.resolution-card {
+  display: grid;
+  gap: 10px;
+  margin: 0 16px 12px;
+  padding: 12px;
+  border: 1px solid var(--color-brand);
+  border-radius: 8px;
+  background: #ffffff;
 }
 
 .privacy-gate > div {
@@ -913,6 +985,21 @@ async function scrollToBottom() {
   .composer {
     grid-template-columns: 36px minmax(0, 1fr) auto;
     align-items: end;
+  }
+
+  .chat-header {
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .header-actions {
+    max-width: 96px;
+  }
+
+  .message-list,
+  .composer {
+    padding-right: 12px;
+    padding-left: 12px;
   }
 
   .lead-fields {

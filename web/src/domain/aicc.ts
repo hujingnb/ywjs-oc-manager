@@ -210,6 +210,20 @@ export interface AICCPublicMessageResult {
   text?: string
   // retry_wait 状态建议的下一次查询等待秒数。
   retry_after_seconds?: number
+  // 当前助手回复触发的下一步访客交互。
+  next_action?: 'offer_lead' | 'ask_resolution' | string
+  // 公开页允许展示的回答依据。
+  sources?: AICCResponseSource[]
+}
+
+// AICCResponseSource 是公开回复可安全展示的来源标签；未确认网络内容必须显式标注。
+export interface AICCResponseSource {
+  type?: string
+  title?: string
+  url?: string
+  scope?: string
+  reference_id?: string
+  unconfirmed?: boolean
 }
 
 // AICCPublicImageResult 是公开图片上传后返回的文件引用。
@@ -324,6 +338,10 @@ export interface AICCMessage {
   is_refusal?: boolean
   // 运行时错误摘要。
   error_summary?: string
+  // 助手回复触发的下一步访客交互。
+  next_action?: 'offer_lead' | 'ask_resolution' | string
+  // 助手回复的公开可见依据。
+  sources?: AICCResponseSource[]
   // 消息创建时间。
   created_at?: string
 }
