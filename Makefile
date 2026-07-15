@@ -52,8 +52,9 @@ override HERMES_VARIANT_DIR := runtime/hermes/$(HERMES_VARIANT)
 override HERMES_VERSION := $(strip $(shell if [ -f "$(HERMES_VARIANT_DIR)/version.txt" ]; then cat "$(HERMES_VARIANT_DIR)/version.txt"; fi))
 # 普通 Hermes 的产品版本与上游源码 ref 并非始终同号：version.txt 继续决定对外版本和镜像 tag，
 # hermes-ref.txt 仅决定 Docker 构建时检出的上游 Git ref。历史 variant 尚未提供 hermes-ref.txt，
-# 因此仅在文件内容非空时采用独立 ref，否则回退到 HERMES_VERSION，保证旧目录仍可原样构建。
-override HERMES_UPSTREAM_REF := $(or $(strip $(shell if [ -f "$(HERMES_VARIANT_DIR)/hermes-ref.txt" ]; then cat "$(HERMES_VARIANT_DIR)/hermes-ref.txt"; fi)),$(HERMES_VERSION))
+# 因此文件缺失时才回退到 HERMES_VERSION，保证旧目录仍可原样构建；文件存在但内容为空时
+# 必须保留空值并交由版本守卫拒绝，避免元数据配置错误被兼容回退静默掩盖。
+override HERMES_UPSTREAM_REF := $(strip $(shell if [ -f "$(HERMES_VARIANT_DIR)/hermes-ref.txt" ]; then cat "$(HERMES_VARIANT_DIR)/hermes-ref.txt"; else printf '%s' "$(HERMES_VERSION)"; fi))
 HERMES_IMAGE_REPO    ?= $(PROD_REGISTRY)/$(PROD_APP_NS)/oc-manager-aigowork
 # hermes tag 形如 v2026.5.16-2026-05-21-12-00-00-be70e40a，便于从镜像引用直接看出上游版本和源码提交。
 override HERMES_IMAGE := $(HERMES_IMAGE_REPO):$(HERMES_VERSION)-$(IMAGE_TAG)
@@ -132,7 +133,7 @@ help: ## 显示本帮助文档(make 默认 target)
 .guard-hermes-version:
 	@test -f "$(HERMES_VARIANT_DIR)/version.txt" || { echo "Hermes variant 缺少 version.txt: $(HERMES_VARIANT_DIR)/version.txt" >&2; exit 1; }
 	@test -n "$(HERMES_VERSION)" || { echo "Hermes version 不能为空: $(HERMES_VARIANT_DIR)/version.txt" >&2; exit 1; }
-	@test -n "$(HERMES_UPSTREAM_REF)" || { echo "Hermes 上游源码 ref 不能为空: $(HERMES_VARIANT_DIR)/hermes-ref.txt 或 version.txt" >&2; exit 1; }
+	@test -n "$(HERMES_UPSTREAM_REF)" || { echo "Hermes 上游 ref 不能为空: $(HERMES_VARIANT_DIR)/hermes-ref.txt 或 version.txt" >&2; exit 1; }
 	@test "$(HERMES_VARIANT)" = "hermes-$(HERMES_VERSION)" || { echo "Hermes variant 名称必须与 version.txt 对齐: $(HERMES_VARIANT) != hermes-$(HERMES_VERSION)" >&2; exit 1; }
 	@printf '%s\n' "$(HERMES_VERSION)" | grep -Eq '^v[0-9]+[.][0-9]+[.][0-9]+([._-][A-Za-z0-9_.-]+)?$$' || { echo "Hermes version 必须是完整版本号: $(HERMES_VERSION)" >&2; exit 1; }
 	@case "$(HERMES_VERSION)" in \
