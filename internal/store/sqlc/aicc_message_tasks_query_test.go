@@ -56,3 +56,42 @@ func TestAICCConversationIntelligenceQueriesUseStableOrdering(t *testing.T) {
 	assert.Contains(t, candidates, "v.lead_id is not null")
 	assert.Contains(t, candidates, "order by i.created_at asc, i.id asc")
 }
+
+// TestAICCConversationIntelligenceQueriesKeepSessionAndMessageIsolation 验证摘要、原始消息、
+// 意向画像及其来源均以 session 或 message 主键精确过滤，不能在无状态续聊时串入其它访客数据。
+func TestAICCConversationIntelligenceQueriesKeepSessionAndMessageIsolation(t *testing.T) {
+	// 正常路径：指定 session 后才能读取其摘要与已分析意向，查询不应接受空的全局筛选条件。
+	assert.Contains(t, normalizedSQL(getAICCSessionContext), "from aicc_session_contexts where session_id = ?")
+	assert.Contains(t, normalizedSQL(getAICCSessionIntent), "from aicc_session_intents where session_id = ?")
+	// 边界路径：同一时间写入的多条消息仍限定在一个 session，不能因排序窗口混入其它会话。
+	contextMessages := normalizedSQL(listAICCContextMessages)
+	assert.Contains(t, contextMessages, "from aicc_messages where session_id = ?")
+	assert.NotContains(t, contextMessages, "join aicc_sessions")
+	// 每个来源只由对应助手消息读取，调用方无法通过来源查询枚举其它消息的引用。
+	assert.Contains(t, normalizedSQL(listAICCMessageSources), "from aicc_message_sources where message_id = ?")
+}
+
+// TestAICCConversationIntelligenceUpsertsReplaceSingleSessionFact 验证重复分析同一会话时
+// 会更新既有摘要或意向，而不是创建第二行；来源则按单条消息写入多个独立证据。
+func TestAICCConversationIntelligenceUpsertsReplaceSingleSessionFact(t *testing.T) {
+	// 正常路径：摘要写入覆盖正文、处理水位和版本，使下一个新 Pod 使用最新事实恢复上下文。
+	context := normalizedSQL(upsertAICCSessionContext)
+	assert.Contains(t, context, "insert into aicc_session_contexts")
+	assert.Contains(t, context, "on duplicate key update")
+	assert.Contains(t, context, "summary = values(summary)")
+	assert.Contains(t, context, "summarized_through_message_id = values(summarized_through_message_id)")
+	assert.Contains(t, context, "summary_version = values(summary_version)")
+	// 边界路径：意向重新分析必须同步覆盖 JSON 证据、分析版本和邀请状态，不能遗留旧轮次判断。
+	intent := normalizedSQL(upsertAICCSessionIntent)
+	assert.Contains(t, intent, "insert into aicc_session_intents")
+	assert.Contains(t, intent, "fields_json = values(fields_json)")
+	assert.Contains(t, intent, "confidence_json = values(confidence_json)")
+	assert.Contains(t, intent, "evidence_json = values(evidence_json)")
+	assert.Contains(t, intent, "analyzed_message_id = values(analyzed_message_id)")
+	assert.Contains(t, intent, "invite_status = values(invite_status)")
+	// 一条助手消息可以保留多条工具审计来源，因此创建查询不得错误使用 upsert 或遗漏未确认标记。
+	source := normalizedSQL(createAICCMessageSource)
+	assert.Contains(t, source, "insert into aicc_message_sources")
+	assert.Contains(t, source, "source_type, title, url, scope, reference_id, unconfirmed, retrieved_at")
+	assert.NotContains(t, source, "on duplicate key update")
+}

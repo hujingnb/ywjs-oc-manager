@@ -320,7 +320,9 @@ func TestAICCConversationIntelligenceMigration(t *testing.T) {
 	assert.Contains(t, up, "UNIQUE KEY uk_aicc_session_contexts_session (session_id)")
 	assert.Contains(t, up, "summarized_through_message_id CHAR(36) NULL")
 	assert.Contains(t, up, "summary_version INT NOT NULL DEFAULT 1")
+	assert.Contains(t, up, "CONSTRAINT aicc_session_contexts_version_check CHECK (summary_version >= 1)")
 	assert.Contains(t, up, "CONSTRAINT fk_aicc_session_contexts_session FOREIGN KEY (session_id) REFERENCES aicc_sessions(id) ON DELETE CASCADE")
+	assert.Contains(t, up, "CONSTRAINT fk_aicc_session_contexts_message FOREIGN KEY (summarized_through_message_id) REFERENCES aicc_messages(id) ON DELETE CASCADE")
 
 	// 每条助手消息可持久化多个知识或公开网络来源，企业公开网络结果必须另行标记未确认。
 	assert.Contains(t, up, "CREATE TABLE aicc_message_sources")
@@ -339,8 +341,15 @@ func TestAICCConversationIntelligenceMigration(t *testing.T) {
 	downBytes, err := FS.ReadFile("000037_aicc_conversation_intelligence.down.sql")
 	require.NoError(t, err)
 	down := string(downBytes)
-	// 回滚按依赖关系删除，避免 message/source 与 session/context 的外键阻止回退。
-	assert.Less(t, strings.Index(down, "DROP TABLE IF EXISTS aicc_message_sources;"), strings.Index(down, "DROP TABLE IF EXISTS aicc_session_contexts;"))
+	// 回滚明确列出三张表，并按来源、意向、上下文的稳定顺序删除，避免遗漏新增事实表。
+	dropSources := strings.Index(down, "DROP TABLE IF EXISTS aicc_message_sources;")
+	dropIntents := strings.Index(down, "DROP TABLE IF EXISTS aicc_session_intents;")
+	dropContexts := strings.Index(down, "DROP TABLE IF EXISTS aicc_session_contexts;")
+	require.NotEqual(t, -1, dropSources)
+	require.NotEqual(t, -1, dropIntents)
+	require.NotEqual(t, -1, dropContexts)
+	assert.Less(t, dropSources, dropIntents)
+	assert.Less(t, dropIntents, dropContexts)
 }
 
 // TestAICCSettingsMigrationContainsOperationalTables 覆盖 AICC 运营配置表：
