@@ -19,12 +19,6 @@ func secretName(appID string) string            { return "app-" + appID + "-toke
 func hpaName(appID string) string               { return deploymentName(appID) }
 func aiccNetworkPolicyName(appID string) string { return deploymentName(appID) + "-egress" }
 
-const (
-	// aiccWebEgressNoProxy 确保 manager 知识 API 与 new-api 模型网关留在集群内直连，
-	// 不把携带 runtime token 的内部请求转交网页检索代理。
-	aiccWebEgressNoProxy = ".svc,.svc.cluster.local"
-)
-
 // appLabels 是资源 ObjectMeta 与 pod template 的完整 label（含分组维度 part-of）。
 func appLabels(appID string) map[string]string {
 	return map[string]string{"app": appID, "app.kubernetes.io/part-of": "oc-manager"}
@@ -74,9 +68,9 @@ func RenderService(spec AppSpec, namespace string) *corev1.Service {
 	}
 }
 
-// RenderAICCNetworkPolicy 为单个客服 Pod 建立默认拒绝的 egress 边界。Kubernetes NetworkPolicy
-// 无法按 DNS 域名过滤公网 DDGS 等动态后端，因此绝不直接放行 443 或任意 IP：网页检索只能经
-// app=aicc-web-egress-proxy 的集群内代理，该代理必须负责域名 allowlist、请求审计和出口控制。
+// RenderAICCNetworkPolicy 为单个客服 Pod 建立默认拒绝的 egress 边界：仅允许解析 DNS、访问
+// manager-api 和 new-api，以及 Hermes 原生只读网页检索直连 HTTP/HTTPS 公网。函数保留以便
+// 应用删除时可按既有生命周期清理 NetworkPolicy。
 func RenderAICCNetworkPolicy(spec AppSpec, namespace string) *networkingv1.NetworkPolicy {
 	protocolTCP, protocolUDP := corev1.ProtocolTCP, corev1.ProtocolUDP
 	port := func(protocol corev1.Protocol, number int) networkingv1.NetworkPolicyPort {
@@ -105,8 +99,8 @@ func RenderAICCNetworkPolicy(spec AppSpec, namespace string) *networkingv1.Netwo
 				{To: []networkingv1.NetworkPolicyPeer{peer("ocm", "manager-api")}, Ports: []networkingv1.NetworkPolicyPort{port(protocolTCP, 8080)}},
 				// new-api 是模型请求的唯一内网网关，禁止客服 Pod 直连任意外部模型服务。
 				{To: []networkingv1.NetworkPolicyPeer{peer("ocm", "new-api")}, Ports: []networkingv1.NetworkPolicyPort{port(protocolTCP, 3000)}},
-				// 受控网页检索代理是唯一外网出口；代理服务本身须配置允许域名、审计和认证。
-				{To: []networkingv1.NetworkPolicyPeer{peer("ocm", "aicc-web-egress-proxy")}, Ports: []networkingv1.NetworkPolicyPort{port(protocolTCP, 8080)}},
+				// Hermes 原生网页检索只需读取公开网页，直连公网时仅放行 HTTP/HTTPS，其他端口仍默认拒绝。
+				{To: []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: "0.0.0.0/0"}}}, Ports: []networkingv1.NetworkPolicyPort{port(protocolTCP, 80), port(protocolTCP, 443)}},
 			},
 		},
 	}
@@ -218,24 +212,15 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 		// AICC bootstrap 只生成 hermes 消费的输入配置，不恢复标准应用的数据目录。
 		initContainer.VolumeMounts = []corev1.VolumeMount{inputMount}
 	}
-	runtimeProxyEnv := proxyEnv
-	if domain.IsAICCAppType(spec.AppType) {
-		// 忽略通用应用的外部代理配置，客服网页检索只能走控制面明确下发、且被 NetworkPolicy
-		// 选中的受控代理。初始化 worker 会拒绝空 URL，不能退回公网直连。
-		runtimeProxyEnv = []corev1.EnvVar{
-			{Name: "HTTP_PROXY", Value: spec.AICCEgressProxyURL},
-			{Name: "HTTPS_PROXY", Value: spec.AICCEgressProxyURL},
-			{Name: "NO_PROXY", Value: aiccWebEgressNoProxy},
-		}
-	}
-	hermesEnv := append([]corev1.EnvVar{
+	hermesEnv := []corev1.EnvVar{
 		{Name: "HERMES_HOME", Value: "/opt/data"},
 		{Name: "API_SERVER_ENABLED", Value: "true"},
 		{Name: "API_SERVER_KEY", ValueFrom: ctrlTokenEnv.ValueFrom},
-	}, runtimeProxyEnv...)
+	}
 	// 客服容器不接入消息渠道，也不具备发布能力；模型、知识 API 与网页后端配置均由
 	// oc-bootstrap 生成的只读运行时配置提供，避免以环境变量横向暴露通用应用能力。
 	if !domain.IsAICCAppType(spec.AppType) {
+		hermesEnv = append(hermesEnv, proxyEnv...)
 		hermesEnv = append(append(append(hermesEnv, feishuOptionalEnv(spec.AppID)...), workWechatOptionalEnv(spec.AppID)...), dingtalkOptionalEnv(spec.AppID)...)
 	}
 	ocOpsEnv := []corev1.EnvVar{

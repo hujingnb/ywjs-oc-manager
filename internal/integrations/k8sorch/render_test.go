@@ -64,7 +64,6 @@ func TestRenderDeployment(t *testing.T) {
 func TestRenderDeploymentAICC(t *testing.T) {
 	spec := testSpec()
 	spec.AppType = domain.AppTypeAICC
-	spec.AICCEgressProxyURL = "http://aicc:token@aicc-web-egress-proxy.ocm.svc.cluster.local:8080"
 
 	dep := RenderDeployment(spec, "oc-apps")
 	require.Len(t, dep.Spec.Template.Spec.InitContainers, 1, "AICC 必须只渲染一个初始化容器")
@@ -73,6 +72,12 @@ func TestRenderDeploymentAICC(t *testing.T) {
 	assert.NotNil(t, containerByName(dep, "hermes"))
 	assert.NotNil(t, containerByName(dep, "oc-ops"))
 	assert.Nil(t, containerByName(dep, "s3-sync"))
+	hermes := containerByName(dep, "hermes")
+	require.NotNil(t, hermes)
+	// 客服 Hermes 原生只读网页检索直连公网，不携带专属受控出口代理变量。
+	assert.Nil(t, envByName(hermes, "HTTP_PROXY"))
+	assert.Nil(t, envByName(hermes, "HTTPS_PROXY"))
+	assert.Nil(t, envByName(hermes, "NO_PROXY"))
 	// AICC 可以弹性扩容，更新时必须保留旧副本直至新副本就绪，避免客服会话入口中断。
 	require.NotNil(t, dep.Spec.Strategy.RollingUpdate)
 	assert.Equal(t, appsv1.RollingUpdateDeploymentStrategyType, dep.Spec.Strategy.Type)
@@ -109,7 +114,7 @@ func TestRenderDeploymentAICC(t *testing.T) {
 }
 
 // TestRenderAICCNetworkPolicy 验证客服 Pod 默认拒绝出网，仅允许解析 DNS、访问 manager 知识 API、
-// 模型网关，以及经受控审计代理发起网页检索；不得直接放行公网 DDGS 或任意外部地址。
+// 模型网关，以及 Hermes 原生只读网页检索直连 HTTP/HTTPS 公网。
 func TestRenderAICCNetworkPolicy(t *testing.T) {
 	spec := testSpec()
 	spec.AppType = domain.AppTypeAICC
@@ -121,9 +126,9 @@ func TestRenderAICCNetworkPolicy(t *testing.T) {
 	assert.Equal(t, selectorLabels(spec.AppID), policy.Spec.PodSelector.MatchLabels)
 	assert.Equal(t, []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}, policy.Spec.PolicyTypes)
 	require.Len(t, policy.Spec.Egress, 4)
-	for _, rule := range policy.Spec.Egress {
+	for _, rule := range policy.Spec.Egress[:3] {
 		require.Len(t, rule.To, 1)
-		assert.Nil(t, rule.To[0].IPBlock, "AICC 不得以 IPBlock 直接放行任意公网出口")
+		assert.Nil(t, rule.To[0].IPBlock)
 	}
 	assert.Equal(t, "kube-system", policy.Spec.Egress[0].To[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"])
 	assert.Equal(t, "kube-dns", policy.Spec.Egress[0].To[0].PodSelector.MatchLabels["k8s-app"])
@@ -133,17 +138,25 @@ func TestRenderAICCNetworkPolicy(t *testing.T) {
 	assert.Equal(t, int32(8080), policy.Spec.Egress[1].Ports[0].Port.IntVal)
 	assert.Equal(t, "new-api", policy.Spec.Egress[2].To[0].PodSelector.MatchLabels["app"])
 	assert.Equal(t, int32(3000), policy.Spec.Egress[2].Ports[0].Port.IntVal)
-	assert.Equal(t, "aicc-web-egress-proxy", policy.Spec.Egress[3].To[0].PodSelector.MatchLabels["app"])
-	assert.Equal(t, int32(8080), policy.Spec.Egress[3].Ports[0].Port.IntVal)
+	// Hermes 原生只读网页检索可直连 HTTP/HTTPS 公网；不再选择 app=aicc-web-egress-proxy。
+	require.Len(t, policy.Spec.Egress[3].To, 1)
+	require.NotNil(t, policy.Spec.Egress[3].To[0].IPBlock)
+	assert.Equal(t, "0.0.0.0/0", policy.Spec.Egress[3].To[0].IPBlock.CIDR)
+	require.Len(t, policy.Spec.Egress[3].Ports, 2)
+	assert.Equal(t, int32(80), policy.Spec.Egress[3].Ports[0].Port.IntVal)
+	assert.Equal(t, int32(443), policy.Spec.Egress[3].Ports[1].Port.IntVal)
+	assert.Equal(t, corev1.ProtocolTCP, *policy.Spec.Egress[3].Ports[0].Protocol)
+	assert.Equal(t, corev1.ProtocolTCP, *policy.Spec.Egress[3].Ports[1].Protocol)
 	hermes := containerByName(RenderDeployment(spec, "oc-aicc"), "hermes")
 	require.NotNil(t, hermes)
-	httpProxy := envByName(hermes, "HTTP_PROXY")
-	noProxy := envByName(hermes, "NO_PROXY")
-	require.NotNil(t, httpProxy)
-	require.NotNil(t, noProxy)
-	assert.Equal(t, spec.AICCEgressProxyURL, httpProxy.Value)
-	assert.Equal(t, ".svc,.svc.cluster.local", noProxy.Value)
-	assert.Nil(t, envByName(containerByName(RenderDeployment(spec, "oc-aicc"), "oc-ops"), "HTTP_PROXY"))
+	assert.Nil(t, envByName(hermes, "HTTP_PROXY"))
+	assert.Nil(t, envByName(hermes, "HTTPS_PROXY"))
+	assert.Nil(t, envByName(hermes, "NO_PROXY"))
+	ocOps := containerByName(RenderDeployment(spec, "oc-aicc"), "oc-ops")
+	require.NotNil(t, ocOps)
+	assert.Nil(t, envByName(ocOps, "HTTP_PROXY"))
+	assert.Nil(t, envByName(ocOps, "HTTPS_PROXY"))
+	assert.Nil(t, envByName(ocOps, "NO_PROXY"))
 }
 
 // TestRenderAICCHPA 验证未配置外部指标适配器时，AICC HPA 只使用集群已提供的 CPU、内存指标。
