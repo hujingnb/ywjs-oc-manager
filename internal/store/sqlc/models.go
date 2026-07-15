@@ -89,6 +89,16 @@ type AiccImage struct {
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
+type AiccIntentAnalysisRetry struct {
+	SessionID string      `db:"session_id" json:"session_id"`
+	MessageID string      `db:"message_id" json:"message_id"`
+	Attempts  int32       `db:"attempts" json:"attempts"`
+	RunAfter  time.Time   `db:"run_after" json:"run_after"`
+	LastError null.String `db:"last_error" json:"last_error"`
+	CreatedAt time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt time.Time   `db:"updated_at" json:"updated_at"`
+}
+
 type AiccLead struct {
 	ID                 string      `db:"id" json:"id"`
 	OrgID              string      `db:"org_id" json:"org_id"`

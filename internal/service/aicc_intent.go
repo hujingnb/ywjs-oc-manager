@@ -128,6 +128,54 @@ func (d *AICCDispatcher) analyzeAICCIntent(ctx context.Context, task sqlc.AiccMe
 	return aiccIntentDecision{InviteStatus: inviteStatus}, true
 }
 
+// queueAICCIntentRetry 保存独立重试事实；主回复无需等待它成功。相同 session 的主键使重复失败
+// 合并为一条记录，避免 worker 重启或消息重放制造无限重试队列。
+func (d *AICCDispatcher) queueAICCIntentRetry(ctx context.Context, task sqlc.AiccMessageTask, reason string) {
+	store, ok := d.store.(interface {
+		UpsertAICCIntentAnalysisRetry(context.Context, sqlc.UpsertAICCIntentAnalysisRetryParams) error
+	})
+	if !ok {
+		return
+	}
+	_ = store.UpsertAICCIntentAnalysisRetry(ctx, sqlc.UpsertAICCIntentAnalysisRetryParams{SessionID: task.SessionID, MessageID: task.MessageID, LastError: null.StringFrom(reason)})
+}
+
+// RetryPendingAICCIntentAnalysis 由后台循环调用。它不重放客服主回复，只对失败分析执行新 Hermes Turn，
+// 成功后删除重试记录，因此任意次数重复扫描都不会生成第二条访客可见消息。
+func (d *AICCDispatcher) RetryPendingAICCIntentAnalysis(ctx context.Context) error {
+	store, ok := d.store.(interface {
+		ListReadyAICCIntentAnalysisRetries(context.Context, int32) ([]sqlc.ListReadyAICCIntentAnalysisRetriesRow, error)
+		DeleteAICCIntentAnalysisRetry(context.Context, sqlc.DeleteAICCIntentAnalysisRetryParams) error
+		GetAICCMessageByID(context.Context, string) (sqlc.AiccMessage, error)
+		GetAICCSessionContext(context.Context, string) (sqlc.AiccSessionContext, error)
+		ListAICCContextMessages(context.Context, sqlc.ListAICCContextMessagesParams) ([]sqlc.AiccMessage, error)
+	})
+	if !ok {
+		return nil
+	}
+	rows, err := store.ListReadyAICCIntentAnalysisRetries(ctx, 16)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		visitor, err := store.GetAICCMessageByID(ctx, row.MessageID)
+		if err != nil {
+			continue
+		}
+		contextData, err := BuildAICCConversationContext(ctx, store, row.SessionID, "")
+		if err != nil {
+			continue
+		}
+		task := sqlc.AiccMessageTask{MessageID: row.MessageID, SessionID: row.SessionID, AgentID: row.AgentID, OrgID: row.OrgID, AppID: row.AppID}
+		if _, ready := d.analyzeAICCIntent(ctx, task, visitor, contextData); !ready {
+			d.queueAICCIntentRetry(ctx, task, "intent analysis retry failed")
+			continue
+		}
+		_ = store.DeleteAICCIntentAnalysisRetry(ctx, sqlc.DeleteAICCIntentAnalysisRetryParams{SessionID: row.SessionID, MessageID: row.MessageID})
+	}
+	return nil
+}
+
 // aiccSessionVisitorText 从 manager 重建的当前会话上下文中筛出访客消息；助手内容不能作为画像证据。
 func aiccSessionVisitorText(conversation AICCConversationContext, current string) string {
 	parts := make([]string, 0, len(conversation.Messages)+1)

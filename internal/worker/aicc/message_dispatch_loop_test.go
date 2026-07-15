@@ -55,6 +55,17 @@ func TestMessageDispatchLoopTelemetryCoversQueueAndConcurrency(t *testing.T) {
 	assert.Zero(t, observer.Metrics().Inflight)
 }
 
+// TestMessageDispatchLoopRetriesIntentAnalysis 验证意向分析重试使用独立后台路径，不依赖新访客消息入队。
+func TestMessageDispatchLoopRetriesIntentAnalysis(t *testing.T) {
+	queue := redis.NewMemoryQueue()
+	store := &messageTaskStoreStub{}
+	dispatcher := &intentRetryDispatcherStub{}
+	loop := NewMessageDispatchLoop(store, queue, dispatcher, slog.Default())
+
+	require.NoError(t, loop.Tick(context.Background()))
+	assert.Equal(t, 1, dispatcher.retryCalls)
+}
+
 // TestMessageDispatchLoopTelemetrySeparatesBusinessGaugesByHiddenApp 验证同一 manager
 // 副本扫描多个客服应用时，队列深度和在飞调用必须按隐藏 app ID 分开导出，供 HPA selector 使用。
 func TestMessageDispatchLoopTelemetrySeparatesBusinessGaugesByHiddenApp(t *testing.T) {
@@ -444,6 +455,17 @@ type messageTaskDispatcherStub struct {
 	mu           sync.Mutex
 	tasks        []sqlc.AiccMessageTask
 	recoverCalls int64
+}
+
+// intentRetryDispatcherStub 仅实现可选重试接口，证明循环不会要求主消息 dispatcher 改变契约。
+type intentRetryDispatcherStub struct {
+	messageTaskDispatcherStub
+	retryCalls int
+}
+
+func (d *intentRetryDispatcherStub) RetryPendingAICCIntentAnalysis(context.Context) error {
+	d.retryCalls++
+	return nil
 }
 
 func (d *messageTaskDispatcherStub) Dispatch(_ context.Context, task sqlc.AiccMessageTask) error {

@@ -142,6 +142,9 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 	// 意向画像先于主回复生成，manager 据此把本轮可用 next_action 收紧为确定值；
 	// 运行时模型没有权力自行决定是否索取联系方式。
 	intentDecision, intentReady := d.analyzeAICCIntent(chatCtx, task, visitor, conversationContext)
+	if !intentReady {
+		d.queueAICCIntentRetry(ctx, task, "initial intent analysis failed")
+	}
 	turn := AICCInboundTurn{TurnID: task.MessageID, SessionID: task.SessionID, Channel: "web_link", Text: visitor.TextContent.String, OccurredAt: d.now(), Context: conversationContext, Instruction: buildAICCRuntimePrompt(agent, ""), AppID: task.AppID}
 	if intentReady && intentDecision.InviteStatus == "invited" {
 		turn.Instruction += "\n本轮 manager 已允许且仅允许 next_action 使用 offer_lead；其它场景不得使用 offer_lead。"

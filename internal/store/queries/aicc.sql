@@ -408,6 +408,25 @@ UPDATE aicc_session_intents
 SET invite_status = ?, updated_at = now()
 WHERE session_id = ?;
 
+-- name: UpsertAICCIntentAnalysisRetry :exec
+INSERT INTO aicc_intent_analysis_retries (session_id, message_id, attempts, run_after, last_error)
+VALUES (?, ?, 1, DATE_ADD(NOW(6), INTERVAL 1 SECOND), ?)
+ON DUPLICATE KEY UPDATE
+    message_id = VALUES(message_id), attempts = attempts + 1,
+    run_after = DATE_ADD(NOW(6), INTERVAL LEAST(attempts, 5) SECOND), last_error = VALUES(last_error);
+
+-- name: ListReadyAICCIntentAnalysisRetries :many
+SELECT r.session_id, r.message_id, s.agent_id, s.org_id, a.app_id
+FROM aicc_intent_analysis_retries r
+JOIN aicc_sessions s ON s.id = r.session_id
+JOIN aicc_agents a ON a.id = s.agent_id
+WHERE r.run_after <= NOW(6)
+ORDER BY r.run_after ASC, r.session_id ASC
+LIMIT ?;
+
+-- name: DeleteAICCIntentAnalysisRetry :exec
+DELETE FROM aicc_intent_analysis_retries WHERE session_id = ? AND message_id = ?;
+
 -- name: ListAICCAnonymousIntentCandidates :many
 -- 已关联正式线索的会话不再作为匿名候选，避免后台对同一客户出现两份待跟进记录。
 SELECT i.*

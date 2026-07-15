@@ -29,6 +29,11 @@ type messageTaskDispatcher interface {
 	RecoverExpiredLeases(context.Context) (int64, error)
 }
 
+// intentRetryDispatcher 是可选扩展，避免旧测试替身或只处理主消息的实现被迫承担意向分析职责。
+type intentRetryDispatcher interface {
+	RetryPendingAICCIntentAnalysis(context.Context) error
+}
+
 // MessageDispatchLoop 周期扫描并执行 AICC 公开消息的异步任务。
 type MessageDispatchLoop struct {
 	store      messageTaskStore
@@ -98,6 +103,12 @@ func (l *MessageDispatchLoop) Tick(ctx context.Context) error {
 	// 必须经 dispatcher 的恢复入口执行，避免循环绕过其观测与未来的恢复策略。
 	if _, err := l.dispatcher.RecoverExpiredLeases(ctx); err != nil {
 		return fmt.Errorf("回收过期 AICC 消息租约失败: %w", err)
+	}
+	// 意向分析失败有独立持久化队列；它不重放主回复，也不占用公开消息任务的完成语义。
+	if retry, ok := l.dispatcher.(intentRetryDispatcher); ok {
+		if err := retry.RetryPendingAICCIntentAnalysis(ctx); err != nil {
+			return fmt.Errorf("重试 AICC 意向分析失败: %w", err)
+		}
 	}
 	// queue gauge 必须先读取不带 LIMIT 的分组真值；后续 ready 仅用于本轮最多 32 条的实际分派。
 	queueDepthRows, err := l.store.CountReadyAICCMessageTasksByApp(ctx)

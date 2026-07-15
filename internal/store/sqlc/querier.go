@@ -118,6 +118,7 @@ type Querier interface {
 	DeleteAICCAgentIndustryKnowledgeNotAuthorizedByOrg(ctx context.Context, orgID string) error
 	DeleteAICCAgentKnowledgeByAgent(ctx context.Context, agentID string) error
 	DeleteAICCBlockedVisitor(ctx context.Context, arg DeleteAICCBlockedVisitorParams) (int64, error)
+	DeleteAICCIntentAnalysisRetry(ctx context.Context, arg DeleteAICCIntentAnalysisRetryParams) error
 	DeleteAICCSession(ctx context.Context, id string) error
 	DeleteAppSkillByAppAndName(ctx context.Context, arg DeleteAppSkillByAppAndNameParams) error
 	DeleteCustomSkillTargetsByName(ctx context.Context, customSkillName string) error
@@ -293,6 +294,7 @@ type Querier interface {
 	// 全库列出 running 超过给定时刻仍未推进(updated_at 即「进入 running 时刻」,刷新任务状态不变时不写库)的文档,
 	// 供自愈任务 stop_parsing→reparse。只取 running、不取 queued(排队是正常积压,不在此恢复)。
 	ListRAGFlowStuckRunningDocumentsForHeal(ctx context.Context, arg ListRAGFlowStuckRunningDocumentsForHealParams) ([]ListRAGFlowStuckRunningDocumentsForHealRow, error)
+	ListReadyAICCIntentAnalysisRetries(ctx context.Context, limit int32) ([]ListReadyAICCIntentAnalysisRetriesRow, error)
 	// 只返回当前到期且所在会话没有执行中任务的任务；租约时仍会再次原子校验，列表结果不能视作所有权。
 	ListReadyAICCMessageTasks(ctx context.Context, limit int32) ([]AiccMessageTask, error)
 	ListReadyJobs(ctx context.Context, limit int32) ([]Job, error)
@@ -482,6 +484,7 @@ type Querier interface {
 	UpsertAICCAgentSettings(ctx context.Context, arg UpsertAICCAgentSettingsParams) error
 	UpsertAICCBlockedVisitor(ctx context.Context, arg UpsertAICCBlockedVisitorParams) error
 	UpsertAICCFeedback(ctx context.Context, arg UpsertAICCFeedbackParams) error
+	UpsertAICCIntentAnalysisRetry(ctx context.Context, arg UpsertAICCIntentAnalysisRetryParams) error
 	UpsertAICCLead(ctx context.Context, arg UpsertAICCLeadParams) error
 	UpsertAICCLeadField(ctx context.Context, arg UpsertAICCLeadFieldParams) error
 	UpsertAICCLeadValue(ctx context.Context, arg UpsertAICCLeadValueParams) error

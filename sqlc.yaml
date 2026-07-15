@@ -37,6 +37,7 @@ sql:
       - internal/migrations/000035_aicc_message_reply_link.up.sql
       - internal/migrations/000036_aicc_queue_governance.up.sql
       - internal/migrations/000037_aicc_conversation_intelligence.up.sql
+      - internal/migrations/000038_aicc_intent_analysis_retries.up.sql
     queries: internal/store/queries
     gen:
       go:

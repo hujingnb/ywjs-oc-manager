@@ -676,6 +676,20 @@ func (q *Queries) DeleteAICCBlockedVisitor(ctx context.Context, arg DeleteAICCBl
 	return result.RowsAffected()
 }
 
+const deleteAICCIntentAnalysisRetry = `-- name: DeleteAICCIntentAnalysisRetry :exec
+DELETE FROM aicc_intent_analysis_retries WHERE session_id = ? AND message_id = ?
+`
+
+type DeleteAICCIntentAnalysisRetryParams struct {
+	SessionID string `db:"session_id" json:"session_id"`
+	MessageID string `db:"message_id" json:"message_id"`
+}
+
+func (q *Queries) DeleteAICCIntentAnalysisRetry(ctx context.Context, arg DeleteAICCIntentAnalysisRetryParams) error {
+	_, err := q.db.ExecContext(ctx, deleteAICCIntentAnalysisRetry, arg.SessionID, arg.MessageID)
+	return err
+}
+
 const deleteAICCSession = `-- name: DeleteAICCSession :exec
 DELETE FROM aicc_sessions
 WHERE id = ?
@@ -2439,6 +2453,53 @@ func (q *Queries) ListExpiredAICCSessions(ctx context.Context, limit int32) ([]A
 	return items, nil
 }
 
+const listReadyAICCIntentAnalysisRetries = `-- name: ListReadyAICCIntentAnalysisRetries :many
+SELECT r.session_id, r.message_id, s.agent_id, s.org_id, a.app_id
+FROM aicc_intent_analysis_retries r
+JOIN aicc_sessions s ON s.id = r.session_id
+JOIN aicc_agents a ON a.id = s.agent_id
+WHERE r.run_after <= NOW(6)
+ORDER BY r.run_after ASC, r.session_id ASC
+LIMIT ?
+`
+
+type ListReadyAICCIntentAnalysisRetriesRow struct {
+	SessionID string `db:"session_id" json:"session_id"`
+	MessageID string `db:"message_id" json:"message_id"`
+	AgentID   string `db:"agent_id" json:"agent_id"`
+	OrgID     string `db:"org_id" json:"org_id"`
+	AppID     string `db:"app_id" json:"app_id"`
+}
+
+func (q *Queries) ListReadyAICCIntentAnalysisRetries(ctx context.Context, limit int32) ([]ListReadyAICCIntentAnalysisRetriesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listReadyAICCIntentAnalysisRetries, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListReadyAICCIntentAnalysisRetriesRow{}
+	for rows.Next() {
+		var i ListReadyAICCIntentAnalysisRetriesRow
+		if err := rows.Scan(
+			&i.SessionID,
+			&i.MessageID,
+			&i.AgentID,
+			&i.OrgID,
+			&i.AppID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listReadyAICCMessageTasks = `-- name: ListReadyAICCMessageTasks :many
 SELECT task.id, task.message_id, task.session_id, task.agent_id, task.org_id, task.app_id, task.status, task.attempts, task.max_attempts, task.run_after, task.lease_token, task.lease_expires_at, task.last_error, task.processing_session_key, task.created_at, task.updated_at
 FROM aicc_message_tasks AS task
@@ -2943,6 +3004,25 @@ func (q *Queries) UpsertAICCFeedback(ctx context.Context, arg UpsertAICCFeedback
 		arg.MessageID,
 		arg.Helpful,
 	)
+	return err
+}
+
+const upsertAICCIntentAnalysisRetry = `-- name: UpsertAICCIntentAnalysisRetry :exec
+INSERT INTO aicc_intent_analysis_retries (session_id, message_id, attempts, run_after, last_error)
+VALUES (?, ?, 1, DATE_ADD(NOW(6), INTERVAL 1 SECOND), ?)
+ON DUPLICATE KEY UPDATE
+    message_id = VALUES(message_id), attempts = attempts + 1,
+    run_after = DATE_ADD(NOW(6), INTERVAL LEAST(attempts, 5) SECOND), last_error = VALUES(last_error)
+`
+
+type UpsertAICCIntentAnalysisRetryParams struct {
+	SessionID string      `db:"session_id" json:"session_id"`
+	MessageID string      `db:"message_id" json:"message_id"`
+	LastError null.String `db:"last_error" json:"last_error"`
+}
+
+func (q *Queries) UpsertAICCIntentAnalysisRetry(ctx context.Context, arg UpsertAICCIntentAnalysisRetryParams) error {
+	_, err := q.db.ExecContext(ctx, upsertAICCIntentAnalysisRetry, arg.SessionID, arg.MessageID, arg.LastError)
 	return err
 }
 
