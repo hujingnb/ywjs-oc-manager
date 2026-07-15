@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { clearLoginState, createStartedAICCConversationFixture, forceZh, openAICCConsole, sendPublicAICCMessage, setLocalAICCIntentFailureOnce } from './aicc/helpers'
+import { clearLoginState, countAICCIntentAnalysisRetries, createStartedAICCConversationFixture, forceZh, openAICCConsole, sendPublicAICCMessage, setLocalAICCIntentFailureOnce } from './aicc/helpers'
 import { loadE2EFixture, loginAs } from './fixtures'
 
 test.setTimeout(600_000)
@@ -94,8 +94,16 @@ test.describe('AICC 客服意向与会话状态', () => {
       const agent = await createStartedAICCConversationFixture(page, '意向重试客服')
       await page.goto(`/aicc/${agent.publicToken}`)
       await sendPublicAICCMessage(page, '我们准备采购 30 个席位，请安排演示。')
-      // 首轮分析失败仍应正常回答；下一轮在 worker 恢复后只能展示一个首次邀约。
+      const sessionToken = await page.evaluate(token => window.localStorage.getItem(`aicc:session:${token}:web_link`), agent.publicToken)
+      expect(sessionToken).toBeTruthy()
+      // 首轮一次性失败必须写入重试事实，且不能在主回复中提前展示邀约。
+      await expect.poll(() => countAICCIntentAnalysisRetries(sessionToken!), { timeout: 10_000 }).toBe(1)
+      await expect(page.getByRole('button', { name: '暂不留资' })).toHaveCount(0)
+      // 下一轮由真实分析恢复；重试事实被清理且只展示一个首次邀约。
       await sendPublicAICCMessage(page, '请补充一下实施周期。')
+      await expect.poll(() => countAICCIntentAnalysisRetries(sessionToken!), { timeout: 30_000 }).toBe(0)
+      await expect(page.getByRole('button', { name: '暂不留资' })).toHaveCount(1)
+      await sendPublicAICCMessage(page, '我们还需要了解交付方式。')
       await expect(page.getByRole('button', { name: '暂不留资' })).toHaveCount(1)
     } finally {
       setLocalAICCIntentFailureOnce(false)
@@ -120,10 +128,20 @@ test.describe('AICC 客服意向与会话状态', () => {
     await pageB.evaluate(([key, value]) => window.localStorage.setItem(key, value), [`aicc:session:${agent.publicToken}:web_link`, token!])
     await pageB.reload()
     try {
+      // 两个标签必须先各自恢复同一张留资卡，避免把“第二个标签尚未恢复”误判为并发去重成功。
+      await expect(pageA.getByPlaceholder('联系电话')).toBeVisible()
+      await expect(pageB.getByPlaceholder('联系电话')).toBeVisible()
+      const submittedA = pageA.waitForResponse(response => response.url().includes('/lead-values') && response.request().method() === 'POST')
+      const submittedB = pageB.waitForResponse(response => response.url().includes('/lead-values') && response.request().method() === 'POST')
       await Promise.all([
         pageA.getByPlaceholder('联系电话').fill('13800000000').then(() => pageA.getByRole('button', { name: '提交信息' }).click()),
         pageB.getByPlaceholder('联系电话').fill('13800000000').then(() => pageB.getByRole('button', { name: '提交信息' }).click()),
       ])
+      const [responseA, responseB] = await Promise.all([submittedA, submittedB])
+      expect(responseA.ok()).toBeTruthy()
+      expect(responseB.ok()).toBeTruthy()
+      await expect(pageA.getByPlaceholder('联系电话')).toHaveCount(0)
+      await expect(pageB.getByPlaceholder('联系电话')).toHaveCount(0)
       await clearLoginState(setup)
       await loginAs(setup, 'org_admin', loadE2EFixture(), 'zh')
       await openAICCConsole(setup)

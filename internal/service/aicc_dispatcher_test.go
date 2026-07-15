@@ -20,6 +20,7 @@ import (
 type aiccDispatcherStoreFake struct {
 	task            sqlc.AiccMessageTask
 	visitor         sqlc.AiccMessage
+	session         sqlc.AiccSession
 	agent           sqlc.AiccAgent
 	contextRow      sqlc.AiccSessionContext
 	contextMessages []sqlc.AiccMessage
@@ -54,6 +55,9 @@ type aiccDispatcherStoreFake struct {
 
 func (s *aiccDispatcherStoreFake) GetAICCMessageByID(context.Context, string) (sqlc.AiccMessage, error) {
 	return s.visitor, nil
+}
+func (s *aiccDispatcherStoreFake) GetAICCSession(context.Context, string) (sqlc.AiccSession, error) {
+	return s.session, nil
 }
 func (s *aiccDispatcherStoreFake) GetAICCAgent(context.Context, string) (sqlc.AiccAgent, error) {
 	return s.agent, nil
@@ -335,6 +339,8 @@ func TestAICCDispatcherLeaseUsesDatabaseClock(t *testing.T) {
 // 每轮必须以任务 MessageID 标识，并在租约内从 manager 数据库装配摘要、历史和当前访客原文。
 func TestAICCDispatcherBuildsTurnFromDatabaseContext(t *testing.T) {
 	s := newAICCDispatcherStoreFake()
+	// 场景：网页挂件会话的持久化渠道必须原样进入 runtime Turn，不能回退为公开链接渠道。
+	s.session.Channel = "web_widget"
 	s.contextRow = sqlc.AiccSessionContext{ID: "context", SessionID: "session", Summary: "已咨询企业版"}
 	s.contextMessages = []sqlc.AiccMessage{
 		// 历史访客消息必须作为普通上下文数据传入。
@@ -348,6 +354,7 @@ func TestAICCDispatcherBuildsTurnFromDatabaseContext(t *testing.T) {
 	assert.Equal(t, "session", chat.turn.SessionID)
 	assert.Equal(t, "价格", chat.turn.Text)
 	assert.Equal(t, "已咨询企业版", chat.turn.Context.Summary)
+	assert.Equal(t, "web_widget", chat.turn.Channel)
 	require.Len(t, chat.turn.Context.Messages, 1)
 	assert.Equal(t, "之前的问题", chat.turn.Context.Messages[0].Text)
 }

@@ -50,6 +50,17 @@ export function assertAICCSessionChannel(sessionToken: string, expectedChannel: 
   if (channel !== expectedChannel) throw new Error(`AICC session 渠道应为 ${expectedChannel}，实际为 ${channel || '(空)'}`)
 }
 
+// countAICCIntentAnalysisRetries 读取当前 session 的重试事实，用于验证一次失败确实持久化、恢复后又被清理。
+export function countAICCIntentAnalysisRetries(sessionToken: string): number {
+  assertLocalK3DContext()
+  const escapedToken = sessionToken.replaceAll("'", "''")
+  const result = execFileSync('kubectl', [
+    '--context', localK3DContext, '-n', 'ocm', 'exec', 'mysql-0', '--', 'sh', '-c',
+    `mysql -uroot -p"$MYSQL_ROOT_PASSWORD" ocm -N -e "SELECT COUNT(*) FROM aicc_intent_analysis_retries r JOIN aicc_sessions s ON s.id=r.session_id WHERE s.session_token='${escapedToken}'" 2>/dev/null`,
+  ], { encoding: 'utf8' }).trim()
+  return Number(result)
+}
+
 // setLocalAICCIntentFailureOnce 仅在 k3d 本地 manager-api 上启停一次性分析失败注入器。
 // 该变量由 server 入口额外要求 app.env=local，测试结束必须清除并等待滚动完成，避免污染后续场景。
 export function setLocalAICCIntentFailureOnce(enabled: boolean): void {

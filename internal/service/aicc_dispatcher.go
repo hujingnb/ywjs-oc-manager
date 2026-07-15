@@ -39,6 +39,7 @@ type AICCConcurrencyLimiter interface {
 // AICCDispatcherStore 是 dispatcher 读取任务上下文并更新任务状态的最小持久化接口。
 type AICCDispatcherStore interface {
 	GetAICCMessageByID(context.Context, string) (sqlc.AiccMessage, error)
+	GetAICCSession(context.Context, string) (sqlc.AiccSession, error)
 	GetAICCAgent(context.Context, string) (sqlc.AiccAgent, error)
 	LeaseAICCMessageTask(context.Context, sqlc.LeaseAICCMessageTaskParams) (int64, error)
 	CompleteAICCMessageTask(context.Context, sqlc.CompleteAICCMessageTaskParams) (int64, error)
@@ -141,6 +142,10 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 	if err != nil {
 		return d.finishError(ctx, task, token, err)
 	}
+	session, err := d.store.GetAICCSession(ctx, task.SessionID)
+	if err != nil {
+		return d.finishError(ctx, task, token, err)
+	}
 	agent, err := d.store.GetAICCAgent(ctx, task.AgentID)
 	if err != nil {
 		return d.finishError(ctx, task, token, err)
@@ -157,7 +162,11 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 	if !intentReady {
 		d.queueAICCIntentRetry(ctx, task, "initial intent analysis failed")
 	}
-	turn := AICCInboundTurn{TurnID: task.MessageID, SessionID: task.SessionID, Channel: "web_link", Text: visitor.TextContent.String, OccurredAt: d.now(), Context: conversationContext, Instruction: buildAICCRuntimePrompt(agent, ""), AppID: task.AppID}
+	channel := strings.TrimSpace(session.Channel)
+	if channel == "" {
+		channel = "web_link"
+	}
+	turn := AICCInboundTurn{TurnID: task.MessageID, SessionID: task.SessionID, Channel: channel, Text: visitor.TextContent.String, OccurredAt: d.now(), Context: conversationContext, Instruction: buildAICCRuntimePrompt(agent, ""), AppID: task.AppID}
 	if intentReady && intentDecision.AllowOffer {
 		turn.Instruction += "\n本轮 manager 已允许且仅允许 next_action 使用 offer_lead；其它场景不得使用 offer_lead。"
 	} else {
