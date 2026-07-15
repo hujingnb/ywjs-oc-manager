@@ -38,13 +38,21 @@ WEIXIN_DM_POLICY=open
 """
 
 
-def render(data_root: Path, runtime_env: Optional[dict[str, str]] = None) -> str:
-    """渲染 .env 到 data_root/.env，返回相对路径。"""
+def render(
+    data_root: Path,
+    runtime_env: Optional[dict[str, str]] = None,
+    account_root: Optional[Path] = None,
+) -> str:
+    """渲染 .env 到 data_root/.env，返回相对路径。
+
+    account_root 在 staging 渲染时仍指向正式数据卷：微信账号由 Hermes 管理，不能复制进
+    临时目录再随受管配置一起替换。
+    """
     data_root.mkdir(parents=True, exist_ok=True)
     body = BEHAVIOR_FLAGS
     if runtime_env:
         body += _render_runtime_env(runtime_env)
-    weixin = _load_weixin_account(data_root)
+    weixin = _load_weixin_account(account_root or data_root)
     if weixin:
         body += _render_weixin_env(weixin)
     write_text(data_root / ".env", body)

@@ -15,6 +15,7 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -44,6 +45,14 @@ def main() -> int:
     input_root = Path(os.environ.get("OC_INPUT_DIR", "/opt/oc-input"))
     data_root = Path(os.environ.get("OC_DATA_DIR", "/opt/data"))
     curr_variant = os.environ.get("OC_IMAGE_VARIANT", "unknown")
+
+    # .aicc-render-* 仅是本入口创建的受管临时目录。无论上次启动在何处终止，都不能让它
+    # 成为下一次启动的输入，更不能碰 migrator 或 .oc-state.json 等非受管运行时数据。
+    try:
+        _remove_stale_aicc_render_staging(data_root)
+    except OSError as e:
+        oclog.emit("prepare_render", "error", str(e))
+        return 1
 
     # phase 1 load manifest
     try:
@@ -75,28 +84,30 @@ def main() -> int:
         oclog.emit("migrate", "error", str(e), prev_variant=prev_variant, curr_variant=curr_variant)
         return 1
 
-    # render 前：把镜像层的客服 Skill 同步到可能被 emptyDir 覆盖的共享卷，并校验其
-    # frontmatter 能力不能超过本次 manifest 授权；之后再记录内置 Skill 基线。
-    # 默认写入 /opt/data/skills/.bundled_manifest，供 hermes/oc-ops/ops sidecar 跨容器共享；
-    # OC_BUILTIN_MANIFEST 仅用于测试或调试覆盖。
-    builtin_manifest_override = os.environ.get("OC_BUILTIN_MANIFEST")
-    builtin_manifest_path = Path(builtin_manifest_override) if builtin_manifest_override else None
+    # render 前：所有受管产物均先写入独立 staging。只有完整校验成功后才替换正式
+    # config/SOUL/skills，避免重启中的 Hermes 读取半份配置。
+    staging_root = data_root / f".aicc-render-{os.getpid()}"
     try:
-        sync_aicc_builtin_skills(data_root, capabilities)
-        ensure_builtin_manifest(data_root, builtin_manifest_path)
-    except Exception as e:  # noqa: BLE001
-        oclog.emit("sync_builtin_skills", "error", str(e))
-        return 1
+        staging_root.mkdir(parents=True, exist_ok=False)
+        # 内置 Skill 及其基线也属于受管输出，必须和配置一起在 staging 校验后发布。
+        sync_aicc_builtin_skills(staging_root, capabilities)
+        # 基线也必须留在 staging 内，不能接受外部路径覆盖，否则会绕过本轮原子发布边界。
+        ensure_builtin_manifest(staging_root)
 
-    # phase 4 render（每次都跑、幂等）
-    outputs: list[str] = []
-    try:
-        outputs.append(render_config_yaml.render(manifest, data_root))
-        outputs.append(render_env.render(data_root, _runtime_cli_env()))
-        outputs.append(render_soul_md.render(manifest, input_root, data_root))
-        outputs.extend(render_skills.render(manifest, input_root, data_root))
+        # phase 4 render（每次都跑、幂等）
+        outputs: list[str] = []
+        outputs.append(render_config_yaml.render(manifest, staging_root))
+        outputs.append(render_env.render(staging_root, _runtime_cli_env(), account_root=data_root))
+        outputs.append(render_soul_md.render(manifest, input_root, staging_root))
+        outputs.extend(render_skills.render(manifest, input_root, staging_root))
+        _validate_aicc_render_staging(staging_root)
+        _publish_aicc_render_staging(data_root, staging_root)
     except Exception as e:  # noqa: BLE001
         oclog.emit("render", "error", str(e))
+        try:
+            _remove_aicc_render_directory(staging_root)
+        except OSError as cleanup_error:
+            oclog.emit("cleanup_render", "error", str(cleanup_error))
         return 1
 
     # phase 5 commit state
@@ -118,6 +129,59 @@ def main() -> int:
         return 0
     os.execvp("hermes", ["hermes", "gateway", "run"])
     return 1  # pragma: no cover
+
+
+def _remove_stale_aicc_render_staging(data_root: Path) -> None:
+    """只清理入口自身留下的 staging/备份，不读取或删除迁移与状态文件。"""
+    if not data_root.exists():
+        return
+    for path in data_root.iterdir():
+        if path.name.startswith(".aicc-render-") or path.name.startswith(".aicc-previous-"):
+            _remove_aicc_render_directory(path)
+
+
+def _remove_aicc_render_directory(path: Path) -> None:
+    """删除受管 staging；删除失败必须上抛，让启动失败关闭而不是复用脏产物。"""
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    elif path.exists() or path.is_symlink():
+        path.unlink()
+
+
+def _validate_aicc_render_staging(staging_root: Path) -> None:
+    """发布前校验全部受管输出存在且非空，阻止半成品目录覆盖当前可用运行时。"""
+    for name in ("config.yaml", ".env", "SOUL.md"):
+        output = staging_root / name
+        if not output.is_file() or not output.read_text(encoding="utf-8").strip():
+            raise ValueError(f"AICC_RENDER_INVALID: {name}")
+    skills_root = staging_root / "skills"
+    if not skills_root.is_dir() or not any(path.is_dir() for path in skills_root.iterdir()):
+        raise ValueError("AICC_RENDER_INVALID: skills")
+
+
+def _publish_aicc_render_staging(data_root: Path, staging_root: Path) -> None:
+    """把完整 staging 的受管产物逐项 rename 到正式目录。
+
+    文件用 os.replace 原子覆盖；skills 目录先移到同卷备份，再把新目录 rename 到位，
+    失败时恢复旧目录。整个过程不触碰 state、migrator 或 Hermes 自管账号数据。
+    """
+    data_root.mkdir(parents=True, exist_ok=True)
+    for name in ("config.yaml", ".env", "SOUL.md"):
+        os.replace(staging_root / name, data_root / name)
+    destination = data_root / "skills"
+    backup = data_root / f".aicc-previous-{os.getpid()}-skills"
+    if destination.exists():
+        os.replace(destination, backup)
+    try:
+        os.replace(staging_root / "skills", destination)
+    except Exception:
+        if backup.exists() and not destination.exists():
+            os.replace(backup, destination)
+        raise
+    if backup.exists():
+        _remove_aicc_render_directory(backup)
+    # staging 根目录在正常发布后为空；保留清理步骤可让重复启动的目录状态稳定。
+    _remove_aicc_render_directory(staging_root)
 
 
 def _sha256(data: bytes) -> str:
