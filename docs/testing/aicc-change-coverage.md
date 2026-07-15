@@ -22,6 +22,9 @@
 | `internal/store/queries/aicc.sql`、`industry_knowledge.sql`、`organizations.sql` 及 `internal/store/sqlc/*` | AICC、行业库和企业查询持久化 | AICC-ORG-01..02、AICC-SESSION-06..07、AICC-LEAD-03、AICC-KB-03、AICC-ANALYTICS-01..02 | SQL/store 单测、迁移与浏览器闭环 | BLOCKED |
 | `internal/migrations/000031_aicc_org_industry_knowledge.*.sql` | 行业知识库企业授权 schema 变更 | AICC-KB-03、AICC-UPGRADE-01、AICC-ROLLBACK-01 | migration 单测、升级回滚演练 | BLOCKED |
 | `runtime/hermes/hermes-v2026.7.1/oc-kb.py`、`renderer/render_skills.py`、测试 | 公开客服知识检索注入与运行时渲染 | AICC-KB-01..05、AICC-CHAT-01..03、AICC-FAULT-01 | Python 单测、真实知识问答与故障恢复 | BLOCKED |
+| `internal/config/platform_prompt.go`、`platform_prompt_test.go` | AICC 平台规则与客服 Skill 发现边界 | AICC-CAP-002、AICC-SRC-001..004、AICC-INT-001 | Go 失败基线；后续平台提示词单测 | BASELINE-FAIL |
+| `runtime/hermes/hermes-aicc/renderer/render_config_yaml.py`、`tests/test_render_config_yaml.py` | 客服镜像的终端、审批与跨会话记忆裁剪 | AICC-CAP-001、AICC-BOOT-001..004 | Python 失败基线；后续 renderer 契约测试 | BASELINE-FAIL |
+| `docs/testing/aicc-conversation-requirement-matrix.md` | 客服能力、来源、意向、状态、启动、渠道与 Chrome 验收的唯一映射 | AICC-CAP-*、AICC-SRC-*、AICC-INT-*、AICC-STATE-*、AICC-BOOT-*、AICC-CH-*、AICC-E2E-* | 需求矩阵审查、各任务自动化和 Chrome Stable 旅程 | IN-PROGRESS |
 | `web/public/aicc-widget.js` | 网页挂件、来源页与域名白名单 | AICC-DELIVERY-02..03、AICC-SESSION-01..02 | Playwright 掛件与未授权域名场景 | BLOCKED |
 | `web/src/domain/aicc.ts`、`aicc.spec.ts`、`api/hooks/useAICC.ts` | 前端领域模型与 AICC API 调用 | AICC-AGENT-01..02、AICC-SESSION-01..07、AICC-STATUS-01..02、AICC-LEAD-01..03 | Vitest、Playwright 主流程 | BLOCKED |
 | `web/src/layouts/AICCConsole*.vue`、`aiccConsoleContext.ts` 及测试 | 工作台路由、顶部智能体切换与模块导航 | AICC-ENTRY-01..03、AICC-AGENT-02、AICC-I18N-01、AICC-MOBILE-01 | Vitest、四角色桌面/移动浏览器 | BLOCKED |

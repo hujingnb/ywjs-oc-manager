@@ -57,14 +57,19 @@ func TestPlatformPrompts_Invariants(t *testing.T) {
 			for _, text := range testCase.excludes {
 				assert.NotContains(t, testCase.prompt, text)
 			}
-			// 两种对话都必须在适用时遵循已安装技能，且仅无适用技能时回退通用能力。
-			assert.Contains(t, testCase.prompt, "处理任何用户任务前，必须先调用 skills_list")
-			assert.Contains(t, testCase.prompt, "适用的技能")
-			assert.Contains(t, testCase.prompt, "先阅读该技能的说明")
-			assert.Contains(t, testCase.prompt, "严格按其指引完成任务")
-			assert.Contains(t, testCase.prompt, "与当前任务无关的技能不用启用")
-			assert.Contains(t, testCase.prompt, "没有适用的技能")
-			assert.Contains(t, testCase.prompt, "通用能力")
+			if testCase.appType == domain.AppTypeAICC {
+				// AICC 只能按客服能力白名单选择已审核 Skill，不能被平台提示词强制枚举全部 Skill。
+				assert.NotContains(t, testCase.prompt, "处理任何用户任务前，必须先调用 skills_list")
+			} else {
+				// 普通实例保留通用 Skill 发现流程，确保原有工作流不受 AICC 裁剪影响。
+				assert.Contains(t, testCase.prompt, "处理任何用户任务前，必须先调用 skills_list")
+				assert.Contains(t, testCase.prompt, "适用的技能")
+				assert.Contains(t, testCase.prompt, "先阅读该技能的说明")
+				assert.Contains(t, testCase.prompt, "严格按其指引完成任务")
+				assert.Contains(t, testCase.prompt, "与当前任务无关的技能不用启用")
+				assert.Contains(t, testCase.prompt, "没有适用的技能")
+				assert.Contains(t, testCase.prompt, "通用能力")
+			}
 			// 花括号会被 RenderRuleText 当作变量占位符，平台提示词中禁止出现。
 			assert.NotContains(t, testCase.prompt, "{")
 			assert.NotContains(t, testCase.prompt, "}")
