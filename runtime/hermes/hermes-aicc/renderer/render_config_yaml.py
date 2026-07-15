@@ -60,8 +60,8 @@ def render(m: Manifest, data_root: Path) -> str:
         # toolset 是上游 Hermes 的第一层可见工具集收敛；Task 2 的补丁还会按 manifest
         # capabilities 过滤具体函数并在 dispatch 时复核，不能以此列表替代授权判断。
         "platform_toolsets": {"api_server": ["aicc", "web", "skills", "vision"]},
-        # 公开网络只允许只读检索；DDGS 无需企业侧密钥，适合作为默认后端。
-        "web": {"backend": "ddgs"},
+        # 公开网络只允许只读检索；搜索用无需企业侧密钥的 DDGS，正文提取交给共享 Firecrawl。
+        "web": {"search_backend": "ddgs", "extract_backend": "firecrawl"},
     }
     header = "# Hermes 配置 - 由 oc-entrypoint 在容器启动时渲染（manifest v2）\n"
     body = header + yaml.safe_dump(config, allow_unicode=True, sort_keys=False)

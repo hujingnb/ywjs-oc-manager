@@ -62,6 +62,10 @@ def render(m: Manifest, data_root: Path) -> str:
             "backend": "local", "cwd": "/opt/data/workspace",
             "timeout": 180, "lifetime_seconds": 300,
         },
+        # API Server 保留上游完整预设并显式启用 web，避免单独声明 web 时覆盖既有工具集。
+        "platform_toolsets": {"api_server": ["hermes-api-server", "web"]},
+        # 搜索采用无需密钥的 DDGS；网页正文提取统一使用共享 Firecrawl 服务。
+        "web": {"search_backend": "ddgs", "extract_backend": "firecrawl"},
         # 关闭上游 hermes-agent 的 dangerous-command 审批：
         # - mode="off" 命中上游 _normalize_approval_mode 的 yolo 分支，跳过所有
         #   dangerous-command 提示（受控部署形态下，逐条 /approve 是噪声非收益）。

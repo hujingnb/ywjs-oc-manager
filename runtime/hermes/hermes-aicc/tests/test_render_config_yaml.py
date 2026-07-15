@@ -31,12 +31,13 @@ def test_render_writes_expected_fields(tmp_data: Path) -> None:
     assert "terminal" not in out
 
 
-def test_render_limits_platform_toolsets_and_web_backend(tmp_data: Path) -> None:
+def test_render_limits_platform_toolsets_and_web_backends(tmp_data: Path) -> None:
     # AICC 只声明客服只读工具集；具体工具名仍由 Task 2 的运行时策略再次收紧。
+    # 检索走无需密钥的 DDGS，正文提取走共享 Firecrawl 服务。
     render(make_manifest(), tmp_data)
     out = yaml.safe_load((tmp_data / "config.yaml").read_text())
     assert out["platform_toolsets"]["api_server"] == ["aicc", "web", "skills", "vision"]
-    assert out["web"]["backend"] == "ddgs"
+    assert out["web"] == {"search_backend": "ddgs", "extract_backend": "firecrawl"}
     assert "web_publish" not in out
 
 
