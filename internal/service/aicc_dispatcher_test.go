@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"sync"
 	"testing"
@@ -214,6 +215,46 @@ func (c *aiccDispatcherSequenceChatFake) ChatAICC(_ context.Context, _ AICCInbou
 
 type aiccDispatcherTxFake struct{ store *aiccDispatcherStoreFake }
 
+// intentDispatcherStoreFake 仅在意向事务测试中暴露画像查询，避免普通 dispatcher 用例额外触发分析 Turn。
+type intentDispatcherStoreFake struct {
+	*aiccDispatcherStoreFake
+	intent          sqlc.AiccSessionIntent
+	intentRows      int64
+	forceIntentRows bool
+	intentErr       error
+}
+
+func (s *intentDispatcherStoreFake) GetAICCSessionIntent(context.Context, string) (sqlc.AiccSessionIntent, error) {
+	return s.intent, sql.ErrNoRows
+}
+func (s *intentDispatcherStoreFake) UpsertAICCSessionIntent(context.Context, sqlc.UpsertAICCSessionIntentParams) error {
+	return nil
+}
+func (s *intentDispatcherStoreFake) ConsumeAICCSessionIntentInvitation(context.Context, string) (int64, error) {
+	s.inviteUpdates = append(s.inviteUpdates, "session")
+	if s.intentErr != nil {
+		return 0, s.intentErr
+	}
+	if s.forceIntentRows {
+		return s.intentRows, nil
+	}
+	return 1, nil
+}
+
+type intentDispatcherRollbackTx struct{ store *intentDispatcherStoreFake }
+
+func (t intentDispatcherRollbackTx) WithAICCDispatcherTx(_ context.Context, fn func(AICCDispatcherStore) error) error {
+	beforeAssistant := append([]sqlc.CreateAICCMessageParams(nil), t.store.assistant...)
+	beforeSources := append([]sqlc.CreateAICCMessageSourceParams(nil), t.store.sources...)
+	beforeInvites := append([]string(nil), t.store.inviteUpdates...)
+	beforeCompleted := t.store.completed
+	if err := fn(t.store); err != nil {
+		t.store.assistant, t.store.sources, t.store.inviteUpdates, t.store.completed = beforeAssistant, beforeSources, beforeInvites, beforeCompleted
+		return err
+	}
+	return nil
+}
+
 // aiccDispatcherAllowLimiter 显式模拟测试环境可获得的运行额度，避免成功路径依赖生产 Redis。
 type aiccDispatcherAllowLimiter struct{}
 
@@ -242,6 +283,38 @@ func (t aiccDispatcherRollbackTxFake) WithAICCDispatcherTx(_ context.Context, fn
 		return err
 	}
 	return nil
+}
+
+// TestAICCDispatcherInviteConsumptionRollback 验证条件消费未命中或出错时，回复镜像、来源、任务完成和邀约消费全部回滚。
+func TestAICCDispatcherInviteConsumptionRollback(t *testing.T) {
+	tests := []struct {
+		name      string
+		rows      int64
+		forceRows bool
+		err       error
+	}{
+		// 访客已拒绝或提交导致条件更新 0 行，不能交付首次邀约回复。
+		{name: "条件更新未命中", rows: 0, forceRows: true},
+		// 数据库更新错误同样必须使整个回复事务回滚。
+		{name: "条件更新失败", err: errors.New("invite update failed")},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			base := newAICCDispatcherStoreFake()
+			store := &intentDispatcherStoreFake{aiccDispatcherStoreFake: base, intentRows: testCase.rows, forceIntentRows: testCase.forceRows, intentErr: testCase.err}
+			chat := &aiccDispatcherSequenceChatFake{replies: []AICCResponseEnvelope{
+				{Raw: `{"level":"high","fields":{},"confidence":{},"evidence":{}}`},
+				{Text: "欢迎留下联系方式", NextAction: "none"},
+			}}
+			d := NewAICCDispatcher(store, intentDispatcherRollbackTx{store: store}, chat, aiccDispatcherAllowLimiter{})
+
+			require.Error(t, d.Dispatch(context.Background(), store.task))
+			assert.Empty(t, store.assistant)
+			assert.Empty(t, store.sources)
+			assert.Empty(t, store.inviteUpdates)
+			assert.Zero(t, store.completed)
+		})
+	}
 }
 
 func newAICCDispatcherStoreFake() *aiccDispatcherStoreFake {
