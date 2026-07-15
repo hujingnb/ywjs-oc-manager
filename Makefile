@@ -56,7 +56,8 @@ override HERMES_VERSION := $(strip $(shell if [ -f "$(HERMES_VARIANT_DIR)/versio
 # 必须保留空值并交由版本守卫拒绝，避免元数据配置错误被兼容回退静默掩盖。
 override HERMES_UPSTREAM_REF := $(strip $(shell if [ -f "$(HERMES_VARIANT_DIR)/hermes-ref.txt" ]; then cat "$(HERMES_VARIANT_DIR)/hermes-ref.txt"; else printf '%s' "$(HERMES_VERSION)"; fi))
 HERMES_IMAGE_REPO    ?= $(PROD_REGISTRY)/$(PROD_APP_NS)/oc-manager-aigowork
-# hermes tag 形如 v2026.5.16-2026-05-21-12-00-00-be70e40a，便于从镜像引用直接看出上游版本和源码提交。
+# hermes 镜像 tag 以产品/variant 版本开头（如 v0.18.2-时间戳-源码提交），便于识别对外运行时版本。
+# 上游固定 ref 独立记录在 hermes-ref.txt 并透传到镜像元数据，不能再从产品版本号推断。
 override HERMES_IMAGE := $(HERMES_IMAGE_REPO):$(HERMES_VERSION)-$(IMAGE_TAG)
 
 # AICC runtime 使用独立构建目录与仓库，生命周期不与普通实例 Hermes 版本列表耦合。
@@ -130,10 +131,16 @@ help: ## 显示本帮助文档(make 默认 target)
 	$(MAKEFILE_LIST)
 
 .PHONY: .guard-hermes-version
+# 上游 ref 必须不可变且能安全进入后续 Docker recipe。守卫直接从 hermes-ref.txt 读取到
+# shell 变量，不能把尚未校验的 HERMES_UPSTREAM_REF 插入 shell 源码，否则反引号、命令替换等
+# 元字符会先于校验执行；历史 variant 缺少该文件时才使用已校验命名关系的 HERMES_VERSION。
 .guard-hermes-version:
 	@test -f "$(HERMES_VARIANT_DIR)/version.txt" || { echo "Hermes variant 缺少 version.txt: $(HERMES_VARIANT_DIR)/version.txt" >&2; exit 1; }
 	@test -n "$(HERMES_VERSION)" || { echo "Hermes version 不能为空: $(HERMES_VARIANT_DIR)/version.txt" >&2; exit 1; }
-	@test -n "$(HERMES_UPSTREAM_REF)" || { echo "Hermes 上游 ref 不能为空: $(HERMES_VARIANT_DIR)/hermes-ref.txt 或 version.txt" >&2; exit 1; }
+	@hermes_ref="$(HERMES_VERSION)"; \
+	if [ -f "$(HERMES_VARIANT_DIR)/hermes-ref.txt" ]; then hermes_ref=$$(cat "$(HERMES_VARIANT_DIR)/hermes-ref.txt"); fi; \
+	test -n "$$hermes_ref" || { echo "Hermes 上游 ref 不能为空: $(HERMES_VARIANT_DIR)/hermes-ref.txt 或 version.txt" >&2; exit 1; }; \
+	printf '%s\n' "$$hermes_ref" | grep -Eq '^(v[0-9]+[.][0-9]+[.][0-9]+([._-][A-Za-z0-9_.-]+)?|[0-9a-f]{40})$$' || { echo "Hermes 上游 ref 必须是不可变版本 tag 或完整 commit SHA: $$hermes_ref" >&2; exit 1; }
 	@test "$(HERMES_VARIANT)" = "hermes-$(HERMES_VERSION)" || { echo "Hermes variant 名称必须与 version.txt 对齐: $(HERMES_VARIANT) != hermes-$(HERMES_VERSION)" >&2; exit 1; }
 	@printf '%s\n' "$(HERMES_VERSION)" | grep -Eq '^v[0-9]+[.][0-9]+[.][0-9]+([._-][A-Za-z0-9_.-]+)?$$' || { echo "Hermes version 必须是完整版本号: $(HERMES_VERSION)" >&2; exit 1; }
 	@case "$(HERMES_VERSION)" in \
