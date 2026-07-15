@@ -3184,7 +3184,7 @@ ON DUPLICATE KEY UPDATE
     evidence_json = VALUES(evidence_json),
     analyzer_version = VALUES(analyzer_version),
     analyzed_message_id = VALUES(analyzed_message_id),
-    invite_status = VALUES(invite_status),
+    -- 画像重试可能晚于访客拒绝/提交；只能更新画像，绝不能回写已消费的邀约状态。
     updated_at = now()
 `
 

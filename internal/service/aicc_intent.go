@@ -186,20 +186,24 @@ func (d *AICCDispatcher) RetryPendingAICCIntentAnalysis(ctx context.Context) err
 		return err
 	}
 	for _, row := range rows {
+		task := sqlc.AiccMessageTask{MessageID: row.MessageID, SessionID: row.SessionID, AgentID: row.AgentID, OrgID: row.OrgID, AppID: row.AppID}
 		visitor, err := store.GetAICCMessageByID(ctx, row.MessageID)
 		if err != nil {
+			d.queueAICCIntentRetry(ctx, task, "retry visitor message read failed")
 			continue
 		}
 		contextData, err := BuildAICCConversationContext(ctx, store, row.SessionID, "")
 		if err != nil {
+			d.queueAICCIntentRetry(ctx, task, "retry context build failed")
 			continue
 		}
-		task := sqlc.AiccMessageTask{MessageID: row.MessageID, SessionID: row.SessionID, AgentID: row.AgentID, OrgID: row.OrgID, AppID: row.AppID}
 		if _, ready := d.analyzeAICCIntent(ctx, task, visitor, contextData); !ready {
 			d.queueAICCIntentRetry(ctx, task, "intent analysis retry failed")
 			continue
 		}
-		_ = store.DeleteAICCIntentAnalysisRetry(ctx, sqlc.DeleteAICCIntentAnalysisRetryParams{SessionID: row.SessionID, MessageID: row.MessageID})
+		if err := store.DeleteAICCIntentAnalysisRetry(ctx, sqlc.DeleteAICCIntentAnalysisRetryParams{SessionID: row.SessionID, MessageID: row.MessageID}); err != nil {
+			d.queueAICCIntentRetry(ctx, task, "retry cleanup failed")
+		}
 	}
 	return nil
 }
