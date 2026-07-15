@@ -28,7 +28,7 @@ type publicAICCService interface {
 	SendMessage(ctx context.Context, input service.AICCPublicMessageInput) (service.AICCPublicMessageResult, error)
 	GetMessageStatus(ctx context.Context, sessionToken, messageID string) (service.AICCPublicMessageResult, error)
 	SubmitLeadValues(ctx context.Context, input service.AICCPublicLeadValuesInput) (service.AICCPublicLeadValuesResult, error)
-	SubmitFeedback(ctx context.Context, input service.AICCPublicFeedbackInput) (service.AICCPublicFeedbackResult, error)
+	DeclineLeadInvitation(ctx context.Context, sessionToken string) error
 	ResolveSession(ctx context.Context, sessionToken string) (service.AICCPublicResolutionResult, error)
 	UpdateSessionResolution(ctx context.Context, input service.AICCPublicResolutionInput) (service.AICCPublicResolutionResult, error)
 }
@@ -49,9 +49,9 @@ func RegisterPublicAICCRoutes(router gin.IRouter, handler *PublicAICCHandler) {
 	group.POST("/sessions/:sessionToken/messages", handler.SendMessage)
 	group.GET("/sessions/:sessionToken/messages/:messageId", handler.GetMessageStatus)
 	group.POST("/sessions/:sessionToken/lead-values", handler.SubmitLeadValues)
+	group.POST("/sessions/:sessionToken/lead-invitation/decline", handler.DeclineLeadInvitation)
 	group.POST("/sessions/:sessionToken/resolution", handler.UpdateResolution)
 	group.POST("/sessions/:sessionToken/resolve", handler.ResolveSession)
-	group.POST("/sessions/:sessionToken/messages/:messageId/feedback", handler.Feedback)
 }
 
 // Config 返回访客端公开配置。
@@ -327,37 +327,23 @@ func (h *PublicAICCHandler) SubmitLeadValues(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"lead": result})
 }
 
-// Feedback 提交单条助手回复反馈。
+// DeclineLeadInvitation 记录访客明确拒绝当前会话的首次留资邀请。
 //
-// @Summary      提交 AICC 回复反馈
-// @Description  访客反馈助手回复是否有帮助，并同步会话解决状态
+// @Summary      拒绝 AICC 留资邀请
+// @Description  访客拒绝当前会话的留资邀请后，不再重复弹出邀请
 // @Tags         public-aicc
-// @Accept       json
 // @Produce      json
-// @Param        sessionToken  path      string                     true  "会话 token"
-// @Param        messageId     path      string                     true  "消息 ID"
-// @Param        body          body      SubmitAICCFeedbackRequest  true  "反馈内容"
-// @Success      200           {object}  map[string]service.AICCPublicFeedbackResult
-// @Failure      400           {object}  ErrorResponse
-// @Failure      404           {object}  ErrorResponse
-// @Failure      500           {object}  ErrorResponse
-// @Router       /public/aicc/sessions/{sessionToken}/messages/{messageId}/feedback [post]
-func (h *PublicAICCHandler) Feedback(c *gin.Context) {
-	var req SubmitAICCFeedbackRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		writeBindError(c, err)
-		return
-	}
-	result, err := h.service.SubmitFeedback(c.Request.Context(), service.AICCPublicFeedbackInput{
-		SessionToken: c.Param("sessionToken"),
-		MessageID:    c.Param("messageId"),
-		Helpful:      *req.Helpful,
-	})
-	if err != nil {
+// @Param        sessionToken  path  string  true  "会话 token"
+// @Success      204
+// @Failure      401  {object}  ErrorResponse
+// @Failure      500  {object}  ErrorResponse
+// @Router       /public/aicc/sessions/{sessionToken}/lead-invitation/decline [post]
+func (h *PublicAICCHandler) DeclineLeadInvitation(c *gin.Context) {
+	if err := h.service.DeclineLeadInvitation(c.Request.Context(), c.Param("sessionToken")); err != nil {
 		writePublicAICCError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"feedback": result})
+	c.Status(http.StatusNoContent)
 }
 
 // ResolveSession 将当前公开会话标记为已解决。

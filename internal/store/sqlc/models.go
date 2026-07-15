@@ -198,24 +198,25 @@ type AiccQueueGovernance struct {
 }
 
 type AiccSession struct {
-	ID                 string      `db:"id" json:"id"`
-	AgentID            string      `db:"agent_id" json:"agent_id"`
-	OrgID              string      `db:"org_id" json:"org_id"`
-	SessionToken       string      `db:"session_token" json:"session_token"`
-	Channel            string      `db:"channel" json:"channel"`
-	SourceUrl          null.String `db:"source_url" json:"source_url"`
-	Referrer           null.String `db:"referrer" json:"referrer"`
-	Region             null.String `db:"region" json:"region"`
-	IpHash             null.String `db:"ip_hash" json:"ip_hash"`
-	UserAgentHash      null.String `db:"user_agent_hash" json:"user_agent_hash"`
-	PrivacyNoticeShown bool        `db:"privacy_notice_shown" json:"privacy_notice_shown"`
-	PrivacyConsentedAt null.Time   `db:"privacy_consented_at" json:"privacy_consented_at"`
-	ResolutionStatus   string      `db:"resolution_status" json:"resolution_status"`
-	LeadStatus         string      `db:"lead_status" json:"lead_status"`
-	LastActiveAt       time.Time   `db:"last_active_at" json:"last_active_at"`
-	ExpiresAt          time.Time   `db:"expires_at" json:"expires_at"`
-	CreatedAt          time.Time   `db:"created_at" json:"created_at"`
-	UpdatedAt          time.Time   `db:"updated_at" json:"updated_at"`
+	ID                            string      `db:"id" json:"id"`
+	AgentID                       string      `db:"agent_id" json:"agent_id"`
+	OrgID                         string      `db:"org_id" json:"org_id"`
+	SessionToken                  string      `db:"session_token" json:"session_token"`
+	Channel                       string      `db:"channel" json:"channel"`
+	SourceUrl                     null.String `db:"source_url" json:"source_url"`
+	Referrer                      null.String `db:"referrer" json:"referrer"`
+	Region                        null.String `db:"region" json:"region"`
+	IpHash                        null.String `db:"ip_hash" json:"ip_hash"`
+	UserAgentHash                 null.String `db:"user_agent_hash" json:"user_agent_hash"`
+	PrivacyNoticeShown            bool        `db:"privacy_notice_shown" json:"privacy_notice_shown"`
+	PrivacyConsentedAt            null.Time   `db:"privacy_consented_at" json:"privacy_consented_at"`
+	ResolutionStatus              string      `db:"resolution_status" json:"resolution_status"`
+	LeadStatus                    string      `db:"lead_status" json:"lead_status"`
+	LastActiveAt                  time.Time   `db:"last_active_at" json:"last_active_at"`
+	ExpiresAt                     time.Time   `db:"expires_at" json:"expires_at"`
+	CreatedAt                     time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt                     time.Time   `db:"updated_at" json:"updated_at"`
+	ResolutionPhaseStartMessageID null.String `db:"resolution_phase_start_message_id" json:"resolution_phase_start_message_id"`
 }
 
 type AiccSessionContext struct {

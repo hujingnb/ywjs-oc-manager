@@ -1169,7 +1169,7 @@ func (q *Queries) GetAICCMessageTaskByMessageID(ctx context.Context, messageID s
 }
 
 const getAICCSession = `-- name: GetAICCSession :one
-SELECT id, agent_id, org_id, session_token, channel, source_url, referrer, region, ip_hash, user_agent_hash, privacy_notice_shown, privacy_consented_at, resolution_status, lead_status, last_active_at, expires_at, created_at, updated_at
+SELECT id, agent_id, org_id, session_token, channel, source_url, referrer, region, ip_hash, user_agent_hash, privacy_notice_shown, privacy_consented_at, resolution_status, lead_status, last_active_at, expires_at, created_at, updated_at, resolution_phase_start_message_id
 FROM aicc_sessions
 WHERE id = ?
 `
@@ -1196,12 +1196,13 @@ func (q *Queries) GetAICCSession(ctx context.Context, id string) (AiccSession, e
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ResolutionPhaseStartMessageID,
 	)
 	return i, err
 }
 
 const getAICCSessionByToken = `-- name: GetAICCSessionByToken :one
-SELECT id, agent_id, org_id, session_token, channel, source_url, referrer, region, ip_hash, user_agent_hash, privacy_notice_shown, privacy_consented_at, resolution_status, lead_status, last_active_at, expires_at, created_at, updated_at
+SELECT id, agent_id, org_id, session_token, channel, source_url, referrer, region, ip_hash, user_agent_hash, privacy_notice_shown, privacy_consented_at, resolution_status, lead_status, last_active_at, expires_at, created_at, updated_at, resolution_phase_start_message_id
 FROM aicc_sessions
 WHERE session_token = ? AND expires_at > now()
 `
@@ -1228,6 +1229,7 @@ func (q *Queries) GetAICCSessionByToken(ctx context.Context, sessionToken string
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ResolutionPhaseStartMessageID,
 	)
 	return i, err
 }
@@ -2086,7 +2088,7 @@ func (q *Queries) ListAICCSessionTrendByWeek(ctx context.Context, arg ListAICCSe
 }
 
 const listAICCSessionsByAgent = `-- name: ListAICCSessionsByAgent :many
-SELECT s.id, s.agent_id, s.org_id, s.session_token, s.channel, s.source_url, s.referrer, s.region, s.ip_hash, s.user_agent_hash, s.privacy_notice_shown, s.privacy_consented_at, s.resolution_status, s.lead_status, s.last_active_at, s.expires_at, s.created_at, s.updated_at,
+SELECT s.id, s.agent_id, s.org_id, s.session_token, s.channel, s.source_url, s.referrer, s.region, s.ip_hash, s.user_agent_hash, s.privacy_notice_shown, s.privacy_consented_at, s.resolution_status, s.lead_status, s.last_active_at, s.expires_at, s.created_at, s.updated_at, s.resolution_phase_start_message_id,
        (SELECT COUNT(*) FROM aicc_messages m WHERE m.session_id = s.id) AS message_count
 FROM aicc_sessions s
 WHERE s.agent_id = ?
@@ -2120,25 +2122,26 @@ type ListAICCSessionsByAgentParams struct {
 }
 
 type ListAICCSessionsByAgentRow struct {
-	ID                 string      `db:"id" json:"id"`
-	AgentID            string      `db:"agent_id" json:"agent_id"`
-	OrgID              string      `db:"org_id" json:"org_id"`
-	SessionToken       string      `db:"session_token" json:"session_token"`
-	Channel            string      `db:"channel" json:"channel"`
-	SourceUrl          null.String `db:"source_url" json:"source_url"`
-	Referrer           null.String `db:"referrer" json:"referrer"`
-	Region             null.String `db:"region" json:"region"`
-	IpHash             null.String `db:"ip_hash" json:"ip_hash"`
-	UserAgentHash      null.String `db:"user_agent_hash" json:"user_agent_hash"`
-	PrivacyNoticeShown bool        `db:"privacy_notice_shown" json:"privacy_notice_shown"`
-	PrivacyConsentedAt null.Time   `db:"privacy_consented_at" json:"privacy_consented_at"`
-	ResolutionStatus   string      `db:"resolution_status" json:"resolution_status"`
-	LeadStatus         string      `db:"lead_status" json:"lead_status"`
-	LastActiveAt       time.Time   `db:"last_active_at" json:"last_active_at"`
-	ExpiresAt          time.Time   `db:"expires_at" json:"expires_at"`
-	CreatedAt          time.Time   `db:"created_at" json:"created_at"`
-	UpdatedAt          time.Time   `db:"updated_at" json:"updated_at"`
-	MessageCount       int64       `db:"message_count" json:"message_count"`
+	ID                            string      `db:"id" json:"id"`
+	AgentID                       string      `db:"agent_id" json:"agent_id"`
+	OrgID                         string      `db:"org_id" json:"org_id"`
+	SessionToken                  string      `db:"session_token" json:"session_token"`
+	Channel                       string      `db:"channel" json:"channel"`
+	SourceUrl                     null.String `db:"source_url" json:"source_url"`
+	Referrer                      null.String `db:"referrer" json:"referrer"`
+	Region                        null.String `db:"region" json:"region"`
+	IpHash                        null.String `db:"ip_hash" json:"ip_hash"`
+	UserAgentHash                 null.String `db:"user_agent_hash" json:"user_agent_hash"`
+	PrivacyNoticeShown            bool        `db:"privacy_notice_shown" json:"privacy_notice_shown"`
+	PrivacyConsentedAt            null.Time   `db:"privacy_consented_at" json:"privacy_consented_at"`
+	ResolutionStatus              string      `db:"resolution_status" json:"resolution_status"`
+	LeadStatus                    string      `db:"lead_status" json:"lead_status"`
+	LastActiveAt                  time.Time   `db:"last_active_at" json:"last_active_at"`
+	ExpiresAt                     time.Time   `db:"expires_at" json:"expires_at"`
+	CreatedAt                     time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt                     time.Time   `db:"updated_at" json:"updated_at"`
+	ResolutionPhaseStartMessageID null.String `db:"resolution_phase_start_message_id" json:"resolution_phase_start_message_id"`
+	MessageCount                  int64       `db:"message_count" json:"message_count"`
 }
 
 func (q *Queries) ListAICCSessionsByAgent(ctx context.Context, arg ListAICCSessionsByAgentParams) ([]ListAICCSessionsByAgentRow, error) {
@@ -2188,6 +2191,7 @@ func (q *Queries) ListAICCSessionsByAgent(ctx context.Context, arg ListAICCSessi
 			&i.ExpiresAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ResolutionPhaseStartMessageID,
 			&i.MessageCount,
 		); err != nil {
 			return nil, err
@@ -2460,7 +2464,7 @@ func (q *Queries) ListAllAICCLeadsByOrg(ctx context.Context, arg ListAllAICCLead
 }
 
 const listExpiredAICCSessions = `-- name: ListExpiredAICCSessions :many
-SELECT id, agent_id, org_id, session_token, channel, source_url, referrer, region, ip_hash, user_agent_hash, privacy_notice_shown, privacy_consented_at, resolution_status, lead_status, last_active_at, expires_at, created_at, updated_at
+SELECT id, agent_id, org_id, session_token, channel, source_url, referrer, region, ip_hash, user_agent_hash, privacy_notice_shown, privacy_consented_at, resolution_status, lead_status, last_active_at, expires_at, created_at, updated_at, resolution_phase_start_message_id
 FROM aicc_sessions
 WHERE expires_at < now()
 ORDER BY expires_at ASC, id ASC
@@ -2495,6 +2499,7 @@ func (q *Queries) ListExpiredAICCSessions(ctx context.Context, limit int32) ([]A
 			&i.ExpiresAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ResolutionPhaseStartMessageID,
 		); err != nil {
 			return nil, err
 		}
@@ -2682,7 +2687,7 @@ func (q *Queries) LockAICCQueueGovernance(ctx context.Context) (int8, error) {
 }
 
 const lockAICCSessionForUpdate = `-- name: LockAICCSessionForUpdate :one
-SELECT id, agent_id, org_id, session_token, channel, source_url, referrer, region, ip_hash, user_agent_hash, privacy_notice_shown, privacy_consented_at, resolution_status, lead_status, last_active_at, expires_at, created_at, updated_at
+SELECT id, agent_id, org_id, session_token, channel, source_url, referrer, region, ip_hash, user_agent_hash, privacy_notice_shown, privacy_consented_at, resolution_status, lead_status, last_active_at, expires_at, created_at, updated_at, resolution_phase_start_message_id
 FROM aicc_sessions
 WHERE id = ? AND expires_at > now()
 FOR UPDATE
@@ -2710,6 +2715,7 @@ func (q *Queries) LockAICCSessionForUpdate(ctx context.Context, id string) (Aicc
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ResolutionPhaseStartMessageID,
 	)
 	return i, err
 }
@@ -2856,6 +2862,23 @@ func (q *Queries) RescheduleClaimedAICCIntentAnalysisRetry(ctx context.Context, 
 	return result.RowsAffected()
 }
 
+const resetAICCSessionResolutionForNewPhase = `-- name: ResetAICCSessionResolutionForNewPhase :exec
+UPDATE aicc_sessions
+SET resolution_status = 'unknown', resolution_phase_start_message_id = ?, updated_at = now()
+WHERE id = ? AND resolution_status IN ('resolved', 'unresolved')
+`
+
+type ResetAICCSessionResolutionForNewPhaseParams struct {
+	ResolutionPhaseStartMessageID null.String `db:"resolution_phase_start_message_id" json:"resolution_phase_start_message_id"`
+	ID                            string      `db:"id" json:"id"`
+}
+
+// 仅在访客已明确选择结果后写入阶段起点；未知状态下的追问不能伪造新阶段。
+func (q *Queries) ResetAICCSessionResolutionForNewPhase(ctx context.Context, arg ResetAICCSessionResolutionForNewPhaseParams) error {
+	_, err := q.db.ExecContext(ctx, resetAICCSessionResolutionForNewPhase, arg.ResolutionPhaseStartMessageID, arg.ID)
+	return err
+}
+
 const retryAICCMessageTask = `-- name: RetryAICCMessageTask :execrows
 UPDATE aicc_message_tasks
 SET status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'retry_wait' END,
@@ -2970,7 +2993,7 @@ func (q *Queries) UpdateAICCAgentProfile(ctx context.Context, arg UpdateAICCAgen
 const updateAICCSessionIntentInviteStatus = `-- name: UpdateAICCSessionIntentInviteStatus :execrows
 UPDATE aicc_session_intents
 SET invite_status = ?, updated_at = now()
-WHERE session_id = ?
+WHERE session_id = ? AND invite_status = 'invited'
 `
 
 type UpdateAICCSessionIntentInviteStatusParams struct {
@@ -3277,7 +3300,8 @@ ON DUPLICATE KEY UPDATE
     confidence_json = VALUES(confidence_json),
     evidence_json = VALUES(evidence_json),
     analyzer_version = VALUES(analyzer_version),
-    analyzed_message_id = VALUES(analyzed_message_id),
+    -- 首次邀约已展示后保留对应访客消息，公开端据此只在那条助手回复上展示留资卡片。
+    analyzed_message_id = IF(invite_status = 'not_invited', VALUES(analyzed_message_id), analyzed_message_id),
     -- 画像重试可能晚于访客拒绝/提交；只能更新画像，绝不能回写已消费的邀约状态。
     updated_at = now()
 `

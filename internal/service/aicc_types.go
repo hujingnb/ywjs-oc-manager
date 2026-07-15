@@ -165,6 +165,8 @@ type AICCMessageResult struct {
 	ErrorSummary string `json:"error_summary,omitempty"`
 	// Sources 是助手回复已校验的知识库或网络依据；公开端仅展示其中安全字段。
 	Sources []AICCResponseSource `json:"sources,omitempty"`
+	// NextAction 是当前助手回复对应的下一步展示动作，公开端据此渲染留资或解决状态卡片。
+	NextAction string `json:"next_action,omitempty"`
 	// CreatedAt 是消息创建时间。
 	CreatedAt time.Time `json:"created_at"`
 }

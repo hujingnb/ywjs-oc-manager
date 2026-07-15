@@ -13660,6 +13660,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/public/aicc/sessions/{sessionToken}/lead-invitation/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 拒绝 AICC 留资邀请
+         * @description 访客拒绝当前会话的留资邀请后，不再重复弹出邀请
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 会话 token */
+                    sessionToken: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/public/aicc/sessions/{sessionToken}/lead-values": {
         parameters: {
             query?: never;
@@ -13915,84 +13973,6 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/public/aicc/sessions/{sessionToken}/messages/{messageId}/feedback": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 提交 AICC 回复反馈
-         * @description 访客反馈助手回复是否有帮助，并同步会话解决状态
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description 会话 token */
-                    sessionToken: string;
-                    /** @description 消息 ID */
-                    messageId: string;
-                };
-                cookie?: never;
-            };
-            /** @description 反馈内容 */
-            requestBody: {
-                content: {
-                    "application/json": Record<string, never> | components["schemas"]["handlers.SubmitAICCFeedbackRequest"];
-                };
-            };
-            responses: {
-                /** @description OK */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            [key: string]: components["schemas"]["service.AICCPublicFeedbackResult"];
-                        };
-                    };
-                };
-                /** @description Bad Request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Not Found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-                /** @description Internal Server Error */
-                500: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["handlers.ErrorResponse"];
-                    };
-                };
-            };
-        };
         delete?: never;
         options?: never;
         head?: never;
@@ -15988,10 +15968,6 @@ export interface components {
         "handlers.SetSkillTicketQuoteRequest": {
             quote_amount_cents?: number;
         };
-        "handlers.SubmitAICCFeedbackRequest": {
-            /** @description Helpful 表示该回答是否有帮助。 */
-            helpful: boolean;
-        };
         "handlers.SubmitAICCLeadValuesRequest": {
             /** @description Values 是 field_key 到访客填写值的映射。 */
             values: {
@@ -16139,6 +16115,8 @@ export interface components {
             timestamp?: unknown;
             /** @description 工具调用（透传，前端可忽略） */
             tool_calls?: unknown;
+            /** @description ToolName 仅在 role=tool 的受控运行时转录中出现；AICC 用它限定哪些工具结果可形成来源审计。 */
+            tool_name?: string;
         };
         "ocops.ConversationSession": {
             id?: string;
@@ -16635,8 +16613,12 @@ export interface components {
             is_fallback?: boolean;
             /** @description IsRefusal 表示是否为拒答。 */
             is_refusal?: boolean;
+            /** @description NextAction 是当前助手回复对应的下一步展示动作，公开端据此渲染留资或解决状态卡片。 */
+            next_action?: string;
             /** @description RetryAfterSeconds 是 retry_wait 状态的建议轮询等待秒数。 */
             retry_after_seconds?: number;
+            /** @description Sources 是助手回复已校验的知识库或网络依据；公开端仅展示其中安全字段。 */
+            sources?: components["schemas"]["service.AICCResponseSource"][];
             /** @description TaskStatus 是访客消息异步任务状态；仅公开会话恢复时补充。 */
             task_status?: string;
             /** @description Text 是文本内容，可为空。 */
@@ -16650,9 +16632,6 @@ export interface components {
             privacy_text?: string;
             retention_days?: number;
         };
-        "service.AICCPublicFeedbackResult": {
-            resolution_status?: string;
-        };
         "service.AICCPublicImageResult": {
             image_file_id?: string;
             mime?: string;
@@ -16665,8 +16644,12 @@ export interface components {
         "service.AICCPublicMessageResult": {
             /** @description MessageID 是访客消息 ID，也是异步任务的幂等关联键。 */
             message_id?: string;
+            /** @description NextAction 是 manager 计算后的下一步展示动作。 */
+            next_action?: string;
             /** @description RetryAfterSeconds 仅在 retry_wait 时返回，表示建议客户端下次查询前等待的秒数。 */
             retry_after_seconds?: number;
+            /** @description Sources 是当前助手答复已校验的公开来源。 */
+            sources?: components["schemas"]["service.AICCResponseSource"][];
             /** @description Status 为 queued、processing、retry_wait、completed 或 failed。 */
             status?: string;
             /** @description Text 仅在本地拒答或已完成且已持久化助手回复时返回。 */
@@ -16689,6 +16672,14 @@ export interface components {
             privacy_text?: string;
             restored?: boolean;
             session_token?: string;
+        };
+        "service.AICCResponseSource": {
+            reference_id?: string;
+            scope?: string;
+            title?: string;
+            type?: string;
+            unconfirmed?: boolean;
+            url?: string;
         };
         "service.AICCSessionDetailResult": {
             /** @description LeadValues 是本会话已提交的留资字段值，便于运营结合对话上下文回看。 */

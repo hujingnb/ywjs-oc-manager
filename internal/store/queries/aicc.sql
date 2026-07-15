@@ -398,7 +398,8 @@ ON DUPLICATE KEY UPDATE
     confidence_json = VALUES(confidence_json),
     evidence_json = VALUES(evidence_json),
     analyzer_version = VALUES(analyzer_version),
-    analyzed_message_id = VALUES(analyzed_message_id),
+    -- 首次邀约已展示后保留对应访客消息，公开端据此只在那条助手回复上展示留资卡片。
+    analyzed_message_id = IF(invite_status = 'not_invited', VALUES(analyzed_message_id), analyzed_message_id),
     -- 画像重试可能晚于访客拒绝/提交；只能更新画像，绝不能回写已消费的邀约状态。
     updated_at = now();
 
@@ -406,7 +407,7 @@ ON DUPLICATE KEY UPDATE
 -- 访客的拒绝或显式提交只改变本会话的邀约状态，绝不能影响其它匿名会话。
 UPDATE aicc_session_intents
 SET invite_status = ?, updated_at = now()
-WHERE session_id = ?;
+WHERE session_id = ? AND invite_status = 'invited';
 
 -- name: ConsumeAICCSessionIntentInvitation :execrows
 -- 首次邀约只能从 not_invited 原子推进到 invited，不能覆盖访客已拒绝或已提交的决定。
@@ -587,6 +588,12 @@ ON DUPLICATE KEY UPDATE
 UPDATE aicc_sessions
 SET resolution_status = ?, updated_at = now()
 WHERE id = ?;
+
+-- name: ResetAICCSessionResolutionForNewPhase :exec
+-- 仅在访客已明确选择结果后写入阶段起点；未知状态下的追问不能伪造新阶段。
+UPDATE aicc_sessions
+SET resolution_status = 'unknown', resolution_phase_start_message_id = ?, updated_at = now()
+WHERE id = ? AND resolution_status IN ('resolved', 'unresolved');
 
 -- name: ListAICCLeadsByOrg :many
 SELECT *

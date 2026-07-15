@@ -384,6 +384,8 @@ type Querier interface {
 	// 注意：jobs 表无 started_at 列，仅清 locked_* / last_error / 状态。
 	RequeueJob(ctx context.Context, id string) error
 	RescheduleClaimedAICCIntentAnalysisRetry(ctx context.Context, arg RescheduleClaimedAICCIntentAnalysisRetryParams) (int64, error)
+	// 仅在访客已明确选择结果后写入阶段起点；未知状态下的追问不能伪造新阶段。
+	ResetAICCSessionResolutionForNewPhase(ctx context.Context, arg ResetAICCSessionResolutionForNewPhaseParams) error
 	// 整库 embedding 模型切换后，把该 dataset 下所有本地 document 状态重置为 queued，交给现有刷新任务继续推进。
 	ResetRAGFlowDocumentsParseStatusByDataset(ctx context.Context, datasetID string) error
 	// 重试请求会在同一更新内判定上限；最后一次失败直接终态化，且继续记录 worker 返回的错误摘要。
