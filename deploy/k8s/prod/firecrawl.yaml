@@ -8,7 +8,10 @@ metadata:
 type: Opaque
 stringData:
   # 临时 PostgreSQL 仅承载运行队列；该口令不复用于任何外部系统。
-  postgres-password: firecrawl-temporary
+  POSTGRES_PASSWORD: firecrawl-temporary
+  # 独立 worker 不经 harness 启动，NuQ 需显式获得可写与监听连接串。
+  NUQ_DATABASE_URL: postgres://postgres:firecrawl-temporary@firecrawl-postgres:5432/postgres
+  NUQ_DATABASE_URL_LISTEN: postgres://postgres:firecrawl-temporary@firecrawl-postgres:5432/postgres
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -25,7 +28,7 @@ data:
   POSTGRES_DB: postgres
   NUQ_RABBITMQ_URL: amqp://firecrawl-rabbitmq:5672
   USE_DB_AUTHENTICATION: "false"
-  NUQ_BACKEND: postgres
+  NUQ_BACKEND: pg
   NUM_WORKERS_PER_QUEUE: "1"
   CRAWL_CONCURRENT_REQUESTS: "4"
   MAX_CONCURRENT_JOBS: "4"
@@ -106,7 +109,7 @@ spec:
             - { name: POSTGRES_USER, value: postgres }
             - { name: POSTGRES_DB, value: postgres }
             - name: POSTGRES_PASSWORD
-              valueFrom: { secretKeyRef: { name: firecrawl-runtime, key: postgres-password } }
+              valueFrom: { secretKeyRef: { name: firecrawl-runtime, key: POSTGRES_PASSWORD } }
           ports: [{ containerPort: 5432, name: postgres }]
           resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: "1", memory: 1Gi } }
           volumeMounts: [{ name: data, mountPath: /var/lib/postgresql/data }]
@@ -164,12 +167,12 @@ spec:
         - name: api
           image: ghcr.io/firecrawl/firecrawl:2.11.110
           command: ["node", "dist/src/index.js"]
-          envFrom: [{ configMapRef: { name: firecrawl-runtime } }]
+          envFrom: [{ configMapRef: { name: firecrawl-runtime } }, { secretRef: { name: firecrawl-runtime } }]
           env:
             - { name: HOST, value: 0.0.0.0 }
             - { name: PORT, value: "3002" }
             - name: POSTGRES_PASSWORD
-              valueFrom: { secretKeyRef: { name: firecrawl-runtime, key: postgres-password } }
+              valueFrom: { secretKeyRef: { name: firecrawl-runtime, key: POSTGRES_PASSWORD } }
           ports: [{ containerPort: 3002, name: http }]
           readinessProbe: { httpGet: { path: /health, port: http }, initialDelaySeconds: 10, periodSeconds: 10 }
           resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { cpu: "2", memory: 2Gi } }
@@ -198,11 +201,11 @@ spec:
         - name: scrape-worker
           image: ghcr.io/firecrawl/firecrawl:2.11.110
           command: ["node", "dist/src/services/queue-worker.js"]
-          envFrom: [{ configMapRef: { name: firecrawl-runtime } }]
+          envFrom: [{ configMapRef: { name: firecrawl-runtime } }, { secretRef: { name: firecrawl-runtime } }]
           env:
             - { name: WORKER_PORT, value: "3005" }
             - name: POSTGRES_PASSWORD
-              valueFrom: { secretKeyRef: { name: firecrawl-runtime, key: postgres-password } }
+              valueFrom: { secretKeyRef: { name: firecrawl-runtime, key: POSTGRES_PASSWORD } }
           resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { cpu: "2", memory: 2Gi } }
 ---
 apiVersion: apps/v1
@@ -221,11 +224,11 @@ spec:
         - name: extract-worker
           image: ghcr.io/firecrawl/firecrawl:2.11.110
           command: ["node", "dist/src/services/extract-worker.js"]
-          envFrom: [{ configMapRef: { name: firecrawl-runtime } }]
+          envFrom: [{ configMapRef: { name: firecrawl-runtime } }, { secretRef: { name: firecrawl-runtime } }]
           env:
             - { name: EXTRACT_WORKER_PORT, value: "3004" }
             - name: POSTGRES_PASSWORD
-              valueFrom: { secretKeyRef: { name: firecrawl-runtime, key: postgres-password } }
+              valueFrom: { secretKeyRef: { name: firecrawl-runtime, key: POSTGRES_PASSWORD } }
           resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { cpu: "2", memory: 2Gi } }
 ---
 apiVersion: apps/v1
@@ -244,12 +247,12 @@ spec:
         - name: nuq-worker
           image: ghcr.io/firecrawl/firecrawl:2.11.110
           command: ["node", "dist/src/services/worker/nuq-worker.js"]
-          envFrom: [{ configMapRef: { name: firecrawl-runtime } }]
+          envFrom: [{ configMapRef: { name: firecrawl-runtime } }, { secretRef: { name: firecrawl-runtime } }]
           env:
             - { name: NUQ_WORKER_PORT, value: "3010" }
             - { name: NUQ_POD_NAME, value: nuq-worker }
             - name: POSTGRES_PASSWORD
-              valueFrom: { secretKeyRef: { name: firecrawl-runtime, key: postgres-password } }
+              valueFrom: { secretKeyRef: { name: firecrawl-runtime, key: POSTGRES_PASSWORD } }
           resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { cpu: "2", memory: 2Gi } }
 ---
 apiVersion: apps/v1
@@ -268,13 +271,13 @@ spec:
         - name: nuq-prefetch-worker
           image: ghcr.io/firecrawl/firecrawl:2.11.110
           command: ["node", "dist/src/services/worker/nuq-prefetch-worker.js"]
-          envFrom: [{ configMapRef: { name: firecrawl-runtime } }]
+          envFrom: [{ configMapRef: { name: firecrawl-runtime } }, { secretRef: { name: firecrawl-runtime } }]
           env:
             - { name: NUQ_PREFETCH_WORKER_PORT, value: "3011" }
             - { name: NUQ_POD_NAME, value: nuq-prefetch-worker }
             - { name: NUQ_PREFETCH_REPLICAS, value: "1" }
             - name: POSTGRES_PASSWORD
-              valueFrom: { secretKeyRef: { name: firecrawl-runtime, key: postgres-password } }
+              valueFrom: { secretKeyRef: { name: firecrawl-runtime, key: POSTGRES_PASSWORD } }
           resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { cpu: "2", memory: 2Gi } }
 ---
 # 六个计算组件统一采用 CPU 70% 与内存 75% 阈值；worker 上限更高以消化队列积压。
