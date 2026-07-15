@@ -39,6 +39,9 @@ test.describe('AICC 客服无状态运行时与故障恢复', () => {
     await page.getByPlaceholder('输入您的问题').fill('请触发本地已配置的模型超时故障。')
     await page.getByRole('button', { name: '发送' }).click()
     await expect(page.getByRole('button', { name: '重试' })).toBeVisible()
+    // 本地故障注入器配置为一次性失败；点击重试后必须取得真实助手文本，不能只验证错误按钮存在。
+    await page.getByRole('button', { name: '重试' }).click()
+    await expect(page.locator('.message-row.assistant .bubble p:not(.message-status)').last()).toBeVisible({ timeout: 240_000 })
   })
 
   // 故障注入由本地测试部署显式提供，避免 E2E 为了覆盖而修改任意运行时配置；每类失败都必须可恢复。
@@ -51,6 +54,8 @@ test.describe('AICC 客服无状态运行时与故障恢复', () => {
       await page.getByPlaceholder('输入您的问题').fill(`请触发已配置的${scenario}。`)
       await page.getByRole('button', { name: '发送' }).click()
       await expect(page.getByRole('button', { name: '重试' })).toBeVisible()
+      await page.getByRole('button', { name: '重试' }).click()
+      await expect(page.locator('.message-row.assistant .bubble p:not(.message-status)').last()).toBeVisible({ timeout: 240_000 })
     })
   }
 

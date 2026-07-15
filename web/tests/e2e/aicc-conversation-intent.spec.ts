@@ -80,5 +80,9 @@ test.describe('AICC 客服意向与会话状态', () => {
     await openAICCConsole(page)
     await page.getByRole('link', { name: '线索', exact: true }).click()
     await expect(page.getByText('13800000000')).toBeVisible()
+    await page.getByRole('button', { name: '查看对话' }).first().click()
+    // 后台证据抽屉必须显示可核验画像，并可定位到包含联系方式的访客原文。
+    await expect(page.getByLabel('意向画像')).toContainText(/高意向|中意向|低意向/)
+    await expect(page.getByRole('dialog')).toContainText('13800000000')
   })
 })

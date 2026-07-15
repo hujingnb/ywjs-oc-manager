@@ -24,6 +24,21 @@ export function deleteLocalAICCPod(appID: string): void {
   ], { stdio: 'pipe' })
 }
 
+// assertNoUnauthorizedAICCSourceAudit 读取 manager 持久化的受信任工具来源审计。
+// AICC 只会把受控 knowledge/web 工具的当前轮审计来源写入 aicc_message_sources；
+// 因此操作性拒绝后该会话不应产生任何来源记录，避免模型文本伪造“已执行”的痕迹。
+export function assertNoUnauthorizedAICCSourceAudit(sessionToken: string): void {
+  assertLocalK3DContext()
+  const escapedToken = sessionToken.replaceAll("'", "''")
+  const count = execFileSync('kubectl', [
+    '--context', localK3DContext, '-n', 'ocm', 'exec', 'mysql-0', '--', 'sh', '-c',
+    `mysql -uroot -p"$MYSQL_ROOT_PASSWORD" ocm -N -e "SELECT COUNT(*) FROM aicc_message_sources src JOIN aicc_messages msg ON msg.id=src.message_id JOIN aicc_sessions s ON s.id=msg.session_id WHERE s.session_token='${escapedToken}'" 2>/dev/null`,
+  ], { encoding: 'utf8' }).trim()
+  if (count !== '0') {
+    throw new Error(`操作性拒绝不应持久化任何受信任工具来源审计，实际记录数为 ${count || '(空)'}`)
+  }
+}
+
 // forceZh 在页面初始化前固定中文界面，避免平台默认语言差异影响可见文案定位。
 export async function forceZh(page: Page): Promise<void> {
   await page.addInitScript(() => {
