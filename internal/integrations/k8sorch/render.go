@@ -6,16 +6,27 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 // 资源命名约定（manager 按 appID 确定性寻址，无需存 pod 标识）。
-func deploymentName(appID string) string { return "app-" + appID }
-func serviceName(appID string) string    { return "app-" + appID + "-ocops" }
-func secretName(appID string) string     { return "app-" + appID + "-token" }
-func hpaName(appID string) string        { return deploymentName(appID) }
+func deploymentName(appID string) string        { return "app-" + appID }
+func serviceName(appID string) string           { return "app-" + appID + "-ocops" }
+func secretName(appID string) string            { return "app-" + appID + "-token" }
+func hpaName(appID string) string               { return deploymentName(appID) }
+func aiccNetworkPolicyName(appID string) string { return deploymentName(appID) + "-egress" }
+
+const (
+	// aiccWebEgressProxyURL 是客服网页检索的唯一公网出口。该 Service 后的代理必须强制域名
+	// allowlist 与请求审计；AICC Pod 的 NetworkPolicy 只允许访问这个集群内地址。
+	aiccWebEgressProxyURL = "http://aicc-web-egress-proxy.ocm.svc.cluster.local:8080"
+	// aiccWebEgressNoProxy 确保 manager 知识 API 与 new-api 模型网关留在集群内直连，
+	// 不把携带 runtime token 的内部请求转交网页检索代理。
+	aiccWebEgressNoProxy = ".svc,.svc.cluster.local"
+)
 
 // appLabels 是资源 ObjectMeta 与 pod template 的完整 label（含分组维度 part-of）。
 func appLabels(appID string) map[string]string {
@@ -62,6 +73,44 @@ func RenderService(spec AppSpec, namespace string) *corev1.Service {
 		Spec: corev1.ServiceSpec{
 			Selector: selectorLabels(spec.AppID),
 			Ports:    []corev1.ServicePort{{Name: "oc-ops", Port: 8080, TargetPort: intstr.FromInt32(8080)}},
+		},
+	}
+}
+
+// RenderAICCNetworkPolicy 为单个客服 Pod 建立默认拒绝的 egress 边界。Kubernetes NetworkPolicy
+// 无法按 DNS 域名过滤公网 DDGS 等动态后端，因此绝不直接放行 443 或任意 IP：网页检索只能经
+// app=aicc-web-egress-proxy 的集群内代理，该代理必须负责域名 allowlist、请求审计和出口控制。
+func RenderAICCNetworkPolicy(spec AppSpec, namespace string) *networkingv1.NetworkPolicy {
+	protocolTCP, protocolUDP := corev1.ProtocolTCP, corev1.ProtocolUDP
+	port := func(protocol corev1.Protocol, number int) networkingv1.NetworkPolicyPort {
+		value := intstr.FromInt(number)
+		return networkingv1.NetworkPolicyPort{Protocol: &protocol, Port: &value}
+	}
+	peer := func(namespace, app string) networkingv1.NetworkPolicyPeer {
+		return networkingv1.NetworkPolicyPeer{
+			NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": namespace}},
+			PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": app}},
+		}
+	}
+	dnsPeer := networkingv1.NetworkPolicyPeer{
+		NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kube-system"}},
+		PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"k8s-app": "kube-dns"}},
+	}
+	return &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: aiccNetworkPolicyName(spec.AppID), Namespace: namespace, Labels: appLabels(spec.AppID)},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{MatchLabels: selectorLabels(spec.AppID)},
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
+			Egress: []networkingv1.NetworkPolicyEgressRule{
+				// CoreDNS 同时支持 UDP/TCP；只选 kube-system 中的 kube-dns Pod，避免开放任意 53 端口。
+				{To: []networkingv1.NetworkPolicyPeer{dnsPeer}, Ports: []networkingv1.NetworkPolicyPort{port(protocolUDP, 53), port(protocolTCP, 53)}},
+				// manager-api 提供 token bootstrap 与受 app token 保护的知识检索入口。
+				{To: []networkingv1.NetworkPolicyPeer{peer("ocm", "manager-api")}, Ports: []networkingv1.NetworkPolicyPort{port(protocolTCP, 8080)}},
+				// new-api 是模型请求的唯一内网网关，禁止客服 Pod 直连任意外部模型服务。
+				{To: []networkingv1.NetworkPolicyPeer{peer("ocm", "new-api")}, Ports: []networkingv1.NetworkPolicyPort{port(protocolTCP, 3000)}},
+				// 受控网页检索代理是唯一外网出口；代理服务本身须配置允许域名、审计和认证。
+				{To: []networkingv1.NetworkPolicyPeer{peer("ocm", "aicc-web-egress-proxy")}, Ports: []networkingv1.NetworkPolicyPort{port(protocolTCP, 8080)}},
+			},
 		},
 	}
 }
@@ -172,11 +221,20 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 		// AICC bootstrap 只生成 hermes 消费的输入配置，不恢复标准应用的数据目录。
 		initContainer.VolumeMounts = []corev1.VolumeMount{inputMount}
 	}
+	runtimeProxyEnv := proxyEnv
+	if domain.IsAICCAppType(spec.AppType) {
+		// 忽略通用应用的外部代理配置，客服网页检索只能走 NetworkPolicy 允许的受控代理。
+		runtimeProxyEnv = []corev1.EnvVar{
+			{Name: "HTTP_PROXY", Value: aiccWebEgressProxyURL},
+			{Name: "HTTPS_PROXY", Value: aiccWebEgressProxyURL},
+			{Name: "NO_PROXY", Value: aiccWebEgressNoProxy},
+		}
+	}
 	hermesEnv := append([]corev1.EnvVar{
 		{Name: "HERMES_HOME", Value: "/opt/data"},
 		{Name: "API_SERVER_ENABLED", Value: "true"},
 		{Name: "API_SERVER_KEY", ValueFrom: ctrlTokenEnv.ValueFrom},
-	}, proxyEnv...)
+	}, runtimeProxyEnv...)
 	// 客服容器不接入消息渠道，也不具备发布能力；模型、知识 API 与网页后端配置均由
 	// oc-bootstrap 生成的只读运行时配置提供，避免以环境变量横向暴露通用应用能力。
 	if !domain.IsAICCAppType(spec.AppType) {

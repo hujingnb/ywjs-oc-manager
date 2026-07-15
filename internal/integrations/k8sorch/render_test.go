@@ -10,6 +10,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/yaml"
@@ -104,6 +105,44 @@ func TestRenderDeploymentAICC(t *testing.T) {
 		assert.Equal(t, []corev1.Capability{"ALL"}, c.SecurityContext.Capabilities.Drop)
 	}
 	assertGolden(t, "deployment-aicc.golden.yaml", dep)
+}
+
+// TestRenderAICCNetworkPolicy 验证客服 Pod 默认拒绝出网，仅允许解析 DNS、访问 manager 知识 API、
+// 模型网关，以及经受控审计代理发起网页检索；不得直接放行公网 DDGS 或任意外部地址。
+func TestRenderAICCNetworkPolicy(t *testing.T) {
+	spec := testSpec()
+	spec.AppType = domain.AppTypeAICC
+
+	policy := RenderAICCNetworkPolicy(spec, "oc-aicc")
+
+	assert.Equal(t, "app-a1-egress", policy.Name)
+	assert.Equal(t, "oc-aicc", policy.Namespace)
+	assert.Equal(t, selectorLabels(spec.AppID), policy.Spec.PodSelector.MatchLabels)
+	assert.Equal(t, []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}, policy.Spec.PolicyTypes)
+	require.Len(t, policy.Spec.Egress, 4)
+	for _, rule := range policy.Spec.Egress {
+		require.Len(t, rule.To, 1)
+		assert.Nil(t, rule.To[0].IPBlock, "AICC 不得以 IPBlock 直接放行任意公网出口")
+	}
+	assert.Equal(t, "kube-system", policy.Spec.Egress[0].To[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"])
+	assert.Equal(t, "kube-dns", policy.Spec.Egress[0].To[0].PodSelector.MatchLabels["k8s-app"])
+	assert.Equal(t, int32(53), policy.Spec.Egress[0].Ports[0].Port.IntVal)
+	assert.Equal(t, "ocm", policy.Spec.Egress[1].To[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"])
+	assert.Equal(t, "manager-api", policy.Spec.Egress[1].To[0].PodSelector.MatchLabels["app"])
+	assert.Equal(t, int32(8080), policy.Spec.Egress[1].Ports[0].Port.IntVal)
+	assert.Equal(t, "new-api", policy.Spec.Egress[2].To[0].PodSelector.MatchLabels["app"])
+	assert.Equal(t, int32(3000), policy.Spec.Egress[2].Ports[0].Port.IntVal)
+	assert.Equal(t, "aicc-web-egress-proxy", policy.Spec.Egress[3].To[0].PodSelector.MatchLabels["app"])
+	assert.Equal(t, int32(8080), policy.Spec.Egress[3].Ports[0].Port.IntVal)
+	hermes := containerByName(RenderDeployment(spec, "oc-aicc"), "hermes")
+	require.NotNil(t, hermes)
+	httpProxy := envByName(hermes, "HTTP_PROXY")
+	noProxy := envByName(hermes, "NO_PROXY")
+	require.NotNil(t, httpProxy)
+	require.NotNil(t, noProxy)
+	assert.Equal(t, "http://aicc-web-egress-proxy.ocm.svc.cluster.local:8080", httpProxy.Value)
+	assert.Equal(t, ".svc,.svc.cluster.local", noProxy.Value)
+	assert.Nil(t, envByName(containerByName(RenderDeployment(spec, "oc-aicc"), "oc-ops"), "HTTP_PROXY"))
 }
 
 // TestRenderAICCHPA 验证未配置外部指标适配器时，AICC HPA 只使用集群已提供的 CPU、内存指标。

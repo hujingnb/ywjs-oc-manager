@@ -44,6 +44,8 @@ func TestEnsureAppAICCCreatesHPA(t *testing.T) {
 	aicc := testSpec()
 	aicc.AppType = domain.AppTypeAICC
 	require.NoError(t, a.EnsureApp(context.Background(), aicc))
+	_, err := cs.NetworkingV1().NetworkPolicies("oc-aicc").Get(context.Background(), "app-a1-egress", metav1.GetOptions{})
+	require.NoError(t, err)
 	// 模拟 HPA 已将 Deployment 扩容；后续业务 reconcile 不得把副本数强制写回初始值 1。
 	require.NoError(t, a.Scale(context.Background(), aicc.AppID, 3))
 	// 重复 reconcile 应走 Update 路径并保持幂等，避免 worker 重试时因 HPA 已存在而失败。
@@ -73,6 +75,20 @@ func TestDeleteAICCDeletesHPA(t *testing.T) {
 
 	require.NoError(t, a.Delete(context.Background(), "a1"))
 	_, err := cs.AutoscalingV2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-a1", metav1.GetOptions{})
+	require.Error(t, err)
+}
+
+// TestDeleteAICCDeletesNetworkPolicy 验证删除 AICC 时一并删除专属 egress 策略，避免 app ID
+// 重用后被过期策略意外选中或留下不可审计的孤儿安全资源。
+func TestDeleteAICCDeletesNetworkPolicy(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	a := NewAICCKubernetesAdapter(cs, "oc-aicc")
+	spec := testSpec()
+	spec.AppType = domain.AppTypeAICC
+	require.NoError(t, a.EnsureApp(context.Background(), spec))
+
+	require.NoError(t, a.Delete(context.Background(), spec.AppID))
+	_, err := cs.NetworkingV1().NetworkPolicies("oc-aicc").Get(context.Background(), "app-a1-egress", metav1.GetOptions{})
 	require.Error(t, err)
 }
 

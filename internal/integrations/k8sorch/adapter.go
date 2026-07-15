@@ -11,6 +11,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -54,6 +55,12 @@ func (a *KubernetesAdapter) EnsureApp(ctx context.Context, spec AppSpec) error {
 	if err := a.applyService(ctx, RenderService(spec, a.namespace)); err != nil {
 		return err
 	}
+	if a.aicc && domain.IsAICCAppType(spec.AppType) {
+		// 在创建/更新客服 Pod 前先收敛默认拒绝 egress 策略，避免滚动更新窗口产生未受限副本。
+		if err := a.applyNetworkPolicy(ctx, RenderAICCNetworkPolicy(spec, a.namespace)); err != nil {
+			return err
+		}
+	}
 	if err := a.applyDeployment(ctx, RenderDeployment(spec, a.namespace), a.aicc && domain.IsAICCAppType(spec.AppType)); err != nil {
 		return err
 	}
@@ -61,6 +68,22 @@ func (a *KubernetesAdapter) EnsureApp(ctx context.Context, spec AppSpec) error {
 		return a.applyHPA(ctx, RenderAICCHPA(spec, a.namespace, a.businessMetrics))
 	}
 	return nil
+}
+
+// applyNetworkPolicy 以 Get→Create/Update 方式幂等收敛 AICC 的逐应用 egress 策略。
+func (a *KubernetesAdapter) applyNetworkPolicy(ctx context.Context, policy *networkingv1.NetworkPolicy) error {
+	api := a.client.NetworkingV1().NetworkPolicies(a.namespace)
+	existing, err := api.Get(ctx, policy.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		_, cerr := api.Create(ctx, policy, metav1.CreateOptions{})
+		return wrapK8s("创建 AICC NetworkPolicy", cerr)
+	}
+	if err != nil {
+		return wrapK8s("查询 AICC NetworkPolicy", err)
+	}
+	policy.ResourceVersion = existing.ResourceVersion
+	_, uerr := api.Update(ctx, policy, metav1.UpdateOptions{})
+	return wrapK8s("更新 AICC NetworkPolicy", uerr)
 }
 
 // applyHPA 以 Get→Create/Update 方式幂等收敛 HPA，保留 apiserver 分配的 ResourceVersion。
@@ -247,6 +270,9 @@ func (a *KubernetesAdapter) Delete(ctx context.Context, appID string) error {
 		if err := a.deleteHPA(ctx, appID); err != nil {
 			return err
 		}
+		if err := a.deleteAICCNetworkPolicy(ctx, appID); err != nil {
+			return err
+		}
 	}
 	if err := a.client.AppsV1().Deployments(a.namespace).Delete(ctx, deploymentName(appID), del); err != nil && !apierrors.IsNotFound(err) {
 		return wrapK8s("删除 Deployment", err)
@@ -258,6 +284,15 @@ func (a *KubernetesAdapter) Delete(ctx context.Context, appID string) error {
 		return wrapK8s("删除 Secret", err)
 	}
 	return nil
+}
+
+// deleteAICCNetworkPolicy 清理逐应用默认拒绝 egress 策略；资源不存在视为已收敛。
+func (a *KubernetesAdapter) deleteAICCNetworkPolicy(ctx context.Context, appID string) error {
+	err := a.client.NetworkingV1().NetworkPolicies(a.namespace).Delete(ctx, aiccNetworkPolicyName(appID), metav1.DeleteOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return wrapK8s("删除 AICC NetworkPolicy", err)
 }
 
 // deleteHPA 幂等删除 AICC HPA；NotFound 表示已停止或已删除，按成功处理。
