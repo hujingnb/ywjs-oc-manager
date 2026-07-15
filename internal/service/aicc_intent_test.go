@@ -1,12 +1,76 @@
 package service
 
 import (
+	"context"
+	"database/sql"
+	"errors"
 	"testing"
 
+	"github.com/guregu/null/v5"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"oc-manager/internal/store/sqlc"
 )
+
+// intentRetryStoreFake 是确定性内存状态机，用于验证重试租约行为而非 SQL 文本。
+type intentRetryStoreFake struct {
+	*aiccDispatcherStoreFake
+	row        bool
+	claimed    bool
+	processed  bool
+	attempts   int
+	chatFail   bool
+	deleteFail bool
+}
+
+func (s *intentRetryStoreFake) ListReadyAICCIntentAnalysisRetries(context.Context, int32) ([]sqlc.ListReadyAICCIntentAnalysisRetriesRow, error) {
+	if s.row && !s.processed && !s.claimed {
+		return []sqlc.ListReadyAICCIntentAnalysisRetriesRow{{SessionID: "s", MessageID: "m", AgentID: "a", OrgID: "o", AppID: "p"}}, nil
+	}
+	return nil, nil
+}
+func (s *intentRetryStoreFake) ClaimAICCIntentAnalysisRetry(context.Context, sqlc.ClaimAICCIntentAnalysisRetryParams) (int64, error) {
+	if s.claimed {
+		return 0, nil
+	}
+	s.claimed = true
+	return 1, nil
+}
+func (s *intentRetryStoreFake) GetAICCMessageByID(context.Context, string) (sqlc.AiccMessage, error) {
+	if s.chatFail {
+		return sqlc.AiccMessage{}, errors.New("read")
+	}
+	return sqlc.AiccMessage{ID: "m", TextContent: null.StringFrom("预算10万")}, nil
+}
+func (*intentRetryStoreFake) GetAICCSessionContext(context.Context, string) (sqlc.AiccSessionContext, error) {
+	return sqlc.AiccSessionContext{}, sql.ErrNoRows
+}
+func (*intentRetryStoreFake) ListAICCContextMessages(context.Context, sqlc.ListAICCContextMessagesParams) ([]sqlc.AiccMessage, error) {
+	return nil, nil
+}
+func (*intentRetryStoreFake) GetAICCSessionIntent(context.Context, string) (sqlc.AiccSessionIntent, error) {
+	return sqlc.AiccSessionIntent{}, sql.ErrNoRows
+}
+func (*intentRetryStoreFake) UpsertAICCSessionIntent(context.Context, sqlc.UpsertAICCSessionIntentParams) error {
+	return nil
+}
+func (s *intentRetryStoreFake) RescheduleClaimedAICCIntentAnalysisRetry(context.Context, sqlc.RescheduleClaimedAICCIntentAnalysisRetryParams) (int64, error) {
+	s.claimed = false
+	s.attempts++
+	return 1, nil
+}
+func (s *intentRetryStoreFake) MarkAICCIntentAnalysisRetryProcessed(context.Context, sqlc.MarkAICCIntentAnalysisRetryProcessedParams) (int64, error) {
+	s.processed = true
+	return 1, nil
+}
+func (s *intentRetryStoreFake) DeleteProcessedAICCIntentAnalysisRetry(context.Context, sqlc.DeleteProcessedAICCIntentAnalysisRetryParams) (int64, error) {
+	if s.deleteFail {
+		return 0, errors.New("delete")
+	}
+	s.row = false
+	return 1, nil
+}
 
 // TestParseAICCIntentAnalysis 验证低中高意向只采纳当前访客原话可证明的白名单字段。
 func TestParseAICCIntentAnalysis(t *testing.T) {
@@ -99,4 +163,20 @@ func TestRenderAICCIntentEvidenceInput(t *testing.T) {
 	analysis, ok := parseAICCIntentAnalysis(`{"level":"high","fields":{"budget":"预算 10 万"},"confidence":{},"evidence":{"budget":{"message_id":"msg-1","text":"预算 10 万"}}}`, map[string]string{"msg-1": "预算 10 万"})
 	assert.True(t, ok)
 	assert.Equal(t, "预算 10 万", analysis.Fields["budget"])
+}
+
+// TestAICCIntentRetryLeaseBehavior 覆盖失败释放与已处理清理失败不重跑模型。
+func TestAICCIntentRetryLeaseBehavior(t *testing.T) {
+	store := &intentRetryStoreFake{aiccDispatcherStoreFake: newAICCDispatcherStoreFake(), row: true, chatFail: true}
+	d := NewAICCDispatcher(store, nil, aiccDispatcherChatFake{}, nil)
+	require.NoError(t, d.RetryPendingAICCIntentAnalysis(context.Background()))
+	assert.False(t, store.claimed)
+	assert.Equal(t, 1, store.attempts)
+	store.chatFail = false
+	store.deleteFail = true
+	d.chat = aiccDispatcherChatFake{reply: `{"level":"low","fields":{},"confidence":{},"evidence":{}}`}
+	require.NoError(t, d.RetryPendingAICCIntentAnalysis(context.Background()))
+	assert.True(t, store.processed)
+	require.NoError(t, d.RetryPendingAICCIntentAnalysis(context.Background()))
+	assert.True(t, store.processed)
 }
