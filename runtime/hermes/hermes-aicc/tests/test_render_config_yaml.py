@@ -31,11 +31,17 @@ def test_render_writes_expected_fields(tmp_data: Path) -> None:
     assert "terminal" not in out
 
 
-def test_render_disables_cross_session_memory_and_user_profile(tmp_data: Path) -> None:
+def test_render_disables_cross_session_memory(tmp_data: Path) -> None:
     # AICC 的跨会话上下文以 manager 为唯一真相源，避免 Hermes 长期记忆串访客。
     render(make_manifest(), tmp_data)
     out = yaml.safe_load((tmp_data / "config.yaml").read_text())
     assert out["memory"]["memory_enabled"] is False
+
+
+def test_render_disables_cross_session_user_profile(tmp_data: Path) -> None:
+    # AICC 不能维护访客跨会话画像，避免不同访客或企业之间发生信息泄漏。
+    render(make_manifest(), tmp_data)
+    out = yaml.safe_load((tmp_data / "config.yaml").read_text())
     assert out["memory"]["user_profile_enabled"] is False
 
 

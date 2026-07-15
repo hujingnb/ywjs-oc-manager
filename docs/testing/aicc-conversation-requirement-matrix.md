@@ -13,7 +13,7 @@
 
 | ID | 需求 | 正向 | 拒绝/边界 | 故障/恢复 | 并发/隔离 | 自动化证据 | 结果 |
 |---|---|---|---|---|---|---|---|
-| AICC-CAP-001 | AICC 不暴露 terminal、process、execute_code、文件读写、cron、kanban、发布和外部写工具 | `knowledge.read`、`web.search`、Skill 查看和视觉工具可用 | 伪造或未声明工具调用返回 `AICC_TOOL_FORBIDDEN` | policy 缺失、损坏或审计失败时不 Ready | 多 Pod 使用相同不可变工具集合 | `test_aicc_tool_policy.py`、镜像契约 | BASELINE-FAIL |
+| AICC-CAP-001 | AICC 不暴露 terminal、process、execute_code、文件读写、cron、kanban、发布和外部写工具 | `knowledge.read`、`web.search`、Skill 查看，以及仅接收 manager 验证的当前轮次图片理解可用 | 伪造或未声明工具调用返回 `AICC_TOOL_FORBIDDEN`；图片不得开放文件系统或历史附件读取 | policy 缺失、损坏或审计失败时不 Ready | 多 Pod 使用相同不可变工具集合 | `test_aicc_tool_policy.py`、镜像契约 | BASELINE-FAIL |
 | AICC-CAP-002 | AICC 不强制枚举全部 Skill，只能选择审核通过的客服 Skill | 白名单 Skill 可被发现和查看 | 普通或未审核 Skill 不可见且不可调用 | manifest 声明越权 capability 时启动失败关闭 | 企业启用项只能缩小镜像上限 | `platform_prompt_test.go`、`test_render_skills.py` | BASELINE-FAIL |
 | AICC-CAP-003 | capability 同时经过镜像、Skill、运行时和 manager API 四层校验 | 合法只读检索完成 | 非法工具、伪造 Skill 和 AICC token 写请求均拒绝 | Broker 或 manager 校验不可用时拒绝执行 | 并发请求不能借用其他 Skill 或 app 权限 | `test_aicc_tool_policy.py`、`knowledge_service_test.go` | PENDING |
 | AICC-CAP-004 | 普通 Hermes 应用保留现有通用能力 | standard app 保持 terminal、S3 和原有 Skill | AICC 配置不得回退为 standard 配置 | AICC 校验失败不自动降级为普通运行时 | 两类 app 配置和 token 不串用 | Go/Python 回归、部署契约 | PENDING |
@@ -47,5 +47,5 @@
 
 | 命令 | 对应 ID | 当前预期差异 | 实际结果 |
 |---|---|---|---|
-| `go test ./internal/config -run TestPlatformPrompts_Invariants -count=1` | AICC-CAP-002 | AICC 提示词仍强制调用 `skills_list` | `FAIL`：`TestPlatformPrompts_Invariants/AICC` 断言提示词不含强制 `skills_list` 规则失败；退出码 1。 |
-| `pytest -q runtime/hermes/hermes-aicc/tests/test_render_config_yaml.py` | AICC-CAP-001、AICC-BOOT-003 | config 仍包含 terminal、approvals，且 memory 和 user profile 均为 true | `FAIL`：9 项中 3 项失败，分别检测到 `terminal`、`approvals`，以及 `memory_enabled=true`；退出码 1。 |
+| `go test ./internal/config -run TestPlatformPrompts_Invariants -count=1` | AICC-CAP-002 | AICC 提示词缺少审核客服 Skill 白名单，并仍强制调用 `skills_list` 和回退通用能力 | `FAIL`：`TestPlatformPrompts_Invariants/AICC` 缺少两项白名单规则，并仍含强制 `skills_list` 及两项通用能力回退表述；退出码 1。 |
+| `pytest -q runtime/hermes/hermes-aicc/tests/test_render_config_yaml.py` | AICC-CAP-001、AICC-BOOT-003 | config 仍包含 terminal、approvals，且 memory 和 user profile 均为 true | `FAIL`：10 项中 4 项失败，分别检测到 `terminal`、`approvals`、`memory_enabled=true` 和 `user_profile_enabled=true`；退出码 1。 |

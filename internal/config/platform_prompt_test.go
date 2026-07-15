@@ -58,8 +58,13 @@ func TestPlatformPrompts_Invariants(t *testing.T) {
 				assert.NotContains(t, testCase.prompt, text)
 			}
 			if testCase.appType == domain.AppTypeAICC {
-				// AICC 只能按客服能力白名单选择已审核 Skill，不能被平台提示词强制枚举全部 Skill。
+				// AICC 只能使用平台审核且处于当前白名单的客服 Skill，不得回退至通用能力。
+				assert.Contains(t, testCase.prompt, "仅可使用平台审核并在当前 AICC 白名单中的客服 Skill")
+				assert.Contains(t, testCase.prompt, "不得调用未审核、通用或未在白名单中的 Skill")
+				// AICC 不得被平台提示词强制枚举全部 Skill，也不得在无匹配时自行回退通用能力。
 				assert.NotContains(t, testCase.prompt, "处理任何用户任务前，必须先调用 skills_list")
+				assert.NotContains(t, testCase.prompt, "只有在没有适用的技能时，才使用通用能力")
+				assert.NotContains(t, testCase.prompt, "通用能力完成任务")
 			} else {
 				// 普通实例保留通用 Skill 发现流程，确保原有工作流不受 AICC 裁剪影响。
 				assert.Contains(t, testCase.prompt, "处理任何用户任务前，必须先调用 skills_list")
