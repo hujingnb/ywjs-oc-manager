@@ -140,6 +140,28 @@ describe('AICCLeadsPage', () => {
     expect(wrapper.find('.intent-fields button').text()).toContain('预算 10 万')
   })
 
+  // 场景：运营点击意向字段时必须定位到对应访客原话；缺少证据的字段不得触发滚动或猜测位置。
+  it('scrolls to the exact visitor evidence and ignores fields without evidence', async () => {
+    const scrollIntoView = vi.fn()
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView })
+    const wrapper = mountLeadsPage()
+    const viewButton = wrapper.findAll('button').find(item => item.text().includes('查看对话'))
+    await viewButton?.trigger('click')
+    const evidenceButton = wrapper.find('.intent-fields button')
+
+    await evidenceButton.trigger('click')
+    expect(scrollIntoView).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-message-id="msg-1"]').exists()).toBe(true)
+
+    queryState.detail.data.value = {
+      ...queryState.detail.data.value!,
+      intent: { ...queryState.detail.data.value!.intent!, fields: { timeline: '下个月上线' }, evidence: {} },
+    }
+    await wrapper.vm.$nextTick()
+    await wrapper.find('.intent-fields button').trigger('click')
+    expect(scrollIntoView).toHaveBeenCalledTimes(1)
+  })
+
   // 场景：未留联系方式的高意向访客仍应作为匿名线索展示，运营可从对话依据回看判断。
   it('labels a lead without contact values as an anonymous interested visitor', async () => {
     queryState.leads.data.value = [{

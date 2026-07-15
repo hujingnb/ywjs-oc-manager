@@ -72,7 +72,7 @@
             <strong>{{ t('aicc.leads.noConversationTitle') }}</strong>
             <span>{{ t('aicc.leads.noConversationDesc') }}</span>
           </div>
-          <div v-else class="transcript-stack">
+          <div v-else ref="transcriptStackEl" class="transcript-stack">
             <section v-if="sessionIntent" class="intent-profile" :aria-label="t('aicc.leads.intentProfileLabel')">
               <strong>{{ t('aicc.leads.intentProfileTitle') }} · {{ intentLevelLabel(sessionIntent.intent_level) }}</strong>
               <div v-if="Object.keys(sessionIntent.fields).length" class="intent-fields">
@@ -137,6 +137,7 @@ const activeLeadId = ref<string | undefined>()
 const selectedLead = ref<AICCLead | undefined>()
 const selectedSessionId = ref<string | undefined>()
 const transcriptOpen = ref(false)
+const transcriptStackEl = ref<HTMLElement | null>(null)
 const leads = computed(() => leadsQuery.data.value ?? [])
 const detailQuery = useAICCSessionQuery(selectedSessionId)
 const transcriptMessages = computed(() => detailQuery.data.value?.messages ?? [])
@@ -219,7 +220,7 @@ function roleLabel(role?: string) {
 function focusEvidence(messageID?: string) {
   if (!messageID) return
   // 不拼接 CSS 选择器，避免消息 ID 中的特殊字符影响定位；data 属性精确比较即可。
-  Array.from(document.querySelectorAll<HTMLElement>('[data-message-id]'))
+  Array.from(transcriptStackEl.value?.querySelectorAll<HTMLElement>('[data-message-id]') ?? [])
     .find(element => element.dataset.messageId === messageID)
     ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 }

@@ -776,6 +776,7 @@ async function scrollToBottom() {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  min-width: 0;
 }
 
 .message-row.visitor {
@@ -793,6 +794,8 @@ async function scrollToBottom() {
   border: 1px solid var(--color-divider);
   line-height: 1.6;
   white-space: pre-wrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .visitor .bubble {

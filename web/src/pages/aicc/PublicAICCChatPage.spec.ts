@@ -671,6 +671,10 @@ describe('PublicAICCChatPage', () => {
     expect(wrapper.find('.public-chat').exists()).toBe(true)
     expect(wrapper.find('.chat-window').exists()).toBe(true)
     expect(wrapper.find('.composer').exists()).toBe(true)
+    await wrapper.find('textarea').setValue('https://example.com/' + 'unbroken-token-'.repeat(80))
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('.message-row.visitor .bubble').text()).toContain('unbroken-token')
   })
 
   // 场景：选择非图片文件时前端立即提示，不能创建图片预览或调用上传接口。

@@ -822,11 +822,11 @@ func TestAICCServiceRuntimeDisplayStatus(t *testing.T) {
 		phase       string
 		want        string
 	}{
-		{name: "Pod 启动中", agentStatus: domain.AICCAgentStatusDraft, appStatus: domain.AppStatusStarting, phase: domain.RuntimePhaseStarting, want: "starting"}, // 隐藏 app 未就绪时不可开始接待。
-		{name: "Pod 就绪待接待", agentStatus: domain.AICCAgentStatusDraft, appStatus: domain.AppStatusBindingWaiting, phase: domain.RuntimePhaseReady, want: "ready"}, // 运行时可用但尚未接待。
+		{name: "Pod 启动中", agentStatus: domain.AICCAgentStatusDraft, appStatus: domain.AppStatusStarting, phase: domain.RuntimePhaseStarting, want: "starting"},        // 隐藏 app 未就绪时不可开始接待。
+		{name: "Pod 就绪待接待", agentStatus: domain.AICCAgentStatusDraft, appStatus: domain.AppStatusBindingWaiting, phase: domain.RuntimePhaseReady, want: "ready"},      // 运行时可用但尚未接待。
 		{name: "Pod 就绪接待中", agentStatus: domain.AICCAgentStatusActive, appStatus: domain.AppStatusBindingWaiting, phase: domain.RuntimePhaseReady, want: "receiving"}, // 公开入口已开始接待。
-		{name: "Pod 就绪已暂停", agentStatus: domain.AICCAgentStatusPaused, appStatus: domain.AppStatusBindingWaiting, phase: domain.RuntimePhaseReady, want: "paused"}, // 管理员暂停后保留运行时。
-		{name: "隐藏 app 异常", agentStatus: domain.AICCAgentStatusDraft, appStatus: domain.AppStatusError, phase: domain.RuntimePhaseUnknown, want: "error"}, // 初始化或运行失败优先展示异常。
+		{name: "Pod 就绪已暂停", agentStatus: domain.AICCAgentStatusPaused, appStatus: domain.AppStatusBindingWaiting, phase: domain.RuntimePhaseReady, want: "paused"},    // 管理员暂停后保留运行时。
+		{name: "隐藏 app 异常", agentStatus: domain.AICCAgentStatusDraft, appStatus: domain.AppStatusError, phase: domain.RuntimePhaseUnknown, want: "error"},             // 初始化或运行失败优先展示异常。
 	}
 
 	for _, tc := range cases {
@@ -1379,6 +1379,40 @@ func TestAICCServiceGetSessionReturnsMessages(t *testing.T) {
 	require.Len(t, result.LeadValues, 1)
 	assert.Equal(t, "phone", result.LeadValues[0].FieldKey)
 	assert.Equal(t, "13800138000", result.LeadValues[0].Value)
+	// 场景：旧 store 或尚未完成分析的会话没有意向记录时，查看对话不应失败也不应伪造画像。
+	assert.Nil(t, result.Intent)
+}
+
+// intentReadableAICCStore 为会话详情测试显式提供 Task8 意向读取能力，验证可选窄接口被安全消费。
+type intentReadableAICCStore struct {
+	*fakeAICCStore
+	intent sqlc.AiccSessionIntent
+	err    error
+}
+
+// GetAICCSessionIntent 返回测试预置的已校验意向事实；sql.ErrNoRows 模拟尚无分析记录。
+func (s *intentReadableAICCStore) GetAICCSessionIntent(context.Context, string) (sqlc.AiccSessionIntent, error) {
+	if s.err != nil {
+		return sqlc.AiccSessionIntent{}, s.err
+	}
+	return s.intent, nil
+}
+
+// TestAICCServiceGetSessionReturnsVerifiableIntent 覆盖管理端会话详情返回画像和字段到访客消息的证据锚点。
+func TestAICCServiceGetSessionReturnsVerifiableIntent(t *testing.T) {
+	store := &intentReadableAICCStore{fakeAICCStore: seededAICCStore(), intent: sqlc.AiccSessionIntent{
+		SessionID: "session-1", IntentLevel: "high", FieldsJson: []byte(`{"budget":"预算 10 万"}`),
+		ConfidenceJson: []byte(`{"budget":0.9}`), EvidenceJson: []byte(`{"budget":{"message_id":"msg-1","text":"你好"}}`), InviteStatus: "invited",
+	}}
+	svc := NewAICCService(store, &fakeAICCHiddenAppCreator{})
+
+	result, err := svc.GetSession(context.Background(), aiccOrgAdmin(), "session-1")
+
+	require.NoError(t, err)
+	require.NotNil(t, result.Intent)
+	assert.Equal(t, "high", result.Intent.IntentLevel)
+	assert.Equal(t, "预算 10 万", result.Intent.Fields["budget"])
+	assert.Equal(t, "msg-1", result.Intent.Evidence["budget"])
 }
 
 // TestAICCServiceListLeadsAndMarkRead 覆盖线索运营列表和已读标记：
