@@ -18,7 +18,7 @@
 | `web/src/{domain/aicc.ts,api/hooks/useAICC.ts,pages/aicc/*.vue,i18n/locales/*/aicc.ts}`、`PublicAICCChatPage.spec.ts` | 公开/挂件、后台线索证据、状态动作、移动与中英文展示 | AICC-SRC-003、AICC-INT-*、AICC-STATE-*、AICC-CH-002..003 | `npm test -- --run src/pages/aicc/PublicAICCChatPage.spec.ts`：31 passed | 局部测试通过；Chrome 验收 BLOCKED 见矩阵。AICCConsole layouts 为未改动依赖，范围外。 |
 | `web/playwright.config.ts`、`web/tests/e2e/aicc-conversation-*.spec.ts`、`helpers.ts` | Chrome Stable 挂件、隔离、状态、意向、重启、故障与来源验收 | AICC-E2E-001..003 | `npx playwright test --list --project=chrome-headed ...`：34 tests；真实运行时受 RAGFlow 与专用 fixture 阻塞 | BLOCKED |
 | `internal/api/handlers/{public_aicc,runtime_knowledge,knowledge}.go`、`dto.go`、OpenAPI、`web/src/api/generated.ts`、`internal/config/config.go`、`internal/worker/handlers/app_initialize.go`、`internal/integrations/ocops/types_conversation.go`、`sqlc.yaml` | 公开 API、运行时只读知识、配置、启动与渠道类型契约 | AICC-CAP-003、AICC-BOOT-001..004、AICC-CH-001..002 | `go test ./internal/api/handlers -run AICC -count=1` | 已映射；验收 PENDING/BLOCKED 见矩阵 |
-| `deploy/k8s/{local,prod}/{manager-api.yaml,manager-rbac.yaml,secret.yaml,secret.example.yaml}`、`internal/integrations/k8sorch/*`、bootstrap | AICC 容器安全、RBAC、密钥和本地/生产模板约束 | AICC-CAP-003、AICC-BOOT-004 | k8s render/Go bootstrap 测试 | 已映射；真实 Pod 验收 BLOCKED 见矩阵 |
+| `deploy/k8s/{local,prod}/{manager-rbac.yaml,secret.yaml,secret.example.yaml}`、`internal/integrations/k8sorch/*`、bootstrap | AICC 容器安全、RBAC、密钥和本地/生产模板约束 | AICC-CAP-003、AICC-BOOT-004 | k8s render/Go bootstrap 测试 | 已映射；真实 Pod 验收 BLOCKED 见矩阵 |
 | `docs/testing/aicc-conversation-{requirement-matrix,validation-report}.md` | 当前需求、证据、历史基线与阻塞原因 | 全部 AICC-CAP/SRC/INT/STATE/BOOT/CH/E2E | 本文档与验收报告 | 文档已映射；总体验收 PENDING/BLOCKED 见矩阵 |
 
 ## 历史业务面（范围外 ID）
