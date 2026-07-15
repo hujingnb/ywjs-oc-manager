@@ -30,6 +30,7 @@ var aiccEnterprisePriceClaimPattern = regexp.MustCompile(`(?i)(价格|报价|pri
 var aiccOperationCompletedPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?:已|已经|成功)(?:帮|替)?(?:您|你)?.{0,12}(?:创建|新建|修改|更新|删除|执行|写入|部署|发布|启动|开通|重置)`),
 	regexp.MustCompile(`(?:订单|网站|文件|服务|账号|密码).{0,12}(?:已|已经|成功).{0,6}(?:创建|新建|修改|更新|删除|执行|写入|部署|发布|启动|开通|重置|完成|上线)`),
+	regexp.MustCompile(`(?:订单|网站|文件|服务|账号|密码).{0,12}(?:创建|新建|修改|更新|删除|执行|写入|部署|发布|启动|开通|重置).{0,6}(?:成功|完成|已完成|已经完成|上线)`),
 	regexp.MustCompile(`(?:部署|发布).{0,6}(?:已|已经|成功).{0,6}(?:完成|上线)`),
 }
 

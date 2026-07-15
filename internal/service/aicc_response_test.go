@@ -126,6 +126,8 @@ func TestParseAndValidateAICCResponseEnvelopeRejectsChineseOperationalVariants(t
 		{text: "您的密码已重置。"},   // 被动语态密码重置。
 		{text: "已帮创建订单。"},    // 省略受益人的完成式。
 		{text: "订单已成功创建。"},   // 被动完成式。
+		{text: "账号创建成功。"},    // 动作后置成功语序。
+		{text: "订单已创建成功。"},   // 已完成动作后置成功语序。
 		{text: "部署已经完成。"},    // 语序倒置的部署完成式。
 		{text: "替你把服务跑起来。"},  // “跑起来”同义启动表达。
 	}
