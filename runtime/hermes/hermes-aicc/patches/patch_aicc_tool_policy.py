@@ -24,8 +24,9 @@ IMPORT_INJECT = (
     "from aicc_tools.policy import authorize as authorize_aicc_tool, "
     "current_manifest_capabilities, filter_definitions as filter_aicc_tool_definitions\n"
     "from aicc_tools.aicc_knowledge_tool import register_with_hermes_registry\n"
+    "from aicc_tools.aicc_web_audit_tools import register_with_hermes_registry as register_aicc_web_audit_tools\n"
 )
-DISCOVERY_INJECT = "register_with_hermes_registry(registry)\n"
+DISCOVERY_INJECT = "register_with_hermes_registry(registry)\nregister_aicc_web_audit_tools(registry)\n"
 DEFINITIONS_INJECT = "    filtered_tools = filter_aicc_tool_definitions(filtered_tools, current_manifest_capabilities())\n"
 ASSEMBLY_INJECT = "            filtered_tools = filter_aicc_tool_definitions(filtered_tools, current_manifest_capabilities())\n"
 DISPATCH_INJECT = "    authorize_aicc_tool(function_name, current_manifest_capabilities())\n"

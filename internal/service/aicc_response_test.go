@@ -110,7 +110,19 @@ func TestParseAndValidateAICCResponseEnvelopeRejectsEnterpriseNetworkWhenKnowled
 // TestParseAndValidateAICCResponseEnvelopeRejectsChineseOperationalVariants 覆盖常见中文操作完成声称：
 // 客服不能因账号开通或重置密码等表达而伪装完成外部操作。
 func TestParseAndValidateAICCResponseEnvelopeRejectsChineseOperationalVariants(t *testing.T) {
-	for _, text := range []string{"已为您开通账号。", "已为你重置密码。", "您的密码已重置。"} {
+	for _, text := range []string{
+		"已为您创建订单。",   // 创建操作。
+		"已为你修改配置。",   // 修改操作。
+		"已经删除临时文件。",  // 删除操作。
+		"已为您执行部署命令。", // 执行操作。
+		"文件写好了。",     // 文件写入完成。
+		"网站已部署。",     // 部署完成。
+		"服务已启动。",     // 进程启动完成。
+		"创建网站并启动服务。", // 组合越权操作。
+		"已为您开通账号。",   // 账号开通。
+		"已为你重置密码。",   // 密码重置。
+		"您的密码已重置。",   // 被动语态密码重置。
+	} {
 		_, err := ParseAndValidateAICCResponse(`{"text":"`+text+`","sources":[],"next_action":"none","flags":{}}`, nil)
 		require.ErrorIs(t, err, ErrAICCResponsePolicy)
 	}

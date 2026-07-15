@@ -11,6 +11,7 @@ from urllib.error import HTTPError
 import pytest
 
 from aicc_tools.aicc_knowledge_tool import search_knowledge
+from aicc_tools.aicc_web_audit_tools import append_web_audit
 from aicc_tools.policy import (
     ALLOWED_CAPABILITIES,
     ALLOWED_TOOLS,
@@ -145,6 +146,22 @@ def test_knowledge_search_returns_auditable_response_sources(monkeypatch: pytest
     assert result["aicc_response_sources"] == [
         {"type": "knowledge", "title": "企业手册", "scope": "app", "reference_id": "knowledge:app:doc-1:0"}
     ]
+
+
+# 覆盖：网页检索和网页提取都会返回稳定来源；企业域名命中时必须标识为未经企业确认。
+def test_web_tools_return_auditable_sources_with_enterprise_network_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OC_AICC_ENTERPRISE_DOMAINS", "example.com")
+
+    result = json.loads(append_web_audit(json.dumps({"results": [
+        {"title": "企业官网", "url": "https://www.example.com/product"},
+        {"title": "第三方报道", "url": "https://news.example.net/story"},
+    ]})))
+
+    assert result["aicc_response_sources"][0]["scope"] == "enterprise_network"
+    assert result["aicc_response_sources"][0]["unconfirmed"] is True
+    assert result["aicc_response_sources"][0]["reference_id"].startswith("web:enterprise_network:0:")
+    assert result["aicc_response_sources"][1]["scope"] == "public_network"
+    assert result["aicc_response_sources"][1]["unconfirmed"] is False
 
 
 # 覆盖：manager runtime API 拒绝时，知识工具必须保留失败语义，不得把错误伪装成空知识结果。

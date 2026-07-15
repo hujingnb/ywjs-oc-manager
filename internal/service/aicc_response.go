@@ -148,9 +148,12 @@ func aiccResponseClaimsEnterprisePrice(text string) bool {
 func aiccResponseClaimsOperationCompleted(text string) bool {
 	for _, phrase := range []string{
 		"已为您创建", "已为你创建", "已为您修改", "已为你修改", "已为您删除", "已为你删除", "已为您执行", "已为你执行",
-		"已经创建", "已经修改", "已经删除", "已为您开通账号", "已为你开通账号", "账号已开通", "已开通账号",
+		"已为您写入", "已为你写入", "已为您部署", "已为你部署", "已为您启动", "已为你启动",
+		"已经创建", "已经修改", "已经删除", "已经执行", "已经写入", "已经部署", "已经启动",
+		"创建网站并启动服务", "已创建网站并启动服务", "文件写好了", "文件已经写好", "服务已启动", "网站已部署",
+		"已为您开通账号", "已为你开通账号", "账号已开通", "已开通账号",
 		"已为您重置密码", "已为你重置密码", "密码已重置", "已经重置密码",
-		"already created", "already updated", "already deleted", "account has been opened", "password has been reset",
+		"already created", "already updated", "already deleted", "already deployed", "service started", "account has been opened", "password has been reset",
 	} {
 		if strings.Contains(strings.ToLower(text), strings.ToLower(phrase)) {
 			return true

@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"oc-manager/internal/domain"
+	"oc-manager/internal/integrations/ocops"
 	"oc-manager/internal/store/sqlc"
 )
 
@@ -375,6 +376,26 @@ func TestAICCDispatcherPersistsAuditedSourcesWithAssistant(t *testing.T) {
 	assert.Equal(t, s.assistant[0].ID, s.sources[0].MessageID)
 	assert.Equal(t, "kb-1", s.sources[0].ReferenceID.String)
 	assert.Equal(t, 1, s.completed)
+}
+
+// TestAICCDispatcherPersistsEnterpriseNetworkSourceFromHermesTranscript 覆盖真实运行时来源链路：
+// Hermes 当前轮 tool transcript 返回的企业网络来源必须带 unconfirmed，并经 dispatcher 校验后入库。
+func TestAICCDispatcherPersistsEnterpriseNetworkSourceFromHermesTranscript(t *testing.T) {
+	s := newAICCDispatcherStoreFake()
+	ops := &fakeConversationOps{
+		chatOut: ocops.ConversationChatResult{Message: ocops.ConversationMessage{Content: `{"text":"公开网络有相关介绍，请以企业确认信息为准。","sources":[{"type":"web","title":"企业官网","url":"https://www.example.com/product","scope":"enterprise_network","reference_id":"web:enterprise_network:0:abc","unconfirmed":true}],"next_action":"none","flags":{}}`}},
+		messages: []ocops.ConversationMessage{
+			// 此载荷模拟 AICC 受控网页工具已经完成的结果，模型只能回显其中 reference_id。
+			{Role: "tool", ToolName: "web_extract", Content: `{"aicc_response_sources":[{"type":"web","title":"企业官网","url":"https://www.example.com/product","scope":"enterprise_network","reference_id":"web:enterprise_network:0:abc","unconfirmed":true}]}`},
+		},
+	}
+	chat := NewAICCPublicHermesChat(ops, &fakeOcOpsResolver{loc: OcOpsAppLocation{Supported: true, Endpoint: ocops.Endpoint{BaseURL: "http://runtime"}}})
+	d := NewAICCDispatcher(s, aiccDispatcherTxFake{s}, chat, aiccDispatcherAllowLimiter{})
+
+	require.NoError(t, d.Dispatch(context.Background(), s.task))
+	require.Len(t, s.sources, 1)
+	assert.Equal(t, "enterprise_network", s.sources[0].Scope.String)
+	assert.True(t, s.sources[0].Unconfirmed)
 }
 
 // TestAICCDispatcherRollsBackAllWritesWhenLeaseLost 覆盖完成任务时租约已丢失：
