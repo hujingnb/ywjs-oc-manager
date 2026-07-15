@@ -433,7 +433,8 @@ LIMIT ?;
 
 -- name: ClaimAICCIntentAnalysisRetry :execrows
 UPDATE aicc_intent_analysis_retries
-SET lease_token = ?, lease_expires_at = DATE_ADD(NOW(6), INTERVAL 30 SECOND)
+-- 意向分析可能等待上游模型，租约需覆盖主请求超时和一次网络抖动，避免 30 秒后重复分析。
+SET lease_token = ?, lease_expires_at = DATE_ADD(NOW(6), INTERVAL 5 MINUTE)
 WHERE session_id = ? AND message_id = ?
   AND processed_at IS NULL
   AND (lease_expires_at IS NULL OR lease_expires_at < NOW(6));

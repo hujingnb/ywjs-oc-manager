@@ -69,7 +69,7 @@ func (q *Queries) AttachAICCLeadValuesToLead(ctx context.Context, arg AttachAICC
 
 const claimAICCIntentAnalysisRetry = `-- name: ClaimAICCIntentAnalysisRetry :execrows
 UPDATE aicc_intent_analysis_retries
-SET lease_token = ?, lease_expires_at = DATE_ADD(NOW(6), INTERVAL 30 SECOND)
+SET lease_token = ?, lease_expires_at = DATE_ADD(NOW(6), INTERVAL 5 MINUTE)
 WHERE session_id = ? AND message_id = ?
   AND processed_at IS NULL
   AND (lease_expires_at IS NULL OR lease_expires_at < NOW(6))
@@ -81,6 +81,7 @@ type ClaimAICCIntentAnalysisRetryParams struct {
 	MessageID  string      `db:"message_id" json:"message_id"`
 }
 
+// 意向分析可能等待上游模型，租约需覆盖主请求超时和一次网络抖动，避免 30 秒后重复分析。
 func (q *Queries) ClaimAICCIntentAnalysisRetry(ctx context.Context, arg ClaimAICCIntentAnalysisRetryParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, claimAICCIntentAnalysisRetry, arg.LeaseToken, arg.SessionID, arg.MessageID)
 	if err != nil {

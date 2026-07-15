@@ -88,7 +88,7 @@ func TestAICCConversationIntelligenceUpsertsReplaceSingleSessionFact(t *testing.
 	assert.Contains(t, intent, "confidence_json = values(confidence_json)")
 	assert.Contains(t, intent, "evidence_json = values(evidence_json)")
 	assert.Contains(t, intent, "analyzed_message_id = values(analyzed_message_id)")
-	assert.Contains(t, intent, "invite_status = values(invite_status)")
+	assert.NotContains(t, intent, "invite_status = values(invite_status)")
 	// 一条助手消息可以保留多条工具审计来源，因此创建查询不得错误使用 upsert 或遗漏未确认标记。
 	source := normalizedSQL(createAICCMessageSource)
 	assert.Contains(t, source, "insert into aicc_message_sources")
