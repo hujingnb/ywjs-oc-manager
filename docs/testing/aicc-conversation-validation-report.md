@@ -14,7 +14,7 @@
 | Kubernetes 隔离 | PASS | `kubectl config current-context` 为 `k3d-ocm`；节点 `k3d-ocm-server-0` 为 Ready。所有新增 Pod 删除命令先校验并显式使用该 context。 |
 | Chrome Stable | PASS | `Google Chrome 150.0.7871.114`；Playwright `1.59.1`。 |
 | Chrome 页面层检查 | PASS | `OCM_E2E_NO_SEED=1 npx playwright test --project=chrome-headed tests/e2e/login.spec.ts` 退出码 0，实际运行 2 个登录页面场景。 |
-| AICC 用例可发现性 | PASS | `npx playwright test --list --project=chrome-headed tests/e2e/aicc-conversation-*.spec.ts` 列出 3 文件共 7 个场景。 |
+| AICC 用例可发现性 | PASS | `npx playwright test --list --project=chrome-headed tests/e2e/aicc-conversation-*.spec.ts` 列出 3 文件共 29 个场景。 |
 | AICC 全链路 | BLOCKED | `ocm/ragflow-65489bf9b5-s2bw2` 为 `0/1 CrashLoopBackOff`，检查时 restart count 为 45。 |
 
 RAGFlow 上一轮日志的关键错误为：容器访问 `host.k3d.internal:7890` 代理被拒绝（`Connection refused`），
@@ -25,13 +25,17 @@ RAGFlow 上一轮日志的关键错误为：容器访问 `host.k3d.internal:7890
 
 | Spec | 场景 | 对应矩阵 |
 |---|---|---|
-| `aicc-conversation-security.spec.ts` | 操作指令和多轮注入拒绝、公开请求不触及管理/运行时写路由、两个 BrowserContext 内容隔离、来源标签可见性 | AICC-CAP-001、AICC-CAP-003、AICC-SRC-001~004、AICC-E2E-001 |
-| `aicc-conversation-intent.spec.ts` | 高意向一次留资邀请与拒绝后继续咨询、访客确认解决状态与新问题、390px 中英文移动页面 | AICC-INT-001~005、AICC-STATE-001~004、AICC-E2E-002~003 |
-| `aicc-conversation-runtime.spec.ts` | 首轮后删除本地 AICC Pod、等待 Ready 并续聊；通过显式故障注入验证失败重试 UI | AICC-BOOT-001~004、AICC-CH-001~003、AICC-E2E-003 |
+| `aicc-conversation-security.spec.ts` | 知识/来源页面合同、命令/文件/建站/登录/多轮注入拒绝、两个 BrowserContext 隔离、域名/隐私/频控/图片/token 入口边界 | AICC-CAP-001、AICC-CAP-003、AICC-SRC-001~004、AICC-E2E-001 |
+| `aicc-conversation-intent.spec.ts` | low/medium、求职/投诉/媒体误判负例、高意向一次邀请与拒绝、升级/更正降级、匿名候选提交联系方式、状态和 390px 中英文移动页面 | AICC-INT-001~005、AICC-STATE-001~004、AICC-E2E-002~003 |
+| `aicc-conversation-runtime.spec.ts` | 首轮后删除本地 AICC Pod、等待 Ready 并续聊；RAGFlow/搜索/模型/队列四类显式故障注入、失败重试、未解决刷新与新消息重置 | AICC-BOOT-001~004、AICC-CH-001~003、AICC-E2E-003 |
 
 Chrome 项目使用 `channel: "chrome"`、`headless: false`；首次重试保留 trace/video，失败保留 screenshot。
 原有 `chromium` 项目未删除，继续承担快速回归。测试以 role、label、placeholder 和 web-first assertion
 为主，未使用固定 `waitForTimeout`。
+
+以下细项已写入 spec，但因 runtime 阻塞均为**待执行**：客服/企业/行业知识单独命中、组合命中和冲突优先级；
+公开网络未确认来源；后台线索画像字段证据可视化；授权域名和频率限制的服务端拒绝审计；以及故障恢复后的
+实际重试成功。当前实现只在公开页面验证可观察合同，未将这些细项误记为 PASS。
 
 ## 未执行的三轮验收
 
@@ -53,7 +57,7 @@ done
 
 ```text
 cd web && npm run typecheck                              # PASS
-npx playwright test --list --project=chrome-headed ...  # PASS，7 tests
+npx playwright test --list --project=chrome-headed ...  # PASS，29 tests
 OCM_E2E_NO_SEED=1 npx playwright test --project=chrome-headed tests/e2e/login.spec.ts # PASS
-OCM_E2E_NO_SEED=1 npx playwright test --project=chrome-headed tests/e2e/aicc-conversation-*.spec.ts # 7 skipped（保护开关，非 PASS）
+OCM_E2E_NO_SEED=1 npx playwright test --project=chrome-headed tests/e2e/aicc-conversation-*.spec.ts # 29 skipped（保护开关，非 PASS）
 ```

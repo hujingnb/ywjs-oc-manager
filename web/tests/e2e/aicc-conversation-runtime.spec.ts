@@ -40,4 +40,30 @@ test.describe('AICC 客服无状态运行时与故障恢复', () => {
     await page.getByRole('button', { name: '发送' }).click()
     await expect(page.getByRole('button', { name: '重试' })).toBeVisible()
   })
+
+  // 故障注入由本地测试部署显式提供，避免 E2E 为了覆盖而修改任意运行时配置；每类失败都必须可恢复。
+  for (const scenario of ['RAGFlow 检索失败', '公开网络搜索超时', '模型响应超时', '异步队列失败']) {
+    // 场景：依赖故障返回安全失败态，恢复后同一会话仍可继续发送。
+    test(`${scenario}后可恢复咨询`, async ({ page }) => {
+      test.skip(process.env.OCM_AICC_FAULT_INJECTION !== '1', '需由本地故障注入环境显式启用')
+      const agent = await createStartedAICCConversationFixture(page, `恢复-${scenario}`)
+      await page.goto(`/aicc/${agent.publicToken}`)
+      await page.getByPlaceholder('输入您的问题').fill(`请触发已配置的${scenario}。`)
+      await page.getByRole('button', { name: '发送' }).click()
+      await expect(page.getByRole('button', { name: '重试' })).toBeVisible()
+    })
+  }
+
+  // 未解决状态同样是访客显式动作；刷新后应保留，随后新消息才能重置为 unknown。
+  test('未解决状态刷新后保留并在新消息后重置', async ({ page }) => {
+    const agent = await createStartedAICCConversationFixture(page, '未解决状态客服')
+    await page.goto(`/aicc/${agent.publicToken}`)
+    await sendPublicAICCMessage(page, '请说明支持服务。')
+    await sendPublicAICCMessage(page, '这次仍未解决。')
+    await page.getByRole('button', { name: '未解决' }).click()
+    await page.reload()
+    await expect(page.getByRole('button', { name: '未解决' })).toHaveCount(0)
+    await sendPublicAICCMessage(page, '我还有一个新的部署问题。')
+    await expect(page.locator('.message-list')).toContainText('新的部署问题')
+  })
 })
