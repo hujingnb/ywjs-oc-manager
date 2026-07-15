@@ -25,8 +25,8 @@ RAGFlow 上一轮日志的关键错误为：容器访问 `host.k3d.internal:7890
 
 | Spec | 场景 | 对应矩阵 |
 |---|---|---|
-| `aicc-conversation-security.spec.ts` | 知识/来源页面合同、命令/文件/建站/登录/多轮注入拒绝、两个 BrowserContext 隔离、域名/隐私/频控/图片/token 入口边界 | AICC-CAP-001、AICC-CAP-003、AICC-SRC-001~004、AICC-E2E-001 |
-| `aicc-conversation-intent.spec.ts` | low/medium、求职/投诉/媒体误判负例、高意向一次邀请与拒绝、升级/更正降级、匿名候选提交联系方式、状态和 390px 中英文移动页面 | AICC-INT-001~005、AICC-STATE-001~004、AICC-E2E-002~003 |
+| `aicc-conversation-security.spec.ts` | **公开链接页**的知识/来源页面合同、命令/文件/建站/登录/多轮注入拒绝、两个 BrowserContext 隔离、域名/隐私/频控/图片/token 入口边界 | AICC-CAP-001、AICC-CAP-003、AICC-SRC-001~004、AICC-E2E-001（不含网页挂件） |
+| `aicc-conversation-intent.spec.ts` | low/medium、求职/投诉/媒体误判负例、高意向一次邀请与拒绝、升级/更正降级、匿名候选提交联系方式、后台线索可见、状态和 390px 中英文移动页面 | AICC-INT-001~005、AICC-STATE-001~004、AICC-E2E-002~003（不含意向分析失败重试/多标签并发） |
 | `aicc-conversation-runtime.spec.ts` | 首轮后删除本地 AICC Pod、等待 Ready 并续聊；RAGFlow/搜索/模型/队列四类显式故障注入、失败重试、未解决刷新与新消息重置 | AICC-BOOT-001~004、AICC-CH-001~003、AICC-E2E-003 |
 
 Chrome 项目使用 `channel: "chrome"`、`headless: false`；首次重试保留 trace/video，失败保留 screenshot。
@@ -41,6 +41,10 @@ Chrome 项目使用 `channel: "chrome"`、`headless: false`；首次重试保留
 来源标题或绑定关系。因此上述知识场景有独立 `OCM_AICC_KNOWLEDGE_FIXTURE=1` 前置，缺失时逐条标为 BLOCKED。
 同样，仓库尚未提供可由 E2E 启停的一次性 RAGFlow/搜索/模型/队列故障 injector；四类恢复场景有独立
 `OCM_AICC_FAULT_INJECTION=1` 前置，不能把当前 skip 视为故障恢复已测。
+
+当前 Chrome specs **不包含网页挂件真实嵌入验收**，也**不包含意向分析失败后的恢复重试或多个标签页并发提交**。
+这些是矩阵 AICC-E2E-001/002 的未实现子项，而非本地 RAGFlow 故障导致的“已实现未运行”子项；后续补齐前必须保持
+BLOCKED，不能用于计算意向 precision、recall 或全场景覆盖率。
 
 来源场景在运行时会强制断言来源标题、消息时间、未确认标签，以及公开网络来源的 HTTPS 链接；操作性拒绝会
 通过 manager 数据库中 `aicc_message_sources` 的受信任工具来源审计断言为零。当前公开页仅以文本展示来源，

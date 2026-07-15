@@ -37,8 +37,8 @@
 | AICC-CH-001 | 输入轮次与响应信封渠道无关 | web、widget 通过 adapter 交给同一服务 | 渠道不可伪造内部 capability 或动作 | adapter 失败返回渠道安全错误 | 两渠道 session/token 不串用 | `aicc_channel_test.go`、契约测试 | PENDING |
 | AICC-CH-002 | 留资邀请和解决确认以结构化动作交付 | web 渲染卡片/确认按钮 | 动作不能由模型任意伪造或绕过策略 | 解析失败使用安全文本兜底 | 同动作幂等消费一次 | response action、Vue Vitest | PENDING |
 | AICC-CH-003 | 预留语音客服 adapter，不提前绑定供应商 | mock ASR/TTS 与打断契约可通过 | 语音不得获得额外工具、记忆或隐私权限 | ASR/TTS/通话失败保留会话一致性 | 语音和网页并发会话隔离 | voice adapter mock、契约测试 | PENDING |
-| AICC-E2E-001 | 公开页和挂件在 Chrome Stable 中完成企业问答与来源展示 | 知识命中、网络补充、来源标签可见 | 操作请求和提示词攻击被拒绝 | 检索、模型、网络失败可恢复 | 两个独立 browser context 不串信息 | `aicc-conversation-security.spec.ts`（`chrome-headed`） | BLOCKED：RAGFlow CrashLoopBackOff；知识单层/组合/冲突/网络来源另需 `OCM_AICC_KNOWLEDGE_FIXTURE=1` 的固定三层语料，当前 seed-e2e 未提供。 |
-| AICC-E2E-002 | Chrome Stable 验证意向、匿名候选、留资合并和后台证据 | 高意向留资卡、匿名候选、正式线索和证据可见 | 拒绝留资后仍可问答且不重复邀请 | 分析失败恢复后不重复建线索 | 多标签并发提交不重复 | `aicc-conversation-intent.spec.ts`（`chrome-headed`） | BLOCKED：同一 runtime 前置不可用；测试已实现但未将 skip 伪记为通过。 |
+| AICC-E2E-001 | 公开页和挂件在 Chrome Stable 中完成企业问答与来源展示 | 知识命中、网络补充、来源标签可见 | 操作请求和提示词攻击被拒绝 | 检索、模型、网络失败可恢复 | 两个独立 browser context 不串信息 | `aicc-conversation-security.spec.ts`（`chrome-headed`） | BLOCKED：RAGFlow CrashLoopBackOff；知识单层/组合/冲突/网络来源另需 `OCM_AICC_KNOWLEDGE_FIXTURE=1` 的固定三层语料，当前 seed-e2e 未提供。**网页挂件 Chrome 验收尚未实现**，不得视为该 spec 覆盖。 |
+| AICC-E2E-002 | Chrome Stable 验证意向、匿名候选、留资合并和后台证据 | 高意向留资卡、匿名候选、正式线索和证据可见 | 拒绝留资后仍可问答且不重复邀请 | 分析失败恢复后不重复建线索 | 多标签并发提交不重复 | `aicc-conversation-intent.spec.ts`（`chrome-headed`） | BLOCKED：同一 runtime 前置不可用。当前仅覆盖公开页高/低/中意向、拒绝、联系方式和后台线索可见；**意向分析失败重试与多标签并发提交尚未实现**，不得标记为已覆盖。 |
 | AICC-E2E-003 | Chrome Stable 验证 session 状态、刷新、重试、移动端和挂件 | 状态流转、刷新恢复、移动端无横向溢出 | 未确认不计为未解决；控制台无内部错误 | 删除 Pod 后可续聊，失败回复可重试 | 多浏览器 context 与多 Pod 会话隔离 | `aicc-conversation-runtime.spec.ts`（`chrome-headed`） | BLOCKED：RAGFlow/runtime 不可用；四类故障恢复另需可控的一次性 `OCM_AICC_FAULT_INJECTION=1` injector，当前本地未提供。 |
 
 ## Task 1 失败基线
