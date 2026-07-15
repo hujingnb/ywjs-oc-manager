@@ -75,6 +75,8 @@ type AICCDispatcher struct {
 	halfOpen     bool
 	// testFailIntentOnce 仅由本地 E2E 控制面装配；CompareAndSwap 保证多 worker 竞争时只失败一次。
 	testFailIntentOnce atomic.Bool
+	// testPauseIntentRetries 仅由本地 E2E 控制面装配，确保测试能先观察到失败重试事实再释放恢复。
+	testPauseIntentRetries atomic.Bool
 }
 
 // EnableLocalAICCIntentFailureOnce 仅供本地 E2E 注入一次意向分析失败，验证持久化重试与首次邀约幂等。
@@ -82,6 +84,13 @@ type AICCDispatcher struct {
 func (d *AICCDispatcher) EnableLocalAICCIntentFailureOnce() {
 	if d != nil {
 		d.testFailIntentOnce.Store(true)
+	}
+}
+
+// PauseLocalAICCIntentRetries 暂停本地 E2E 的意向重试扫描；恢复由新进程不带该开关启动完成。
+func (d *AICCDispatcher) PauseLocalAICCIntentRetries() {
+	if d != nil {
+		d.testPauseIntentRetries.Store(true)
 	}
 }
 

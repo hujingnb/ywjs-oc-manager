@@ -175,6 +175,10 @@ func (d *AICCDispatcher) queueAICCIntentRetry(ctx context.Context, task sqlc.Aic
 // RetryPendingAICCIntentAnalysis 由后台循环调用。它不重放客服主回复，只对失败分析执行新 Hermes Turn，
 // 成功后删除重试记录，因此任意次数重复扫描都不会生成第二条访客可见消息。
 func (d *AICCDispatcher) RetryPendingAICCIntentAnalysis(ctx context.Context) error {
+	// 本地 E2E 先验证失败记录已落库，再通过重启释放真实 worker；暂停期间不领取任务，避免竞态清理证据。
+	if d != nil && d.testPauseIntentRetries.Load() {
+		return nil
+	}
 	store, ok := d.store.(interface {
 		ListReadyAICCIntentAnalysisRetries(context.Context, int32) ([]sqlc.ListReadyAICCIntentAnalysisRetriesRow, error)
 		DeleteProcessedAICCIntentAnalysisRetry(context.Context, sqlc.DeleteProcessedAICCIntentAnalysisRetryParams) (int64, error)

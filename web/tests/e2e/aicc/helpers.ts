@@ -65,9 +65,11 @@ export function countAICCIntentAnalysisRetries(sessionToken: string): number {
 // 该变量由 server 入口额外要求 app.env=local，测试结束必须清除并等待滚动完成，避免污染后续场景。
 export function setLocalAICCIntentFailureOnce(enabled: boolean): void {
   assertLocalK3DContext()
-  const value = enabled ? 'OCM_AICC_TEST_FAIL_INTENT_ONCE=1' : 'OCM_AICC_TEST_FAIL_INTENT_ONCE-'
+  const values = enabled
+    ? ['OCM_AICC_TEST_FAIL_INTENT_ONCE=1', 'OCM_AICC_TEST_PAUSE_INTENT_RETRIES=1']
+    : ['OCM_AICC_TEST_FAIL_INTENT_ONCE-', 'OCM_AICC_TEST_PAUSE_INTENT_RETRIES-']
   execFileSync('kubectl', [
-    '--context', localK3DContext, '-n', 'ocm', 'set', 'env', 'deployment/manager-api', value,
+    '--context', localK3DContext, '-n', 'ocm', 'set', 'env', 'deployment/manager-api', ...values,
   ], { stdio: 'pipe' })
   execFileSync('kubectl', [
     '--context', localK3DContext, '-n', 'ocm', 'rollout', 'status', 'deployment/manager-api', '--timeout=180s',

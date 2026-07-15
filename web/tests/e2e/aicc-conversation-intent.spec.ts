@@ -99,7 +99,8 @@ test.describe('AICC 客服意向与会话状态', () => {
       // 首轮一次性失败必须写入重试事实，且不能在主回复中提前展示邀约。
       await expect.poll(() => countAICCIntentAnalysisRetries(sessionToken!), { timeout: 10_000 }).toBe(1)
       await expect(page.getByRole('button', { name: '暂不留资' })).toHaveCount(0)
-      // 下一轮由真实分析恢复；重试事实被清理且只展示一个首次邀约。
+      // 释放一次性暂停器后由新 worker 恢复真实分析；重试事实被清理且只展示一个首次邀约。
+      setLocalAICCIntentFailureOnce(false)
       await sendPublicAICCMessage(page, '请补充一下实施周期。')
       await expect.poll(() => countAICCIntentAnalysisRetries(sessionToken!), { timeout: 30_000 }).toBe(0)
       await expect(page.getByRole('button', { name: '暂不留资' })).toHaveCount(1)

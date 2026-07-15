@@ -44,7 +44,8 @@ Chrome 项目使用 `channel: "chrome"`、`headless: false`；首次重试保留
 
 网页挂件 iframe、意向分析失败后恢复重试和同会话多标签并发提交均已有 Chrome 场景；意向重试场景在
 `OCM_AICC_INTENT_RETRY_FIXTURE=1` 时会仅对本地 `k3d-ocm` 的 manager-api 注入一次性失败并滚动重启，
-server 还要求 `app.env=local` 才会消费该变量。该控制面不由 seed-e2e 默认开启，且当前 RAGFlow/runtime
+server 还要求 `app.env=local` 才会消费该变量；注入器同时暂停重试扫描，待 E2E 读取到持久化失败记录后
+显式清除两个变量并滚动重启来释放恢复。该控制面不由 seed-e2e 默认开启，且当前 RAGFlow/runtime
 仍阻塞，故仍为 BLOCKED 的“已实现未运行”子项，不能用于计算意向 precision、recall 或全场景覆盖率。
 
 来源场景在运行时会强制断言来源标题、消息时间、未确认标签，以及公开网络来源的 HTTPS 链接；操作性拒绝会

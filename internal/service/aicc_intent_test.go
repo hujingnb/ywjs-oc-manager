@@ -130,6 +130,9 @@ func TestEnableLocalAICCIntentFailureOnce(t *testing.T) {
 	dispatcher.EnableLocalAICCIntentFailureOnce()
 	assert.True(t, dispatcher.testFailIntentOnce.CompareAndSwap(true, false))
 	assert.False(t, dispatcher.testFailIntentOnce.CompareAndSwap(true, false))
+	// 场景：本地重试暂停开关可被安全启用，worker 在释放前不应消费重试事实。
+	dispatcher.PauseLocalAICCIntentRetries()
+	assert.True(t, dispatcher.testPauseIntentRetries.Load())
 }
 
 // TestNextAICCInviteStatus 验证首次高意向邀请和访客拒绝/提交后的不可逆边界。

@@ -302,6 +302,9 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if cfg.App.Env == "local" && os.Getenv("OCM_AICC_TEST_FAIL_INTENT_ONCE") == "1" {
 		aiccMessageDispatcher.EnableLocalAICCIntentFailureOnce()
 	}
+	if cfg.App.Env == "local" && os.Getenv("OCM_AICC_TEST_PAUSE_INTENT_RETRIES") == "1" {
+		aiccMessageDispatcher.PauseLocalAICCIntentRetries()
+	}
 	aiccMessageDispatcher.SetUpstreamCircuit(service.NewRedisAICCUpstreamCircuit(imagecoordRedis, cfg.Redis.KeyPrefix, cfg.AICC.Governance.CircuitConsecutive, cfg.AICC.Governance.CircuitWindow.Duration, cfg.AICC.Governance.CircuitFailurePercent, cfg.AICC.Governance.CircuitCooldown.Duration))
 	// 复用项目既有结构化日志记录异步消息状态，不额外引入尚未部署的指标系统。
 	aiccMessageObserver := service.NewSlogAICCDispatchObserver(logger)
