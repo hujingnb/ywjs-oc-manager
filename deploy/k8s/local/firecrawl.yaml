@@ -174,7 +174,9 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom: { secretKeyRef: { name: firecrawl-runtime, key: POSTGRES_PASSWORD } }
           ports: [{ containerPort: 3002, name: http }]
-          readinessProbe: { httpGet: { path: /health, port: http }, initialDelaySeconds: 10, periodSeconds: 10 }
+          # 上游 API 分别暴露存活与依赖就绪端点；不能使用不存在的通用 /health。
+          livenessProbe: { httpGet: { path: /v0/health/liveness, port: http }, initialDelaySeconds: 10, periodSeconds: 10 }
+          readinessProbe: { httpGet: { path: /v0/health/readiness, port: http }, initialDelaySeconds: 10, periodSeconds: 10 }
           resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { cpu: "2", memory: 2Gi } }
 ---
 apiVersion: v1

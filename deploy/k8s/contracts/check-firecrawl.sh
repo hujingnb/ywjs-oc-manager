@@ -31,3 +31,6 @@ rg -q '^  NUQ_DATABASE_URL_LISTEN:' "$manifest"
 test "$(rg -c 'secretRef: \{ name: firecrawl-runtime \}' "$manifest")" -eq 5
 # ConfigMap 只能承载非敏感运行参数，连接串必须停留在前置 Secret 文档。
 ! awk '/^kind: ConfigMap$/{in_config_map=1; next} /^---$/{in_config_map=0} in_config_map && /NUQ_DATABASE_URL/{found=1} END{exit found ? 0 : 1}' "$manifest"
+# 上游 API 将存活与就绪检查分离，客服调用 Service 前必须等待 readiness 成功。
+rg -q 'path: /v0/health/liveness' "$manifest"
+rg -q 'path: /v0/health/readiness' "$manifest"
