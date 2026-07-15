@@ -30,7 +30,11 @@
             <p v-if="message.text">{{ message.text }}</p>
             <div v-if="message.sources?.length" class="source-list">
               <span v-for="source in message.sources" :key="source.reference_id || source.url || source.title" class="source-label">
-                {{ source.title || t('aicc.publicChat.sourceLabel') }}
+                <!-- 服务端已校验来源 URL；前端仍只把 HTTPS 地址渲染为外链，避免协议回归时引入脚本或内网跳转。 -->
+                <a v-if="isSafePublicSourceURL(source.url)" :href="source.url" target="_blank" rel="noopener noreferrer">
+                  {{ source.title || t('aicc.publicChat.sourceLabel') }}
+                </a>
+                <template v-else>{{ source.title || t('aicc.publicChat.sourceLabel') }}</template>
                 <em v-if="source.unconfirmed">{{ t('aicc.publicChat.unconfirmedNetwork') }}</em>
               </span>
             </div>
@@ -229,6 +233,17 @@ const showPrivacyNotice = computed(() => Boolean(privacyText.value) && !hasVisit
 
 // 公开端只接受与 file input accept 约束一致的图片类型，避免访客选择无效文件后再等待服务端拒绝。
 const aiccPublicImageTypes = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
+
+// isSafePublicSourceURL 是公开页最后一道展示约束：即使异常响应绕过服务端来源校验，
+// 也不把非 HTTPS URL 变成可点击链接，访客仍可看到纯文本标题。
+function isSafePublicSourceURL(value?: string): boolean {
+  if (!value) return false
+  try {
+    return new URL(value).protocol === 'https:'
+  } catch {
+    return false
+  }
+}
 
 onMounted(() => {
   isPageActive = true
@@ -850,6 +865,11 @@ async function scrollToBottom() {
   margin-left: 4px;
   color: var(--color-warning-text);
   font-style: normal;
+}
+
+.source-label a {
+  color: inherit;
+  text-decoration: underline;
 }
 
 .typing {

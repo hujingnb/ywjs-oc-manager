@@ -109,6 +109,9 @@ test.describe('AICC 客服安全、来源与访客隔离', () => {
   ]) {
     // 场景：来源和冲突策略经真实公开聊天页传递，不能由模型文本自行伪造来源标签。
     test(`知识来源：${scenario.name}`, async ({ page }) => {
+      // 固定三层语料、绑定关系和网络冲突页尚未由 seed-e2e 创建；没有该 fixture 时只跳过当前
+      // 数据依赖场景，不能把测试名字本身或普通 runtime 开关误当成“已完成知识验收”。
+      test.skip(process.env.OCM_AICC_KNOWLEDGE_FIXTURE !== '1', '需预置三层固定知识、冲突页和来源标题的本地 AICC 知识 fixture')
       const agent = await createStartedAICCConversationFixture(page, `来源-${scenario.name}`)
       await page.goto(`/aicc/${agent.publicToken}`)
       const reply = await sendPublicAICCMessage(page, scenario.question)

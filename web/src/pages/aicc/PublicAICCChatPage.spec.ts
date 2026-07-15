@@ -638,6 +638,25 @@ describe('PublicAICCChatPage', () => {
     expect(wrapper.text()).toContain('公开网络，未经企业确认')
   })
 
+  // 场景：公开网络来源仅在 HTTPS 地址通过服务端校验后渲染外链，并隔离 opener，
+  // 让访客可以核验事实而不会让公开页获得第三方页面控制权。
+  it('renders a safe HTTPS source as a hardened external link', async () => {
+    apiState.sendMessage.mockResolvedValue({
+      message_id: 'message-1', status: 'completed', text: '公开资料显示',
+      sources: [{ reference_id: 'web-1', title: '公开网页', url: 'https://example.com/source', unconfirmed: true }],
+    })
+    const wrapper = mountPublicChat()
+    await flushPromises()
+    await wrapper.find('textarea').setValue('查询')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+
+    const link = wrapper.get('.source-label a')
+    expect(link.attributes('href')).toBe('https://example.com/source')
+    expect(link.attributes('target')).toBe('_blank')
+    expect(link.attributes('rel')).toContain('noopener')
+  })
+
   // 场景：服务端要求确认解决状态时，访客可从会话级卡片标记结果或继续咨询。
   it('marks resolution from the server-driven resolution card and can dismiss it', async () => {
     apiState.sendMessage.mockResolvedValue({ message_id: 'message-1', status: 'completed', text: '已回答', next_action: 'ask_resolution' })
