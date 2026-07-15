@@ -56,7 +56,14 @@ func assertGolden(t *testing.T, name string, obj any) {
 
 // TestRenderDeployment 验证 Deployment 渲染与 golden 一致（含 initContainer/三容器/卷/probe）。
 func TestRenderDeployment(t *testing.T) {
-	assertGolden(t, "deployment.golden.yaml", RenderDeployment(testSpec(), "oc-apps"))
+	dep := RenderDeployment(testSpec(), "oc-apps")
+	// 普通 Hermes 启动时必须直连共享 Firecrawl API，网页正文读取无需等待运行时再配置。
+	hermes := containerByName(dep, "hermes")
+	require.NotNil(t, hermes)
+	firecrawlAPIURL := envByName(hermes, "FIRECRAWL_API_URL")
+	require.NotNil(t, firecrawlAPIURL)
+	assert.Equal(t, "http://firecrawl-api.oc-firecrawl.svc.cluster.local:3002", firecrawlAPIURL.Value)
+	assertGolden(t, "deployment.golden.yaml", dep)
 }
 
 // TestRenderDeploymentAICC 验证 AICC 运行时使用无状态启动方式：由 oc-bootstrap 初始化，
@@ -76,6 +83,10 @@ func TestRenderDeploymentAICC(t *testing.T) {
 	assert.Nil(t, containerByName(dep, "s3-sync"))
 	hermes := containerByName(dep, "hermes")
 	require.NotNil(t, hermes)
+	// AICC Hermes 与普通实例共用 Firecrawl 正文提取服务，但不继承普通应用的代理变量。
+	firecrawlAPIURL := envByName(hermes, "FIRECRAWL_API_URL")
+	require.NotNil(t, firecrawlAPIURL)
+	assert.Equal(t, "http://firecrawl-api.oc-firecrawl.svc.cluster.local:3002", firecrawlAPIURL.Value)
 	// 客服 Hermes 原生只读网页检索直连公网，不携带专属受控出口代理变量。
 	assert.Nil(t, envByName(hermes, "HTTP_PROXY"))
 	assert.Nil(t, envByName(hermes, "HTTPS_PROXY"))

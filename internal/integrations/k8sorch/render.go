@@ -216,6 +216,8 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 		{Name: "HERMES_HOME", Value: "/opt/data"},
 		{Name: "API_SERVER_ENABLED", Value: "true"},
 		{Name: "API_SERVER_KEY", ValueFrom: ctrlTokenEnv.ValueFrom},
+		// 共享 Firecrawl 仅供 Hermes 网页正文读取；只注入常驻主容器，避免 sidecar 与初始化容器获得无关能力。
+		{Name: "FIRECRAWL_API_URL", Value: "http://firecrawl-api.oc-firecrawl.svc.cluster.local:3002"},
 	}
 	// 客服容器不接入消息渠道，也不具备发布能力；模型、知识 API 与网页后端配置均由
 	// oc-bootstrap 生成的只读运行时配置提供，避免以环境变量横向暴露通用应用能力。
