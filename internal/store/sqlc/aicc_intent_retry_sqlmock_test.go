@@ -19,6 +19,10 @@ type aiccIntentRetryUpsertState struct {
 	leaseExpires string
 }
 
+func canClaimAICCIntentRetry(state aiccIntentRetryUpsertState) bool {
+	return !state.processed && state.leaseToken == "" && state.leaseExpires == ""
+}
+
 func applyAICCIntentRetryPlainUpsert(state aiccIntentRetryUpsertState) aiccIntentRetryUpsertState {
 	if state.processed {
 		return aiccIntentRetryUpsertState{}
@@ -50,4 +54,10 @@ func TestIntentRetryUpsertAndClaimContract(t *testing.T) {
 	// 否则另一个 worker 会在原分析仍运行时重复领取。
 	active := aiccIntentRetryUpsertState{processed: false, leaseToken: "active-lease", leaseExpires: "future"}
 	assert.Equal(t, active, applyAICCIntentRetryPlainUpsert(active))
+	// 清理失败遗留的 processed 行收到新的失败后必须原子清除完成与租约标记，
+	// 并立刻满足 Claim 条件，不能永久卡住同一会话的后续分析。
+	residual := aiccIntentRetryUpsertState{processed: true, leaseToken: "old-lease", leaseExpires: "past"}
+	reset := applyAICCIntentRetryPlainUpsert(residual)
+	assert.Equal(t, aiccIntentRetryUpsertState{}, reset)
+	assert.True(t, canClaimAICCIntentRetry(reset))
 }
