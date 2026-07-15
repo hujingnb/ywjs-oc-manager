@@ -1,4 +1,4 @@
-.PHONY: test vet build sqlc-generate migrate-up migrate-down web-test web-typecheck web-build build-hermes-runtime hermes-inject-contract seed-e2e openapi-gen web-types-gen openapi-check local-up local-down local-reset local-stop local-start local-build local-preload local-migrate local-seed local-seed-e2e local-mc-init local-status local-logs local-shell cluster-create .guard-k3d-hosts build-ops-runtime local-build-ops local-init-models
+.PHONY: test test-hermes-version-guard vet build sqlc-generate migrate-up migrate-down web-test web-typecheck web-build build-hermes-runtime hermes-inject-contract seed-e2e openapi-gen web-types-gen openapi-check local-up local-down local-reset local-stop local-start local-build local-preload local-migrate local-seed local-seed-e2e local-mc-init local-status local-logs local-shell cluster-create .guard-k3d-hosts build-ops-runtime local-build-ops local-init-models
 
 SWAG_VERSION := v2.0.0-rc5
 OPENAPI_TS_VERSION := 7.13.0
@@ -131,7 +131,8 @@ help: ## 显示本帮助文档(make 默认 target)
 	$(MAKEFILE_LIST)
 
 .PHONY: .guard-hermes-version
-# 上游 ref 必须不可变且能安全进入后续 Docker recipe。守卫直接从 hermes-ref.txt 读取到
+# 上游 ref 必须是适配 --branch 安装路径的不可变版本 tag，且能安全进入后续 Docker recipe。
+# 守卫直接从 hermes-ref.txt 读取到
 # shell 变量，不能把尚未校验的 HERMES_UPSTREAM_REF 插入 shell 源码，否则反引号、命令替换等
 # 元字符会先于校验执行；历史 variant 缺少该文件时才使用已校验命名关系的 HERMES_VERSION。
 # 正则前先对整值执行字符白名单，避免 grep 按行命中首行后放过后续 payload，并阻断 Make 折叠换行。
@@ -142,7 +143,7 @@ help: ## 显示本帮助文档(make 默认 target)
 	if [ -f "$(HERMES_VARIANT_DIR)/hermes-ref.txt" ]; then hermes_ref=$$(cat "$(HERMES_VARIANT_DIR)/hermes-ref.txt"); fi; \
 	test -n "$$hermes_ref" || { echo "Hermes 上游 ref 不能为空: $(HERMES_VARIANT_DIR)/hermes-ref.txt 或 version.txt" >&2; exit 1; }; \
 	case "$$hermes_ref" in *[!A-Za-z0-9_.-]*) echo "Hermes 上游 ref 包含非法字符: $$hermes_ref" >&2; exit 1;; esac; \
-	printf '%s\n' "$$hermes_ref" | grep -Eq '^(v[0-9]+[.][0-9]+[.][0-9]+([._-][A-Za-z0-9_.-]+)?|[0-9a-f]{40})$$' || { echo "Hermes 上游 ref 必须是不可变版本 tag 或完整 commit SHA: $$hermes_ref" >&2; exit 1; }
+	printf '%s\n' "$$hermes_ref" | grep -Eq '^v[0-9]+[.][0-9]+[.][0-9]+([._-][A-Za-z0-9_.-]+)?$$' || { echo "Hermes 上游 ref 必须是不可变版本 tag: $$hermes_ref" >&2; exit 1; }
 	@test "$(HERMES_VARIANT)" = "hermes-$(HERMES_VERSION)" || { echo "Hermes variant 名称必须与 version.txt 对齐: $(HERMES_VARIANT) != hermes-$(HERMES_VERSION)" >&2; exit 1; }
 	@printf '%s\n' "$(HERMES_VERSION)" | grep -Eq '^v[0-9]+[.][0-9]+[.][0-9]+([._-][A-Za-z0-9_.-]+)?$$' || { echo "Hermes version 必须是完整版本号: $(HERMES_VERSION)" >&2; exit 1; }
 	@case "$(HERMES_VERSION)" in \
@@ -365,8 +366,11 @@ local-shell: ## 进入指定服务容器（用法：make local-shell svc=manager
 
 ##@ 测试 / 静态检查
 
-test: ## 跑 Go 单元测试 (go test ./...)
+test: test-hermes-version-guard ## 跑 Hermes 版本守卫回归测试和 Go 单元测试 (go test ./...)
 	go test ./...
+
+test-hermes-version-guard: ## 跑普通 Hermes 上游 ref 版本守卫回归测试
+	./scripts/hermes-version-guard_test.sh
 
 integration-test: ## 跑集成测试（需本地 k3d MySQL/Redis 经端口转发或外部实例，见 docs/local-development.md）
 	INTEGRATION_DATABASE_URL="$${INTEGRATION_DATABASE_URL:?需指向可达的 MySQL，如经 kubectl port-forward}" \
