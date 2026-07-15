@@ -1,16 +1,19 @@
 # AICC 实现反查覆盖表
 
 - 历史基线：`1726141080159c3e3b8842b7b72370095a583b1e`
-- 历史表范围：下表原始条目用于记录基线时的 AICC 业务面，不等同于本轮客服能力实施状态；其中 `BASELINE-FAIL` 仅表示 Task 1 当时的预期差异，当前结果以本节“当前客服能力变更”与需求矩阵为准。
+- 历史表范围：下表原始条目用于记录基线时的 AICC 业务面，不等同于本轮客服能力实施状态；其中 `BASELINE-FAIL` 仅表示 Task 1 当时的预期差异。覆盖表只说明代码映射和已执行的局部命令，**需求验收状态以 `aicc-conversation-requirement-matrix.md` 为唯一权威来源**。
 - 规则：每个当前分支相对 `master` 的 AICC 实现入口必须映射到需求矩阵；生成的 sqlc、OpenAPI 与前端类型跟随其源文件验证。
 
 ## 当前客服能力变更（2026-07-16）
 
 | 实现入口 | 本轮职责 | 需求矩阵 ID | 当前证据 | 状态 |
 |---|---|---|---|---|
-| `runtime/hermes/hermes-aicc/aicc_tools/*`、`patches/patch_aicc_tool_policy.py`、`lib/manifest.py`、`Dockerfile` | 不可变工具白名单、伪造调用拒绝、受控知识工具与客服镜像能力裁剪 | AICC-CAP-001..004 | `pytest -q runtime/hermes/hermes-aicc/tests/test_render_config_yaml.py runtime/hermes/hermes-aicc/tests/test_aicc_tool_policy.py`：23 passed | PASS |
+| `runtime/hermes/hermes-aicc/aicc_tools/*`、`patches/patch_aicc_tool_policy.py`、`lib/manifest.py`、`Dockerfile` | 不可变工具白名单、伪造调用拒绝、受控知识工具与客服镜像能力裁剪 | AICC-CAP-001..004 | `pytest -q runtime/hermes/hermes-aicc/tests/test_render_config_yaml.py runtime/hermes/hermes-aicc/tests/test_aicc_tool_policy.py`：23 passed | CAP-001 已验证；CAP-003/004 仍以矩阵 PENDING 为准 |
 | `internal/config/platform_prompt.go`、`platform_prompt_test.go` | 审核客服 Skill 白名单与通用能力回退禁止 | AICC-CAP-002 | `go test ./internal/config -run TestPlatformPrompts_Invariants -count=1` | PASS |
 | `internal/service/aicc_{context,response,channel,intent,dispatcher,public_chat}.go` 及测试、`internal/migrations/000037_*`、`000038_*` | 无状态上下文、来源白名单、结构化动作、意向证据/重试、会话渠道与一次邀约 | AICC-SRC-*、AICC-INT-*、AICC-STATE-*、AICC-BOOT-001、AICC-CH-* | `go test ./internal/service -run 'TestAICCDispatcherBuildsTurnFromDatabaseContext|TestEnableLocalAICCIntentFailureOnce|TestAICCIntentRetryLeaseBehavior' -count=1` | PASS（单元范围） |
+| `runtime/hermes/hermes-aicc/{oc-entrypoint.py,entrypoint_helpers.py,renderer/*,lib/atomic.py}`、`tests/test_entrypoint_integration.py`、`test_render_*.py` | 无状态幂等启动、临时渲染、Skill/配置裁剪 | AICC-BOOT-002..004、AICC-CAP-002 | `PYTHONPATH=runtime/hermes/hermes-aicc pytest -q runtime/hermes/hermes-aicc/tests` | 已映射；端到端 Pod 重建仍以矩阵 BLOCKED 为准 |
+| `internal/integrations/k8sorch/*`、`internal/service/bootstrap_service.go`、`internal/api/handlers/runtime_knowledge.go`、`internal/service/knowledge_service.go` 及测试 | AICC 容器约束、运行时知识只读检索、AICC token 写拒绝 | AICC-CAP-003、AICC-BOOT-004、AICC-SRC-001 | `go test ./internal/service ./internal/api/handlers -run AICC -count=1` | 已映射；CAP-003 验收仍以矩阵 PENDING 为准 |
+| `internal/worker/aicc/{message_dispatch_loop,retention_loop}.go` 及测试 | 异步消息、意向重试、任务租约和保留期清理 | AICC-INT-001..003、AICC-BOOT-001、AICC-RETENTION-01 | `go test ./internal/worker/aicc -run AICC -count=1` | PASS（worker 单元范围） |
 | `cmd/server/main.go`、`internal/service/aicc_dispatcher.go` | 仅 local 可用的一次性意向失败/暂停控制面 | AICC-INT-001..003 | 上述 Go 测试；Chrome 实跑仍依赖 RAGFlow | PASS（控制面单测）；E2E BLOCKED |
 | `web/src/pages/aicc/PublicAICCChatPage.vue`、`PublicAICCChatPage.spec.ts` | 公开来源 HTTPS 安全外链、当前轮图片和结构化交互展示 | AICC-SRC-003、AICC-CH-002 | `npm test -- --run src/pages/aicc/PublicAICCChatPage.spec.ts`：31 passed | PASS |
 | `web/playwright.config.ts`、`web/tests/e2e/aicc-conversation-*.spec.ts`、`helpers.ts` | Chrome Stable 挂件、隔离、状态、意向、重启、故障与来源验收 | AICC-E2E-001..003 | `npx playwright test --list --project=chrome-headed ...`：34 tests；真实运行时受 RAGFlow 与专用 fixture 阻塞 | BLOCKED |
