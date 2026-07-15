@@ -191,3 +191,35 @@ git add docs/testing
 git commit -m "test(firecrawl): 记录共享网页能力真实验证" -m "记录无状态 Firecrawl、Hermes 搜索提取、HPA 与 Chrome 验证的实际结果。"
 ```
 
+### Task 5: 覆盖当前分支相对 master 的全量验收
+
+**Files:**
+- Modify: `docs/testing/aicc-conversation-validation-report.md`
+- Modify: `docs/testing/aicc-conversation-requirement-matrix.md`
+- Modify: `docs/testing/firecrawl-shared-validation-report.md`
+
+- [ ] **Step 1: 列出完整改动范围**
+
+Run: `git diff --name-only master...HEAD`
+
+Expected: 将 AICC 能力沙箱、无状态对话、意向/留资、公开 API/前端、语音适配、直连公网和共享
+Firecrawl 全部映射到验收条目；无关未跟踪文件不进入范围。
+
+- [ ] **Step 2: 运行全量自动化回归**
+
+Run: `go test ./internal/... ./cmd/server -count=1 && PYTHONPATH=runtime/hermes/hermes-aicc pytest -q runtime/hermes/hermes-aicc/tests && cd web && npm test -- --run && npm run typecheck && npm run build && make openapi-check && git diff --check`
+
+Expected: 所有命令均有真实结果；任一失败、超时或环境阻塞必须在三份报告中标记 BLOCKED/FAIL，不能写 PASS。
+
+- [ ] **Step 3: 运行完整 Chrome Stable 场景**
+
+在 `k3d-ocm` context 运行现有 AICC 三个 spec 的所有 34 个 Chrome headed 场景，并补跑 Firecrawl
+普通/AICC Hermes 搜索与提取场景。报告逐项记录通过、失败、跳过和阻塞；修复与当前分支直接相关的
+问题后必须重跑受影响场景。
+
+- [ ] **Step 4: 提交全量验收报告**
+
+```bash
+git add docs/testing/aicc-conversation-validation-report.md docs/testing/aicc-conversation-requirement-matrix.md docs/testing/firecrawl-shared-validation-report.md
+git commit -m "test(aicc): 覆盖当前分支全量验收结果" -m "按相对 master 的完整变更范围记录自动化、真实 Chrome 与 Firecrawl 验收证据。"
+```
