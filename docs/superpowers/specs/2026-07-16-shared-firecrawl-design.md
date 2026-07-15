@@ -45,9 +45,10 @@ Firecrawl Service 仅在 `oc-firecrawl` 集群内暴露。NetworkPolicy：
 - API/worker/Playwright 出站仅允许 DNS、Firecrawl 内部依赖和公网 TCP 80/443；
 - 禁止 Ingress、LoadBalancer、NodePort 与对外公开管理界面；队列管理 UI 不暴露。
 
-Firecrawl 的抓取能力只作为 Hermes `web_extract` 后端。AICC 仍只向模型暴露其现有白名单，禁止
-terminal、文件、进程、登录、表单、浏览器操作和任何写工具；普通 Hermes 的既有能力边界不因
-引入 Firecrawl 被改变。
+Firecrawl 是供所有 Hermes 实例使用的完整网页能力服务，不在 Firecrawl 服务层禁止 `/interact`、
+持久化浏览器 profile、登录、表单填写或写操作。权限在调用方 Hermes 收敛：AICC 仍只向模型暴露其
+现有白名单，禁止 terminal、文件、进程、登录、表单、浏览器操作和任何写工具；普通 Hermes 维持其
+既有权限边界，可使用 Firecrawl 支持的能力。
 
 ## 4. Hermes 配置
 
@@ -82,5 +83,5 @@ AICC 与普通 Hermes 的 API server 都向模型注册 `web_search`、`web_extr
 ## 6. 非目标
 
 - 不实现 Firecrawl 云服务、外部抓取代理、持久化网页归档、跨重启任务恢复或 Firecrawl 高可用。
-- 不允许 Firecrawl 的 `/interact`、持久化浏览器 profile、登录、表单填写或写操作。
-- 不改变 AICC 的对话、意向、来源审计或普通 Hermes 的其它工具策略。
+- 不在本期改变 AICC 的对话、意向、来源审计或普通 Hermes 的其它工具策略；二者仅增加启动时的
+  DDGS 搜索与 Firecrawl 提取配置。
