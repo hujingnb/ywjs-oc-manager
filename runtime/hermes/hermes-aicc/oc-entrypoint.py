@@ -24,6 +24,8 @@ sys.path.insert(0, "/usr/local/lib/oc-entrypoint")
 # 子目录不同级。运行时容器入口不带 PYTHONPATH（仅构建期自检设了 PYTHONPATH=/usr/local/lib），
 # 故须在此显式把 /usr/local/lib 加入 sys.path，否则 `import entrypoint_helpers` 在容器启动即崩溃。
 sys.path.insert(0, "/usr/local/lib")
+# AICC 不可变工具策略位于 Hermes 安装目录；entrypoint 需在渲染前校验 manifest 能力。
+sys.path.insert(0, "/usr/local/lib/hermes-agent")
 # 测试模式：脚本目录而非镜像安装目录。
 if not Path("/usr/local/lib/oc-entrypoint").exists():
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -35,6 +37,7 @@ from lib.state import OcState, read_state, write_state
 from renderer import render_config_yaml, render_env, render_skills, render_soul_md
 from migrator import run as run_migration
 from entrypoint_helpers import ensure_builtin_manifest
+from aicc_tools.policy import require_manifest_capabilities
 
 
 def main() -> int:
@@ -48,6 +51,14 @@ def main() -> int:
     except (ManifestError, FileNotFoundError, OSError) as e:
         oclog.emit("load_manifest", "error", str(e))
         return 1
+    try:
+        capabilities = require_manifest_capabilities(manifest.capabilities)
+    except ValueError as e:
+        oclog.emit("load_manifest", "error", str(e))
+        return 1
+    # model_tools.py 的定义过滤和 dispatcher 都读取该值；每次启动由 manifest 覆盖，
+    # 不可由 Pod 的历史临时状态放宽。
+    os.environ["OC_AICC_CAPABILITIES"] = ",".join(sorted(capabilities))
     _configure_knowledge_env(manifest)
     _configure_web_publish_env(manifest)
 

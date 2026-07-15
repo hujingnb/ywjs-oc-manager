@@ -16,16 +16,16 @@ TARGET = Path("/usr/local/lib/hermes-agent/model_tools.py")
 IMPORT_ANCHOR = "from tools.registry import discover_builtin_tools, registry\n"
 DISCOVERY_ANCHOR = "discover_builtin_tools()\n"
 DEFINITIONS_ANCHOR = "    filtered_tools = registry.get_definitions(tools_to_include, quiet=quiet_mode)\n"
-DISPATCH_ANCHOR = "    try:\n        if function_name in _AGENT_LOOP_TOOLS:\n"
+DISPATCH_ANCHOR = "    _tool_middleware_trace = list(tool_request_middleware_trace or [])\n"
 
 IMPORT_INJECT = (
     "from aicc_tools.policy import authorize as authorize_aicc_tool, "
-    "filter_definitions as filter_aicc_tool_definitions\n"
+    "current_manifest_capabilities, filter_definitions as filter_aicc_tool_definitions\n"
     "from aicc_tools.aicc_knowledge_tool import register_with_hermes_registry\n"
 )
 DISCOVERY_INJECT = "register_with_hermes_registry(registry)\n"
-DEFINITIONS_INJECT = "    filtered_tools = filter_aicc_tool_definitions(filtered_tools)\n"
-DISPATCH_INJECT = "    try:\n        authorize_aicc_tool(function_name)\n        if function_name in _AGENT_LOOP_TOOLS:\n"
+DEFINITIONS_INJECT = "    filtered_tools = filter_aicc_tool_definitions(filtered_tools, current_manifest_capabilities())\n"
+DISPATCH_INJECT = "    authorize_aicc_tool(function_name, current_manifest_capabilities())\n"
 
 
 def _inject_once(content: str, anchor: str, injected: str, label: str) -> str:

@@ -32,10 +32,11 @@ def _manifest(
     )
 
 
-def _make_skill_tar(path: Path, skill_name: str) -> None:
+def _make_skill_tar(path: Path, skill_name: str, capabilities: list[str] | None = None) -> None:
     # 在 path 写一个扁平 skill tar：SKILL.md 直接位于归档顶层（与平台库上传/oc-ops 扁平契约一致）。
     path.parent.mkdir(parents=True, exist_ok=True)
-    body = f"---\nname: {skill_name}\ndescription: d\n---\n# {skill_name}\n正文".encode()
+    declared = "" if capabilities is None else f"aicc_capabilities: {capabilities}\n"
+    body = f"---\nname: {skill_name}\ndescription: d\n{declared}---\n# {skill_name}\n正文".encode()
     with tarfile.open(path, "w") as tw:
         info = tarfile.TarInfo("SKILL.md")
         info.size = len(body)
@@ -109,6 +110,18 @@ def test_render_extracts_version_skill_tar(tmp_input: Path, tmp_data: Path) -> N
     marker = tmp_data / "skills" / "weather" / ".oc-managed"
     assert marker.exists()
     assert json.loads(marker.read_text())["source"] == "version-skill"
+
+
+def test_render_rejects_skill_capability_outside_manifest(tmp_input: Path, tmp_data: Path) -> None:
+    # 客服 Skill 声明 terminal.execute 时必须在真实加载路径拒绝，不能只靠安装页检查。
+    _make_skill_tar(
+        tmp_input / "resources" / "skills" / "dangerous.tar",
+        "dangerous",
+        ["terminal.execute"],
+    )
+
+    with pytest.raises(ValueError, match="AICC_SKILL_CAPABILITY_FORBIDDEN"):
+        render(_manifest(["resources/skills/dangerous.tar"]), tmp_input, tmp_data)
 
 
 def test_render_wipes_previously_managed_skill(tmp_input: Path, tmp_data: Path) -> None:

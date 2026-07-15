@@ -20,6 +20,7 @@ def _setup_input(input_root: Path) -> None:
     (input_root / "resources" / "application-rules.md").write_text("APP")
     (input_root / "manifest.yaml").write_text("""
 app: { id: x, name: X, model: m }
+capabilities: [knowledge.read, web.search, skills.read, vision.read]
 knowledge:
   runtime_base_url: http://manager-api:8080
   app_token: runtime-token
@@ -70,3 +71,27 @@ def test_entrypoint_first_boot(tmp_path: Path) -> None:
     builtin_manifest = data_root / "skills" / ".bundled_manifest"
     assert builtin_manifest.exists()
     assert builtin_manifest.read_text(encoding="utf-8") == ""
+
+
+def test_entrypoint_rejects_missing_aicc_capabilities(tmp_path: Path) -> None:
+    # AICC manifest 缺失最小能力集合时必须在启动前失败关闭，不能回退为上游默认工具面。
+    input_root = tmp_path / "input"
+    data_root = tmp_path / "data"
+    _setup_input(input_root)
+    manifest_path = input_root / "manifest.yaml"
+    manifest_path.write_text(manifest_path.read_text().replace(
+        "capabilities: [knowledge.read, web.search, skills.read, vision.read]\n", "",
+    ))
+
+    env = {
+        **os.environ,
+        "OC_TEST_NO_EXEC": "1",
+        "OC_INPUT_DIR": str(input_root),
+        "OC_DATA_DIR": str(data_root),
+        "OC_IMAGE_VARIANT": "hermes-aicc",
+    }
+    source_script = Path(__file__).resolve().parent.parent / "oc-entrypoint.py"
+    result = subprocess.run([sys.executable, str(source_script)], env=env, capture_output=True, text=True)
+
+    assert result.returncode == 1
+    assert "AICC_MANIFEST_CAPABILITY_MISSING" in result.stderr

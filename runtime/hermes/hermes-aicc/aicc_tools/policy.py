@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+import os
 from types import MappingProxyType
 from typing import Any
 
@@ -62,6 +63,22 @@ def validate_manifest_capabilities(capabilities: Iterable[str]) -> frozenset[str
     if unknown:
         raise ValueError(f"AICC_MANIFEST_CAPABILITY_FORBIDDEN: {', '.join(sorted(unknown))}")
     return normalized
+
+
+def require_manifest_capabilities(capabilities: Iterable[str]) -> frozenset[str]:
+    """拒绝缺少 AICC 最小只读能力的 manifest，避免空配置退化为镜像默认权限。"""
+    normalized = validate_manifest_capabilities(capabilities)
+    missing = ALLOWED_CAPABILITIES - normalized
+    if missing:
+        raise ValueError(f"AICC_MANIFEST_CAPABILITY_MISSING: {', '.join(sorted(missing))}")
+    return normalized
+
+
+def current_manifest_capabilities() -> frozenset[str]:
+    """从 entrypoint 写入的进程环境读取本次 manifest 能力，不存在时失败关闭。"""
+    raw = os.environ.get("OC_AICC_CAPABILITIES", "")
+    capabilities = [value for value in raw.split(",") if value]
+    return require_manifest_capabilities(capabilities)
 
 
 def validate_skill_capabilities(declared: Iterable[str], manifest_capabilities: Iterable[str]) -> None:

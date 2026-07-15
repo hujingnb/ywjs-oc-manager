@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import py_compile
 from urllib.error import HTTPError
 
 import pytest
@@ -14,8 +15,10 @@ from aicc_tools.policy import (
     ALLOWED_CAPABILITIES,
     ALLOWED_TOOLS,
     authorize,
+    current_manifest_capabilities,
     filter_definitions,
     validate_skill_capabilities,
+    require_manifest_capabilities,
 )
 from lib.manifest import ManifestError, load
 
@@ -36,6 +39,9 @@ def test_policy_filters_definitions_and_rejects_every_non_allowlisted_tool() -> 
         "read_file",
         "write_file",
         "skill_manage",
+        "tool_search",
+        "tool_describe",
+        "tool_call",
         "browser_click",
         "cronjob",
     ]:
@@ -49,6 +55,22 @@ def test_policy_rejects_skill_capabilities_outside_manifest_subset() -> None:
 
     with pytest.raises(ValueError, match="AICC_SKILL_CAPABILITY_FORBIDDEN"):
         validate_skill_capabilities(["knowledge.write"], ALLOWED_CAPABILITIES)
+
+
+# 覆盖：AICC 容器启动必须拿到完整只读能力集合，缺失 manifest capabilities 时不能退化为全权限。
+def test_policy_rejects_missing_required_manifest_capabilities() -> None:
+    with pytest.raises(ValueError, match="AICC_MANIFEST_CAPABILITY_MISSING"):
+        require_manifest_capabilities(["knowledge.read"])
+
+
+# 覆盖：definition filter 与 dispatcher 共用 entrypoint 下发的 manifest 能力，环境缺失时必须失败关闭。
+def test_policy_reads_manifest_capabilities_from_runtime_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OC_AICC_CAPABILITIES", "knowledge.read,web.search,skills.read,vision.read")
+    assert current_manifest_capabilities() == ALLOWED_CAPABILITIES
+
+    monkeypatch.delenv("OC_AICC_CAPABILITIES")
+    with pytest.raises(ValueError, match="AICC_MANIFEST_CAPABILITY_MISSING"):
+        current_manifest_capabilities()
 
 
 # 覆盖：AICC manifest 只能接受平台定义的 capability，未知能力不能因 forward-compat 被静默放行。
@@ -115,7 +137,7 @@ def test_knowledge_search_raises_runtime_error_for_manager_failure(monkeypatch: 
         search_knowledge("售后政策")
 
 
-# 覆盖：构建期补丁对上游两个插入点各替换一次，缺锚点或重复锚点时必须失败而不能静默生成半保护镜像。
+# 覆盖：构建期补丁对上游四个插入点各替换一次，且补丁结果可编译、dispatcher 守卫先于桥接工具分支。
 def test_patch_requires_exactly_one_anchor_for_each_injection() -> None:
     patch_path = Path(__file__).resolve().parents[1] / "patches" / "patch_aicc_tool_policy.py"
     spec = importlib.util.spec_from_file_location("patch_aicc_tool_policy", patch_path)
@@ -130,7 +152,7 @@ def test_patch_requires_exactly_one_anchor_for_each_injection() -> None:
         + module.DISPATCH_ANCHOR
     )
     patched = module.patch(source)
-    assert patched.count("filtered_tools = filter_aicc_tool_definitions(filtered_tools)") == 1
+    assert patched.count("filtered_tools = filter_aicc_tool_definitions(filtered_tools, current_manifest_capabilities())") == 1
     assert patched.count("authorize_aicc_tool") == 2  # import 与 dispatcher guard 各一处。
 
     with pytest.raises(RuntimeError, match="expected exactly one"):
@@ -141,3 +163,36 @@ def test_patch_requires_exactly_one_anchor_for_each_injection() -> None:
             + module.DEFINITIONS_ANCHOR
             + module.DISPATCH_ANCHOR
         )
+
+
+# 覆盖：真实 dispatcher 的桥接工具分支之前先做授权；伪造 tool_search/tool_describe/tool_call 不得绕过守卫。
+def test_patch_places_guard_before_tool_search_bridge_and_compiles(tmp_path: Path) -> None:
+    patch_path = Path(__file__).resolve().parents[1] / "patches" / "patch_aicc_tool_policy.py"
+    spec = importlib.util.spec_from_file_location("patch_aicc_tool_policy", patch_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    source = """from tools.registry import discover_builtin_tools, registry
+discover_builtin_tools()
+def get_tools():
+    filtered_tools = registry.get_definitions(tools_to_include, quiet=quiet_mode)
+    return filtered_tools
+def handle(function_name):
+    function_args = {}
+    _tool_middleware_trace = list(tool_request_middleware_trace or [])
+    # ── Tool Search bridge dispatch ──────────────────────────────────
+    if function_name in {\"tool_search\", \"tool_describe\", \"tool_call\"}:
+        return \"bridge\"
+    try:
+        if function_name in _AGENT_LOOP_TOOLS:
+            return \"agent\"
+    except Exception:
+        return \"error\"
+"""
+    patched = module.patch(source)
+    result = tmp_path / "model_tools.py"
+    result.write_text(patched, encoding="utf-8")
+    py_compile.compile(str(result), doraise=True)
+    assert patched.index("authorize_aicc_tool(function_name, current_manifest_capabilities())") < patched.index("Tool Search bridge dispatch")
+    assert patched.index("authorize_aicc_tool(function_name, current_manifest_capabilities())") < patched.index("tool_call")

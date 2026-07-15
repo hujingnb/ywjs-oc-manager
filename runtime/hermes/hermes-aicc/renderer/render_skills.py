@@ -20,6 +20,9 @@ import zipfile
 from pathlib import Path
 from typing import List
 
+import yaml
+
+from aicc_tools.policy import validate_skill_capabilities
 from lib.atomic import write_text
 from lib.manifest import Manifest
 
@@ -36,7 +39,7 @@ def render(m: Manifest, input_root: Path, data_root: Path) -> List[str]:
     outputs.extend(_render_runtime_knowledge_skill(m, skills_root))
     # web_publish 配置存在时渲染 oc-publish skill，企业未开通时整体跳过。
     outputs.extend(_render_web_publish_skill(m, skills_root))
-    outputs.extend(_extract_version_skills(m.skills or [], input_root, skills_root))
+    outputs.extend(_extract_version_skills(m.skills or [], input_root, skills_root, m.capabilities))
     return outputs
 
 
@@ -124,7 +127,29 @@ def _extract_zip(archive_path: Path, dest: Path, rel: str) -> None:
             zf.extract(name, dest)
 
 
-def _extract_version_skills(skill_rels: List[str], input_root: Path, skills_root: Path) -> List[str]:
+def _validate_skill_capabilities(skill_dir: Path, manifest_capabilities: frozenset[str]) -> None:
+    """校验 Skill frontmatter 的 aicc_capabilities 是本次 manifest 授权集合的子集。"""
+    skill_file = skill_dir / "SKILL.md"
+    if not skill_file.exists():
+        raise ValueError(f"AICC_SKILL_CAPABILITY_INVALID: missing SKILL.md ({skill_dir.name})")
+    body = skill_file.read_text(encoding="utf-8")
+    if not body.startswith("---\n"):
+        raise ValueError(f"AICC_SKILL_CAPABILITY_INVALID: missing frontmatter ({skill_dir.name})")
+    frontmatter, separator, _ = body[4:].partition("\n---\n")
+    if not separator:
+        raise ValueError(f"AICC_SKILL_CAPABILITY_INVALID: unterminated frontmatter ({skill_dir.name})")
+    metadata = yaml.safe_load(frontmatter)
+    if not isinstance(metadata, dict):
+        raise ValueError(f"AICC_SKILL_CAPABILITY_INVALID: invalid frontmatter ({skill_dir.name})")
+    declared = metadata.get("aicc_capabilities", [])
+    if not isinstance(declared, list) or not all(isinstance(capability, str) for capability in declared):
+        raise ValueError(f"AICC_SKILL_CAPABILITY_INVALID: aicc_capabilities ({skill_dir.name})")
+    validate_skill_capabilities(declared, manifest_capabilities)
+
+
+def _extract_version_skills(
+    skill_rels: List[str], input_root: Path, skills_root: Path, manifest_capabilities: frozenset[str],
+) -> List[str]:
     """解压 manifest.skills 列出的版本 skill 归档（tar/zip）到 skills_root/<name>/，并补 .oc-managed 标记。
 
     扁平契约（与 oc-ops install_skill 一致）：归档内 SKILL.md 等内容直接位于归档顶层，
@@ -154,6 +179,8 @@ def _extract_version_skills(skill_rels: List[str], input_root: Path, skills_root
             _extract_zip(archive_path, skill_dir, rel)
         else:
             _extract_tar(archive_path, skill_dir, rel)
+        # 解压成功不代表可启用：声明越权的 Skill 在进入 Hermes 扫描目录前必须失败关闭。
+        _validate_skill_capabilities(skill_dir, manifest_capabilities)
         _write_marker(skill_dir, "version-skill")
         outputs.append(f"skills/{name}/")
     return outputs

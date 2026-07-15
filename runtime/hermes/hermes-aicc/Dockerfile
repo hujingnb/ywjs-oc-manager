@@ -188,7 +188,8 @@ RUN set -e; \
     python3 /usr/local/lib/oc-entrypoint/patches/patch_i18n_literals.py; \
     python3 /usr/local/lib/oc-entrypoint/patches/check_oc_i18n_consistency.py; \
     python3 /usr/local/lib/oc-entrypoint/patches/patch_api_server_reload.py; \
-    python3 /usr/local/lib/oc-entrypoint/patches/patch_aicc_tool_policy.py
+    python3 /usr/local/lib/oc-entrypoint/patches/patch_aicc_tool_policy.py; \
+    python3 -m py_compile /usr/local/lib/hermes-agent/model_tools.py
 
 # 镜像身份信息写到固定位置，供 oc-info 读取
 ARG OC_IMAGE_VARIANT
