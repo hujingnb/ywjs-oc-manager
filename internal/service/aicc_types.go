@@ -148,6 +148,8 @@ type AICCMessageResult struct {
 	IsRefusal bool `json:"is_refusal"`
 	// ErrorSummary 是运行时错误摘要。
 	ErrorSummary string `json:"error_summary,omitempty"`
+	// Sources 是助手回复已校验的知识库或网络依据；公开端仅展示其中安全字段。
+	Sources []AICCResponseSource `json:"sources,omitempty"`
 	// CreatedAt 是消息创建时间。
 	CreatedAt time.Time `json:"created_at"`
 }

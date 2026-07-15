@@ -46,6 +46,7 @@ type AICCDispatcherStore interface {
 	RenewAICCMessageTaskLease(context.Context, sqlc.RenewAICCMessageTaskLeaseParams) (int64, error)
 	RecoverExpiredAICCMessageTaskLeases(context.Context) (int64, error)
 	CreateAICCMessage(context.Context, sqlc.CreateAICCMessageParams) error
+	CreateAICCMessageSource(context.Context, sqlc.CreateAICCMessageSourceParams) error
 	GetAICCSessionContext(context.Context, string) (sqlc.AiccSessionContext, error)
 	ListAICCContextMessages(context.Context, sqlc.ListAICCContextMessagesParams) ([]sqlc.AiccMessage, error)
 }
@@ -146,9 +147,18 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 		}
 		return d.finishError(ctx, task, token, err)
 	}
+	// 运行时的原始输出首次不合规时，只给予一次固定重写机会；不能把校验细节交给模型，
+	// 以免提示词注入借错误信息探测策略。第二次仍失败时改为 manager 固定兜底。
+	reply = d.validateOrFallbackAICCResponse(chatCtx, turn, reply)
 	write := func(s AICCDispatcherStore) error {
-		if err := s.CreateAICCMessage(ctx, sqlc.CreateAICCMessageParams{ID: newUUID(), SessionID: task.SessionID, AgentID: task.AgentID, Direction: domain.AICCMessageDirectionAssistant, ContentType: domain.AICCMessageContentTypeText, TextContent: null.StringFrom(reply.Text), ClientMessageID: visitor.ClientMessageID, ReplyToMessageID: null.StringFrom(task.MessageID)}); err != nil {
+		messageID := newUUID()
+		if err := s.CreateAICCMessage(ctx, sqlc.CreateAICCMessageParams{ID: messageID, SessionID: task.SessionID, AgentID: task.AgentID, Direction: domain.AICCMessageDirectionAssistant, ContentType: domain.AICCMessageContentTypeText, TextContent: null.StringFrom(reply.Text), ClientMessageID: visitor.ClientMessageID, ReplyToMessageID: null.StringFrom(task.MessageID), IsFallback: reply.Fallback, IsRefusal: reply.Refusal}); err != nil {
 			return err
+		}
+		for _, source := range reply.Sources {
+			if err := s.CreateAICCMessageSource(ctx, sqlc.CreateAICCMessageSourceParams{ID: newUUID(), MessageID: messageID, SourceType: source.Type, Title: nullStr(source.Title), Url: nullStr(source.URL), Scope: nullStr(source.Scope), ReferenceID: nullStr(source.ReferenceID), Unconfirmed: source.Unconfirmed, RetrievedAt: d.now()}); err != nil {
+				return err
+			}
 		}
 		rows, err := s.CompleteAICCMessageTask(ctx, sqlc.CompleteAICCMessageTaskParams{ID: task.ID, LeaseToken: null.StringFrom(token)})
 		if err != nil {
@@ -179,6 +189,36 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 	}
 	d.observe(ctx, task, "completed", "completed")
 	return nil
+}
+
+const aiccResponseRewriteInstruction = "你的上一条输出未通过客服安全格式校验。仅输出一个 JSON 对象：{\"text\":\"\",\"sources\":[],\"next_action\":\"none\",\"flags\":{}}。不得添加 Markdown、解释或执行操作声称。"
+
+// validateOrFallbackAICCResponse 将 wire 输出解析为渠道响应。只有 AICCPublicHermesChat 设置 Raw，
+// 测试或未来受信任渠道适配器可以直接传入已验证 envelope；后者仍接受基础策略校验。
+func (d *AICCDispatcher) validateOrFallbackAICCResponse(ctx context.Context, turn AICCInboundTurn, reply AICCResponseEnvelope) AICCResponseEnvelope {
+	if reply.Raw == "" {
+		if checked, err := validateAICCResponseEnvelope(reply, reply.ToolAudit); err == nil {
+			return checked
+		}
+		return aiccSafeFallbackResponse()
+	}
+	if checked, err := ParseAndValidateAICCResponse(reply.Raw, reply.ToolAudit); err == nil {
+		return checked
+	}
+	rewrite := turn
+	rewrite.Instruction = strings.TrimSpace(turn.Instruction + "\n" + aiccResponseRewriteInstruction)
+	retried, err := d.chat.ChatAICC(ctx, rewrite)
+	if err == nil && retried.Raw != "" {
+		if checked, parseErr := ParseAndValidateAICCResponse(retried.Raw, retried.ToolAudit); parseErr == nil {
+			return checked
+		}
+	}
+	return aiccSafeFallbackResponse()
+}
+
+// aiccSafeFallbackResponse 由 manager 固定生成，不携带来源、不作企业承诺，也不触发页面动作。
+func aiccSafeFallbackResponse() AICCResponseEnvelope {
+	return AICCResponseEnvelope{Text: "抱歉，我暂时无法依据可确认的信息回答这个问题。请联系企业客服进一步确认。", NextAction: "none", Fallback: true}
 }
 
 // RecoverExpiredLeases 由扫库 worker 定期调用，使宕机 worker 的任务重新可领取。

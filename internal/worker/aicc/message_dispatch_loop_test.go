@@ -344,6 +344,9 @@ func (*loopRealDispatcherStore) RenewAICCMessageTaskLease(context.Context, sqlc.
 func (*loopRealDispatcherStore) CreateAICCMessage(context.Context, sqlc.CreateAICCMessageParams) error {
 	return nil
 }
+func (*loopRealDispatcherStore) CreateAICCMessageSource(context.Context, sqlc.CreateAICCMessageSourceParams) error {
+	return nil
+}
 
 type loopRealDispatcherTx struct{ store *loopRealDispatcherStore }
 

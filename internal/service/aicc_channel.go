@@ -20,12 +20,12 @@ type AICCInboundTurn struct {
 
 // AICCResponseSource 描述答复依据，后续持久化与公开 API 均使用同一来源模型。
 type AICCResponseSource struct {
-	Type        string
-	Title       string
-	URL         string
-	Scope       string
-	ReferenceID string
-	Unconfirmed bool
+	Type        string `json:"type"`
+	Title       string `json:"title"`
+	URL         string `json:"url"`
+	Scope       string `json:"scope"`
+	ReferenceID string `json:"reference_id"`
+	Unconfirmed bool   `json:"unconfirmed"`
 }
 
 // AICCResponseEnvelope 是渠道无关的客服答复；当前文字网页仅消费 Text，
@@ -37,4 +37,9 @@ type AICCResponseEnvelope struct {
 	Refusal    bool
 	Fallback   bool
 	AuditRef   string
+	// ToolAudit 只能由受信任运行时适配层根据本轮工具执行记录写入。它用于校验
+	// sources 的 reference_id，既不会持久化，也不会透出到公开 API。
+	ToolAudit AICCResponseToolAudit
+	// Raw 是 Hermes 原始输出，仅在 manager 到运行时的受信任边界内使用；持久化和公开 API 不输出它。
+	Raw string
 }

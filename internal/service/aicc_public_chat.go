@@ -54,7 +54,10 @@ func (c *AICCPublicHermesChat) ChatAICC(ctx context.Context, turn AICCInboundTur
 	if err := aiccRuntimeDiagnosticError(conversationContentText(out.Message.Content)); err != nil {
 		return AICCResponseEnvelope{}, err
 	}
-	return AICCResponseEnvelope{Text: conversationContentText(out.Message.Content)}, nil
+	// Raw 交由 dispatcher 统一解析并执行来源政策；Text 保留原文兼容当前调用方的运行时诊断与观测测试，
+	// 但绝不能直接持久化为公开回复。
+	content := conversationContentText(out.Message.Content)
+	return AICCResponseEnvelope{Text: content, Raw: content}, nil
 }
 
 var aiccRuntimeStatusPattern = regexp.MustCompile(`(?i)\b(429|503|529)\b`)

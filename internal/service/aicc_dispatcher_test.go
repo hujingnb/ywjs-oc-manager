@@ -25,7 +25,9 @@ type aiccDispatcherStoreFake struct {
 	retry           sqlc.RetryAICCMessageTaskParams
 	failed          sqlc.FailAICCMessageTaskParams
 	assistant       []sqlc.CreateAICCMessageParams
+	sources         []sqlc.CreateAICCMessageSourceParams
 	complete        int64
+	completed       int
 	recover         int64
 	retryRows       int64
 	failRows        int64
@@ -90,6 +92,7 @@ func (s *aiccDispatcherStoreFake) CompleteAICCMessageTask(context.Context, sqlc.
 	s.leaseMu.Lock()
 	s.claimed = false
 	s.leaseMu.Unlock()
+	s.completed++
 	return s.complete, nil
 }
 func (s *aiccDispatcherStoreFake) RetryAICCMessageTask(_ context.Context, p sqlc.RetryAICCMessageTaskParams) (int64, error) {
@@ -147,17 +150,25 @@ func (s *aiccDispatcherStoreFake) CreateAICCMessage(_ context.Context, p sqlc.Cr
 	s.assistant = append(s.assistant, p)
 	return nil
 }
+func (s *aiccDispatcherStoreFake) CreateAICCMessageSource(_ context.Context, p sqlc.CreateAICCMessageSourceParams) error {
+	s.sources = append(s.sources, p)
+	return nil
+}
 
 type aiccDispatcherChatFake struct {
-	reply string
-	err   error
-	run   func(context.Context) (string, error)
+	reply         string
+	replyEnvelope AICCResponseEnvelope
+	err           error
+	run           func(context.Context) (string, error)
 }
 
 func (c aiccDispatcherChatFake) ChatAICC(ctx context.Context, _ AICCInboundTurn) (AICCResponseEnvelope, error) {
 	if c.run != nil {
 		reply, err := c.run(ctx)
 		return AICCResponseEnvelope{Text: reply}, err
+	}
+	if c.replyEnvelope.Text != "" || c.replyEnvelope.Raw != "" {
+		return c.replyEnvelope, c.err
 	}
 	return AICCResponseEnvelope{Text: c.reply}, c.err
 }
@@ -181,6 +192,23 @@ func (aiccDispatcherAllowLimiter) Acquire(context.Context, string, string, strin
 
 func (t aiccDispatcherTxFake) WithAICCDispatcherTx(ctx context.Context, fn func(AICCDispatcherStore) error) error {
 	return fn(t.store)
+}
+
+// aiccDispatcherRollbackTxFake 在单测中模拟数据库事务：回调返回错误时丢弃本轮的消息、来源和完成标记。
+// 它专门验证租约丢失不会留下任何访客可见的半成品记录。
+type aiccDispatcherRollbackTxFake struct{ store *aiccDispatcherStoreFake }
+
+func (t aiccDispatcherRollbackTxFake) WithAICCDispatcherTx(_ context.Context, fn func(AICCDispatcherStore) error) error {
+	beforeAssistant := append([]sqlc.CreateAICCMessageParams(nil), t.store.assistant...)
+	beforeSources := append([]sqlc.CreateAICCMessageSourceParams(nil), t.store.sources...)
+	beforeCompleted := t.store.completed
+	if err := fn(t.store); err != nil {
+		t.store.assistant = beforeAssistant
+		t.store.sources = beforeSources
+		t.store.completed = beforeCompleted
+		return err
+	}
+	return nil
 }
 
 func newAICCDispatcherStoreFake() *aiccDispatcherStoreFake {
@@ -328,6 +356,45 @@ func TestAICCDispatcherSuccessAtomicallyWritesAssistantAndCompletes(t *testing.T
 	require.Len(t, s.assistant, 1)
 	assert.Equal(t, "答复", s.assistant[0].TextContent.String)
 	assert.Equal(t, "visitor", s.assistant[0].ReplyToMessageID.String)
+}
+
+// TestAICCDispatcherPersistsAuditedSourcesWithAssistant 覆盖可展示来源的成功链路：
+// reference_id 通过本轮工具审计后，助手消息、来源和 completed 状态必须一起提交。
+func TestAICCDispatcherPersistsAuditedSourcesWithAssistant(t *testing.T) {
+	s := newAICCDispatcherStoreFake()
+	source := AICCResponseSource{Type: "knowledge", Title: "企业手册", ReferenceID: "kb-1"}
+	chat := aiccDispatcherChatFake{replyEnvelope: AICCResponseEnvelope{
+		Raw:       `{"text":"企业版支持知识库问答。","sources":[{"type":"knowledge","title":"企业手册","reference_id":"kb-1"}],"next_action":"none","flags":{}}`,
+		ToolAudit: AICCResponseToolAudit{"kb-1": source},
+	}}
+	d := NewAICCDispatcher(s, aiccDispatcherTxFake{s}, chat, aiccDispatcherAllowLimiter{})
+
+	require.NoError(t, d.Dispatch(context.Background(), s.task))
+	require.Len(t, s.assistant, 1)
+	require.Len(t, s.sources, 1)
+	assert.Equal(t, s.assistant[0].ID, s.sources[0].MessageID)
+	assert.Equal(t, "kb-1", s.sources[0].ReferenceID.String)
+	assert.Equal(t, 1, s.completed)
+}
+
+// TestAICCDispatcherRollsBackAllWritesWhenLeaseLost 覆盖完成任务时租约已丢失：
+// 消息、来源与 completed 三项必须同事务回滚，后续 holder 不会遇到半成品回复。
+func TestAICCDispatcherRollsBackAllWritesWhenLeaseLost(t *testing.T) {
+	s := newAICCDispatcherStoreFake()
+	s.complete = 0
+	source := AICCResponseSource{Type: "knowledge", Title: "企业手册", ReferenceID: "kb-1"}
+	chat := aiccDispatcherChatFake{replyEnvelope: AICCResponseEnvelope{
+		Raw:       `{"text":"企业版支持知识库问答。","sources":[{"type":"knowledge","title":"企业手册","reference_id":"kb-1"}],"next_action":"none","flags":{}}`,
+		ToolAudit: AICCResponseToolAudit{"kb-1": source},
+	}}
+	d := NewAICCDispatcher(s, aiccDispatcherRollbackTxFake{s}, chat, aiccDispatcherAllowLimiter{})
+
+	err := d.Dispatch(context.Background(), s.task)
+
+	require.ErrorIs(t, err, ErrAICCLeaseLost)
+	assert.Empty(t, s.assistant)
+	assert.Empty(t, s.sources)
+	assert.Zero(t, s.completed)
 }
 
 // TestAICCDispatcherRetryableErrorsEnterRetryWait 覆盖上游限流、服务不可用、网关过载和超时：
