@@ -16,10 +16,16 @@ const aiccIntentAnalyzerVersion = "aicc-lead-analysis/v1"
 // aiccIntentAnalysis 是 aicc-lead-analysis Skill 的最小输出合同。证据必须来自访客原话，
 // manager 会再次验证字段和值，模型不能借此写入任意画像或敏感信息。
 type aiccIntentAnalysis struct {
-	Level      string             `json:"level"`
-	Fields     map[string]string  `json:"fields"`
-	Confidence map[string]float64 `json:"confidence"`
-	Evidence   map[string]string  `json:"evidence"`
+	Level      string                        `json:"level"`
+	Fields     map[string]string             `json:"fields"`
+	Confidence map[string]float64            `json:"confidence"`
+	Evidence   map[string]aiccIntentEvidence `json:"evidence"`
+}
+
+// aiccIntentEvidence 把每个字段绑定到具体访客消息，避免模型用“历史会话”这一模糊概念伪造依据。
+type aiccIntentEvidence struct {
+	MessageID string `json:"message_id"`
+	Text      string `json:"text"`
 }
 
 var aiccIntentFieldAllowlist = map[string]struct{}{
@@ -29,7 +35,7 @@ var aiccIntentFieldAllowlist = map[string]struct{}{
 
 // parseAICCIntentAnalysis 只接受白名单字段、合法等级及可在当前访客文本中找到的证据。
 // 这能阻止 Skill 幻觉、跨轮记忆和手机号/身份证等敏感字段被悄悄沉淀。
-func parseAICCIntentAnalysis(raw, visitorText string) (aiccIntentAnalysis, bool) {
+func parseAICCIntentAnalysis(raw string, visitorMessages map[string]string) (aiccIntentAnalysis, bool) {
 	var analysis aiccIntentAnalysis
 	if json.Unmarshal([]byte(strings.TrimSpace(raw)), &analysis) != nil {
 		return aiccIntentAnalysis{}, false
@@ -37,14 +43,16 @@ func parseAICCIntentAnalysis(raw, visitorText string) (aiccIntentAnalysis, bool)
 	if analysis.Level != "low" && analysis.Level != "medium" && analysis.Level != "high" {
 		return aiccIntentAnalysis{}, false
 	}
-	clean := aiccIntentAnalysis{Level: analysis.Level, Fields: map[string]string{}, Confidence: map[string]float64{}, Evidence: map[string]string{}}
+	clean := aiccIntentAnalysis{Level: analysis.Level, Fields: map[string]string{}, Confidence: map[string]float64{}, Evidence: map[string]aiccIntentEvidence{}}
 	for key, value := range analysis.Fields {
 		if _, allowed := aiccIntentFieldAllowlist[key]; !allowed {
 			continue
 		}
 		value = strings.TrimSpace(value)
-		evidence := strings.TrimSpace(analysis.Evidence[key])
-		if value == "" || evidence == "" || !strings.Contains(visitorText, evidence) {
+		evidence := analysis.Evidence[key]
+		evidence.Text = strings.TrimSpace(evidence.Text)
+		messageText, belongs := visitorMessages[evidence.MessageID]
+		if value == "" || evidence.Text == "" || !belongs || !strings.Contains(messageText, evidence.Text) {
 			continue
 		}
 		// 明确不接收模型提取的敏感联系方式；正式联系方式只能由访客在表单里主动提交。
@@ -72,7 +80,10 @@ func looksLikeAICCSensitiveValue(value string) bool {
 
 // aiccIntentDecision 是 manager 在本轮回复前形成的唯一邀约决策；模型只能服从该决策，
 // 不得自行把普通咨询升级为留资弹窗。
-type aiccIntentDecision struct{ InviteStatus string }
+type aiccIntentDecision struct {
+	InviteStatus string
+	AllowOffer   bool
+}
 
 // analyzeAICCIntent 在主回复前以独立 Hermes Turn 分析同一会话的访客原话。
 // 返回 false 表示分析失败，调用方仍可交付普通答复，但必须将本任务保留为可重试状态。
@@ -85,6 +96,7 @@ func (d *AICCDispatcher) analyzeAICCIntent(ctx context.Context, task sqlc.AiccMe
 		return aiccIntentDecision{}, true
 	}
 	visitorText := aiccSessionVisitorText(conversation, visitor.TextContent.String)
+	visitorMessages := aiccSessionVisitorMessages(conversation, visitor)
 	turn := AICCInboundTurn{
 		TurnID:      task.MessageID + ":intent",
 		SessionID:   task.SessionID,
@@ -101,7 +113,7 @@ func (d *AICCDispatcher) analyzeAICCIntent(ctx context.Context, task sqlc.AiccMe
 	if raw == "" {
 		raw = reply.Text
 	}
-	analysis, valid := parseAICCIntentAnalysis(raw, visitorText)
+	analysis, valid := parseAICCIntentAnalysis(raw, visitorMessages)
 	if !valid {
 		return aiccIntentDecision{}, false
 	}
@@ -112,6 +124,7 @@ func (d *AICCDispatcher) analyzeAICCIntent(ctx context.Context, task sqlc.AiccMe
 	} else if err != nil && err != sql.ErrNoRows {
 		return aiccIntentDecision{}, false
 	}
+	allowOffer := analysis.Level == "high" && inviteStatus == "not_invited"
 	inviteStatus = nextAICCInviteStatus(analysis.Level, inviteStatus)
 	// 既有字段只能在本会话历史证据仍可回溯时保留；本轮同名字段以最新访客明确表达为准。
 	mergeAICCIntentFields(&analysis, previous, visitorText)
@@ -125,7 +138,7 @@ func (d *AICCDispatcher) analyzeAICCIntent(ctx context.Context, task sqlc.AiccMe
 	}); err != nil {
 		return aiccIntentDecision{}, false
 	}
-	return aiccIntentDecision{InviteStatus: inviteStatus}, true
+	return aiccIntentDecision{InviteStatus: inviteStatus, AllowOffer: allowOffer}, true
 }
 
 // queueAICCIntentRetry 保存独立重试事实；主回复无需等待它成功。相同 session 的主键使重复失败
@@ -188,16 +201,27 @@ func aiccSessionVisitorText(conversation AICCConversationContext, current string
 	return strings.Join(parts, "\n")
 }
 
+func aiccSessionVisitorMessages(conversation AICCConversationContext, current sqlc.AiccMessage) map[string]string {
+	items := map[string]string{current.ID: current.TextContent.String}
+	for _, message := range conversation.Messages {
+		if message.Direction == "visitor" && message.ID != "" {
+			items[message.ID] = message.Text
+		}
+	}
+	return items
+}
+
 func mergeAICCIntentFields(analysis *aiccIntentAnalysis, previous sqlc.AiccSessionIntent, visitorText string) {
 	if previous.ID == "" {
 		return
 	}
-	var fields, evidence map[string]string
+	var fields map[string]string
+	var evidence map[string]aiccIntentEvidence
 	if json.Unmarshal(previous.FieldsJson, &fields) != nil || json.Unmarshal(previous.EvidenceJson, &evidence) != nil {
 		return
 	}
 	for key, value := range fields {
-		if _, exists := analysis.Fields[key]; exists || strings.TrimSpace(evidence[key]) == "" || !strings.Contains(visitorText, evidence[key]) {
+		if _, exists := analysis.Fields[key]; exists || strings.TrimSpace(evidence[key].Text) == "" || !strings.Contains(visitorText, evidence[key].Text) {
 			continue
 		}
 		analysis.Fields[key], analysis.Evidence[key] = value, evidence[key]
@@ -207,7 +231,7 @@ func mergeAICCIntentFields(analysis *aiccIntentAnalysis, previous sqlc.AiccSessi
 // constrainAICCIntentNextAction 是模型输出后的服务端最终防线。只有 manager 判定的首次高意向
 // 才允许 offer_lead；其它任何状态一律剥离该动作，不能依赖提示词自觉。
 func constrainAICCIntentNextAction(reply AICCResponseEnvelope, decision aiccIntentDecision) AICCResponseEnvelope {
-	if decision.InviteStatus != "invited" || reply.NextAction == "offer_lead" && decision.InviteStatus != "invited" {
+	if !decision.AllowOffer {
 		if reply.NextAction == "offer_lead" {
 			reply.NextAction = "none"
 		}

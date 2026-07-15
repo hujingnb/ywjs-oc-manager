@@ -146,7 +146,7 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 		d.queueAICCIntentRetry(ctx, task, "initial intent analysis failed")
 	}
 	turn := AICCInboundTurn{TurnID: task.MessageID, SessionID: task.SessionID, Channel: "web_link", Text: visitor.TextContent.String, OccurredAt: d.now(), Context: conversationContext, Instruction: buildAICCRuntimePrompt(agent, ""), AppID: task.AppID}
-	if intentReady && intentDecision.InviteStatus == "invited" {
+	if intentReady && intentDecision.AllowOffer {
 		turn.Instruction += "\n本轮 manager 已允许且仅允许 next_action 使用 offer_lead；其它场景不得使用 offer_lead。"
 	} else {
 		turn.Instruction += "\n本轮 manager 未允许邀约，next_action 必须为 none 或 ask_resolution，禁止 offer_lead。"

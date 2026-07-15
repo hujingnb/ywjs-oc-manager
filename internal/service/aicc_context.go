@@ -24,6 +24,8 @@ type AICCConversationContextStore interface {
 
 // AICCContextMessage 是经过角色标注的原始对话记录，绝不提升为系统指令。
 type AICCContextMessage struct {
+	// ID 是原始消息主键，意向分析用它绑定字段证据，不能由模型自行编造跨会话引用。
+	ID        string
 	Direction string
 	Text      string
 }
@@ -62,7 +64,7 @@ func BuildAICCConversationContext(ctx context.Context, store AICCConversationCon
 		if message.Direction == domain.AICCMessageDirectionVisitor {
 			direction = "visitor"
 		}
-		items = append(items, AICCContextMessage{Direction: direction, Text: text})
+		items = append(items, AICCContextMessage{ID: message.ID, Direction: direction, Text: text})
 	}
 	if len(items) > aiccContextMessageLimit {
 		items = items[len(items)-aiccContextMessageLimit:]
