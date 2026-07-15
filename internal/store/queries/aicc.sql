@@ -408,6 +408,12 @@ UPDATE aicc_session_intents
 SET invite_status = ?, updated_at = now()
 WHERE session_id = ?;
 
+-- name: ConsumeAICCSessionIntentInvitation :execrows
+-- 首次邀约只能从 not_invited 原子推进到 invited，不能覆盖访客已拒绝或已提交的决定。
+UPDATE aicc_session_intents
+SET invite_status = 'invited', updated_at = now()
+WHERE session_id = ? AND invite_status = 'not_invited';
+
 -- name: UpsertAICCIntentAnalysisRetry :exec
 INSERT INTO aicc_intent_analysis_retries (session_id, message_id, attempts, run_after, last_error)
 VALUES (?, ?, 1, DATE_ADD(NOW(6), INTERVAL 1 SECOND), ?)

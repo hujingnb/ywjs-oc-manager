@@ -29,6 +29,8 @@ type Querier interface {
 	// transitionTo / RequestInitialize 强制清空进度字段。
 	ClearAppProgress(ctx context.Context, id string) error
 	CompleteAICCMessageTask(ctx context.Context, arg CompleteAICCMessageTaskParams) (int64, error)
+	// 首次邀约只能从 not_invited 原子推进到 invited，不能覆盖访客已拒绝或已提交的决定。
+	ConsumeAICCSessionIntentInvitation(ctx context.Context, sessionID string) (int64, error)
 	CountAICCAgentsByOrg(ctx context.Context, orgID string) (int64, error)
 	CountAICCCompletedLeadSessions(ctx context.Context, orgID string) (int64, error)
 	CountAICCCompletedLeadSessionsInRange(ctx context.Context, arg CountAICCCompletedLeadSessionsInRangeParams) (int64, error)

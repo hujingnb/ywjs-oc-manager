@@ -97,6 +97,21 @@ func (q *Queries) CompleteAICCMessageTask(ctx context.Context, arg CompleteAICCM
 	return result.RowsAffected()
 }
 
+const consumeAICCSessionIntentInvitation = `-- name: ConsumeAICCSessionIntentInvitation :execrows
+UPDATE aicc_session_intents
+SET invite_status = 'invited', updated_at = now()
+WHERE session_id = ? AND invite_status = 'not_invited'
+`
+
+// 首次邀约只能从 not_invited 原子推进到 invited，不能覆盖访客已拒绝或已提交的决定。
+func (q *Queries) ConsumeAICCSessionIntentInvitation(ctx context.Context, sessionID string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, consumeAICCSessionIntentInvitation, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const countAICCAgentsByOrg = `-- name: CountAICCAgentsByOrg :one
 SELECT COUNT(*)
 FROM aicc_agents

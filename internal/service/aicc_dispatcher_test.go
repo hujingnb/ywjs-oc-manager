@@ -27,7 +27,9 @@ type aiccDispatcherStoreFake struct {
 	failed          sqlc.FailAICCMessageTaskParams
 	assistant       []sqlc.CreateAICCMessageParams
 	sources         []sqlc.CreateAICCMessageSourceParams
-	inviteUpdates   []sqlc.UpdateAICCSessionIntentInviteStatusParams
+	inviteUpdates   []string
+	inviteRows      int64
+	inviteErr       error
 	complete        int64
 	completed       int
 	recover         int64
@@ -157,9 +159,15 @@ func (s *aiccDispatcherStoreFake) CreateAICCMessageSource(_ context.Context, p s
 	return nil
 }
 
-// UpdateAICCSessionIntentInviteStatus 模拟回复事务内消费首次留资邀约；默认命中一行。
-func (s *aiccDispatcherStoreFake) UpdateAICCSessionIntentInviteStatus(_ context.Context, p sqlc.UpdateAICCSessionIntentInviteStatusParams) (int64, error) {
-	s.inviteUpdates = append(s.inviteUpdates, p)
+// ConsumeAICCSessionIntentInvitation 模拟条件消费首次邀约；默认命中一行。
+func (s *aiccDispatcherStoreFake) ConsumeAICCSessionIntentInvitation(_ context.Context, sessionID string) (int64, error) {
+	s.inviteUpdates = append(s.inviteUpdates, sessionID)
+	if s.inviteErr != nil {
+		return 0, s.inviteErr
+	}
+	if s.inviteRows != 0 {
+		return s.inviteRows, nil
+	}
 	return 1, nil
 }
 
@@ -224,10 +232,12 @@ type aiccDispatcherRollbackTxFake struct{ store *aiccDispatcherStoreFake }
 func (t aiccDispatcherRollbackTxFake) WithAICCDispatcherTx(_ context.Context, fn func(AICCDispatcherStore) error) error {
 	beforeAssistant := append([]sqlc.CreateAICCMessageParams(nil), t.store.assistant...)
 	beforeSources := append([]sqlc.CreateAICCMessageSourceParams(nil), t.store.sources...)
+	beforeInvites := append([]string(nil), t.store.inviteUpdates...)
 	beforeCompleted := t.store.completed
 	if err := fn(t.store); err != nil {
 		t.store.assistant = beforeAssistant
 		t.store.sources = beforeSources
+		t.store.inviteUpdates = beforeInvites
 		t.store.completed = beforeCompleted
 		return err
 	}
