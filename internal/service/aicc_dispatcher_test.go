@@ -58,8 +58,14 @@ func (s *aiccDispatcherStoreFake) GetAICCSessionContext(context.Context, string)
 }
 
 // ListAICCContextMessages 模拟当前会话按稳定顺序读取的原消息。
-func (s *aiccDispatcherStoreFake) ListAICCContextMessages(context.Context, string) ([]sqlc.AiccMessage, error) {
-	return s.contextMessages, nil
+func (s *aiccDispatcherStoreFake) ListAICCContextMessages(_ context.Context, arg sqlc.ListAICCContextMessagesParams) ([]sqlc.AiccMessage, error) {
+	items := make([]sqlc.AiccMessage, 0, len(s.contextMessages))
+	for _, message := range s.contextMessages {
+		if message.ID != arg.ExcludeMessageID {
+			items = append(items, message)
+		}
+	}
+	return items, nil
 }
 func (s *aiccDispatcherStoreFake) LeaseAICCMessageTask(_ context.Context, p sqlc.LeaseAICCMessageTaskParams) (int64, error) {
 	s.leaseMu.Lock()

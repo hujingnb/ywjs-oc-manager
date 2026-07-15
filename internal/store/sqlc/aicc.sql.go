@@ -1476,12 +1476,18 @@ const listAICCContextMessages = `-- name: ListAICCContextMessages :many
 SELECT id, session_id, agent_id, direction, content_type, text_content, image_object_key, image_mime, image_size_bytes, hermes_message_id, is_fallback, is_refusal, error_summary, created_at, client_message_id, reply_to_message_id
 FROM aicc_messages
 WHERE session_id = ?
+  AND id <> ?
 ORDER BY created_at ASC, id ASC
 `
 
+type ListAICCContextMessagesParams struct {
+	SessionID        string `db:"session_id" json:"session_id"`
+	ExcludeMessageID string `db:"exclude_message_id" json:"exclude_message_id"`
+}
+
 // 上下文构建器从稳定升序消息流中截取最近窗口，不能依赖数据库未声明的自然顺序。
-func (q *Queries) ListAICCContextMessages(ctx context.Context, sessionID string) ([]AiccMessage, error) {
-	rows, err := q.db.QueryContext(ctx, listAICCContextMessages, sessionID)
+func (q *Queries) ListAICCContextMessages(ctx context.Context, arg ListAICCContextMessagesParams) ([]AiccMessage, error) {
+	rows, err := q.db.QueryContext(ctx, listAICCContextMessages, arg.SessionID, arg.ExcludeMessageID)
 	if err != nil {
 		return nil, err
 	}

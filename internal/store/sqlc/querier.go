@@ -220,7 +220,7 @@ type Querier interface {
 	ListAICCAnonymousIntentCandidates(ctx context.Context, orgID string) ([]AiccSessionIntent, error)
 	ListAICCBlockedVisitorsByAgent(ctx context.Context, arg ListAICCBlockedVisitorsByAgentParams) ([]AiccBlockedVisitor, error)
 	// 上下文构建器从稳定升序消息流中截取最近窗口，不能依赖数据库未声明的自然顺序。
-	ListAICCContextMessages(ctx context.Context, sessionID string) ([]AiccMessage, error)
+	ListAICCContextMessages(ctx context.Context, arg ListAICCContextMessagesParams) ([]AiccMessage, error)
 	ListAICCImageObjectKeysBySession(ctx context.Context, sessionID string) ([]string, error)
 	ListAICCLeadFieldsByAgent(ctx context.Context, agentID string) ([]AiccLeadField, error)
 	ListAICCLeadValuesByLead(ctx context.Context, arg ListAICCLeadValuesByLeadParams) ([]ListAICCLeadValuesByLeadRow, error)

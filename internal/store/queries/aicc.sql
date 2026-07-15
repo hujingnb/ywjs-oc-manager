@@ -367,7 +367,8 @@ ON DUPLICATE KEY UPDATE
 -- 上下文构建器从稳定升序消息流中截取最近窗口，不能依赖数据库未声明的自然顺序。
 SELECT *
 FROM aicc_messages
-WHERE session_id = ?
+WHERE session_id = sqlc.arg(session_id)
+  AND id <> sqlc.arg(exclude_message_id)
 ORDER BY created_at ASC, id ASC;
 
 -- name: CreateAICCMessageSource :exec

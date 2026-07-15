@@ -326,7 +326,7 @@ func (*loopRealDispatcherStore) GetAICCSessionContext(context.Context, string) (
 }
 
 // ListAICCContextMessages 覆盖没有历史消息的新会话上下文。
-func (*loopRealDispatcherStore) ListAICCContextMessages(context.Context, string) ([]sqlc.AiccMessage, error) {
+func (*loopRealDispatcherStore) ListAICCContextMessages(context.Context, sqlc.ListAICCContextMessagesParams) ([]sqlc.AiccMessage, error) {
 	return nil, nil
 }
 func (*loopRealDispatcherStore) CompleteAICCMessageTask(context.Context, sqlc.CompleteAICCMessageTaskParams) (int64, error) {

@@ -47,7 +47,7 @@ type AICCDispatcherStore interface {
 	RecoverExpiredAICCMessageTaskLeases(context.Context) (int64, error)
 	CreateAICCMessage(context.Context, sqlc.CreateAICCMessageParams) error
 	GetAICCSessionContext(context.Context, string) (sqlc.AiccSessionContext, error)
-	ListAICCContextMessages(context.Context, string) ([]sqlc.AiccMessage, error)
+	ListAICCContextMessages(context.Context, sqlc.ListAICCContextMessagesParams) ([]sqlc.AiccMessage, error)
 }
 
 // AICCDispatcherTxRunner 保证助手消息镜像和 completed 状态不会半成功。
@@ -132,7 +132,7 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 	if err != nil {
 		return d.finishError(ctx, task, token, err)
 	}
-	conversationContext, err := BuildAICCConversationContext(ctx, d.store, task.SessionID)
+	conversationContext, err := BuildAICCConversationContext(ctx, d.store, task.SessionID, task.MessageID)
 	if err != nil {
 		return d.finishError(ctx, task, token, err)
 	}

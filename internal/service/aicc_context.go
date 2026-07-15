@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
@@ -18,7 +19,7 @@ const (
 // AICCConversationContextStore 只暴露构建当前会话上下文所需的只读查询。
 type AICCConversationContextStore interface {
 	GetAICCSessionContext(context.Context, string) (sqlc.AiccSessionContext, error)
-	ListAICCContextMessages(context.Context, string) ([]sqlc.AiccMessage, error)
+	ListAICCContextMessages(context.Context, sqlc.ListAICCContextMessagesParams) ([]sqlc.AiccMessage, error)
 }
 
 // AICCContextMessage 是经过角色标注的原始对话记录，绝不提升为系统指令。
@@ -35,7 +36,7 @@ type AICCConversationContext struct {
 
 // BuildAICCConversationContext 在当前 session 中读取摘要和稳定排序的消息窗口。
 // 总字符超限时从最老原消息裁剪，保证新 Pod 也能以相同 DB 真相恢复最近对话。
-func BuildAICCConversationContext(ctx context.Context, store AICCConversationContextStore, sessionID string) (AICCConversationContext, error) {
+func BuildAICCConversationContext(ctx context.Context, store AICCConversationContextStore, sessionID, excludeMessageID string) (AICCConversationContext, error) {
 	if store == nil {
 		return AICCConversationContext{}, fmt.Errorf("aicc conversation context store unavailable")
 	}
@@ -47,7 +48,7 @@ func BuildAICCConversationContext(ctx context.Context, store AICCConversationCon
 	if err == nil {
 		summary = strings.TrimSpace(contextRow.Summary)
 	}
-	messages, err := store.ListAICCContextMessages(ctx, sessionID)
+	messages, err := store.ListAICCContextMessages(ctx, sqlc.ListAICCContextMessagesParams{SessionID: sessionID, ExcludeMessageID: excludeMessageID})
 	if err != nil {
 		return AICCConversationContext{}, err
 	}
@@ -67,10 +68,10 @@ func BuildAICCConversationContext(ctx context.Context, store AICCConversationCon
 		items = items[len(items)-aiccContextMessageLimit:]
 	}
 	// 摘要同样受总上下文预算约束；优先保留最新原消息，避免陈旧摘要挤掉当前问题。
-	if len(summary) > aiccContextCharacterMax {
-		summary = summary[len(summary)-aiccContextCharacterMax:]
+	if utf8.RuneCountInString(summary) > aiccContextCharacterMax {
+		summary = aiccLastRunes(summary, aiccContextCharacterMax)
 	}
-	used := len(summary)
+	used := utf8.RuneCountInString(summary)
 	for len(items) > 0 && used+contextMessageCharacters(items) > aiccContextCharacterMax {
 		items = items[1:]
 	}
@@ -80,9 +81,18 @@ func BuildAICCConversationContext(ctx context.Context, store AICCConversationCon
 func contextMessageCharacters(messages []AICCContextMessage) int {
 	total := 0
 	for _, message := range messages {
-		total += len(message.Text)
+		total += utf8.RuneCountInString(message.Text)
 	}
 	return total
+}
+
+// aiccLastRunes 以 rune 而非 byte 裁剪，避免中文和 emoji 在 UTF-8 中被截成非法字符串。
+func aiccLastRunes(value string, max int) string {
+	runes := []rune(value)
+	if len(runes) <= max {
+		return value
+	}
+	return string(runes[len(runes)-max:])
 }
 
 // RenderAICCConversationContext 采用不可伪造的 XML 数据边界；访客历史只能作为数据，
