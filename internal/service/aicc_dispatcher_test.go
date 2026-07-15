@@ -11,35 +11,38 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
 )
 
 type aiccDispatcherStoreFake struct {
-	task       sqlc.AiccMessageTask
-	visitor    sqlc.AiccMessage
-	agent      sqlc.AiccAgent
-	leased     sqlc.LeaseAICCMessageTaskParams
-	retry      sqlc.RetryAICCMessageTaskParams
-	failed     sqlc.FailAICCMessageTaskParams
-	assistant  []sqlc.CreateAICCMessageParams
-	complete   int64
-	recover    int64
-	retryRows  int64
-	failRows   int64
-	lostRetry  bool
-	lostFail   bool
-	renews     int
-	leaseMu    sync.Mutex
-	exclusive  bool
-	claimed    bool
-	leaseNow   func() time.Time
-	expiresAt  time.Time
-	leaseCalls int
-	renewed    chan struct{}
-	blockRenew chan struct{}
-	leaseRows  int64
-	leaseErr   error
-	unclaimed  bool
+	task            sqlc.AiccMessageTask
+	visitor         sqlc.AiccMessage
+	agent           sqlc.AiccAgent
+	contextRow      sqlc.AiccSessionContext
+	contextMessages []sqlc.AiccMessage
+	leased          sqlc.LeaseAICCMessageTaskParams
+	retry           sqlc.RetryAICCMessageTaskParams
+	failed          sqlc.FailAICCMessageTaskParams
+	assistant       []sqlc.CreateAICCMessageParams
+	complete        int64
+	recover         int64
+	retryRows       int64
+	failRows        int64
+	lostRetry       bool
+	lostFail        bool
+	renews          int
+	leaseMu         sync.Mutex
+	exclusive       bool
+	claimed         bool
+	leaseNow        func() time.Time
+	expiresAt       time.Time
+	leaseCalls      int
+	renewed         chan struct{}
+	blockRenew      chan struct{}
+	leaseRows       int64
+	leaseErr        error
+	unclaimed       bool
 }
 
 func (s *aiccDispatcherStoreFake) GetAICCMessageByID(context.Context, string) (sqlc.AiccMessage, error) {
@@ -47,6 +50,16 @@ func (s *aiccDispatcherStoreFake) GetAICCMessageByID(context.Context, string) (s
 }
 func (s *aiccDispatcherStoreFake) GetAICCAgent(context.Context, string) (sqlc.AiccAgent, error) {
 	return s.agent, nil
+}
+
+// GetAICCSessionContext 模拟当前会话的持久化摘要。
+func (s *aiccDispatcherStoreFake) GetAICCSessionContext(context.Context, string) (sqlc.AiccSessionContext, error) {
+	return s.contextRow, nil
+}
+
+// ListAICCContextMessages 模拟当前会话按稳定顺序读取的原消息。
+func (s *aiccDispatcherStoreFake) ListAICCContextMessages(context.Context, string) ([]sqlc.AiccMessage, error) {
+	return s.contextMessages, nil
 }
 func (s *aiccDispatcherStoreFake) LeaseAICCMessageTask(_ context.Context, p sqlc.LeaseAICCMessageTaskParams) (int64, error) {
 	s.leaseMu.Lock()
@@ -135,11 +148,20 @@ type aiccDispatcherChatFake struct {
 	run   func(context.Context) (string, error)
 }
 
-func (c aiccDispatcherChatFake) ChatAICC(ctx context.Context, _ string, _ string, _ string) (string, error) {
+func (c aiccDispatcherChatFake) ChatAICC(ctx context.Context, _ AICCInboundTurn) (AICCResponseEnvelope, error) {
 	if c.run != nil {
-		return c.run(ctx)
+		reply, err := c.run(ctx)
+		return AICCResponseEnvelope{Text: reply}, err
 	}
-	return c.reply, c.err
+	return AICCResponseEnvelope{Text: c.reply}, c.err
+}
+
+// aiccDispatcherTurnChatFake 记录 dispatcher 交给运行时的 Turn，验证无状态恢复输入。
+type aiccDispatcherTurnChatFake struct{ turn AICCInboundTurn }
+
+func (c *aiccDispatcherTurnChatFake) ChatAICC(_ context.Context, turn AICCInboundTurn) (AICCResponseEnvelope, error) {
+	c.turn = turn
+	return AICCResponseEnvelope{Text: "答复"}, nil
 }
 
 type aiccDispatcherTxFake struct{ store *aiccDispatcherStoreFake }
@@ -167,6 +189,27 @@ func TestAICCDispatcherLeaseUsesDatabaseClock(t *testing.T) {
 	require.NoError(t, d.Dispatch(context.Background(), s.task))
 	assert.Equal(t, "task", s.leased.ID)
 	assert.True(t, s.leased.LeaseToken.Valid)
+}
+
+// TestAICCDispatcherBuildsTurnFromDatabaseContext 覆盖无状态运行时调用：
+// 每轮必须以任务 MessageID 标识，并在租约内从 manager 数据库装配摘要、历史和当前访客原文。
+func TestAICCDispatcherBuildsTurnFromDatabaseContext(t *testing.T) {
+	s := newAICCDispatcherStoreFake()
+	s.contextRow = sqlc.AiccSessionContext{ID: "context", SessionID: "session", Summary: "已咨询企业版"}
+	s.contextMessages = []sqlc.AiccMessage{
+		// 历史访客消息必须作为普通上下文数据传入。
+		{ID: "history", SessionID: "session", Direction: domain.AICCMessageDirectionVisitor, TextContent: null.StringFrom("之前的问题")},
+	}
+	chat := &aiccDispatcherTurnChatFake{}
+	d := NewAICCDispatcher(s, aiccDispatcherTxFake{s}, chat, aiccDispatcherAllowLimiter{})
+
+	require.NoError(t, d.Dispatch(context.Background(), s.task))
+	assert.Equal(t, "visitor", chat.turn.TurnID)
+	assert.Equal(t, "session", chat.turn.SessionID)
+	assert.Equal(t, "价格", chat.turn.Text)
+	assert.Equal(t, "已咨询企业版", chat.turn.Context.Summary)
+	require.Len(t, chat.turn.Context.Messages, 1)
+	assert.Equal(t, "之前的问题", chat.turn.Context.Messages[0].Text)
 }
 
 // TestAICCDispatcherHeartbeatKeepsSlowChatLease 覆盖慢速 Hermes 调用：

@@ -46,6 +46,8 @@ type AICCDispatcherStore interface {
 	RenewAICCMessageTaskLease(context.Context, sqlc.RenewAICCMessageTaskLeaseParams) (int64, error)
 	RecoverExpiredAICCMessageTaskLeases(context.Context) (int64, error)
 	CreateAICCMessage(context.Context, sqlc.CreateAICCMessageParams) error
+	GetAICCSessionContext(context.Context, string) (sqlc.AiccSessionContext, error)
+	ListAICCContextMessages(context.Context, string) ([]sqlc.AiccMessage, error)
 }
 
 // AICCDispatcherTxRunner 保证助手消息镜像和 completed 状态不会半成功。
@@ -130,9 +132,14 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 	if err != nil {
 		return d.finishError(ctx, task, token, err)
 	}
+	conversationContext, err := BuildAICCConversationContext(ctx, d.store, task.SessionID)
+	if err != nil {
+		return d.finishError(ctx, task, token, err)
+	}
 	chatCtx, cancelChat := context.WithCancel(ctx)
 	stopHeartbeat := d.startLeaseHeartbeat(chatCtx, cancelChat, task.ID, token)
-	reply, err := d.chat.ChatAICC(chatCtx, task.AppID, task.SessionID, buildAICCRuntimePrompt(agent, visitor.TextContent.String))
+	turn := AICCInboundTurn{TurnID: task.MessageID, SessionID: task.SessionID, Channel: "web_link", Text: visitor.TextContent.String, OccurredAt: d.now(), Context: conversationContext, Instruction: buildAICCRuntimePrompt(agent, ""), AppID: task.AppID}
+	reply, err := d.chat.ChatAICC(chatCtx, turn)
 	if err != nil {
 		if heartbeatErr := stopHeartbeat(); heartbeatErr != nil {
 			return heartbeatErr
@@ -140,7 +147,7 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 		return d.finishError(ctx, task, token, err)
 	}
 	write := func(s AICCDispatcherStore) error {
-		if err := s.CreateAICCMessage(ctx, sqlc.CreateAICCMessageParams{ID: newUUID(), SessionID: task.SessionID, AgentID: task.AgentID, Direction: domain.AICCMessageDirectionAssistant, ContentType: domain.AICCMessageContentTypeText, TextContent: null.StringFrom(reply), ClientMessageID: visitor.ClientMessageID, ReplyToMessageID: null.StringFrom(task.MessageID)}); err != nil {
+		if err := s.CreateAICCMessage(ctx, sqlc.CreateAICCMessageParams{ID: newUUID(), SessionID: task.SessionID, AgentID: task.AgentID, Direction: domain.AICCMessageDirectionAssistant, ContentType: domain.AICCMessageContentTypeText, TextContent: null.StringFrom(reply.Text), ClientMessageID: visitor.ClientMessageID, ReplyToMessageID: null.StringFrom(task.MessageID)}); err != nil {
 			return err
 		}
 		rows, err := s.CompleteAICCMessageTask(ctx, sqlc.CompleteAICCMessageTaskParams{ID: task.ID, LeaseToken: null.StringFrom(token)})

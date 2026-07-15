@@ -3,6 +3,7 @@ package aicc
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -318,6 +319,16 @@ func (*loopRealDispatcherStore) GetAICCMessageByID(context.Context, string) (sql
 func (*loopRealDispatcherStore) GetAICCAgent(context.Context, string) (sqlc.AiccAgent, error) {
 	return sqlc.AiccAgent{}, nil
 }
+
+// GetAICCSessionContext 覆盖无摘要的冷启动会话，真实 dispatcher 仍应正常派发。
+func (*loopRealDispatcherStore) GetAICCSessionContext(context.Context, string) (sqlc.AiccSessionContext, error) {
+	return sqlc.AiccSessionContext{}, sql.ErrNoRows
+}
+
+// ListAICCContextMessages 覆盖没有历史消息的新会话上下文。
+func (*loopRealDispatcherStore) ListAICCContextMessages(context.Context, string) ([]sqlc.AiccMessage, error) {
+	return nil, nil
+}
 func (*loopRealDispatcherStore) CompleteAICCMessageTask(context.Context, sqlc.CompleteAICCMessageTaskParams) (int64, error) {
 	return 1, nil
 }
@@ -345,8 +356,8 @@ type loopRealDispatcherChat struct {
 	reply string
 }
 
-func (c loopRealDispatcherChat) ChatAICC(context.Context, string, string, string) (string, error) {
-	return c.reply, c.err
+func (c loopRealDispatcherChat) ChatAICC(context.Context, service.AICCInboundTurn) (service.AICCResponseEnvelope, error) {
+	return service.AICCResponseEnvelope{Text: c.reply}, c.err
 }
 
 func hasMetricPrefix(counters map[string]uint64, prefix string) bool {

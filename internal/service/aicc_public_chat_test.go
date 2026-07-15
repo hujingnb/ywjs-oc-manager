@@ -21,16 +21,16 @@ func TestAICCPublicHermesChatCreatesHermesSessionBeforeChat(t *testing.T) {
 	loc := OcOpsAppLocation{Supported: true, Endpoint: ocops.Endpoint{BaseURL: "http://runtime"}}
 	svc := NewAICCPublicHermesChat(ops, &fakeOcOpsResolver{loc: loc})
 
-	reply, err := svc.ChatAICC(context.Background(), "app-1", "aicc-session-1", "你好")
+	reply, err := svc.ChatAICC(context.Background(), AICCInboundTurn{AppID: "app-1", SessionID: "aicc-session-1", TurnID: "turn-1", Text: "你好"})
 
 	require.NoError(t, err)
-	assert.Equal(t, "您好，我可以介绍产品和服务。", reply)
+	assert.Equal(t, "您好，我可以介绍产品和服务。", reply.Text)
 	assert.Empty(t, ops.listSource)
 	assert.Equal(t, 1, ops.createCalls)
 	assert.Equal(t, "web", ops.createReq.Source)
-	assert.Equal(t, "AICC aicc-session-1", ops.createReq.Title)
+	assert.Equal(t, "AICC turn turn-1", ops.createReq.Title)
 	assert.Equal(t, "new", ops.gotSID)
-	assert.Equal(t, "你好", ops.lastReq.Message)
+	assert.Contains(t, ops.lastReq.Message, "<current_visitor_message>\n你好")
 }
 
 // TestAICCPublicHermesChatReturnsTypedOverloadError 覆盖模型上游过载诊断：
@@ -40,7 +40,7 @@ func TestAICCPublicHermesChatReturnsTypedOverloadError(t *testing.T) {
 	loc := OcOpsAppLocation{Supported: true, Endpoint: ocops.Endpoint{BaseURL: "http://runtime"}}
 	svc := NewAICCPublicHermesChat(ops, &fakeOcOpsResolver{loc: loc})
 
-	reply, err := svc.ChatAICC(context.Background(), "app-1", "aicc-session-1", "你好")
+	reply, err := svc.ChatAICC(context.Background(), AICCInboundTurn{AppID: "app-1", SessionID: "aicc-session-1", TurnID: "turn-1", Text: "你好"})
 
 	require.Error(t, err)
 	assert.Empty(t, reply)
@@ -54,7 +54,7 @@ func TestAICCPublicHermesChatPreservesHTTPOverloadStatus(t *testing.T) {
 	loc := OcOpsAppLocation{Supported: true, Endpoint: ocops.Endpoint{BaseURL: "http://runtime"}}
 	svc := NewAICCPublicHermesChat(ops, &fakeOcOpsResolver{loc: loc})
 
-	_, err := svc.ChatAICC(context.Background(), "app-1", "aicc-session-1", "你好")
+	_, err := svc.ChatAICC(context.Background(), AICCInboundTurn{AppID: "app-1", SessionID: "aicc-session-1", TurnID: "turn-1", Text: "你好"})
 
 	require.Error(t, err)
 	assert.True(t, isAICCRetryable(err))
@@ -68,7 +68,7 @@ func TestAICCPublicHermesChatPreservesNetworkTimeout(t *testing.T) {
 	loc := OcOpsAppLocation{Supported: true, Endpoint: ocops.Endpoint{BaseURL: "http://runtime"}}
 	svc := NewAICCPublicHermesChat(ops, &fakeOcOpsResolver{loc: loc})
 
-	_, err := svc.ChatAICC(context.Background(), "app-1", "aicc-session-1", "你好")
+	_, err := svc.ChatAICC(context.Background(), AICCInboundTurn{AppID: "app-1", SessionID: "aicc-session-1", TurnID: "turn-1", Text: "你好"})
 
 	require.Error(t, err)
 	assert.True(t, isAICCRetryable(err))
@@ -83,9 +83,8 @@ func TestMapOcOpsConversationErrKeepsGenericCLIContract(t *testing.T) {
 	assert.False(t, isAICCRetryable(err))
 }
 
-// AICC 公开会话查找 Hermes 会话时不能按 web 过滤：Hermes 创建时接受 web，
-// 但持久化后可能回显为 api_server；按 web 过滤会查不到已有 title 并重复创建触发 400。
-func TestAICCPublicHermesChatReusesAPIServerSessionByTitle(t *testing.T) {
+// AICC 每轮都必须创建独立 Hermes 会话，不能复用容器内的历史会话状态。
+func TestAICCPublicHermesChatCreatesIndependentSessionForEveryTurn(t *testing.T) {
 	ops := &fakeConversationOps{
 		sessions: []ocops.ConversationSession{
 			{ID: "runtime-session", Source: "api_server", Title: "AICC aicc-session-1"},
@@ -97,11 +96,11 @@ func TestAICCPublicHermesChatReusesAPIServerSessionByTitle(t *testing.T) {
 	loc := OcOpsAppLocation{Supported: true, Endpoint: ocops.Endpoint{BaseURL: "http://runtime"}}
 	svc := NewAICCPublicHermesChat(ops, &fakeOcOpsResolver{loc: loc})
 
-	reply, err := svc.ChatAICC(context.Background(), "app-1", "aicc-session-1", "你好")
+	reply, err := svc.ChatAICC(context.Background(), AICCInboundTurn{AppID: "app-1", SessionID: "aicc-session-1", TurnID: "turn-2", Text: "你好"})
 
 	require.NoError(t, err)
-	assert.Equal(t, "已复用运行时会话", reply)
+	assert.Equal(t, "已复用运行时会话", reply.Text)
 	assert.Empty(t, ops.listSource)
-	assert.Equal(t, 0, ops.createCalls)
-	assert.Equal(t, "runtime-session", ops.gotSID)
+	assert.Equal(t, 1, ops.createCalls)
+	assert.Equal(t, "new", ops.gotSID)
 }

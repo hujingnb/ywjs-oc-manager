@@ -22,32 +22,39 @@ func NewAICCPublicHermesChat(ops conversationOps, resolver OcOpsResolver) *AICCP
 	return &AICCPublicHermesChat{ops: ops, resolver: resolver}
 }
 
-// ChatAICC 转发单轮文字消息到 hidden app/hermes，并返回助手文本回复。
-func (c *AICCPublicHermesChat) ChatAICC(ctx context.Context, appID, sessionID, text string) (string, error) {
+// ChatAICC 为每个 Turn 创建独立 Hermes 临时会话。运行时容器可随时替换，
+// 跨 Turn 的对话记忆完全由 manager 注入的 Context 承担，不能复用 Hermes 本地会话。
+func (c *AICCPublicHermesChat) ChatAICC(ctx context.Context, turn AICCInboundTurn) (AICCResponseEnvelope, error) {
 	if c == nil || c.ops == nil || c.resolver == nil {
-		return "", ErrConversationRuntimeUnavailable
+		return AICCResponseEnvelope{}, ErrConversationRuntimeUnavailable
 	}
-	loc, err := c.resolver.Resolve(ctx, appID)
+	loc, err := c.resolver.Resolve(ctx, turn.AppID)
 	if err != nil {
-		return "", err
+		return AICCResponseEnvelope{}, err
 	}
 	if !loc.Supported || strings.TrimSpace(loc.Endpoint.BaseURL) == "" {
-		return "", ErrConversationRuntimeUnavailable
+		return AICCResponseEnvelope{}, ErrConversationRuntimeUnavailable
 	}
-	hermesSessionID, err := c.ensureHermesSession(ctx, loc.Endpoint, sessionID)
-	if err != nil {
-		return "", err
+	if strings.TrimSpace(turn.TurnID) == "" {
+		return AICCResponseEnvelope{}, ErrConversationRuntimeUnavailable
 	}
-	out, err := c.ops.SessionChat(ctx, loc.Endpoint, hermesSessionID, ocops.ConversationChatReq{Message: text})
+	created, err := c.ops.CreateSession(ctx, loc.Endpoint, ocops.ConversationCreateReq{Source: "web", Title: "AICC turn " + turn.TurnID})
 	if err != nil {
-		return "", mapAICCOpsConversationErr(err)
+		return AICCResponseEnvelope{}, mapAICCOpsConversationErr(err)
+	}
+	if strings.TrimSpace(created.ID) == "" {
+		return AICCResponseEnvelope{}, ErrConversationRuntimeUnavailable
+	}
+	out, err := c.ops.SessionChat(ctx, loc.Endpoint, created.ID, ocops.ConversationChatReq{Message: renderAICCInboundTurn(turn)})
+	if err != nil {
+		return AICCResponseEnvelope{}, mapAICCOpsConversationErr(err)
 	}
 	// Hermes 有时把模型网关失败诊断包装进成功响应；这不是可展示的客服答复，
 	// 必须转成可分类错误交给 dispatcher 写入 retry_wait / failed 状态。
 	if err := aiccRuntimeDiagnosticError(conversationContentText(out.Message.Content)); err != nil {
-		return "", err
+		return AICCResponseEnvelope{}, err
 	}
-	return conversationContentText(out.Message.Content), nil
+	return AICCResponseEnvelope{Text: conversationContentText(out.Message.Content)}, nil
 }
 
 var aiccRuntimeStatusPattern = regexp.MustCompile(`(?i)\b(429|503|529)\b`)
@@ -94,30 +101,9 @@ func aiccRuntimeDiagnosticError(reply string) error {
 	return fmt.Errorf("aicc runtime diagnostic: %s", reply)
 }
 
-func (c *AICCPublicHermesChat) ensureHermesSession(ctx context.Context, ep ocops.Endpoint, aiccSessionID string) (string, error) {
-	title := "AICC " + aiccSessionID
-	// Hermes 创建会话时接受 source=web，但持久化后可能按 api_server 回显；
-	// 这里必须不带 source 过滤，只用 AICC 专属标题匹配，避免查不到已有会话后重复创建触发 400。
-	sessions, err := c.ops.ListSessions(ctx, ep, "", 100, 0)
-	if err != nil {
-		return "", mapAICCOpsConversationErr(err)
-	}
-	for _, session := range sessions {
-		if session.Title == title && strings.TrimSpace(session.ID) != "" {
-			return session.ID, nil
-		}
-	}
-	created, err := c.ops.CreateSession(ctx, ep, ocops.ConversationCreateReq{
-		Source: "web",
-		Title:  title,
-	})
-	if err != nil {
-		return "", mapAICCOpsConversationErr(err)
-	}
-	if strings.TrimSpace(created.ID) == "" {
-		return "", ErrConversationRuntimeUnavailable
-	}
-	return created.ID, nil
+// renderAICCInboundTurn 将 manager 生成的历史置于数据边界，并把当前访客输入单独标注。
+func renderAICCInboundTurn(turn AICCInboundTurn) string {
+	return strings.Join([]string{strings.TrimSpace(turn.Instruction), RenderAICCConversationContext(turn.Context), "<current_visitor_message>", escapeAICCXML(strings.TrimSpace(turn.Text)), "</current_visitor_message>"}, "\n")
 }
 
 func conversationContentText(content any) string {

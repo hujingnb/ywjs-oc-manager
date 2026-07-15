@@ -1736,13 +1736,13 @@ type fakeAICCHermesChat struct {
 	onChat func()
 }
 
-func (f *fakeAICCHermesChat) ChatAICC(_ context.Context, appID, _ string, text string) (string, error) {
-	f.appID = appID
-	f.text = text
+func (f *fakeAICCHermesChat) ChatAICC(_ context.Context, turn AICCInboundTurn) (AICCResponseEnvelope, error) {
+	f.appID = turn.AppID
+	f.text = turn.Text
 	if f.onChat != nil {
 		f.onChat()
 	}
-	return f.reply, f.err
+	return AICCResponseEnvelope{Text: f.reply}, f.err
 }
 
 type fakeAICCRateLimiter struct {

@@ -128,7 +128,7 @@ type AICCPublicImageBlob interface {
 
 // AICCHermesChat 抽象转发隐藏 app/hermes 的聊天能力。
 type AICCHermesChat interface {
-	ChatAICC(ctx context.Context, appID, sessionID, text string) (string, error)
+	ChatAICC(ctx context.Context, turn AICCInboundTurn) (AICCResponseEnvelope, error)
 }
 
 // AICCPublicSessionInput 是访客创建会话时携带的来源信息。
