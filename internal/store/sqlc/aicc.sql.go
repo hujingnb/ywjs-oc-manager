@@ -2827,6 +2827,34 @@ func (q *Queries) RequeueFailedAICCMessageTask(ctx context.Context, messageID st
 	return result.RowsAffected()
 }
 
+const rescheduleClaimedAICCIntentAnalysisRetry = `-- name: RescheduleClaimedAICCIntentAnalysisRetry :execrows
+UPDATE aicc_intent_analysis_retries
+SET attempts = attempts + 1,
+    run_after = DATE_ADD(NOW(6), INTERVAL LEAST(attempts, 5) SECOND),
+    last_error = ?, lease_token = NULL, lease_expires_at = NULL
+WHERE session_id = ? AND message_id = ? AND lease_token = ? AND processed_at IS NULL
+`
+
+type RescheduleClaimedAICCIntentAnalysisRetryParams struct {
+	LastError  null.String `db:"last_error" json:"last_error"`
+	SessionID  string      `db:"session_id" json:"session_id"`
+	MessageID  string      `db:"message_id" json:"message_id"`
+	LeaseToken null.String `db:"lease_token" json:"lease_token"`
+}
+
+func (q *Queries) RescheduleClaimedAICCIntentAnalysisRetry(ctx context.Context, arg RescheduleClaimedAICCIntentAnalysisRetryParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, rescheduleClaimedAICCIntentAnalysisRetry,
+		arg.LastError,
+		arg.SessionID,
+		arg.MessageID,
+		arg.LeaseToken,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const retryAICCMessageTask = `-- name: RetryAICCMessageTask :execrows
 UPDATE aicc_message_tasks
 SET status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'retry_wait' END,

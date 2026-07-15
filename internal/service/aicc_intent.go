@@ -176,6 +176,7 @@ func (d *AICCDispatcher) RetryPendingAICCIntentAnalysis(ctx context.Context) err
 		DeleteProcessedAICCIntentAnalysisRetry(context.Context, sqlc.DeleteProcessedAICCIntentAnalysisRetryParams) (int64, error)
 		ClaimAICCIntentAnalysisRetry(context.Context, sqlc.ClaimAICCIntentAnalysisRetryParams) (int64, error)
 		MarkAICCIntentAnalysisRetryProcessed(context.Context, sqlc.MarkAICCIntentAnalysisRetryProcessedParams) (int64, error)
+		RescheduleClaimedAICCIntentAnalysisRetry(context.Context, sqlc.RescheduleClaimedAICCIntentAnalysisRetryParams) (int64, error)
 		GetAICCMessageByID(context.Context, string) (sqlc.AiccMessage, error)
 		GetAICCSessionContext(context.Context, string) (sqlc.AiccSessionContext, error)
 		ListAICCContextMessages(context.Context, sqlc.ListAICCContextMessagesParams) ([]sqlc.AiccMessage, error)
@@ -196,28 +197,36 @@ func (d *AICCDispatcher) RetryPendingAICCIntentAnalysis(ctx context.Context) err
 		}
 		visitor, err := store.GetAICCMessageByID(ctx, row.MessageID)
 		if err != nil {
-			d.queueAICCIntentRetry(ctx, task, "retry visitor message read failed")
+			d.rescheduleClaimedAICCIntentRetry(ctx, task, leaseToken, "retry visitor message read failed")
 			continue
 		}
 		contextData, err := BuildAICCConversationContext(ctx, store, row.SessionID, "")
 		if err != nil {
-			d.queueAICCIntentRetry(ctx, task, "retry context build failed")
+			d.rescheduleClaimedAICCIntentRetry(ctx, task, leaseToken, "retry context build failed")
 			continue
 		}
 		if _, ready := d.analyzeAICCIntent(ctx, task, visitor, contextData); !ready {
-			d.queueAICCIntentRetry(ctx, task, "intent analysis retry failed")
+			d.rescheduleClaimedAICCIntentRetry(ctx, task, leaseToken, "intent analysis retry failed")
 			continue
 		}
 		processed, err := store.MarkAICCIntentAnalysisRetryProcessed(ctx, sqlc.MarkAICCIntentAnalysisRetryProcessedParams{SessionID: row.SessionID, MessageID: row.MessageID, LeaseToken: null.StringFrom(leaseToken)})
 		if err != nil || processed != 1 {
-			d.queueAICCIntentRetry(ctx, task, "retry completion mark failed")
+			d.rescheduleClaimedAICCIntentRetry(ctx, task, leaseToken, "retry completion mark failed")
 			continue
 		}
-		if _, err := store.DeleteProcessedAICCIntentAnalysisRetry(ctx, sqlc.DeleteProcessedAICCIntentAnalysisRetryParams{SessionID: row.SessionID, MessageID: row.MessageID}); err != nil {
-			d.queueAICCIntentRetry(ctx, task, "retry cleanup failed")
-		}
+		// 清理失败仅留下已处理记录等待下次清扫，不能把它重新变成模型分析任务。
+		_, _ = store.DeleteProcessedAICCIntentAnalysisRetry(ctx, sqlc.DeleteProcessedAICCIntentAnalysisRetryParams{SessionID: row.SessionID, MessageID: row.MessageID})
 	}
 	return nil
+}
+
+func (d *AICCDispatcher) rescheduleClaimedAICCIntentRetry(ctx context.Context, task sqlc.AiccMessageTask, leaseToken, reason string) {
+	store, ok := d.store.(interface {
+		RescheduleClaimedAICCIntentAnalysisRetry(context.Context, sqlc.RescheduleClaimedAICCIntentAnalysisRetryParams) (int64, error)
+	})
+	if ok {
+		_, _ = store.RescheduleClaimedAICCIntentAnalysisRetry(ctx, sqlc.RescheduleClaimedAICCIntentAnalysisRetryParams{LastError: null.StringFrom(reason), SessionID: task.SessionID, MessageID: task.MessageID, LeaseToken: null.StringFrom(leaseToken)})
+	}
 }
 
 // aiccSessionVisitorText 从 manager 重建的当前会话上下文中筛出访客消息；助手内容不能作为画像证据。
