@@ -61,6 +61,17 @@ export function countAICCIntentAnalysisRetries(sessionToken: string): number {
   return Number(result)
 }
 
+// assertAICCResolutionStatus 从会话事实核对访客动作后的状态，避免只凭前端卡片收起推断写入成功。
+export function assertAICCResolutionStatus(sessionToken: string, expected: 'resolved' | 'unresolved' | 'unknown'): void {
+  assertLocalK3DContext()
+  const escapedToken = sessionToken.replaceAll("'", "''")
+  const status = execFileSync('kubectl', [
+    '--context', localK3DContext, '-n', 'ocm', 'exec', 'mysql-0', '--', 'sh', '-c',
+    `mysql -uroot -p"$MYSQL_ROOT_PASSWORD" ocm -N -e "SELECT resolution_status FROM aicc_sessions WHERE session_token='${escapedToken}'" 2>/dev/null`,
+  ], { encoding: 'utf8' }).trim()
+  if (status !== expected) throw new Error(`AICC session 状态应为 ${expected}，实际为 ${status || '(空)'}`)
+}
+
 // setLocalAICCIntentFailureOnce 仅在 k3d 本地 manager-api 上启停一次性分析失败注入器。
 // 该变量由 server 入口额外要求 app.env=local，测试结束必须清除并等待滚动完成，避免污染后续场景。
 export function setLocalAICCIntentFailureOnce(enabled: boolean): void {

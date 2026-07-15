@@ -73,6 +73,27 @@ test.describe('AICC 客服安全、来源与访客隔离', () => {
     const sessionToken = await widgetFrame!.evaluate(token => window.localStorage.getItem(`aicc:session:${token}:web_widget`), agent.widgetToken)
     expect(sessionToken).toBeTruthy()
     assertAICCSessionChannel(sessionToken!, 'web_widget')
+    // 场景：挂件在 390px 客户站点中仍可打开并完成操作，不产生横向溢出。
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(page.locator('[data-aicc-widget-launcher]')).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBeFalsy()
+  })
+
+  // 域名来源限制必须由预置的 allowed_domains fixture 拒绝；普通 fixture 默认允许所有域名，不能伪造该覆盖。
+  test('非允许域名不能加载网页挂件', async ({ page }) => {
+    test.skip(process.env.OCM_AICC_WIDGET_DOMAIN_FIXTURE !== '1', '需预置仅允许指定客户域名的 widget token')
+    await page.goto('/aicc-widget-preview/fixture-domain-restricted-token')
+    await expect(page.getByRole('alert')).toContainText(/域名|禁止|不允许/)
+  })
+
+  // 图片只作为当前轮输入传给 vision 工具；需可重复的本地 vision fixture 才能验证语义，不以文件上传成功替代理解。
+  test('当前轮图片理解不读取历史附件', async ({ page }) => {
+    test.skip(process.env.OCM_AICC_VISION_FIXTURE !== '1', '需预置可重复的本地 vision 响应与当前轮图片 fixture')
+    const agent = await createStartedAICCConversationFixture(page, '图片边界客服')
+    await page.goto(`/aicc/${agent.publicToken}`)
+    await page.locator('input[type="file"]').setInputFiles({ name: 'current-turn.png', mimeType: 'image/png', buffer: Buffer.from('89504e470d0a1a0a', 'hex') })
+    await page.getByRole('button', { name: '发送' }).click()
+    await expect(page.locator('.message-row.assistant .bubble p:not(.message-status)').last()).toContainText('当前轮')
   })
 
   // 每一条输入都代表一个不可越过的公开边界；用例按表驱动，便于新增攻击面时保持覆盖可追溯。

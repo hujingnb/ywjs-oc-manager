@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 import {
+	assertAICCResolutionStatus,
   createStartedAICCConversationFixture,
   deleteLocalAICCPod,
   forceZh,
@@ -66,9 +67,13 @@ test.describe('AICC 客服无状态运行时与故障恢复', () => {
     await sendPublicAICCMessage(page, '请说明支持服务。')
     await sendPublicAICCMessage(page, '这次仍未解决。')
     await page.getByRole('button', { name: '未解决' }).click()
+    const sessionToken = await page.evaluate(token => window.localStorage.getItem(`aicc:session:${token}:web_link`), agent.publicToken)
+    expect(sessionToken).toBeTruthy()
+    assertAICCResolutionStatus(sessionToken!, 'unresolved')
     await page.reload()
     await expect(page.getByRole('button', { name: '未解决' })).toHaveCount(0)
     await sendPublicAICCMessage(page, '我还有一个新的部署问题。')
+    assertAICCResolutionStatus(sessionToken!, 'unknown')
     await expect(page.locator('.message-list')).toContainText('新的部署问题')
   })
 })

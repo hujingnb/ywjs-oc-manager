@@ -34,6 +34,7 @@ export default defineConfig({
     // 项目供快速回归，避免日常测试必须占用图形桌面。
     {
       name: 'chrome-headed',
+      retries: 1,
       use: {
         ...devices['Desktop Chrome'],
         channel: 'chrome',

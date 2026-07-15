@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { clearLoginState, countAICCIntentAnalysisRetries, createStartedAICCConversationFixture, forceZh, openAICCConsole, sendPublicAICCMessage, setLocalAICCIntentFailureOnce } from './aicc/helpers'
+import { assertAICCResolutionStatus, clearLoginState, countAICCIntentAnalysisRetries, createStartedAICCConversationFixture, forceZh, openAICCConsole, sendPublicAICCMessage, setLocalAICCIntentFailureOnce } from './aicc/helpers'
 import { loadE2EFixture, loginAs } from './fixtures'
 
 test.setTimeout(600_000)
@@ -32,8 +32,12 @@ test.describe('AICC 客服意向与会话状态', () => {
     const resolved = page.getByRole('button', { name: '已解决' })
     await expect(resolved).toBeVisible()
     await resolved.click()
+    const sessionToken = await page.evaluate(token => window.localStorage.getItem(`aicc:session:${token}:web_link`), agent.publicToken)
+    expect(sessionToken).toBeTruthy()
+    assertAICCResolutionStatus(sessionToken!, 'resolved')
     await expect(page.getByRole('button', { name: '已解决' })).toHaveCount(0)
     await sendPublicAICCMessage(page, '补充一个新问题：是否支持私有化部署？')
+    assertAICCResolutionStatus(sessionToken!, 'unknown')
     await expect(page.locator('.message-list')).toContainText('补充一个新问题')
   })
 
