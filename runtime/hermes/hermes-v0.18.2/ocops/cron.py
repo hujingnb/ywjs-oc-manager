@@ -405,7 +405,10 @@ def _select_created_job(before: list[dict], after: list[dict]) -> dict | None:
 
 
 def _advanced_job_updates(args) -> dict:
-    """提取 manager 支持但 Hermes v2026.7.1 CLI 未直接暴露的 per-job 字段。"""
+    """提取 manager 支持但 Hermes CLI 未直接暴露的 per-job 字段。
+
+    该适配继承自 v2026.7.1，并已确认当前上游 v2026.7.7.2 保持相同字段边界。
+    """
     updates = {}
     for field in ("model", "provider", "base_url"):
         value = getattr(args, field, None)
@@ -456,7 +459,10 @@ def _append_common_write_flags(cmd: list[str], args) -> list[str]:
 
 
 def _create_args(args) -> list[str]:
-    """适配 Hermes v2026.7.1：create 的 schedule/prompt 是位置参数。"""
+    """适配 Hermes v2026.7.7.2：create 的 schedule/prompt 是位置参数。
+
+    当前 CLI 形态继承自 v2026.7.1。
+    """
     if getattr(args, "no_agent", False) and not getattr(args, "script", None):
         raise CronError("BAD_REQUEST", "no_agent 模式必须提供 script")
     cmd = _append_common_write_flags(["create"], args)
@@ -468,7 +474,10 @@ def _create_args(args) -> list[str]:
 
 
 def _update_args(args) -> list[str]:
-    """适配 Hermes v2026.7.1：edit 的 job_id 是位置参数，其余字段仍用 flag。"""
+    """适配 Hermes v2026.7.7.2：edit 的 job_id 是位置参数，其余字段仍用 flag。
+
+    当前 CLI 形态继承自 v2026.7.1。
+    """
     cmd = ["edit", validate_job_id(args.id)]
     cmd = _append_common_write_flags(cmd, args)
     for field in ("schedule", "prompt"):
