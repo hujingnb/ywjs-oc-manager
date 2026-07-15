@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { assertNoUnauthorizedAICCSourceAudit, createStartedAICCConversationFixture, forceZh, openAICCSettings, sendPublicAICCMessage } from './aicc/helpers'
+import { assertAICCSessionChannel, assertNoUnauthorizedAICCSourceAudit, createStartedAICCConversationFixture, forceZh, openAICCSettings, sendPublicAICCMessage } from './aicc/helpers'
 
 // Hermes、RAG 与网页检索都属于真实异步链路；这里给出浏览器验收所需的上限，而非固定等待。
 test.setTimeout(600_000)
@@ -68,6 +68,11 @@ test.describe('AICC 客服安全、来源与访客隔离', () => {
     await frame.getByPlaceholder('输入您的问题').fill('请通过网页挂件回答这条咨询。')
     await frame.getByRole('button', { name: '发送' }).click()
     await expect(frame.locator('.message-row.assistant .bubble p:not(.message-status)').last()).toBeVisible({ timeout: 240_000 })
+    const widgetFrame = page.frames().find(item => item.url().includes(`/${agent.widgetToken}?aicc_channel=web_widget`))
+    expect(widgetFrame).toBeTruthy()
+    const sessionToken = await widgetFrame!.evaluate(token => window.localStorage.getItem(`aicc:session:${token}:web_widget`), agent.widgetToken)
+    expect(sessionToken).toBeTruthy()
+    assertAICCSessionChannel(sessionToken!, 'web_widget')
   })
 
   // 每一条输入都代表一个不可越过的公开边界；用例按表驱动，便于新增攻击面时保持覆盖可追溯。

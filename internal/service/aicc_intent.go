@@ -89,6 +89,10 @@ type aiccIntentDecision struct {
 // analyzeAICCIntent 在主回复前以独立 Hermes Turn 分析同一会话的访客原话。
 // 返回 false 表示分析失败，调用方仍可交付普通答复，但必须将本任务保留为可重试状态。
 func (d *AICCDispatcher) analyzeAICCIntent(ctx context.Context, task sqlc.AiccMessageTask, visitor sqlc.AiccMessage, conversation AICCConversationContext) (aiccIntentDecision, bool) {
+	// 本地 E2E 注入器使用原子消费，确保并发 worker 至多制造一条失败重试事实，之后立即恢复真实分析路径。
+	if d != nil && d.testFailIntentOnce.CompareAndSwap(true, false) {
+		return aiccIntentDecision{}, false
+	}
 	store, ok := d.store.(interface {
 		GetAICCSessionIntent(context.Context, string) (sqlc.AiccSessionIntent, error)
 		UpsertAICCSessionIntent(context.Context, sqlc.UpsertAICCSessionIntentParams) error

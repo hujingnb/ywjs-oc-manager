@@ -39,6 +39,30 @@ export function assertNoUnauthorizedAICCSourceAudit(sessionToken: string): void 
   }
 }
 
+// assertAICCSessionChannel 从 manager 会话事实校验公开入口渠道，避免只凭 iframe URL 推断服务端是否按挂件入库。
+export function assertAICCSessionChannel(sessionToken: string, expectedChannel: 'web_link' | 'web_widget'): void {
+  assertLocalK3DContext()
+  const escapedToken = sessionToken.replaceAll("'", "''")
+  const channel = execFileSync('kubectl', [
+    '--context', localK3DContext, '-n', 'ocm', 'exec', 'mysql-0', '--', 'sh', '-c',
+    `mysql -uroot -p"$MYSQL_ROOT_PASSWORD" ocm -N -e "SELECT channel FROM aicc_sessions WHERE session_token='${escapedToken}'" 2>/dev/null`,
+  ], { encoding: 'utf8' }).trim()
+  if (channel !== expectedChannel) throw new Error(`AICC session 渠道应为 ${expectedChannel}，实际为 ${channel || '(空)'}`)
+}
+
+// setLocalAICCIntentFailureOnce 仅在 k3d 本地 manager-api 上启停一次性分析失败注入器。
+// 该变量由 server 入口额外要求 app.env=local，测试结束必须清除并等待滚动完成，避免污染后续场景。
+export function setLocalAICCIntentFailureOnce(enabled: boolean): void {
+  assertLocalK3DContext()
+  const value = enabled ? 'OCM_AICC_TEST_FAIL_INTENT_ONCE=1' : 'OCM_AICC_TEST_FAIL_INTENT_ONCE-'
+  execFileSync('kubectl', [
+    '--context', localK3DContext, '-n', 'ocm', 'set', 'env', 'deployment/manager-api', value,
+  ], { stdio: 'pipe' })
+  execFileSync('kubectl', [
+    '--context', localK3DContext, '-n', 'ocm', 'rollout', 'status', 'deployment/manager-api', '--timeout=180s',
+  ], { stdio: 'pipe' })
+}
+
 // forceZh 在页面初始化前固定中文界面，避免平台默认语言差异影响可见文案定位。
 export async function forceZh(page: Page): Promise<void> {
   await page.addInitScript(() => {

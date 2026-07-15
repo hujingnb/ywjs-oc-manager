@@ -124,6 +124,14 @@ func TestParseAICCIntentAnalysis(t *testing.T) {
 	}
 }
 
+// TestEnableLocalAICCIntentFailureOnce 覆盖本地 E2E 注入器：并发安全的一次性失败只能被首个分析任务消费。
+func TestEnableLocalAICCIntentFailureOnce(t *testing.T) {
+	dispatcher := NewAICCDispatcher(nil, nil, nil, nil)
+	dispatcher.EnableLocalAICCIntentFailureOnce()
+	assert.True(t, dispatcher.testFailIntentOnce.CompareAndSwap(true, false))
+	assert.False(t, dispatcher.testFailIntentOnce.CompareAndSwap(true, false))
+}
+
 // TestNextAICCInviteStatus 验证首次高意向邀请和访客拒绝/提交后的不可逆边界。
 func TestNextAICCInviteStatus(t *testing.T) {
 	tests := []struct {

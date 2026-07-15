@@ -14,7 +14,7 @@
 | Kubernetes 隔离 | PASS | `kubectl config current-context` 为 `k3d-ocm`；节点 `k3d-ocm-server-0` 为 Ready。所有新增 Pod 删除命令先校验并显式使用该 context。 |
 | Chrome Stable | PASS | `Google Chrome 150.0.7871.114`；Playwright `1.59.1`。 |
 | Chrome 页面层检查 | PASS | `OCM_E2E_NO_SEED=1 npx playwright test --project=chrome-headed tests/e2e/login.spec.ts` 退出码 0，实际运行 2 个登录页面场景。 |
-| AICC 用例可发现性 | PASS | `npx playwright test --list --project=chrome-headed tests/e2e/aicc-conversation-*.spec.ts` 列出 3 文件共 29 个场景。 |
+| AICC 用例可发现性 | PASS | `npx playwright test --list --project=chrome-headed tests/e2e/aicc-conversation-*.spec.ts` 列出 3 文件共 32 个场景。 |
 | AICC 全链路 | BLOCKED | `ocm/ragflow-65489bf9b5-s2bw2` 为 `0/1 CrashLoopBackOff`，检查时 restart count 为 45。 |
 
 RAGFlow 上一轮日志的关键错误为：容器访问 `host.k3d.internal:7890` 代理被拒绝（`Connection refused`），
@@ -42,9 +42,10 @@ Chrome 项目使用 `channel: "chrome"`、`headless: false`；首次重试保留
 同样，仓库尚未提供可由 E2E 启停的一次性 RAGFlow/搜索/模型/队列故障 injector；四类恢复场景有独立
 `OCM_AICC_FAULT_INJECTION=1` 前置，不能把当前 skip 视为故障恢复已测。
 
-网页挂件 iframe、意向分析失败后恢复重试和同会话多标签并发提交均已有 Chrome 场景；其中后两项使用独立
-`OCM_AICC_INTENT_RETRY_FIXTURE=1` 一次性失败恢复控制面。该控制面当前未在 seed-e2e 提供，因此仍为
-BLOCKED 的“已实现未运行”子项，不能用于计算意向 precision、recall 或全场景覆盖率。
+网页挂件 iframe、意向分析失败后恢复重试和同会话多标签并发提交均已有 Chrome 场景；意向重试场景在
+`OCM_AICC_INTENT_RETRY_FIXTURE=1` 时会仅对本地 `k3d-ocm` 的 manager-api 注入一次性失败并滚动重启，
+server 还要求 `app.env=local` 才会消费该变量。该控制面不由 seed-e2e 默认开启，且当前 RAGFlow/runtime
+仍阻塞，故仍为 BLOCKED 的“已实现未运行”子项，不能用于计算意向 precision、recall 或全场景覆盖率。
 
 来源场景在运行时会强制断言来源标题、消息时间、未确认标签，以及公开网络来源的 HTTPS 链接；操作性拒绝会
 通过 manager 数据库中 `aicc_message_sources` 的受信任工具来源审计断言为零。当前公开页仅以文本展示来源，
@@ -70,7 +71,7 @@ done
 
 ```text
 cd web && npm run typecheck                              # PASS
-npx playwright test --list --project=chrome-headed ...  # PASS，29 tests
+npx playwright test --list --project=chrome-headed ...  # PASS，32 tests
 OCM_E2E_NO_SEED=1 npx playwright test --project=chrome-headed tests/e2e/login.spec.ts # PASS
-OCM_E2E_NO_SEED=1 npx playwright test --project=chrome-headed tests/e2e/aicc-conversation-*.spec.ts # 29 skipped（保护开关，非 PASS）
+OCM_E2E_NO_SEED=1 npx playwright test --project=chrome-headed tests/e2e/aicc-conversation-*.spec.ts # 32 skipped（保护开关，非 PASS）
 ```

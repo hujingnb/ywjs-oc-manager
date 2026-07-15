@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/guregu/null/v5"
@@ -71,6 +72,16 @@ type AICCDispatcher struct {
 	overloads    int
 	circuitUntil time.Time
 	halfOpen     bool
+	// testFailIntentOnce 仅由本地 E2E 控制面装配；CompareAndSwap 保证多 worker 竞争时只失败一次。
+	testFailIntentOnce atomic.Bool
+}
+
+// EnableLocalAICCIntentFailureOnce 仅供本地 E2E 注入一次意向分析失败，验证持久化重试与首次邀约幂等。
+// 生产入口不会调用此方法，避免将浏览器测试控制面暴露为公开 API。
+func (d *AICCDispatcher) EnableLocalAICCIntentFailureOnce() {
+	if d != nil {
+		d.testFailIntentOnce.Store(true)
+	}
 }
 
 // NewAICCDispatcher 创建可在 worker 中复用的单任务调度器。

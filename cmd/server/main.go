@@ -297,6 +297,11 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// dispatcher 负责领取持久化任务租约并写回助手回复；Redis 只用于唤醒，MySQL 仍是事实来源。
 	aiccLimiter := service.NewRedisAICCHierarchicalLimiter(imagecoordRedis, cfg.Redis.KeyPrefix, service.AICCConcurrencyLimits{Upstream: cfg.AICC.Governance.UpstreamConcurrency, Org: cfg.AICC.Governance.OrgConcurrency, Agent: cfg.AICC.Governance.AgentConcurrency, Session: cfg.AICC.Governance.SessionConcurrency})
 	aiccMessageDispatcher := service.NewAICCDispatcher(dbStore.Queries, store.NewAICCDispatcherRunner(dbStore), aiccPublicChat, aiccLimiter)
+	// 只在 local 进程且显式注入环境变量时制造一次意向分析失败，供 Chrome E2E 验证重试恢复；
+	// 非本地环境即使误带变量也不会启用，避免测试控制面进入共享或生产集群。
+	if cfg.App.Env == "local" && os.Getenv("OCM_AICC_TEST_FAIL_INTENT_ONCE") == "1" {
+		aiccMessageDispatcher.EnableLocalAICCIntentFailureOnce()
+	}
 	aiccMessageDispatcher.SetUpstreamCircuit(service.NewRedisAICCUpstreamCircuit(imagecoordRedis, cfg.Redis.KeyPrefix, cfg.AICC.Governance.CircuitConsecutive, cfg.AICC.Governance.CircuitWindow.Duration, cfg.AICC.Governance.CircuitFailurePercent, cfg.AICC.Governance.CircuitCooldown.Duration))
 	// 复用项目既有结构化日志记录异步消息状态，不额外引入尚未部署的指标系统。
 	aiccMessageObserver := service.NewSlogAICCDispatchObserver(logger)
