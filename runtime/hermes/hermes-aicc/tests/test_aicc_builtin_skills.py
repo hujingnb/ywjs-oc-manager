@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import yaml
+
 
 def test_builtin_skill_directory_contains_only_reviewed_customer_skills() -> None:
     # Docker 会把此目录整体复制到 Hermes skill 根目录，因此目录名本身就是静态能力白名单。
@@ -19,3 +21,17 @@ def test_customer_answer_skill_does_not_document_legacy_write_execution() -> Non
     assert "oc-kb add" not in body
     assert "execute_code" not in body
     assert "aicc_knowledge_search" in body
+
+
+def test_builtin_skills_declare_their_minimum_read_only_capabilities() -> None:
+    # 三个内置 Skill 的声明必须恰好对应答复、公开检索与纯文本意向分析三类用途。
+    root = Path(__file__).resolve().parent.parent / "skills"
+    declared = {}
+    for skill_md in root.glob("*/SKILL.md"):
+        frontmatter = skill_md.read_text(encoding="utf-8")[4:].split("\n---\n", 1)[0]
+        declared[skill_md.parent.name] = yaml.safe_load(frontmatter)["aicc_capabilities"]
+    assert declared == {
+        "aicc-customer-answer": ["knowledge.read"],
+        "aicc-safe-web-research": ["web.search"],
+        "aicc-lead-analysis": [],
+    }

@@ -7,7 +7,65 @@ oc-entrypoint.py 再 from entrypoint_helpers import ... 使用。
 from __future__ import annotations
 
 import hashlib
+import os
+import shutil
 from pathlib import Path
+
+import yaml
+
+from aicc_tools.policy import validate_skill_capabilities
+
+# AICC_BUILTIN_SKILLS_DIR 是镜像层中不可被 /opt/data emptyDir 覆盖的只读 Skill 源目录。
+AICC_BUILTIN_SKILLS_DIR = Path("/opt/oc-aicc-skills")
+
+
+def sync_aicc_builtin_skills(
+    data_root: Path,
+    manifest_capabilities: frozenset[str],
+    source_root: Path | None = None,
+) -> None:
+    """校验并同步镜像内置客服 Skill 到共享卷。
+
+    Kubernetes 的 emptyDir 会覆盖 /opt/data，因此内置 Skill 不能直接放在该目录。每次
+    启动都先从镜像只读层完整覆盖到 data_root/skills，既保证新 Pod 可见，也消除旧镜像
+    遗留的通用 Skill。复制前校验所有 frontmatter，任一越权 Skill 均失败关闭。
+    """
+    source = source_root or Path(os.environ.get("OC_BUILTIN_SKILLS_DIR", AICC_BUILTIN_SKILLS_DIR))
+    if not source.is_dir():
+        raise ValueError(f"AICC_BUILTIN_SKILLS_MISSING: {source}")
+    skill_dirs = sorted(path for path in source.iterdir() if path.is_dir())
+    if not skill_dirs:
+        raise ValueError("AICC_BUILTIN_SKILLS_MISSING: no skills")
+    for skill_dir in skill_dirs:
+        _validate_aicc_skill_frontmatter(skill_dir / "SKILL.md", manifest_capabilities)
+
+    destination = data_root / "skills"
+    destination.mkdir(parents=True, exist_ok=True)
+    # AICC 不存在运行期可安装 Skill；删除所有旧目录避免旧版本的通用 Skill 留在扫描范围。
+    for child in destination.iterdir():
+        if child.is_dir():
+            shutil.rmtree(child)
+    for skill_dir in skill_dirs:
+        shutil.copytree(skill_dir, destination / skill_dir.name)
+    # 复制结果可能随镜像升级变化，基线必须重新生成而不能沿用旧哈希。
+    (destination / ".bundled_manifest").unlink(missing_ok=True)
+
+
+def _validate_aicc_skill_frontmatter(skill_md: Path, manifest_capabilities: frozenset[str]) -> None:
+    """解析并校验一个内置 Skill 的能力声明，拒绝缺失、畸形与越权声明。"""
+    if not skill_md.is_file():
+        raise ValueError(f"AICC_SKILL_CAPABILITY_INVALID: missing SKILL.md ({skill_md.parent.name})")
+    body = skill_md.read_text(encoding="utf-8")
+    if not body.startswith("---\n"):
+        raise ValueError(f"AICC_SKILL_CAPABILITY_INVALID: missing frontmatter ({skill_md.parent.name})")
+    frontmatter, separator, _ = body[4:].partition("\n---\n")
+    if not separator:
+        raise ValueError(f"AICC_SKILL_CAPABILITY_INVALID: unterminated frontmatter ({skill_md.parent.name})")
+    metadata = yaml.safe_load(frontmatter)
+    declared = metadata.get("aicc_capabilities") if isinstance(metadata, dict) else None
+    if not isinstance(declared, list) or not all(isinstance(capability, str) for capability in declared):
+        raise ValueError(f"AICC_SKILL_CAPABILITY_INVALID: aicc_capabilities ({skill_md.parent.name})")
+    validate_skill_capabilities(declared, manifest_capabilities)
 
 
 def ensure_builtin_manifest(

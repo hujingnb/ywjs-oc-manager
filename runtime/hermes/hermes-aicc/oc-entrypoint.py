@@ -36,7 +36,7 @@ from lib.manifest import load as load_manifest, ManifestError
 from lib.state import OcState, read_state, write_state
 from renderer import render_config_yaml, render_env, render_skills, render_soul_md
 from migrator import run as run_migration
-from entrypoint_helpers import ensure_builtin_manifest
+from entrypoint_helpers import ensure_builtin_manifest, sync_aicc_builtin_skills
 from aicc_tools.policy import require_manifest_capabilities
 
 
@@ -75,12 +75,18 @@ def main() -> int:
         oclog.emit("migrate", "error", str(e), prev_variant=prev_variant, curr_variant=curr_variant)
         return 1
 
-    # render 前：首次启动时抓镜像内置 skill 基线（render 会写 .oc-managed，必须在此之前）。
+    # render 前：把镜像层的客服 Skill 同步到可能被 emptyDir 覆盖的共享卷，并校验其
+    # frontmatter 能力不能超过本次 manifest 授权；之后再记录内置 Skill 基线。
     # 默认写入 /opt/data/skills/.bundled_manifest，供 hermes/oc-ops/ops sidecar 跨容器共享；
     # OC_BUILTIN_MANIFEST 仅用于测试或调试覆盖。
     builtin_manifest_override = os.environ.get("OC_BUILTIN_MANIFEST")
     builtin_manifest_path = Path(builtin_manifest_override) if builtin_manifest_override else None
-    ensure_builtin_manifest(data_root, builtin_manifest_path)
+    try:
+        sync_aicc_builtin_skills(data_root, capabilities)
+        ensure_builtin_manifest(data_root, builtin_manifest_path)
+    except Exception as e:  # noqa: BLE001
+        oclog.emit("sync_builtin_skills", "error", str(e))
+        return 1
 
     # phase 4 render（每次都跑、幂等）
     outputs: list[str] = []

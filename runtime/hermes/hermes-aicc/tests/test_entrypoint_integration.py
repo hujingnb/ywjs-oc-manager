@@ -6,6 +6,7 @@ oc-entrypoint phase 6 是 os.execvp 替换进程，不能在 pytest 中直接验
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -46,6 +47,7 @@ def test_entrypoint_first_boot(tmp_path: Path) -> None:
         "OC_INPUT_DIR": str(input_root),
         "OC_DATA_DIR": str(data_root),
         "OC_IMAGE_VARIANT": "hermes-v2026.7.1",
+        "OC_BUILTIN_SKILLS_DIR": str(Path(__file__).resolve().parent.parent / "skills"),
     }
     source_script = Path(__file__).resolve().parent.parent / "oc-entrypoint.py"
     # 测试既支持源码目录布局，也支持 Docker 镜像内的 /usr/local/bin 安装布局。
@@ -57,8 +59,10 @@ def test_entrypoint_first_boot(tmp_path: Path) -> None:
     assert (data_root / "config.yaml").exists()
     assert (data_root / "SOUL.md").exists()
     assert (data_root / ".env").exists()
-    # AICC 的知识能力由镜像内置只读工具提供，启动时不能生成旧 oc-kb 写入 Skill。
+    # AICC 的知识能力来自镜像只读层，entrypoint 会复制进 emptyDir 供 Hermes 实际扫描。
     assert not (data_root / "skills" / "oc-kb" / "SKILL.md").exists()
+    names = sorted(path.name for path in (data_root / "skills").iterdir() if path.is_dir())
+    assert names == ["aicc-customer-answer", "aicc-lead-analysis", "aicc-safe-web-research"]
     env_body = (data_root / ".env").read_text()
     assert "OC_KB_RUNTIME_BASE_URL=http://manager-api:8080" in env_body
     assert "OC_KB_APP_TOKEN=runtime-token" in env_body
@@ -68,10 +72,10 @@ def test_entrypoint_first_boot(tmp_path: Path) -> None:
     assert state["image_variant"] == "hermes-v2026.7.1"
     assert state["last_migrate_from"] is None
 
-    # render 前生成内置 skill 共享基线；首次启动时 skills/ 尚无内置目录，内容为空。
+    # render 前生成内置 skill 共享基线，三个内置 Skill 都必须被记录。
     builtin_manifest = data_root / "skills" / ".bundled_manifest"
     assert builtin_manifest.exists()
-    assert builtin_manifest.read_text(encoding="utf-8") == ""
+    assert len(builtin_manifest.read_text(encoding="utf-8").splitlines()) == 3
 
 
 def test_entrypoint_rejects_missing_aicc_capabilities(tmp_path: Path) -> None:
@@ -96,3 +100,31 @@ def test_entrypoint_rejects_missing_aicc_capabilities(tmp_path: Path) -> None:
 
     assert result.returncode == 1
     assert "AICC_MANIFEST_CAPABILITY_MISSING" in result.stderr
+
+
+def test_entrypoint_rejects_builtin_skill_capability_outside_manifest(tmp_path: Path) -> None:
+    # 即便恶意 Skill 已在镜像源目录，启动也必须在复制到 emptyDir 之前因越权能力失败关闭。
+    input_root = tmp_path / "input"
+    data_root = tmp_path / "data"
+    source_root = tmp_path / "builtin-skills"
+    _setup_input(input_root)
+    shutil.copytree(Path(__file__).resolve().parent.parent / "skills", source_root)
+    target = source_root / "aicc-customer-answer" / "SKILL.md"
+    target.write_text(target.read_text(encoding="utf-8").replace(
+        "- knowledge.read", "- terminal.execute",
+    ), encoding="utf-8")
+
+    env = {
+        **os.environ,
+        "OC_TEST_NO_EXEC": "1",
+        "OC_INPUT_DIR": str(input_root),
+        "OC_DATA_DIR": str(data_root),
+        "OC_IMAGE_VARIANT": "hermes-aicc",
+        "OC_BUILTIN_SKILLS_DIR": str(source_root),
+    }
+    source_script = Path(__file__).resolve().parent.parent / "oc-entrypoint.py"
+    result = subprocess.run([sys.executable, str(source_script)], env=env, capture_output=True, text=True)
+
+    assert result.returncode == 1
+    assert "AICC_SKILL_CAPABILITY_FORBIDDEN: terminal.execute" in result.stderr
+    assert not (data_root / "skills" / "aicc-customer-answer").exists()
