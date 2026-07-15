@@ -64,6 +64,7 @@ func TestRenderDeployment(t *testing.T) {
 func TestRenderDeploymentAICC(t *testing.T) {
 	spec := testSpec()
 	spec.AppType = domain.AppTypeAICC
+	spec.AICCEgressProxyURL = "http://aicc:token@aicc-web-egress-proxy.ocm.svc.cluster.local:8080"
 
 	dep := RenderDeployment(spec, "oc-apps")
 	require.Len(t, dep.Spec.Template.Spec.InitContainers, 1, "AICC 必须只渲染一个初始化容器")
@@ -140,7 +141,7 @@ func TestRenderAICCNetworkPolicy(t *testing.T) {
 	noProxy := envByName(hermes, "NO_PROXY")
 	require.NotNil(t, httpProxy)
 	require.NotNil(t, noProxy)
-	assert.Equal(t, "http://aicc-web-egress-proxy.ocm.svc.cluster.local:8080", httpProxy.Value)
+	assert.Equal(t, spec.AICCEgressProxyURL, httpProxy.Value)
 	assert.Equal(t, ".svc,.svc.cluster.local", noProxy.Value)
 	assert.Nil(t, envByName(containerByName(RenderDeployment(spec, "oc-aicc"), "oc-ops"), "HTTP_PROXY"))
 }

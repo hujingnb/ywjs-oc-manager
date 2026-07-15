@@ -34,9 +34,9 @@ spec:
               key: control-token
               name: app-a1-token
         - name: HTTP_PROXY
-          value: http://aicc-web-egress-proxy.ocm.svc.cluster.local:8080
+          value: http://aicc:token@aicc-web-egress-proxy.ocm.svc.cluster.local:8080
         - name: HTTPS_PROXY
-          value: http://aicc-web-egress-proxy.ocm.svc.cluster.local:8080
+          value: http://aicc:token@aicc-web-egress-proxy.ocm.svc.cluster.local:8080
         - name: NO_PROXY
           value: .svc,.svc.cluster.local
         image: registry/hermes:v1

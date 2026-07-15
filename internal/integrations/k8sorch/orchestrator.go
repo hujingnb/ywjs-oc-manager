@@ -62,6 +62,9 @@ type AppSpec struct {
 	// Proxy 为需直连外网的容器（hermes 微信平台 / oc-ops 渠道登录）注入代理 env；
 	// 各字段留空则不注入对应项（生产 pod 有外网出口时全空）。
 	Proxy ProxyEnv
+	// AICCEgressProxyURL 是 AICC 网页检索唯一允许的受控代理 URL；必须由控制面显式下发，
+	// 可包含代理所需认证信息。空值由初始化 worker 拒绝，不能降级为公网直连。
+	AICCEgressProxyURL string
 	// FeishuAppID 是飞书应用 App ID（明文，未绑定为空）。
 	FeishuAppID string
 	// FeishuAppSecret 是飞书 App Secret 明文（buildAppSpec 从 DB 密文解密后填入，引擎需明文；未绑定为空）。

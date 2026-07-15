@@ -270,9 +270,8 @@ func (a *KubernetesAdapter) Delete(ctx context.Context, appID string) error {
 		if err := a.deleteHPA(ctx, appID); err != nil {
 			return err
 		}
-		if err := a.deleteAICCNetworkPolicy(ctx, appID); err != nil {
-			return err
-		}
+		// 保留默认拒绝 egress 策略直至 app ID 被彻底回收：Deployment 删除是异步的，若先删
+		// 策略会在残余 Pod 的终止窗口形成未受限出网。后续同 ID EnsureApp 会幂等覆盖策略。
 	}
 	if err := a.client.AppsV1().Deployments(a.namespace).Delete(ctx, deploymentName(appID), del); err != nil && !apierrors.IsNotFound(err) {
 		return wrapK8s("删除 Deployment", err)
@@ -284,15 +283,6 @@ func (a *KubernetesAdapter) Delete(ctx context.Context, appID string) error {
 		return wrapK8s("删除 Secret", err)
 	}
 	return nil
-}
-
-// deleteAICCNetworkPolicy 清理逐应用默认拒绝 egress 策略；资源不存在视为已收敛。
-func (a *KubernetesAdapter) deleteAICCNetworkPolicy(ctx context.Context, appID string) error {
-	err := a.client.NetworkingV1().NetworkPolicies(a.namespace).Delete(ctx, aiccNetworkPolicyName(appID), metav1.DeleteOptions{})
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
-	return wrapK8s("删除 AICC NetworkPolicy", err)
 }
 
 // deleteHPA 幂等删除 AICC HPA；NotFound 表示已停止或已删除，按成功处理。

@@ -127,6 +127,8 @@ type AppInitializeK8sConfig struct {
 	// Proxy 为需直连外网的 hermes/oc-ops 容器注入代理 env（本地 k3d 无外网出口时用；
 	// 生产留空不注入）。
 	Proxy AppInitializeK8sProxy
+	// AICCEgressProxyURL 是客服网页检索唯一可用的受控代理 URL；空值必须拒绝 AICC 启动。
+	AICCEgressProxyURL string
 }
 
 // AppInitializeK8sProxy 是注入 app pod 容器的代理环境变量（留空不注入对应项）。
@@ -388,6 +390,11 @@ func (h *AppInitializeHandler) phaseCreate(ctx context.Context, app *sqlc.App, i
 	if h.orch == nil {
 		return nil
 	}
+	if domain.IsAICCAppType(domain.AppType(app.AppType)) && strings.TrimSpace(h.k8sCfg.AICCEgressProxyURL) == "" {
+		// NetworkPolicy 不会为客服 Pod 直接放行公网；缺少已审计代理时 fail closed，
+		// 避免启动一个表面可用、实际会绕过或静默失败的网页检索运行时。
+		return fmt.Errorf("AICC 受控网页检索代理未配置")
+	}
 	// 从 app 的 runtime_token_ciphertext 解密取明文 control token，
 	// 用于写入 k8s Secret，供 pod 启动时鉴权 bootstrap API 和 oc-ops 调用。
 	controlToken, err := h.decryptRuntimeToken(app)
@@ -504,6 +511,7 @@ func (h *AppInitializeHandler) buildAppSpec(ctx context.Context, app sqlc.App, h
 			HTTPSProxy: h.k8sCfg.Proxy.HTTPSProxy,
 			NoProxy:    h.k8sCfg.Proxy.NoProxy,
 		},
+		AICCEgressProxyURL:   h.k8sCfg.AICCEgressProxyURL,
 		FeishuAppID:          feishuAppID,
 		FeishuAppSecret:      feishuSecret,
 		FeishuDomain:         feishuDomain,

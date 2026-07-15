@@ -20,9 +20,6 @@ func hpaName(appID string) string               { return deploymentName(appID) }
 func aiccNetworkPolicyName(appID string) string { return deploymentName(appID) + "-egress" }
 
 const (
-	// aiccWebEgressProxyURL 是客服网页检索的唯一公网出口。该 Service 后的代理必须强制域名
-	// allowlist 与请求审计；AICC Pod 的 NetworkPolicy 只允许访问这个集群内地址。
-	aiccWebEgressProxyURL = "http://aicc-web-egress-proxy.ocm.svc.cluster.local:8080"
 	// aiccWebEgressNoProxy 确保 manager 知识 API 与 new-api 模型网关留在集群内直连，
 	// 不把携带 runtime token 的内部请求转交网页检索代理。
 	aiccWebEgressNoProxy = ".svc,.svc.cluster.local"
@@ -223,10 +220,11 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 	}
 	runtimeProxyEnv := proxyEnv
 	if domain.IsAICCAppType(spec.AppType) {
-		// 忽略通用应用的外部代理配置，客服网页检索只能走 NetworkPolicy 允许的受控代理。
+		// 忽略通用应用的外部代理配置，客服网页检索只能走控制面明确下发、且被 NetworkPolicy
+		// 选中的受控代理。初始化 worker 会拒绝空 URL，不能退回公网直连。
 		runtimeProxyEnv = []corev1.EnvVar{
-			{Name: "HTTP_PROXY", Value: aiccWebEgressProxyURL},
-			{Name: "HTTPS_PROXY", Value: aiccWebEgressProxyURL},
+			{Name: "HTTP_PROXY", Value: spec.AICCEgressProxyURL},
+			{Name: "HTTPS_PROXY", Value: spec.AICCEgressProxyURL},
 			{Name: "NO_PROXY", Value: aiccWebEgressNoProxy},
 		}
 	}

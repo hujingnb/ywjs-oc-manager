@@ -257,6 +257,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			HTTPSProxy: cfg.Kubernetes.PodProxy.HTTPSProxy,
 			NoProxy:    cfg.Kubernetes.PodProxy.NoProxy,
 		},
+		AICCEgressProxyURL: cfg.Kubernetes.AICCEgressProxyURL,
 	}
 
 	// oc-ops HTTP 客户端 + app 坐标解析器：cron / kanban / 微信扫码登录均走

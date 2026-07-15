@@ -1048,6 +1048,27 @@ func TestAppInitialize_AICCHiddenAppUsesDedicatedRuntimeImage(t *testing.T) {
 	assert.Equal(t, aiccImageRef, store.lastAppliedVersion.AppliedImageRef)
 }
 
+// TestAppInitialize_AICCRejectsMissingEgressProxy 验证 AICC 在编排已启用但未配置受控网页检索
+// 代理时失败关闭，不能创建会被迫直连公网或无审计出口的客服 Pod。
+func TestAppInitialize_AICCRejectsMissingEgressProxy(t *testing.T) {
+	store := newAppInitStub(t)
+	store.app.AppType = string(domain.AppTypeAICC)
+	handler := NewAppInitializeHandler(store, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}, AppInitializeConfig{
+		Cipher:              testCipher(t),
+		ResolveRuntimeImage: testResolveRuntimeImage,
+		ResolveAICCRuntimeImage: func() (string, bool) {
+			return "registry.example.com/app/oc-manager-aigowork-aicc:v1", true
+		},
+	})
+	orch := &fakeOrchestrator{}
+	handler.SetOrchestrator(orch, AppInitializeK8sConfig{})
+
+	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))
+
+	require.ErrorContains(t, err, "AICC 受控网页检索代理未配置")
+	assert.Empty(t, orch.ensureAppCalls)
+}
+
 // TestAppInitialize_AICCHiddenAppFailsWithoutDedicatedRuntimeImage 验证客服专用镜像缺失时，
 // AICC 初始化应明确失败，不能使用绑定版本的普通实例镜像继续启动。
 func TestAppInitialize_AICCHiddenAppFailsWithoutDedicatedRuntimeImage(t *testing.T) {
