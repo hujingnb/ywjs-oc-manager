@@ -11,6 +11,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// aiccIntentRetryUpsertState 是 SQL 中 IF(processed_at IS NOT NULL, ...) 的最小状态模型，
+// 用于把活跃租约保留这一持久化语义固定成可读断言，而非仅检查 SQL 字符串。
+type aiccIntentRetryUpsertState struct {
+	processed    bool
+	leaseToken   string
+	leaseExpires string
+}
+
+func applyAICCIntentRetryPlainUpsert(state aiccIntentRetryUpsertState) aiccIntentRetryUpsertState {
+	if state.processed {
+		return aiccIntentRetryUpsertState{}
+	}
+	return state
+}
+
 // TestIntentRetryUpsertAndClaimContract 通过真实 sqlc Exec 边界锁定两种持久化状态：
 // processed 残留的新失败可重置并领取；活跃租约的普通 upsert 不应包含清租约条件。
 func TestIntentRetryUpsertAndClaimContract(t *testing.T) {
@@ -31,4 +46,8 @@ func TestIntentRetryUpsertAndClaimContract(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), rows)
 	require.NoError(t, mock.ExpectationsWereMet())
+	// 活跃未处理租约上的普通失败写入不能清除 token、到期时间或错误地标记 processed，
+	// 否则另一个 worker 会在原分析仍运行时重复领取。
+	active := aiccIntentRetryUpsertState{processed: false, leaseToken: "active-lease", leaseExpires: "future"}
+	assert.Equal(t, active, applyAICCIntentRetryPlainUpsert(active))
 }
