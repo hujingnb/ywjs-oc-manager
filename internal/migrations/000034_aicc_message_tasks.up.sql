@@ -21,15 +21,9 @@ CREATE TABLE aicc_message_tasks (
     updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
     CONSTRAINT aicc_message_tasks_status_check CHECK (status IN ('queued','processing','retry_wait','completed','failed')),
     CONSTRAINT aicc_message_tasks_attempts_check CHECK (attempts >= 0 AND max_attempts > 0),
+    -- message_id 是任务唯一事实来源；消息已通过 aicc_messages 的会话外键级联删除。
+    -- MySQL 在此表同时声明多组共享列的复合外键时会拒绝建表，故不重复声明会话、组织和应用链路。
     CONSTRAINT fk_aicc_message_tasks_message FOREIGN KEY (message_id) REFERENCES aicc_messages(id) ON DELETE CASCADE,
-    CONSTRAINT fk_aicc_message_tasks_session_agent FOREIGN KEY (session_id, agent_id)
-        REFERENCES aicc_sessions(id, agent_id) ON DELETE CASCADE,
-    CONSTRAINT fk_aicc_message_tasks_session_org FOREIGN KEY (session_id, org_id)
-        REFERENCES aicc_sessions(id, org_id) ON DELETE CASCADE,
-    CONSTRAINT fk_aicc_message_tasks_agent_org FOREIGN KEY (agent_id, org_id)
-        REFERENCES aicc_agents(id, org_id),
-    CONSTRAINT fk_aicc_message_tasks_app_org FOREIGN KEY (app_id, org_id)
-        REFERENCES apps(id, org_id),
     UNIQUE KEY uk_aicc_message_tasks_message (message_id),
     UNIQUE KEY uk_aicc_message_tasks_processing_session (processing_session_key),
     KEY idx_aicc_message_tasks_ready (status, run_after, id),
