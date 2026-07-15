@@ -1,8 +1,11 @@
 """验证构建上下文中的 AICC 内置客服 Skill 白名单。"""
 
 from pathlib import Path
+import shutil
 
 import yaml
+
+from entrypoint_helpers import sync_aicc_builtin_skills
 
 
 def test_builtin_skill_directory_contains_only_reviewed_customer_skills() -> None:
@@ -11,6 +14,13 @@ def test_builtin_skill_directory_contains_only_reviewed_customer_skills() -> Non
     names = sorted(path.name for path in root.iterdir() if path.is_dir())
     assert names == ["aicc-customer-answer", "aicc-lead-analysis", "aicc-safe-web-research"]
     assert all(name.startswith("aicc-") for name in names)
+
+
+def test_dockerfile_clears_upstream_skill_layout_before_copying_customer_skills() -> None:
+    # 镜像层必须先清除 install.sh 在 /opt/data/skills 写入的通用 Skill，再保存只读源目录。
+    dockerfile = (Path(__file__).resolve().parent.parent / "Dockerfile").read_text(encoding="utf-8")
+    assert "rm -rf /opt/data/skills /opt/oc-aicc-skills" in dockerfile
+    assert "COPY skills/ /opt/oc-aicc-skills/" in dockerfile
 
 
 def test_customer_answer_skill_does_not_document_legacy_write_execution() -> None:
@@ -35,3 +45,21 @@ def test_builtin_skills_declare_their_minimum_read_only_capabilities() -> None:
         "aicc-safe-web-research": ["web.search"],
         "aicc-lead-analysis": [],
     }
+
+
+def test_sync_removes_previously_visible_generic_skill(tmp_path: Path) -> None:
+    # 启动守卫必须清掉共享卷中旧镜像遗留的通用 Skill，Hermes 最终只能扫描客服白名单。
+    source = tmp_path / "source"
+    shutil.copytree(Path(__file__).resolve().parent.parent / "skills", source)
+    generic = tmp_path / "data" / "skills" / "generic-terminal"
+    generic.mkdir(parents=True)
+    (generic / "SKILL.md").write_text("---\nname: generic-terminal\n---\n", encoding="utf-8")
+
+    sync_aicc_builtin_skills(
+        tmp_path / "data",
+        frozenset({"knowledge.read", "web.search", "skills.read", "vision.read"}),
+        source,
+    )
+
+    names = sorted(path.name for path in (tmp_path / "data" / "skills").iterdir() if path.is_dir())
+    assert names == ["aicc-customer-answer", "aicc-lead-analysis", "aicc-safe-web-research"]

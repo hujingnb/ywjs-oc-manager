@@ -155,7 +155,9 @@ COPY aicc_tools/          /usr/local/lib/hermes-agent/aicc_tools/
 COPY aicc_tools/aicc_knowledge_tool.py /usr/local/lib/hermes-agent/tools/aicc_knowledge_tool.py
 # 上游安装器会带入通用 Skill，其中可能包含文件、终端、发布等与客服无关的操作说明。
 # AICC 只保留构建期审核的三个只读 Skill，运行期 renderer 也不会再解压 manifest Skill。
-RUN rm -rf /opt/oc-aicc-skills && mkdir -p /opt/oc-aicc-skills
+# install.sh 可能把通用 Skill 写进 /opt/data/skills。即使 Docker 匿名卷会初始化该目录，
+# 也必须在构建层清空，防止未挂载 emptyDir 的运行形态扫描到旧通用 Skill。
+RUN rm -rf /opt/data/skills /opt/oc-aicc-skills && mkdir -p /opt/oc-aicc-skills
 COPY skills/ /opt/oc-aicc-skills/
 COPY lib/                 /usr/local/lib/oc-entrypoint/lib/
 COPY renderer/            /usr/local/lib/oc-entrypoint/renderer/
