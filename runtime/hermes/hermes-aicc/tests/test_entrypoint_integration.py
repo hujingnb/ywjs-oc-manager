@@ -57,7 +57,8 @@ def test_entrypoint_first_boot(tmp_path: Path) -> None:
     assert (data_root / "config.yaml").exists()
     assert (data_root / "SOUL.md").exists()
     assert (data_root / ".env").exists()
-    assert (data_root / "skills" / "oc-kb" / "SKILL.md").exists()
+    # AICC 的知识能力由镜像内置只读工具提供，启动时不能生成旧 oc-kb 写入 Skill。
+    assert not (data_root / "skills" / "oc-kb" / "SKILL.md").exists()
     env_body = (data_root / ".env").read_text()
     assert "OC_KB_RUNTIME_BASE_URL=http://manager-api:8080" in env_body
     assert "OC_KB_APP_TOKEN=runtime-token" in env_body

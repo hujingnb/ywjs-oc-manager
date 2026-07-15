@@ -80,7 +80,7 @@ RUN mkdir -p /root/.local/bin && \
 
 # 显式预装 weixin platform 必需依赖（容器启动即 ready，不允许运行时 lazy install）。
 RUN uv pip install --python /usr/local/lib/hermes-agent/venv/bin/python --no-cache-dir \
-      aiohttp cryptography qrcode
+      aiohttp cryptography qrcode ddgs
 
 # 显式预装 feishu / lark platform 必需依赖（容器启动即 ready，不允许运行时 lazy install）。
 # 引擎 gateway/platforms/feishu.py 长连接走 lark_oapi + websockets；扫码注册用 urllib 不依赖 SDK，
@@ -153,6 +153,10 @@ COPY aicc_tools/          /usr/local/lib/hermes-agent/aicc_tools/
 # Hermes 运行时的工具目录保留同一份知识工具源码，便于镜像审计直接确认 AICC toolset 的实现；
 # model_tools 的构建期补丁从 aicc_tools 包显式注册它，避免通用自动发现绕过能力策略。
 COPY aicc_tools/aicc_knowledge_tool.py /usr/local/lib/hermes-agent/tools/aicc_knowledge_tool.py
+# 上游安装器会带入通用 Skill，其中可能包含文件、终端、发布等与客服无关的操作说明。
+# AICC 只保留构建期审核的三个只读 Skill，运行期 renderer 也不会再解压 manifest Skill。
+RUN rm -rf /opt/data/skills && mkdir -p /opt/data/skills
+COPY skills/ /opt/data/skills/
 COPY lib/                 /usr/local/lib/oc-entrypoint/lib/
 COPY renderer/            /usr/local/lib/oc-entrypoint/renderer/
 COPY migrator/            /usr/local/lib/oc-entrypoint/migrator/

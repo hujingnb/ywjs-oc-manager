@@ -55,28 +55,13 @@ def render(m: Manifest, data_root: Path) -> str:
             "base_url": base_url, "api_key": m.openai_api_key,
         },
         "auxiliary": _build_auxiliary(m, base_url),
-        "memory": {
-            "memory_enabled": True, "user_profile_enabled": True,
-            "memory_char_limit": 2200, "user_char_limit": 1375,
-        },
-        "terminal": {
-            "backend": "local", "cwd": "/opt/data/workspace",
-            "timeout": 180, "lifetime_seconds": 300,
-        },
-        # 关闭上游 hermes-agent 的 dangerous-command 审批：
-        # - mode="off" 命中上游 _normalize_approval_mode 的 yolo 分支，跳过所有
-        #   dangerous-command 提示（受控部署形态下，逐条 /approve 是噪声非收益）。
-        # - cron_mode="approve" 是兜底——当前 mode=off 命中 yolo 后 cron 路径
-        #   走不到，但留这一项保证将来若 mode 被改回 manual/smart，cron 任务遇
-        #   危险命令仍放行而非被 deny。
-        # 不可绕过的上游 hardline 命令（rm -rf /、mkfs、dd raw、shutdown、
-        # fork bomb、kill -1 等）仍由 hermes-agent 硬拦，本配置不影响。
-        # YAML 落地：PyYAML 对字符串 "off" 自动加单引号输出 `mode: 'off'`，
-        # 不需要手写引号包装；回读后仍是字符串 "off"。
-        "approvals": {
-            "mode": "off",
-            "cron_mode": "approve",
-        },
+        # AICC 每轮上下文由 manager 重建，禁止 Hermes 保存跨会话记忆或访客画像。
+        "memory": {"memory_enabled": False, "user_profile_enabled": False},
+        # toolset 是上游 Hermes 的第一层可见工具集收敛；Task 2 的补丁还会按 manifest
+        # capabilities 过滤具体函数并在 dispatch 时复核，不能以此列表替代授权判断。
+        "platform_toolsets": {"api_server": ["aicc", "web", "skills", "vision"]},
+        # 公开网络只允许只读检索；DDGS 无需企业侧密钥，适合作为默认后端。
+        "web": {"backend": "ddgs"},
     }
     header = "# Hermes 配置 - 由 oc-entrypoint 在容器启动时渲染（manifest v2）\n"
     body = header + yaml.safe_dump(config, allow_unicode=True, sort_keys=False)
