@@ -49,6 +49,7 @@ type AICCDispatcherStore interface {
 	CreateAICCMessageSource(context.Context, sqlc.CreateAICCMessageSourceParams) error
 	GetAICCSessionContext(context.Context, string) (sqlc.AiccSessionContext, error)
 	ListAICCContextMessages(context.Context, sqlc.ListAICCContextMessagesParams) ([]sqlc.AiccMessage, error)
+	UpdateAICCSessionIntentInviteStatus(context.Context, sqlc.UpdateAICCSessionIntentInviteStatusParams) (int64, error)
 }
 
 // AICCDispatcherTxRunner 保证助手消息镜像和 completed 状态不会半成功。
@@ -175,12 +176,12 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 		// 首次邀约只有在助手回复与任务完成同一事务成功后才消费；事务回滚时仍保持
 		// not_invited，下一次任务重试会再次强制展示本轮 offer_lead。
 		if intentDecision.AllowOffer {
-			if intentStore, ok := s.(interface {
-				UpdateAICCSessionIntentInviteStatus(context.Context, sqlc.UpdateAICCSessionIntentInviteStatusParams) (int64, error)
-			}); ok {
-				if _, err := intentStore.UpdateAICCSessionIntentInviteStatus(ctx, sqlc.UpdateAICCSessionIntentInviteStatusParams{SessionID: task.SessionID, InviteStatus: "invited"}); err != nil {
-					return err
-				}
+			updated, err := s.UpdateAICCSessionIntentInviteStatus(ctx, sqlc.UpdateAICCSessionIntentInviteStatusParams{SessionID: task.SessionID, InviteStatus: "invited"})
+			if err != nil {
+				return err
+			}
+			if updated != 1 {
+				return fmt.Errorf("AICC 首次邀约状态未命中当前会话")
 			}
 		}
 		rows, err := s.CompleteAICCMessageTask(ctx, sqlc.CompleteAICCMessageTaskParams{ID: task.ID, LeaseToken: null.StringFrom(token)})

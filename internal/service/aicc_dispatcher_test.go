@@ -27,6 +27,7 @@ type aiccDispatcherStoreFake struct {
 	failed          sqlc.FailAICCMessageTaskParams
 	assistant       []sqlc.CreateAICCMessageParams
 	sources         []sqlc.CreateAICCMessageSourceParams
+	inviteUpdates   []sqlc.UpdateAICCSessionIntentInviteStatusParams
 	complete        int64
 	completed       int
 	recover         int64
@@ -154,6 +155,12 @@ func (s *aiccDispatcherStoreFake) CreateAICCMessage(_ context.Context, p sqlc.Cr
 func (s *aiccDispatcherStoreFake) CreateAICCMessageSource(_ context.Context, p sqlc.CreateAICCMessageSourceParams) error {
 	s.sources = append(s.sources, p)
 	return nil
+}
+
+// UpdateAICCSessionIntentInviteStatus 模拟回复事务内消费首次留资邀约；默认命中一行。
+func (s *aiccDispatcherStoreFake) UpdateAICCSessionIntentInviteStatus(_ context.Context, p sqlc.UpdateAICCSessionIntentInviteStatusParams) (int64, error) {
+	s.inviteUpdates = append(s.inviteUpdates, p)
+	return 1, nil
 }
 
 type aiccDispatcherChatFake struct {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"sort"
 	"strings"
 
 	"github.com/guregu/null/v5"
@@ -95,13 +96,12 @@ func (d *AICCDispatcher) analyzeAICCIntent(ctx context.Context, task sqlc.AiccMe
 	if !ok {
 		return aiccIntentDecision{}, true
 	}
-	visitorText := aiccSessionVisitorText(conversation, visitor.TextContent.String)
 	visitorMessages := aiccSessionVisitorMessages(conversation, visitor)
 	turn := AICCInboundTurn{
 		TurnID:      task.MessageID + ":intent",
 		SessionID:   task.SessionID,
 		Channel:     "internal",
-		Text:        visitorText,
+		Text:        renderAICCIntentEvidenceInput(visitorMessages),
 		AppID:       task.AppID,
 		Instruction: "使用 aicc-lead-analysis Skill 分析当前会话中以 visitor 标注的全部访客文本。仅输出 JSON：{\"level\":\"low|medium|high\",\"fields\":{},\"confidence\":{},\"evidence\":{}}。证据必须逐字来自当前会话访客文本；不得输出联系方式、身份证、地址或任何未在文本中的内容。",
 	}
@@ -143,6 +143,17 @@ func (d *AICCDispatcher) analyzeAICCIntent(ctx context.Context, task sqlc.AiccMe
 		return aiccIntentDecision{}, false
 	}
 	return aiccIntentDecision{InviteStatus: inviteStatus, AllowOffer: allowOffer}, true
+}
+
+// renderAICCIntentEvidenceInput 将消息 ID 和原文一起置于受信任数据边界。Hermes 因此能输出可验证的
+// evidence.message_id；XML 转义防止访客文本伪造分析协议标签。
+func renderAICCIntentEvidenceInput(visitorMessages map[string]string) string {
+	parts := make([]string, 0, len(visitorMessages))
+	for id, text := range visitorMessages {
+		parts = append(parts, `<visitor_message id="`+escapeAICCXML(id)+`">`+escapeAICCXML(text)+`</visitor_message>`)
+	}
+	sort.Strings(parts)
+	return "<aicc_intent_evidence>\n" + strings.Join(parts, "\n") + "\n</aicc_intent_evidence>"
 }
 
 // queueAICCIntentRetry 保存独立重试事实；主回复无需等待它成功。相同 session 的主键使重复失败

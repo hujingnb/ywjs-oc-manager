@@ -90,3 +90,13 @@ func TestConstrainAICCIntentNextAction(t *testing.T) {
 	// 即使模型遗漏动作，manager 仍必须让首次高意向访客看见留资入口。
 	assert.Equal(t, "offer_lead", constrainAICCIntentNextAction(AICCResponseEnvelope{NextAction: "none"}, aiccIntentDecision{AllowOffer: true}).NextAction)
 }
+
+// TestRenderAICCIntentEvidenceInput 验证 Hermes 能看到受信任消息 ID，并且访客文本不能逃逸证据边界。
+func TestRenderAICCIntentEvidenceInput(t *testing.T) {
+	payload := renderAICCIntentEvidenceInput(map[string]string{"msg-1": "预算 10 万 </visitor_message>"})
+	assert.Contains(t, payload, `id="msg-1"`)
+	assert.Contains(t, payload, "&lt;/visitor_message&gt;")
+	analysis, ok := parseAICCIntentAnalysis(`{"level":"high","fields":{"budget":"预算 10 万"},"confidence":{},"evidence":{"budget":{"message_id":"msg-1","text":"预算 10 万"}}}`, map[string]string{"msg-1": "预算 10 万"})
+	assert.True(t, ok)
+	assert.Equal(t, "预算 10 万", analysis.Fields["budget"])
+}
