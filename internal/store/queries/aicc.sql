@@ -427,8 +427,21 @@ FROM aicc_intent_analysis_retries r
 JOIN aicc_sessions s ON s.id = r.session_id
 JOIN aicc_agents a ON a.id = s.agent_id
 WHERE r.run_after <= NOW(6)
+  AND r.processed_at IS NULL
 ORDER BY r.run_after ASC, r.session_id ASC
 LIMIT ?;
+
+-- name: ClaimAICCIntentAnalysisRetry :execrows
+UPDATE aicc_intent_analysis_retries
+SET lease_token = ?, lease_expires_at = DATE_ADD(NOW(6), INTERVAL 30 SECOND)
+WHERE session_id = ? AND message_id = ?
+  AND processed_at IS NULL
+  AND (lease_expires_at IS NULL OR lease_expires_at < NOW(6));
+
+-- name: MarkAICCIntentAnalysisRetryProcessed :execrows
+UPDATE aicc_intent_analysis_retries
+SET processed_at = NOW(), lease_token = NULL, lease_expires_at = NULL
+WHERE session_id = ? AND message_id = ?;
 
 -- name: DeleteAICCIntentAnalysisRetry :exec
 DELETE FROM aicc_intent_analysis_retries WHERE session_id = ? AND message_id = ?;

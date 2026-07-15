@@ -67,6 +67,28 @@ func (q *Queries) AttachAICCLeadValuesToLead(ctx context.Context, arg AttachAICC
 	return err
 }
 
+const claimAICCIntentAnalysisRetry = `-- name: ClaimAICCIntentAnalysisRetry :execrows
+UPDATE aicc_intent_analysis_retries
+SET lease_token = ?, lease_expires_at = DATE_ADD(NOW(6), INTERVAL 30 SECOND)
+WHERE session_id = ? AND message_id = ?
+  AND processed_at IS NULL
+  AND (lease_expires_at IS NULL OR lease_expires_at < NOW(6))
+`
+
+type ClaimAICCIntentAnalysisRetryParams struct {
+	LeaseToken null.String `db:"lease_token" json:"lease_token"`
+	SessionID  string      `db:"session_id" json:"session_id"`
+	MessageID  string      `db:"message_id" json:"message_id"`
+}
+
+func (q *Queries) ClaimAICCIntentAnalysisRetry(ctx context.Context, arg ClaimAICCIntentAnalysisRetryParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, claimAICCIntentAnalysisRetry, arg.LeaseToken, arg.SessionID, arg.MessageID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const clearAICCLeadLatestSession = `-- name: ClearAICCLeadLatestSession :exec
 UPDATE aicc_leads
 SET latest_session_id = NULL, updated_at = now()
@@ -2474,6 +2496,7 @@ FROM aicc_intent_analysis_retries r
 JOIN aicc_sessions s ON s.id = r.session_id
 JOIN aicc_agents a ON a.id = s.agent_id
 WHERE r.run_after <= NOW(6)
+  AND r.processed_at IS NULL
 ORDER BY r.run_after ASC, r.session_id ASC
 LIMIT ?
 `
@@ -2670,6 +2693,25 @@ func (q *Queries) LockAICCSessionForUpdate(ctx context.Context, id string) (Aicc
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const markAICCIntentAnalysisRetryProcessed = `-- name: MarkAICCIntentAnalysisRetryProcessed :execrows
+UPDATE aicc_intent_analysis_retries
+SET processed_at = NOW(), lease_token = NULL, lease_expires_at = NULL
+WHERE session_id = ? AND message_id = ?
+`
+
+type MarkAICCIntentAnalysisRetryProcessedParams struct {
+	SessionID string `db:"session_id" json:"session_id"`
+	MessageID string `db:"message_id" json:"message_id"`
+}
+
+func (q *Queries) MarkAICCIntentAnalysisRetryProcessed(ctx context.Context, arg MarkAICCIntentAnalysisRetryProcessedParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markAICCIntentAnalysisRetryProcessed, arg.SessionID, arg.MessageID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const markAICCLeadRead = `-- name: MarkAICCLeadRead :execrows

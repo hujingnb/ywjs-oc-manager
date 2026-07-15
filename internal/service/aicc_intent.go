@@ -174,6 +174,8 @@ func (d *AICCDispatcher) RetryPendingAICCIntentAnalysis(ctx context.Context) err
 	store, ok := d.store.(interface {
 		ListReadyAICCIntentAnalysisRetries(context.Context, int32) ([]sqlc.ListReadyAICCIntentAnalysisRetriesRow, error)
 		DeleteAICCIntentAnalysisRetry(context.Context, sqlc.DeleteAICCIntentAnalysisRetryParams) error
+		ClaimAICCIntentAnalysisRetry(context.Context, sqlc.ClaimAICCIntentAnalysisRetryParams) (int64, error)
+		MarkAICCIntentAnalysisRetryProcessed(context.Context, sqlc.MarkAICCIntentAnalysisRetryProcessedParams) (int64, error)
 		GetAICCMessageByID(context.Context, string) (sqlc.AiccMessage, error)
 		GetAICCSessionContext(context.Context, string) (sqlc.AiccSessionContext, error)
 		ListAICCContextMessages(context.Context, sqlc.ListAICCContextMessagesParams) ([]sqlc.AiccMessage, error)
@@ -187,6 +189,10 @@ func (d *AICCDispatcher) RetryPendingAICCIntentAnalysis(ctx context.Context) err
 	}
 	for _, row := range rows {
 		task := sqlc.AiccMessageTask{MessageID: row.MessageID, SessionID: row.SessionID, AgentID: row.AgentID, OrgID: row.OrgID, AppID: row.AppID}
+		claimed, err := store.ClaimAICCIntentAnalysisRetry(ctx, sqlc.ClaimAICCIntentAnalysisRetryParams{LeaseToken: null.StringFrom(newUUID()), SessionID: row.SessionID, MessageID: row.MessageID})
+		if err != nil || claimed != 1 {
+			continue
+		}
 		visitor, err := store.GetAICCMessageByID(ctx, row.MessageID)
 		if err != nil {
 			d.queueAICCIntentRetry(ctx, task, "retry visitor message read failed")
@@ -199,6 +205,11 @@ func (d *AICCDispatcher) RetryPendingAICCIntentAnalysis(ctx context.Context) err
 		}
 		if _, ready := d.analyzeAICCIntent(ctx, task, visitor, contextData); !ready {
 			d.queueAICCIntentRetry(ctx, task, "intent analysis retry failed")
+			continue
+		}
+		processed, err := store.MarkAICCIntentAnalysisRetryProcessed(ctx, sqlc.MarkAICCIntentAnalysisRetryProcessedParams{SessionID: row.SessionID, MessageID: row.MessageID})
+		if err != nil || processed != 1 {
+			d.queueAICCIntentRetry(ctx, task, "retry completion mark failed")
 			continue
 		}
 		if err := store.DeleteAICCIntentAnalysisRetry(ctx, sqlc.DeleteAICCIntentAnalysisRetryParams{SessionID: row.SessionID, MessageID: row.MessageID}); err != nil {

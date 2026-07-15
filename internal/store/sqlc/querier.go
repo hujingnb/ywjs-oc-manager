@@ -23,6 +23,7 @@ type Querier interface {
 	// 重新扫码），则直接把 status 推到 running，避免概览页长期卡在「待绑定」。
 	AppHasBoundChannelBinding(ctx context.Context, appID string) (bool, error)
 	AttachAICCLeadValuesToLead(ctx context.Context, arg AttachAICCLeadValuesToLeadParams) error
+	ClaimAICCIntentAnalysisRetry(ctx context.Context, arg ClaimAICCIntentAnalysisRetryParams) (int64, error)
 	// 抢占 failed 或超时 creating 的 dataset 创建租约；只有成功更新行的调用方允许访问 RAGFlow 创建远端 dataset。
 	ClaimRAGFlowDatasetCreation(ctx context.Context, arg ClaimRAGFlowDatasetCreationParams) error
 	ClearAICCLeadLatestSession(ctx context.Context, latestSessionID null.String) error
@@ -341,6 +342,7 @@ type Querier interface {
 	LockAICCQueueGovernance(ctx context.Context) (int8, error)
 	LockAICCSessionForUpdate(ctx context.Context, id string) (AiccSession, error)
 	LockJobForUpdate(ctx context.Context, id string) (Job, error)
+	MarkAICCIntentAnalysisRetryProcessed(ctx context.Context, arg MarkAICCIntentAnalysisRetryProcessedParams) (int64, error)
 	MarkAICCLeadRead(ctx context.Context, arg MarkAICCLeadReadParams) (int64, error)
 	MarkAICCSessionConsented(ctx context.Context, sessionToken string) (int64, error)
 	// AICC app 不出现在普通实例列表中；创建时已写入 aicc，此查询用于幂等补标记。

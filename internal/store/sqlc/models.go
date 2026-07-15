@@ -90,13 +90,16 @@ type AiccImage struct {
 }
 
 type AiccIntentAnalysisRetry struct {
-	SessionID string      `db:"session_id" json:"session_id"`
-	MessageID string      `db:"message_id" json:"message_id"`
-	Attempts  int32       `db:"attempts" json:"attempts"`
-	RunAfter  time.Time   `db:"run_after" json:"run_after"`
-	LastError null.String `db:"last_error" json:"last_error"`
-	CreatedAt time.Time   `db:"created_at" json:"created_at"`
-	UpdatedAt time.Time   `db:"updated_at" json:"updated_at"`
+	SessionID      string      `db:"session_id" json:"session_id"`
+	MessageID      string      `db:"message_id" json:"message_id"`
+	Attempts       int32       `db:"attempts" json:"attempts"`
+	RunAfter       time.Time   `db:"run_after" json:"run_after"`
+	LastError      null.String `db:"last_error" json:"last_error"`
+	LeaseToken     null.String `db:"lease_token" json:"lease_token"`
+	LeaseExpiresAt null.Time   `db:"lease_expires_at" json:"lease_expires_at"`
+	ProcessedAt    null.Time   `db:"processed_at" json:"processed_at"`
+	CreatedAt      time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt      time.Time   `db:"updated_at" json:"updated_at"`
 }
 
 type AiccLead struct {
