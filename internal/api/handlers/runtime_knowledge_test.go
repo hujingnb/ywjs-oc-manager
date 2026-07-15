@@ -132,3 +132,27 @@ func TestRuntimeKnowledgeAddRejectsOversizedUpload(t *testing.T) {
 	assert.Contains(t, w.Body.String(), strconv.FormatInt(maxKnowledgeUploadMB, 10))
 	assert.Equal(t, 0, stub.addCalls)
 }
+
+// TestRuntimeKnowledgeAddMapsAICCOperationForbidden 验证 AICC runtime 的写入拒绝在 HTTP 层返回明确的
+// 403 错误码，避免容器把该权限错误误判为可重试的 RAGFlow 异常。
+func TestRuntimeKnowledgeAddMapsAICCOperationForbidden(t *testing.T) {
+	stub := &runtimeKnowledgeServiceStub{addErr: service.ErrAICCOperationForbidden}
+	router := newRuntimeKnowledgeRouter(t, stub)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "report.md")
+	require.NoError(t, err)
+	_, err = part.Write([]byte("# report"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/runtime/knowledge/files", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set(runtimeKnowledgeTokenHeader, "aicc-token")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Equal(t, 1, stub.addCalls)
+	assert.Contains(t, w.Body.String(), "AICC_OPERATION_FORBIDDEN")
+}

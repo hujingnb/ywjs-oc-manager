@@ -94,6 +94,14 @@ func TestRenderDeploymentAICC(t *testing.T) {
 		assert.Nil(t, envByName(&c, "AWS_ACCESS_KEY_ID"), "%s 不得注入 AWS 凭证", c.Name)
 		assert.Nil(t, envByName(&c, "AWS_SECRET_ACCESS_KEY"), "%s 不得注入 AWS 凭证", c.Name)
 		assert.Nil(t, envByName(&c, "AWS_ENDPOINT_URL"), "%s 不得注入 AWS/S3 endpoint", c.Name)
+		assert.Nil(t, envByName(&c, "OC_WEB_PUBLISH_URL"), "%s 不得注入发布能力配置", c.Name)
+		require.NotNil(t, c.SecurityContext, "%s 必须显式限制容器安全上下文", c.Name)
+		require.NotNil(t, c.SecurityContext.ReadOnlyRootFilesystem)
+		assert.True(t, *c.SecurityContext.ReadOnlyRootFilesystem)
+		require.NotNil(t, c.SecurityContext.AllowPrivilegeEscalation)
+		assert.False(t, *c.SecurityContext.AllowPrivilegeEscalation)
+		require.NotNil(t, c.SecurityContext.Capabilities)
+		assert.Equal(t, []corev1.Capability{"ALL"}, c.SecurityContext.Capabilities.Drop)
 	}
 	assertGolden(t, "deployment-aicc.golden.yaml", dep)
 }

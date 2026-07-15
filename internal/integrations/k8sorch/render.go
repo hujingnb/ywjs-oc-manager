@@ -172,6 +172,24 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 		// AICC bootstrap 只生成 hermes 消费的输入配置，不恢复标准应用的数据目录。
 		initContainer.VolumeMounts = []corev1.VolumeMount{inputMount}
 	}
+	hermesEnv := append([]corev1.EnvVar{
+		{Name: "HERMES_HOME", Value: "/opt/data"},
+		{Name: "API_SERVER_ENABLED", Value: "true"},
+		{Name: "API_SERVER_KEY", ValueFrom: ctrlTokenEnv.ValueFrom},
+	}, proxyEnv...)
+	// 客服容器不接入消息渠道，也不具备发布能力；模型、知识 API 与网页后端配置均由
+	// oc-bootstrap 生成的只读运行时配置提供，避免以环境变量横向暴露通用应用能力。
+	if !domain.IsAICCAppType(spec.AppType) {
+		hermesEnv = append(append(append(hermesEnv, feishuOptionalEnv(spec.AppID)...), workWechatOptionalEnv(spec.AppID)...), dingtalkOptionalEnv(spec.AppID)...)
+	}
+	ocOpsEnv := []corev1.EnvVar{
+		{Name: "OC_OPS_TOKEN", ValueFrom: ctrlTokenEnv.ValueFrom},
+		{Name: "API_SERVER_KEY", ValueFrom: ctrlTokenEnv.ValueFrom},
+		{Name: "PYTHONPATH", Value: "/usr/local/lib"},
+	}
+	if !domain.IsAICCAppType(spec.AppType) {
+		ocOpsEnv = append(ocOpsEnv, proxyEnv...)
+	}
 	containers := []corev1.Container{
 		{
 			// hermes：主业务容器，负责 AI 网关逻辑，资源配额受限。
@@ -183,13 +201,8 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 			// 拒绝启动（含 loopback-only 绑定）。复用 per-app control-token 作为 key——
 			// api_server 仅绑 127.0.0.1、只有同 pod 内 oc-ops 可达，per-app 密钥安全足够；
 			// oc-ops 容器注入同一 key（见下）后即可鉴权调用 /api/sessions。
-			// 飞书三条 env 永久注入 hermes 容器；未绑定时 Secret 无对应 key，optional=true 使
-			// env 不注入，引擎 getenv 为空 → 飞书平台不启用。Deployment 模板永不因绑定变化。
-			Env: append(append(append(append([]corev1.EnvVar{
-				{Name: "HERMES_HOME", Value: "/opt/data"},
-				{Name: "API_SERVER_ENABLED", Value: "true"},
-				{Name: "API_SERVER_KEY", ValueFrom: ctrlTokenEnv.ValueFrom},
-			}, feishuOptionalEnv(spec.AppID)...), workWechatOptionalEnv(spec.AppID)...), dingtalkOptionalEnv(spec.AppID)...), proxyEnv...),
+			// 标准应用才挂载飞书、企业微信和钉钉渠道 env；AICC 专用镜像不接收这些通用渠道能力。
+			Env:          hermesEnv,
 			VolumeMounts: []corev1.VolumeMount{inputMountRO, dataMount},
 			Resources:    corev1.ResourceRequirements{Requests: reqs, Limits: lims},
 			// readinessProbe：exec hermes gateway status，验证网关真正就绪。
@@ -221,11 +234,7 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 			// API_SERVER_KEY 与 hermes 容器同源（control-token），让 oc-ops 调
 			// hermes api_server /api/sessions 时带 Bearer 鉴权（conversation._api_server_key
 			// 优先读此 env）；两容器同 key 才能互通。
-			Env: append([]corev1.EnvVar{
-				{Name: "OC_OPS_TOKEN", ValueFrom: ctrlTokenEnv.ValueFrom},
-				{Name: "API_SERVER_KEY", ValueFrom: ctrlTokenEnv.ValueFrom},
-				{Name: "PYTHONPATH", Value: "/usr/local/lib"},
-			}, proxyEnv...),
+			Env:   ocOpsEnv,
 			Ports: []corev1.ContainerPort{{ContainerPort: 8080}},
 			// readinessProbe：healthz 仅验证同 Pod api_server 的轻量会话读取，
 			// 不触发模型或渠道请求。TCP listen 早于 api_server 状态恢复，若只探端口，
@@ -271,6 +280,15 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 		grace := int64(90)
 		terminationGracePeriodSeconds = &grace
 		for i := range containers {
+			// AICC 运行时不需要提权或写入镜像根文件系统；data / oc-input 均为显式 emptyDir，
+			// capability broker 之外的文件与进程操作在容器层进一步收敛。
+			readOnlyRootFilesystem := true
+			allowPrivilegeEscalation := false
+			containers[i].SecurityContext = &corev1.SecurityContext{
+				ReadOnlyRootFilesystem:   &readOnlyRootFilesystem,
+				AllowPrivilegeEscalation: &allowPrivilegeEscalation,
+				Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+			}
 			if containers[i].Name == "oc-ops" {
 				// HPA 的 CPU/内存 utilization 要求 Pod 内所有常驻容器都有对应 request；
 				// oc-ops 为轻量控制 sidecar，使用固定小 request，避免放大客服主进程配额。
@@ -282,6 +300,14 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 			// 不调用容器内未定义的业务 drain 命令；仅等待 endpoints 摘除传播，
 			// 随后由 Kubernetes 在 90 秒终止窗口内发送 SIGTERM 并回收 Pod。
 			containers[i].Lifecycle = &corev1.Lifecycle{PreStop: &corev1.LifecycleHandler{Sleep: &corev1.SleepAction{Seconds: 10}}}
+		}
+		// initContainer 同样不需要写镜像根目录或 Linux capabilities，只能把 bootstrap 输出写入 oc-input。
+		readOnlyRootFilesystem := true
+		allowPrivilegeEscalation := false
+		initContainer.SecurityContext = &corev1.SecurityContext{
+			ReadOnlyRootFilesystem:   &readOnlyRootFilesystem,
+			AllowPrivilegeEscalation: &allowPrivilegeEscalation,
+			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 		}
 	}
 	dep := &appsv1.Deployment{

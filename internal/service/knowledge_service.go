@@ -640,6 +640,11 @@ func (s *KnowledgeService) RuntimeAddFile(ctx context.Context, appToken, filenam
 	if err != nil {
 		return KnowledgeDocumentResult{}, err
 	}
+	// AICC 容器不保存运行时工作目录，客服能力仅限只读知识问答；必须在访问配额、dataset
+	// 与 RAGFlow 前阻断写入，避免伪造工具调用绕过镜像侧 capability broker。
+	if domain.IsAICCAppType(domain.AppType(app.AppType)) {
+		return KnowledgeDocumentResult{}, ErrAICCOperationForbidden
+	}
 	if err := s.ensureKnowledgeQuotaAvailable(ctx, "app", app.OrgID, app.ID, app.KnowledgeQuotaBytes, size); err != nil {
 		return KnowledgeDocumentResult{}, err
 	}
