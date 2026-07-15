@@ -109,6 +109,13 @@ describe('AICCLeadsPage', () => {
         { id: 'msg-1', direction: 'visitor', text: '我想了解报价', created_at: '2026-07-11T10:00:00Z' },
         { id: 'msg-2', direction: 'assistant', text: '您好，请问需要哪个版本？', created_at: '2026-07-11T10:00:01Z' },
       ],
+      intent: {
+        intent_level: 'high',
+        fields: { budget: '预算 10 万' },
+        confidence: { budget: 0.9 },
+        evidence: { budget: 'msg-1' },
+        invite_status: 'invited',
+      },
     }
     queryState.selectedSessionId = undefined
     queryState.markRead.mockReset()
@@ -129,6 +136,8 @@ describe('AICCLeadsPage', () => {
     expect(wrapper.text()).toContain('我想了解报价')
     expect(wrapper.text()).toContain('您好，请问需要哪个版本？')
     expect(wrapper.text()).toContain('联系电话')
+    expect(wrapper.text()).toContain('高意向')
+    expect(wrapper.find('.intent-fields button').text()).toContain('预算 10 万')
   })
 
   // 场景：未留联系方式的高意向访客仍应作为匿名线索展示，运营可从对话依据回看判断。

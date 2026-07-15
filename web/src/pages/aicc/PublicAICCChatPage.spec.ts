@@ -615,8 +615,33 @@ describe('PublicAICCChatPage', () => {
     expect(wrapper.find('.resolution-card').exists()).toBe(false)
   })
 
-  // 场景：访客主动新建对话时只清除当前会话，下一次发送才懒创建新 session，避免空会话。
-  it('clears the current session when starting a new conversation', async () => {
+  // 场景：第二条非拒答回复被服务端标记为 ask_resolution 后，“继续咨询”只收起卡片，输入区仍能发送下一轮消息。
+  it('hides the second-response resolution card and keeps the composer usable', async () => {
+    apiState.sendMessage
+      .mockResolvedValueOnce({ message_id: 'message-1', status: 'completed', text: '第一条回复' })
+      .mockResolvedValueOnce({ message_id: 'message-2', status: 'completed', text: '第二条回复', next_action: 'ask_resolution' })
+      .mockResolvedValueOnce({ message_id: 'message-3', status: 'completed', text: '继续答复' })
+    const wrapper = mountPublicChat()
+    await flushPromises()
+    await wrapper.find('textarea').setValue('第一个问题')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+    await wrapper.find('textarea').setValue('第二个问题')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.find('.resolution-card').exists()).toBe(true)
+    await wrapper.findAll('button').find(button => button.text().includes('继续咨询'))?.trigger('click')
+    expect(wrapper.find('.resolution-card').exists()).toBe(false)
+    expect(wrapper.find('textarea').attributes('disabled')).toBeUndefined()
+    await wrapper.find('textarea').setValue('补充问题')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+    expect(apiState.sendMessage).toHaveBeenLastCalledWith('session-token', expect.objectContaining({ text: '补充问题' }))
+  })
+
+  // 场景：顶部次要操作必须结束本次咨询，清除续接凭证并禁止继续发送，而不是静默新建会话。
+  it('ends the current consultation instead of starting a new conversation', async () => {
     apiState.readStoredSession.mockReturnValue('stored-session-token')
     const wrapper = mountPublicChat()
     await flushPromises()
@@ -627,21 +652,15 @@ describe('PublicAICCChatPage', () => {
     await nextTick()
     expect(wrapper.text()).toContain('旧会话消息')
 
-    await wrapper.findAll('button').find(button => button.text().includes('新建对话'))?.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('结束本次咨询'))?.trigger('click')
     await nextTick()
 
     expect(apiState.clearStoredSession).toHaveBeenCalledWith('public-token', 'web_link')
     expect(apiState.createSession).not.toHaveBeenCalled()
     expect(wrapper.text()).not.toContain('旧会话消息')
-    expect(wrapper.text()).toContain('您好，请问有什么可以帮您？')
-
-    await wrapper.find('textarea').setValue('新会话消息')
-    await wrapper.find('form.composer').trigger('submit')
-    await flushPromises()
-    await nextTick()
-
-    expect(apiState.createSession).toHaveBeenCalledTimes(1)
-    expect(apiState.sendMessage).toHaveBeenLastCalledWith('session-token', expect.objectContaining({ client_message_id: expect.any(String), text: '新会话消息', image_file_id: undefined }))
+    expect(apiState.createSession).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('本次咨询已结束')
+    expect(wrapper.find('textarea').attributes('disabled')).toBeDefined()
   })
 
   // 场景：选择非图片文件时前端立即提示，不能创建图片预览或调用上传接口。

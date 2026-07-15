@@ -73,13 +73,22 @@
             <span>{{ t('aicc.leads.noConversationDesc') }}</span>
           </div>
           <div v-else class="transcript-stack">
+            <section v-if="sessionIntent" class="intent-profile" :aria-label="t('aicc.leads.intentProfileLabel')">
+              <strong>{{ t('aicc.leads.intentProfileTitle') }} · {{ intentLevelLabel(sessionIntent.intent_level) }}</strong>
+              <div v-if="Object.keys(sessionIntent.fields).length" class="intent-fields">
+                <button v-for="(value, key) in sessionIntent.fields" :key="key" type="button" @click="focusEvidence(sessionIntent.evidence[key])">
+                  {{ key }}：{{ value }}
+                </button>
+              </div>
+              <small v-else>{{ t('aicc.leads.intentNoFields') }}</small>
+            </section>
             <div v-if="transcriptLeadValues.length" class="drawer-lead-values">
               <span v-for="value in transcriptLeadValues" :key="value.field_key">
                 <strong>{{ value.label }}</strong>
                 <small>{{ value.value }}</small>
               </span>
             </div>
-            <article v-for="message in transcriptMessages" :key="message.id" class="message-item" :class="message.direction">
+            <article v-for="message in transcriptMessages" :key="message.id" class="message-item" :class="message.direction" :data-message-id="message.id">
               <div class="message-meta">
                 <span>{{ roleLabel(message.direction) }}</span>
                 <small>{{ formatDate(message.created_at) }}</small>
@@ -132,6 +141,7 @@ const leads = computed(() => leadsQuery.data.value ?? [])
 const detailQuery = useAICCSessionQuery(selectedSessionId)
 const transcriptMessages = computed(() => detailQuery.data.value?.messages ?? [])
 const transcriptLeadValues = computed(() => detailQuery.data.value?.lead_values ?? selectedLead.value?.values ?? [])
+const sessionIntent = computed(() => detailQuery.data.value?.intent)
 
 async function markRead(leadId: string) {
   activeLeadId.value = leadId
@@ -203,6 +213,19 @@ function roleLabel(role?: string) {
   if (role === 'assistant') return t('aicc.sessions.roles.assistant')
   if (role === 'system') return t('aicc.sessions.roles.system')
   return t('aicc.sessions.roles.visitor')
+}
+
+// focusEvidence 让运营人员从字段直接跳回对应访客原话，避免把模型画像当成不可核验的结论。
+function focusEvidence(messageID?: string) {
+  if (!messageID) return
+  // 不拼接 CSS 选择器，避免消息 ID 中的特殊字符影响定位；data 属性精确比较即可。
+  Array.from(document.querySelectorAll<HTMLElement>('[data-message-id]'))
+    .find(element => element.dataset.messageId === messageID)
+    ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+function intentLevelLabel(level?: string) {
+  return t(`aicc.leads.intentLevels.${level === 'high' || level === 'medium' || level === 'low' ? level : 'unknown'}`)
 }
 </script>
 
@@ -287,6 +310,29 @@ function roleLabel(role?: string) {
   margin-left: 4px;
   color: var(--color-warning-text);
   font-style: normal;
+}
+
+.intent-profile {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--color-brand);
+  border-radius: 8px;
+  background: var(--color-surface-muted);
+}
+
+.intent-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.intent-fields button {
+  border: 0;
+  border-bottom: 1px dashed var(--color-brand);
+  color: var(--color-text-primary);
+  background: transparent;
+  cursor: pointer;
 }
 
 .lead-main small,

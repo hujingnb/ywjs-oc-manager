@@ -13,9 +13,9 @@
           <n-tag :type="sessionToken ? 'success' : 'default'" :bordered="false">
             {{ sessionToken ? t('aicc.publicChat.online') : t('aicc.publicChat.ready') }}
           </n-tag>
-          <n-button size="small" secondary :disabled="isSending" @click="startNewConversation">
+          <n-button size="small" secondary :disabled="isSending" @click="endConversation">
             <template #icon><Plus :size="14" /></template>
-            {{ t('aicc.publicChat.newConversation') }}
+            {{ t('aicc.publicChat.endConversation') }}
           </n-button>
         </div>
       </header>
@@ -202,6 +202,7 @@ const leadValues = ref<Record<string, string>>({})
 const pendingImage = ref<PendingImage | null>(null)
 const resolutionStatus = ref<'resolved' | 'unresolved' | 'unknown' | string>('unknown')
 const resolutionCardDismissed = ref(false)
+const conversationEnded = ref(false)
 const messageListEl = ref<HTMLElement | null>(null)
 const fileInputEl = ref<HTMLInputElement | null>(null)
 const pendingPublicMessages = new Map<string, PendingPublicMessage>()
@@ -220,7 +221,7 @@ const lastAssistantMessage = computed(() => [...messages.value].reverse().find(m
 // 留资只在服务端明确给出 offer_lead 后展示，不能在对话开始前阻塞访客输入。
 const showLeadForm = computed(() => lastAssistantMessage.value?.nextAction === 'offer_lead' && leadFields.value.length > 0 && !leadComplete.value && !needsConsent.value)
 const showResolutionCard = computed(() => lastAssistantMessage.value?.nextAction === 'ask_resolution' && !resolutionCardDismissed.value && !needsConsent.value && resolutionStatus.value === 'unknown')
-const canSend = computed(() => Boolean(config.value) && !needsConsent.value && !isSending.value)
+const canSend = computed(() => Boolean(config.value) && !needsConsent.value && !isSending.value && !conversationEnded.value)
 const canSubmit = computed(() => canSend.value && (draft.value.trim().length > 0 || Boolean(pendingImage.value)))
 const hasVisitorMessage = computed(() => messages.value.some(message => message.role === 'visitor'))
 // notice 模式的隐私说明只用于进入页面时告知访客，访客开始对话后隐藏以减少输入区占用。
@@ -471,7 +472,8 @@ async function ensureSessionReadyForSend(): Promise<string> {
   return sessionToken.value
 }
 
-function startNewConversation() {
+// endConversation 结束当前咨询并删除浏览器续接凭证；它不自动创建下一会话，避免顶部次要操作被误解为新建对话。
+function endConversation() {
   clearAllMessagePolls()
   clearAICCPublicStoredSessionToken(publicToken.value, publicChannel.value)
   sessionToken.value = ''
@@ -481,12 +483,13 @@ function startNewConversation() {
   resolutionBusy.value = ''
   resolutionStatus.value = 'unknown'
   resolutionCardDismissed.value = false
+  conversationEnded.value = true
   deferredLeadValues.value = null
   leadValues.value = Object.fromEntries(leadFields.value.map(field => [field.field_key, '']))
   leadComplete.value = !leadFields.value.some(field => field.required)
   hasConsent.value = config.value?.privacy_mode !== 'consent_required'
   clearPendingImage()
-  resetMessagesToGreeting()
+  messages.value = [{ id: crypto.randomUUID(), role: 'assistant', text: t('aicc.publicChat.conversationEnded'), sentAt: new Date().toISOString() }]
 }
 
 function resetMessagesToGreeting() {

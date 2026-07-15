@@ -179,6 +179,8 @@ type AICCSessionDetailResult struct {
 	LeadValues []AICCLeadValueResult `json:"lead_values"`
 	// Messages 是会话消息镜像。
 	Messages []AICCMessageResult `json:"messages"`
+	// Intent 是会话意向画像及逐字段访客原话证据，供运营在不要求留资的前提下判断跟进价值。
+	Intent *AICCSessionIntentResult `json:"intent,omitempty"`
 }
 
 // AICCSessionListOptions 是管理端会话列表筛选条件。

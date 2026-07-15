@@ -354,6 +354,17 @@ export interface AICCSessionDetail {
   lead_values?: AICCLeadValue[]
   // 会话消息列表。
   messages: AICCMessage[]
+  // 由访客原话证据约束的会话意向画像；无分析结果时省略。
+  intent?: AICCSessionIntent
+}
+
+// AICCSessionIntent 是运营侧查看的会话意向画像，evidence 的值为可定位的访客消息 ID。
+export interface AICCSessionIntent {
+  intent_level: 'low' | 'medium' | 'high' | string
+  fields: Record<string, string>
+  confidence: Record<string, number>
+  evidence: Record<string, string>
+  invite_status: string
 }
 
 // AICCLeadValue 是访客提交的单个自定义留资字段值。

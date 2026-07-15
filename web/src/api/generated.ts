@@ -16682,11 +16682,31 @@ export interface components {
             url?: string;
         };
         "service.AICCSessionDetailResult": {
+            intent?: components["schemas"]["service.AICCSessionIntentResult"];
             /** @description LeadValues 是本会话已提交的留资字段值，便于运营结合对话上下文回看。 */
             lead_values?: components["schemas"]["service.AICCLeadValueResult"][];
             /** @description Messages 是会话消息镜像。 */
             messages?: components["schemas"]["service.AICCMessageResult"][];
             session?: components["schemas"]["service.AICCSessionResult"];
+        };
+        /** @description Intent 是会话意向画像及逐字段访客原话证据，供运营在不要求留资的前提下判断跟进价值。 */
+        "service.AICCSessionIntentResult": {
+            /** @description Confidence 表示各字段的分析置信度，取值范围为 0 到 1。 */
+            confidence?: {
+                [key: string]: number;
+            };
+            /** @description Evidence 是字段在访客原话中的直接证据，供运营回溯核验。 */
+            evidence?: {
+                [key: string]: string;
+            };
+            /** @description Fields 是审核白名单内的业务意向字段。 */
+            fields?: {
+                [key: string]: string;
+            };
+            /** @description IntentLevel 是 low、medium 或 high 三档意向等级。 */
+            intent_level?: string;
+            /** @description InviteStatus 表示 not_invited、invited、declined 或 submitted。 */
+            invite_status?: string;
         };
         "service.AICCSessionListResult": {
             /** @description Limit 是本次查询实际使用的分页条数。 */

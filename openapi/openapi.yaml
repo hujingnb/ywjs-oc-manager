@@ -1924,6 +1924,8 @@ components:
       type: object
     service.AICCSessionDetailResult:
       properties:
+        intent:
+          $ref: '#/components/schemas/service.AICCSessionIntentResult'
         lead_values:
           description: LeadValues 是本会话已提交的留资字段值，便于运营结合对话上下文回看。
           items:
@@ -1938,6 +1940,31 @@ components:
           uniqueItems: false
         session:
           $ref: '#/components/schemas/service.AICCSessionResult'
+      type: object
+    service.AICCSessionIntentResult:
+      description: Intent 是会话意向画像及逐字段访客原话证据，供运营在不要求留资的前提下判断跟进价值。
+      properties:
+        confidence:
+          additionalProperties:
+            type: number
+          description: Confidence 表示各字段的分析置信度，取值范围为 0 到 1。
+          type: object
+        evidence:
+          additionalProperties:
+            type: string
+          description: Evidence 是字段在访客原话中的直接证据，供运营回溯核验。
+          type: object
+        fields:
+          additionalProperties:
+            type: string
+          description: Fields 是审核白名单内的业务意向字段。
+          type: object
+        intent_level:
+          description: IntentLevel 是 low、medium 或 high 三档意向等级。
+          type: string
+        invite_status:
+          description: InviteStatus 表示 not_invited、invited、declined 或 submitted。
+          type: string
       type: object
     service.AICCSessionListResult:
       properties:
