@@ -277,8 +277,16 @@ async function submitLeadForm() {
   leadBusy.value = true
   errorMessage.value = ''
   try {
-    // 留资字段先保存在浏览器内存中，等首次发送消息创建 session 后再提交。
-    deferredLeadValues.value = values
+    // 高意向卡片只会出现在已有会话的助手回复之后，必须立刻提交，不能仅在浏览器内存里标记完成。
+    // 保留无 session 分支兼容未来其他入口在发送前主动展示留资表单的场景。
+    if (sessionToken.value) {
+      const result = await submitAICCPublicLeadValues(sessionToken.value, values)
+      if (result.lead_status !== 'complete') {
+        throw new Error(t('aicc.publicChat.missingRequired'))
+      }
+    } else {
+      deferredLeadValues.value = values
+    }
     leadComplete.value = true
   } catch (err) {
     errorMessage.value = friendlyAICCError(err)

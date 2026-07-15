@@ -578,6 +578,50 @@ describe('PublicAICCChatPage', () => {
     expect(wrapper.find('textarea').attributes('disabled')).toBeUndefined()
   })
 
+  // 场景：高意向留资卡已有 session 时，访客提交后必须立即写入服务端；失败时保留卡片供访客修正重试。
+  it('persists offered lead values immediately and keeps the form visible on failure', async () => {
+    apiState.fetchConfig.mockResolvedValue({
+      name: '售前接待', greeting: '您好', privacy_mode: 'notice', lead_fields: [
+        { field_key: 'phone', label: '联系电话', field_type: 'phone', required: true },
+      ],
+    })
+    apiState.sendMessage.mockResolvedValue({ message_id: 'message-1', status: 'completed', text: '可以为您安排演示', next_action: 'offer_lead' })
+    apiState.submitLeadValues.mockResolvedValue({ lead_status: 'complete' })
+    const wrapper = mountPublicChat()
+    await flushPromises()
+    await wrapper.find('textarea').setValue('想预约演示')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+
+    await wrapper.find('.lead-gate input').setValue('13800138000')
+    await wrapper.find('.lead-gate').trigger('submit')
+    await flushPromises()
+    expect(apiState.submitLeadValues).toHaveBeenCalledWith('session-token', { phone: '13800138000' })
+    expect(wrapper.find('.lead-gate').exists()).toBe(false)
+
+  })
+
+  // 场景：留资接口失败时不能假装留资完成，卡片必须继续可见以便访客重试。
+  it('keeps an offered lead form visible when persistence fails', async () => {
+    apiState.fetchConfig.mockResolvedValue({
+      name: '售前接待', greeting: '您好', privacy_mode: 'notice', lead_fields: [
+        { field_key: 'phone', label: '联系电话', field_type: 'phone', required: true },
+      ],
+    })
+    apiState.submitLeadValues.mockRejectedValueOnce(new Error('保存失败'))
+    apiState.sendMessage.mockResolvedValue({ message_id: 'message-1', status: 'completed', text: '邀请留资', next_action: 'offer_lead' })
+    const wrapper = mountPublicChat()
+    await flushPromises()
+    await wrapper.find('textarea').setValue('继续咨询')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+    await wrapper.find('.lead-gate input').setValue('13900139000')
+    await wrapper.find('.lead-gate').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('.lead-gate').exists()).toBe(true)
+    expect(wrapper.text()).toContain('保存失败')
+  })
+
   // 场景：公开网络补充内容必须贴上“未经企业确认”标签，避免访客误以为是企业承诺。
   it('labels unconfirmed web sources on an assistant reply', async () => {
     apiState.sendMessage.mockResolvedValue({
