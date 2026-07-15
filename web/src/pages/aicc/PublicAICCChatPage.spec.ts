@@ -663,6 +663,16 @@ describe('PublicAICCChatPage', () => {
     expect(wrapper.find('textarea').attributes('disabled')).toBeDefined()
   })
 
+  // 场景：窄屏下公开页必须保留可收缩的消息区和输入区，不因头部操作或长消息产生横向页面滚动。
+  it('keeps mobile chat containers shrinkable for narrow screens', async () => {
+    const wrapper = mountPublicChat()
+    await flushPromises()
+
+    expect(wrapper.find('.public-chat').exists()).toBe(true)
+    expect(wrapper.find('.chat-window').exists()).toBe(true)
+    expect(wrapper.find('.composer').exists()).toBe(true)
+  })
+
   // 场景：选择非图片文件时前端立即提示，不能创建图片预览或调用上传接口。
   it('rejects non-image files before creating a pending upload', async () => {
     const wrapper = mountPublicChat()

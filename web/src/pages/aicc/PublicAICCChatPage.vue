@@ -684,6 +684,7 @@ async function scrollToBottom() {
 .public-chat {
   min-height: 100vh;
   padding: 24px;
+  overflow-x: hidden;
   background:
     linear-gradient(120deg, rgba(17, 24, 39, 0.92), rgba(31, 41, 55, 0.72)),
     radial-gradient(circle at top right, rgba(255, 106, 0, 0.22), transparent 30%),
@@ -705,6 +706,7 @@ async function scrollToBottom() {
 
 .chat-header {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 12px;
   padding: 16px 18px;
@@ -739,6 +741,7 @@ async function scrollToBottom() {
 .header-actions {
   display: flex;
   flex: 0 0 auto;
+  min-width: 0;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
@@ -997,6 +1000,7 @@ async function scrollToBottom() {
 
   .header-actions {
     max-width: 96px;
+    overflow: hidden;
   }
 
   .message-list,
