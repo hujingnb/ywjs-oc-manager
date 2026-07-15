@@ -1,7 +1,20 @@
 # AICC 实现反查覆盖表
 
-- 验证基线：`1726141080159c3e3b8842b7b72370095a583b1e`
+- 历史基线：`1726141080159c3e3b8842b7b72370095a583b1e`
+- 历史表范围：下表原始条目用于记录基线时的 AICC 业务面，不等同于本轮客服能力实施状态；其中 `BASELINE-FAIL` 仅表示 Task 1 当时的预期差异，当前结果以本节“当前客服能力变更”与需求矩阵为准。
 - 规则：每个当前分支相对 `master` 的 AICC 实现入口必须映射到需求矩阵；生成的 sqlc、OpenAPI 与前端类型跟随其源文件验证。
+
+## 当前客服能力变更（2026-07-16）
+
+| 实现入口 | 本轮职责 | 需求矩阵 ID | 当前证据 | 状态 |
+|---|---|---|---|---|
+| `runtime/hermes/hermes-aicc/aicc_tools/*`、`patches/patch_aicc_tool_policy.py`、`lib/manifest.py`、`Dockerfile` | 不可变工具白名单、伪造调用拒绝、受控知识工具与客服镜像能力裁剪 | AICC-CAP-001..004 | `pytest -q runtime/hermes/hermes-aicc/tests/test_render_config_yaml.py runtime/hermes/hermes-aicc/tests/test_aicc_tool_policy.py`：23 passed | PASS |
+| `internal/config/platform_prompt.go`、`platform_prompt_test.go` | 审核客服 Skill 白名单与通用能力回退禁止 | AICC-CAP-002 | `go test ./internal/config -run TestPlatformPrompts_Invariants -count=1` | PASS |
+| `internal/service/aicc_{context,response,channel,intent,dispatcher,public_chat}.go` 及测试、`internal/migrations/000037_*`、`000038_*` | 无状态上下文、来源白名单、结构化动作、意向证据/重试、会话渠道与一次邀约 | AICC-SRC-*、AICC-INT-*、AICC-STATE-*、AICC-BOOT-001、AICC-CH-* | `go test ./internal/service -run 'TestAICCDispatcherBuildsTurnFromDatabaseContext|TestEnableLocalAICCIntentFailureOnce|TestAICCIntentRetryLeaseBehavior' -count=1` | PASS（单元范围） |
+| `cmd/server/main.go`、`internal/service/aicc_dispatcher.go` | 仅 local 可用的一次性意向失败/暂停控制面 | AICC-INT-001..003 | 上述 Go 测试；Chrome 实跑仍依赖 RAGFlow | PASS（控制面单测）；E2E BLOCKED |
+| `web/src/pages/aicc/PublicAICCChatPage.vue`、`PublicAICCChatPage.spec.ts` | 公开来源 HTTPS 安全外链、当前轮图片和结构化交互展示 | AICC-SRC-003、AICC-CH-002 | `npm test -- --run src/pages/aicc/PublicAICCChatPage.spec.ts`：31 passed | PASS |
+| `web/playwright.config.ts`、`web/tests/e2e/aicc-conversation-*.spec.ts`、`helpers.ts` | Chrome Stable 挂件、隔离、状态、意向、重启、故障与来源验收 | AICC-E2E-001..003 | `npx playwright test --list --project=chrome-headed ...`：34 tests；真实运行时受 RAGFlow 与专用 fixture 阻塞 | BLOCKED |
+| `docs/testing/aicc-conversation-{requirement-matrix,validation-report}.md` | 当前需求、证据、历史基线与阻塞原因 | 全部 AICC-CAP/SRC/INT/STATE/BOOT/CH/E2E | 本文档与验收报告 | PASS（文档一致性） |
 
 | 实现入口 | 职责 | 需求矩阵 ID | 自动化与浏览器场景 | 状态 |
 |---|---|---|---|---|
@@ -22,9 +35,9 @@
 | `internal/store/queries/aicc.sql`、`industry_knowledge.sql`、`organizations.sql` 及 `internal/store/sqlc/*` | AICC、行业库和企业查询持久化 | AICC-ORG-01..02、AICC-SESSION-06..07、AICC-LEAD-03、AICC-KB-03、AICC-ANALYTICS-01..02 | SQL/store 单测、迁移与浏览器闭环 | BLOCKED |
 | `internal/migrations/000031_aicc_org_industry_knowledge.*.sql` | 行业知识库企业授权 schema 变更 | AICC-KB-03、AICC-UPGRADE-01、AICC-ROLLBACK-01 | migration 单测、升级回滚演练 | BLOCKED |
 | `runtime/hermes/hermes-v2026.7.1/oc-kb.py`、`renderer/render_skills.py`、测试 | 公开客服知识检索注入与运行时渲染 | AICC-KB-01..05、AICC-CHAT-01..03、AICC-FAULT-01 | Python 单测、真实知识问答与故障恢复 | BLOCKED |
-| `internal/config/platform_prompt.go`、`platform_prompt_test.go` | AICC 平台规则与客服 Skill 发现边界 | AICC-CAP-002、AICC-SRC-001..004、AICC-INT-001 | Go 失败基线；后续平台提示词单测 | BASELINE-FAIL |
-| `runtime/hermes/hermes-aicc/renderer/render_config_yaml.py`、`tests/test_render_config_yaml.py` | 客服镜像的终端、审批与跨会话记忆裁剪 | AICC-CAP-001、AICC-BOOT-001..004 | Python 失败基线；后续 renderer 契约测试 | BASELINE-FAIL |
-| `docs/testing/aicc-conversation-requirement-matrix.md` | 客服能力、来源、意向、状态、启动、渠道与 Chrome 验收的唯一映射 | AICC-CAP-*、AICC-SRC-*、AICC-INT-*、AICC-STATE-*、AICC-BOOT-*、AICC-CH-*、AICC-E2E-* | 需求矩阵审查、各任务自动化和 Chrome Stable 旅程 | IN-PROGRESS |
+| `internal/config/platform_prompt.go`、`platform_prompt_test.go` | AICC 平台规则与客服 Skill 发现边界 | AICC-CAP-002、AICC-SRC-001..004、AICC-INT-001 | 历史失败基线；当前见上方 PASS 证据 | HISTORICAL-BASELINE |
+| `runtime/hermes/hermes-aicc/renderer/render_config_yaml.py`、`tests/test_render_config_yaml.py` | 客服镜像的终端、审批与跨会话记忆裁剪 | AICC-CAP-001、AICC-BOOT-001..004 | 历史失败基线；当前见上方 PASS 证据 | HISTORICAL-BASELINE |
+| `docs/testing/aicc-conversation-requirement-matrix.md` | 客服能力、来源、意向、状态、启动、渠道与 Chrome 验收的唯一映射 | AICC-CAP-*、AICC-SRC-*、AICC-INT-*、AICC-STATE-*、AICC-BOOT-*、AICC-CH-*、AICC-E2E-* | 当前矩阵与验收报告；E2E 受依赖阻塞 | BLOCKED（E2E）；PASS（能力映射） |
 | `web/public/aicc-widget.js` | 网页挂件、来源页与域名白名单 | AICC-DELIVERY-02..03、AICC-SESSION-01..02 | Playwright 掛件与未授权域名场景 | BLOCKED |
 | `web/src/domain/aicc.ts`、`aicc.spec.ts`、`api/hooks/useAICC.ts` | 前端领域模型与 AICC API 调用 | AICC-AGENT-01..02、AICC-SESSION-01..07、AICC-STATUS-01..02、AICC-LEAD-01..03 | Vitest、Playwright 主流程 | BLOCKED |
 | `web/src/layouts/AICCConsole*.vue`、`aiccConsoleContext.ts` 及测试 | 工作台路由、顶部智能体切换与模块导航 | AICC-ENTRY-01..03、AICC-AGENT-02、AICC-I18N-01、AICC-MOBILE-01 | Vitest、四角色桌面/移动浏览器 | BLOCKED |
