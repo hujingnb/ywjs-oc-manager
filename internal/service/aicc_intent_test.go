@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"oc-manager/internal/store/sqlc"
 )
 
 // TestParseAICCIntentAnalysis 验证低中高意向只采纳当前访客原话可证明的白名单字段。
@@ -64,4 +66,25 @@ func TestNextAICCInviteStatus(t *testing.T) {
 			assert.Equal(t, testCase.want, nextAICCInviteStatus(testCase.level, testCase.previous))
 		})
 	}
+}
+
+// TestAICCSessionVisitorTextAndMergeFields 验证分析输入包含同一会话历史访客原话，且有证据的历史字段不会被新轮覆盖丢失。
+func TestAICCSessionVisitorTextAndMergeFields(t *testing.T) {
+	conversation := AICCConversationContext{Messages: []AICCContextMessage{
+		// 历史预算是有效访客证据。
+		{Direction: "visitor", Text: "预算 10 万"},
+		// 助手回答不能成为意向证据。
+		{Direction: "assistant", Text: "可以安排演示"},
+	}}
+	visitorText := aiccSessionVisitorText(conversation, "下个月上线")
+	assert.Equal(t, "预算 10 万\n下个月上线", visitorText)
+	analysis := aiccIntentAnalysis{Fields: map[string]string{"timeline": "下个月上线"}, Evidence: map[string]string{"timeline": "下个月上线"}}
+	mergeAICCIntentFields(&analysis, sqlc.AiccSessionIntent{ID: "intent", FieldsJson: []byte(`{"budget":"预算 10 万"}`), EvidenceJson: []byte(`{"budget":"预算 10 万"}`)}, visitorText)
+	assert.Equal(t, map[string]string{"budget": "预算 10 万", "timeline": "下个月上线"}, analysis.Fields)
+}
+
+// TestConstrainAICCIntentNextAction 验证只有 manager 已确认的首次高意向才允许模型输出留资动作。
+func TestConstrainAICCIntentNextAction(t *testing.T) {
+	assert.Equal(t, "none", constrainAICCIntentNextAction(AICCResponseEnvelope{NextAction: "offer_lead"}, aiccIntentDecision{InviteStatus: "declined"}).NextAction)
+	assert.Equal(t, "offer_lead", constrainAICCIntentNextAction(AICCResponseEnvelope{NextAction: "offer_lead"}, aiccIntentDecision{InviteStatus: "invited"}).NextAction)
 }

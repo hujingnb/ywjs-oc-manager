@@ -70,52 +70,105 @@ func looksLikeAICCSensitiveValue(value string) bool {
 	return digits >= 8 || strings.Contains(value, "@")
 }
 
-// persistAICCIntent 在主回复完成后以独立低风险步骤运行。分析失败不能影响客服答复，
-// 而同一 message_id 重试时会覆写同一会话画像，保持幂等。
-func (d *AICCDispatcher) persistAICCIntent(ctx context.Context, task sqlc.AiccMessageTask, visitor sqlc.AiccMessage) {
+// aiccIntentDecision 是 manager 在本轮回复前形成的唯一邀约决策；模型只能服从该决策，
+// 不得自行把普通咨询升级为留资弹窗。
+type aiccIntentDecision struct{ InviteStatus string }
+
+// analyzeAICCIntent 在主回复前以独立 Hermes Turn 分析同一会话的访客原话。
+// 返回 false 表示分析失败，调用方仍可交付普通答复，但必须将本任务保留为可重试状态。
+func (d *AICCDispatcher) analyzeAICCIntent(ctx context.Context, task sqlc.AiccMessageTask, visitor sqlc.AiccMessage, conversation AICCConversationContext) (aiccIntentDecision, bool) {
 	store, ok := d.store.(interface {
 		GetAICCSessionIntent(context.Context, string) (sqlc.AiccSessionIntent, error)
 		UpsertAICCSessionIntent(context.Context, sqlc.UpsertAICCSessionIntentParams) error
 	})
 	if !ok {
-		return
+		return aiccIntentDecision{}, true
 	}
+	visitorText := aiccSessionVisitorText(conversation, visitor.TextContent.String)
 	turn := AICCInboundTurn{
 		TurnID:      task.MessageID + ":intent",
 		SessionID:   task.SessionID,
 		Channel:     "internal",
-		Text:        visitor.TextContent.String,
+		Text:        visitorText,
 		AppID:       task.AppID,
-		Instruction: "使用 aicc-lead-analysis Skill 分析当前访客文本。仅输出 JSON：{\"level\":\"low|medium|high\",\"fields\":{},\"confidence\":{},\"evidence\":{}}。证据必须逐字来自当前访客文本；不得输出联系方式、身份证、地址或任何未在文本中的内容。",
+		Instruction: "使用 aicc-lead-analysis Skill 分析当前会话中以 visitor 标注的全部访客文本。仅输出 JSON：{\"level\":\"low|medium|high\",\"fields\":{},\"confidence\":{},\"evidence\":{}}。证据必须逐字来自当前会话访客文本；不得输出联系方式、身份证、地址或任何未在文本中的内容。",
 	}
 	reply, err := d.chat.ChatAICC(ctx, turn)
 	if err != nil {
-		return
+		return aiccIntentDecision{}, false
 	}
 	raw := reply.Raw
 	if raw == "" {
 		raw = reply.Text
 	}
-	analysis, valid := parseAICCIntentAnalysis(raw, visitor.TextContent.String)
+	analysis, valid := parseAICCIntentAnalysis(raw, visitorText)
 	if !valid {
-		return
+		return aiccIntentDecision{}, false
 	}
 	inviteStatus := "not_invited"
 	previous, err := store.GetAICCSessionIntent(ctx, task.SessionID)
 	if err == nil {
 		inviteStatus = previous.InviteStatus
 	} else if err != nil && err != sql.ErrNoRows {
-		return
+		return aiccIntentDecision{}, false
 	}
 	inviteStatus = nextAICCInviteStatus(analysis.Level, inviteStatus)
+	// 既有字段只能在本会话历史证据仍可回溯时保留；本轮同名字段以最新访客明确表达为准。
+	mergeAICCIntentFields(&analysis, previous, visitorText)
 	fields, _ := json.Marshal(analysis.Fields)
 	confidence, _ := json.Marshal(analysis.Confidence)
 	evidence, _ := json.Marshal(analysis.Evidence)
-	_ = store.UpsertAICCSessionIntent(ctx, sqlc.UpsertAICCSessionIntentParams{
+	if err := store.UpsertAICCSessionIntent(ctx, sqlc.UpsertAICCSessionIntentParams{
 		ID: newUUID(), SessionID: task.SessionID, IntentLevel: analysis.Level,
 		FieldsJson: fields, ConfidenceJson: confidence, EvidenceJson: evidence,
 		AnalyzerVersion: aiccIntentAnalyzerVersion, AnalyzedMessageID: null.StringFrom(task.MessageID), InviteStatus: inviteStatus,
-	})
+	}); err != nil {
+		return aiccIntentDecision{}, false
+	}
+	return aiccIntentDecision{InviteStatus: inviteStatus}, true
+}
+
+// aiccSessionVisitorText 从 manager 重建的当前会话上下文中筛出访客消息；助手内容不能作为画像证据。
+func aiccSessionVisitorText(conversation AICCConversationContext, current string) string {
+	parts := make([]string, 0, len(conversation.Messages)+1)
+	for _, message := range conversation.Messages {
+		if message.Direction == "visitor" && strings.TrimSpace(message.Text) != "" {
+			parts = append(parts, message.Text)
+		}
+	}
+	parts = append(parts, current)
+	return strings.Join(parts, "\n")
+}
+
+func mergeAICCIntentFields(analysis *aiccIntentAnalysis, previous sqlc.AiccSessionIntent, visitorText string) {
+	if previous.ID == "" {
+		return
+	}
+	var fields, evidence map[string]string
+	if json.Unmarshal(previous.FieldsJson, &fields) != nil || json.Unmarshal(previous.EvidenceJson, &evidence) != nil {
+		return
+	}
+	for key, value := range fields {
+		if _, exists := analysis.Fields[key]; exists || strings.TrimSpace(evidence[key]) == "" || !strings.Contains(visitorText, evidence[key]) {
+			continue
+		}
+		analysis.Fields[key], analysis.Evidence[key] = value, evidence[key]
+	}
+}
+
+// constrainAICCIntentNextAction 是模型输出后的服务端最终防线。只有 manager 判定的首次高意向
+// 才允许 offer_lead；其它任何状态一律剥离该动作，不能依赖提示词自觉。
+func constrainAICCIntentNextAction(reply AICCResponseEnvelope, decision aiccIntentDecision) AICCResponseEnvelope {
+	if decision.InviteStatus != "invited" || reply.NextAction == "offer_lead" && decision.InviteStatus != "invited" {
+		if reply.NextAction == "offer_lead" {
+			reply.NextAction = "none"
+		}
+		return reply
+	}
+	if reply.NextAction == "offer_lead" || decision.InviteStatus != "invited" {
+		return reply
+	}
+	return reply
 }
 
 // nextAICCInviteStatus 只允许第一次高意向把 not_invited 推进到 invited；拒绝和提交都是访客决定，

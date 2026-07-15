@@ -139,7 +139,15 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 	}
 	chatCtx, cancelChat := context.WithCancel(ctx)
 	stopHeartbeat := d.startLeaseHeartbeat(chatCtx, cancelChat, task.ID, token)
+	// 意向画像先于主回复生成，manager 据此把本轮可用 next_action 收紧为确定值；
+	// 运行时模型没有权力自行决定是否索取联系方式。
+	intentDecision, intentReady := d.analyzeAICCIntent(chatCtx, task, visitor, conversationContext)
 	turn := AICCInboundTurn{TurnID: task.MessageID, SessionID: task.SessionID, Channel: "web_link", Text: visitor.TextContent.String, OccurredAt: d.now(), Context: conversationContext, Instruction: buildAICCRuntimePrompt(agent, ""), AppID: task.AppID}
+	if intentReady && intentDecision.InviteStatus == "invited" {
+		turn.Instruction += "\n本轮 manager 已允许且仅允许 next_action 使用 offer_lead；其它场景不得使用 offer_lead。"
+	} else {
+		turn.Instruction += "\n本轮 manager 未允许邀约，next_action 必须为 none 或 ask_resolution，禁止 offer_lead。"
+	}
 	reply, err := d.chat.ChatAICC(chatCtx, turn)
 	if err != nil {
 		if heartbeatErr := stopHeartbeat(); heartbeatErr != nil {
@@ -150,6 +158,7 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 	// 运行时的原始输出首次不合规时，只给予一次固定重写机会；不能把校验细节交给模型，
 	// 以免提示词注入借错误信息探测策略。第二次仍失败时改为 manager 固定兜底。
 	reply = d.validateOrFallbackAICCResponse(chatCtx, turn, reply)
+	reply = constrainAICCIntentNextAction(reply, intentDecision)
 	write := func(s AICCDispatcherStore) error {
 		messageID := newUUID()
 		if err := s.CreateAICCMessage(ctx, sqlc.CreateAICCMessageParams{ID: messageID, SessionID: task.SessionID, AgentID: task.AgentID, Direction: domain.AICCMessageDirectionAssistant, ContentType: domain.AICCMessageContentTypeText, TextContent: null.StringFrom(reply.Text), ClientMessageID: visitor.ClientMessageID, ReplyToMessageID: null.StringFrom(task.MessageID), IsFallback: reply.Fallback, IsRefusal: reply.Refusal}); err != nil {
@@ -187,9 +196,6 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 	} else {
 		d.recordSuccess()
 	}
-	// 主回复已经原子写入并完成任务后，才启动独立意向分析。分析只消费当前会话访客文本，
-	// 任何故障均不回滚已交付的客服答复。
-	d.persistAICCIntent(ctx, task, visitor)
 	d.observe(ctx, task, "completed", "completed")
 	return nil
 }
