@@ -1,7 +1,7 @@
 # AICC 客服对话、能力沙箱与全面验证设计
 
 - 日期：2026-07-15
-- 状态：设计确认稿
+- 状态：待审阅（2026-07-16 修订）
 - 关联设计：`2026-07-14-aicc-stateless-runtime-app-type-design.md`
 
 ## 1. 背景
@@ -60,7 +60,7 @@
   → 消息持久化与异步任务
   → Hermes AICC runtime
   → 镜像内 Capability Broker
-  → manager 只读 runtime API / 受控网络搜索出口
+  → manager 只读 runtime API / Hermes 原生公开网络检索
   → manager 持久化回复、来源、意向和审计
 ```
 
@@ -70,7 +70,7 @@
 - Hermes 负责多轮理解、允许范围内的 Skill 自主选择和自然语言回复。
 - Capability Broker 内置于 `hermes-aicc` 镜像，不新增独立微服务。
 - manager 对 runtime API 再做服务端授权，不能只信任容器内 Broker。
-- RAGFlow 提供企业、行业和当前客服知识检索；受控搜索出口提供公开网络只读能力。
+- RAGFlow 提供企业、行业和当前客服知识检索；Hermes 原生网页检索直接访问公网补充公开信息。
 - 网页、挂件和未来语音入口通过 channel adapter 归一化为同一对话轮次，不把渠道逻辑写进
   Hermes、Capability Broker 或意向分析器。
 
@@ -104,18 +104,20 @@
 ### 5.2 三层防线
 
 1. 启动阶段只安装或呈现客服白名单 Skill；普通 Hermes Skill 不自动进入 AICC。
-2. AICC 不注册通用 terminal、文件和进程工具；知识检索与网络搜索使用专用只读工具。
+2. AICC 不注册通用 terminal、文件和进程工具；知识检索使用专用只读工具，公开网络检索使用 Hermes
+   原生只读能力。
 3. 每次调用按 app type、Skill 声明、镜像上限和请求内容执行时授权。
 
-manager runtime API 使用 app-scoped token 再次校验只读权限。Pod 网络策略只允许访问必要的
-manager API、模型网关和受控搜索出口，并拒绝集群内其他服务、云元数据地址和任意写出口。
+manager runtime API 使用 app-scoped token 再次校验只读权限。AICC Pod 可直接访问公网以支持 Hermes
+原生只读网页检索；仍禁止 terminal、文件、进程、登录、表单提交和任意网络写操作，且只允许访问
+必要的集群内 manager API 与模型网关。
 
 ### 5.3 Skill 生命周期
 
 首期内置三个版本受控的客服 Skill：
 
 - `customer-answer`：来源优先级、客服边界、操作拒绝和自然表达。
-- `safe-web-research`：只读搜索、来源筛选和企业信息标记。
+- `safe-web-research`：使用 Hermes 原生只读搜索、来源筛选和企业信息标记。
 - `lead-analysis`：意向画像、证据和一次性邀请策略。
 
 这些 Skill 构建进不可变 AICC 镜像，bootstrap manifest 只能选择其子集。新增平台客服 Skill
