@@ -13,6 +13,10 @@ from typing import Any, Union
 import yaml
 
 
+# AICC manifest 只能授予镜像内置的只读能力；未知值必须拒绝，不能因兼容性被静默放行。
+_AICC_CAPABILITIES = frozenset({"knowledge.read", "web.search", "skills.read", "vision.read"})
+
+
 class ManifestError(Exception):
     """manifest 缺失必填字段或解析失败。"""
 
@@ -44,6 +48,8 @@ class Manifest:
     # app_language：应用界面语言，由 manager 写入 manifest（"en"/"zh"）；
     # 缺省空串表示未配置，渲染时回落 "en"。
     app_language: str = ""
+    # capabilities：AICC 启动时显式授予的能力上限；普通 manifest 缺省空列表以保持兼容。
+    capabilities: frozenset[str] = field(default_factory=frozenset)
 
 
 def _require(d: dict, *path: str) -> Any:
@@ -75,6 +81,14 @@ def load(path: Union[str, Path]) -> Manifest:
     wp = wp if isinstance(wp, dict) else {}
     # 从 app 节点读取可选字段 language；不存在或为空时缺省空串，渲染侧回落 "en"。
     app_section = raw.get("app") if isinstance(raw.get("app"), dict) else {}
+    # 只有 list 类型的 capabilities 才可能成为授权输入；任何其他类型均拒绝而非忽略。
+    raw_capabilities = raw.get("capabilities", [])
+    if not isinstance(raw_capabilities, list) or not all(isinstance(item, str) for item in raw_capabilities):
+        raise ManifestError("manifest capabilities must be a list of strings")
+    capabilities = frozenset(raw_capabilities)
+    unknown_capabilities = capabilities - _AICC_CAPABILITIES
+    if unknown_capabilities:
+        raise ManifestError(f"unknown AICC capability: {', '.join(sorted(unknown_capabilities))}")
     return Manifest(
         app_id=_require(raw, "app", "id"),
         app_name=_require(raw, "app", "name"),
@@ -93,4 +107,5 @@ def load(path: Union[str, Path]) -> Manifest:
         web_publish_app_token=str(wp.get("app_token") or ""),
         web_publish_base_domain=str(wp.get("base_domain") or ""),
         app_language=str(app_section.get("language") or ""),
+        capabilities=capabilities,
     )

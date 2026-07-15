@@ -147,6 +147,12 @@ COPY ocops-contract/      /usr/local/lib/ocops/contract/
 COPY oc-kb.py             /usr/local/bin/oc-kb
 COPY oc-publish.py        /usr/local/bin/oc-publish
 COPY healthcheck.sh       /usr/local/bin/oc-healthcheck
+# AICC 工具策略与知识检索工具安装到 Hermes 包同级目录，model_tools.py 可直接导入。
+# 该目录不包含 terminal/file/process 等通用执行入口，仅保留客服只读工具。
+COPY aicc_tools/          /usr/local/lib/hermes-agent/aicc_tools/
+# Hermes 运行时的工具目录保留同一份知识工具源码，便于镜像审计直接确认 AICC toolset 的实现；
+# model_tools 的构建期补丁从 aicc_tools 包显式注册它，避免通用自动发现绕过能力策略。
+COPY aicc_tools/aicc_knowledge_tool.py /usr/local/lib/hermes-agent/tools/aicc_knowledge_tool.py
 COPY lib/                 /usr/local/lib/oc-entrypoint/lib/
 COPY renderer/            /usr/local/lib/oc-entrypoint/renderer/
 COPY migrator/            /usr/local/lib/oc-entrypoint/migrator/
@@ -181,7 +187,8 @@ RUN set -e; \
     python3 /usr/local/lib/oc-entrypoint/patches/merge_oc_locales.py; \
     python3 /usr/local/lib/oc-entrypoint/patches/patch_i18n_literals.py; \
     python3 /usr/local/lib/oc-entrypoint/patches/check_oc_i18n_consistency.py; \
-    python3 /usr/local/lib/oc-entrypoint/patches/patch_api_server_reload.py
+    python3 /usr/local/lib/oc-entrypoint/patches/patch_api_server_reload.py; \
+    python3 /usr/local/lib/oc-entrypoint/patches/patch_aicc_tool_policy.py
 
 # 镜像身份信息写到固定位置，供 oc-info 读取
 ARG OC_IMAGE_VARIANT
@@ -196,7 +203,7 @@ ENV OC_IMAGE_VARIANT=${OC_IMAGE_VARIANT}
 # PYTHONPATH=/usr/local/lib 让自检 python（system python）能 import ocops，
 # 从而收集并运行 tests/ 下的 ocops 测试（含 server/SSE，依赖上面装到 system
 # python 的 starlette/anyio/httpx2）。
-RUN PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/usr/local/lib \
+RUN PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/usr/local/lib:/usr/local/lib/hermes-agent \
       python -m pytest /usr/local/lib/oc-entrypoint/tests/ -v -p no:cacheprovider
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \

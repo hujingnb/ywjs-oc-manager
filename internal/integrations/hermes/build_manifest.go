@@ -19,7 +19,8 @@ func BuildManifest(in AppInputData) Manifest {
 			Rules:   ManifestRules{Platform: "resources/platform-rules.md"},
 			Skills:  in.SkillRelPaths,
 		},
-		Routing: in.Routing,
+		Routing:      in.Routing,
+		Capabilities: in.Capabilities,
 	}
 	// knowledge 仅在 runtime base url 与 app token 同时存在时写入（与原 WriteAppInput 语义一致）。
 	if in.KnowledgeRuntimeBaseURL != "" && in.KnowledgeAppToken != "" {

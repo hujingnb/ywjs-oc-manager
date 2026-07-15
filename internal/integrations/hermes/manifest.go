@@ -20,6 +20,8 @@ type Manifest struct {
 	WebPublish ManifestWebPublish `yaml:"web_publish,omitempty"`
 	// Routing 智能路由映射，键为模型别名，值为实际模型名；空时省略。
 	Routing map[string]string `yaml:"routing,omitempty"`
+	// Capabilities 是 manager 显式授予本次运行时的能力上限；空时表示沿用普通应用兼容语义。
+	Capabilities []string `yaml:"capabilities,omitempty"`
 }
 
 // ManifestApp 业务元数据。id/name 仅审计日志使用；model 直接进 hermes config.yaml model.default。

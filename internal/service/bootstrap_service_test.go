@@ -206,6 +206,8 @@ func TestBootstrapBuildAICCIsStateless(t *testing.T) {
 	res, err := svc.Build(context.Background(), app)
 
 	require.NoError(t, err)
+	// 客服 manifest 必须显式下发镜像白名单能力，容器不能从普通 Hermes 配置推断或扩大权限。
+	assert.Contains(t, res.ManifestYAML, "capabilities:\n  - knowledge.read\n  - web.search\n  - skills.read\n  - vision.read")
 	// 客服运行时不下载任何 skill，也不在 manifest 内写入 skill 相对路径。
 	assert.Nil(t, res.Skills)
 	assert.NotContains(t, res.ManifestYAML, "resources/skills/")

@@ -297,6 +297,12 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 	// AICC 隐藏应用面向外部访客，必须使用专用客服规则；普通应用沿用实例工作目录等规则。
 	// 平台规则直接由应用类型映射，避免可变启动配置与已应用 hash 的版本语义脱节。
 	platformPrompt := config.PlatformPromptForApp(domain.AppType(app.AppType))
+	// AICC 的能力是镜像内置策略与 manifest 的交集。这里显式下发只读集合，避免容器重启时
+	// 从普通 Hermes 默认配置猜测权限；普通应用保留空值以维持既有能力契约。
+	capabilities := []string(nil)
+	if appType == domain.AppTypeAICC {
+		capabilities = []string{"knowledge.read", "web.search", "skills.read", "vision.read"}
+	}
 	in := hermes.AppInputData{
 		AppID:                   app.ID,
 		AppName:                 app.Name,
@@ -309,6 +315,7 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 		PlatformRule:            platformPrompt,
 		Routing:                 routing,
 		SkillRelPaths:           skillRelPaths,
+		Capabilities:            capabilities,
 		OrgName:                 org.Name,
 		OwnerName:               owner.DisplayName,
 		Language:                appLanguage,
