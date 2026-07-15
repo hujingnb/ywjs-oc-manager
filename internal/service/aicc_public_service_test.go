@@ -21,6 +21,21 @@ import (
 
 var aiccPublicTestNow = time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
 
+// TestBuildAICCRuntimePromptRestrictsToolsAndFinalSchema 覆盖客服运行时指令：
+// 提示词只能引导只读白名单工具，并强制最终答复使用可由 manager 校验的 JSON 信封。
+func TestBuildAICCRuntimePromptRestrictsToolsAndFinalSchema(t *testing.T) {
+	prompt := buildAICCRuntimePrompt(sqlc.AiccAgent{}, "企业版价格是多少？")
+
+	assert.Contains(t, prompt, "aicc_knowledge_search")
+	assert.Contains(t, prompt, "web_search")
+	assert.Contains(t, prompt, "web_extract")
+	assert.Contains(t, prompt, "aicc_response_sources")
+	assert.Contains(t, prompt, `{"text":"","sources":[],"next_action":"none","flags":{}}`)
+	assert.NotContains(t, prompt, "oc-kb")
+	assert.NotContains(t, prompt, "执行 oc-kb")
+	assert.Contains(t, prompt, "不得调用或建议调用命令、终端、代码、文件、进程")
+}
+
 // TestAICCPublicSendMessageRejectsFullGlobalQueue 验证全局队列已满时事务回滚，不能留下访客消息或任务孤儿。
 func TestAICCPublicSendMessageRejectsFullGlobalQueue(t *testing.T) {
 	store := newAICCPublicMessageStore()

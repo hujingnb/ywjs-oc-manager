@@ -182,6 +182,21 @@ func (c *aiccDispatcherTurnChatFake) ChatAICC(_ context.Context, turn AICCInboun
 	return AICCResponseEnvelope{Text: "答复"}, nil
 }
 
+// aiccDispatcherSequenceChatFake 记录运行时调用次数，用于验证合法首轮回复不会被无谓重写。
+type aiccDispatcherSequenceChatFake struct {
+	replies []AICCResponseEnvelope
+	calls   int
+}
+
+func (c *aiccDispatcherSequenceChatFake) ChatAICC(_ context.Context, _ AICCInboundTurn) (AICCResponseEnvelope, error) {
+	if c.calls >= len(c.replies) {
+		return AICCResponseEnvelope{}, errors.New("unexpected AICC retry")
+	}
+	reply := c.replies[c.calls]
+	c.calls++
+	return reply, nil
+}
+
 type aiccDispatcherTxFake struct{ store *aiccDispatcherStoreFake }
 
 // aiccDispatcherAllowLimiter 显式模拟测试环境可获得的运行额度，避免成功路径依赖生产 Redis。
@@ -376,6 +391,21 @@ func TestAICCDispatcherPersistsAuditedSourcesWithAssistant(t *testing.T) {
 	assert.Equal(t, s.assistant[0].ID, s.sources[0].MessageID)
 	assert.Equal(t, "kb-1", s.sources[0].ReferenceID.String)
 	assert.Equal(t, 1, s.completed)
+}
+
+// TestAICCDispatcherDoesNotRetryLegalFirstJSON 覆盖首轮合法 JSON：
+// 结构与策略均通过时 dispatcher 必须直接持久化，不应额外调用 Hermes 重写。
+func TestAICCDispatcherDoesNotRetryLegalFirstJSON(t *testing.T) {
+	s := newAICCDispatcherStoreFake()
+	chat := &aiccDispatcherSequenceChatFake{replies: []AICCResponseEnvelope{{
+		Raw: `{"text":"您好，我可以介绍企业服务。","sources":[],"next_action":"none","flags":{}}`,
+	}}}
+	d := NewAICCDispatcher(s, aiccDispatcherTxFake{s}, chat, aiccDispatcherAllowLimiter{})
+
+	require.NoError(t, d.Dispatch(context.Background(), s.task))
+	assert.Equal(t, 1, chat.calls)
+	require.Len(t, s.assistant, 1)
+	assert.False(t, s.assistant[0].IsFallback)
 }
 
 // TestAICCDispatcherPersistsEnterpriseNetworkSourceFromHermesTranscript 覆盖真实运行时来源链路：
