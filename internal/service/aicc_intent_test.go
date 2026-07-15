@@ -22,6 +22,7 @@ type intentRetryStoreFake struct {
 	attempts   int
 	chatFail   bool
 	deleteFail bool
+	leaseToken string
 }
 
 func (s *intentRetryStoreFake) ListReadyAICCIntentAnalysisRetries(context.Context, int32) ([]sqlc.ListReadyAICCIntentAnalysisRetriesRow, error) {
@@ -30,11 +31,12 @@ func (s *intentRetryStoreFake) ListReadyAICCIntentAnalysisRetries(context.Contex
 	}
 	return nil, nil
 }
-func (s *intentRetryStoreFake) ClaimAICCIntentAnalysisRetry(context.Context, sqlc.ClaimAICCIntentAnalysisRetryParams) (int64, error) {
+func (s *intentRetryStoreFake) ClaimAICCIntentAnalysisRetry(_ context.Context, p sqlc.ClaimAICCIntentAnalysisRetryParams) (int64, error) {
 	if s.claimed {
 		return 0, nil
 	}
 	s.claimed = true
+	s.leaseToken = p.LeaseToken.String
 	return 1, nil
 }
 func (s *intentRetryStoreFake) GetAICCMessageByID(context.Context, string) (sqlc.AiccMessage, error) {
@@ -55,12 +57,20 @@ func (*intentRetryStoreFake) GetAICCSessionIntent(context.Context, string) (sqlc
 func (*intentRetryStoreFake) UpsertAICCSessionIntent(context.Context, sqlc.UpsertAICCSessionIntentParams) error {
 	return nil
 }
-func (s *intentRetryStoreFake) RescheduleClaimedAICCIntentAnalysisRetry(context.Context, sqlc.RescheduleClaimedAICCIntentAnalysisRetryParams) (int64, error) {
+
+func (s *intentRetryStoreFake) RescheduleClaimedAICCIntentAnalysisRetry(_ context.Context, p sqlc.RescheduleClaimedAICCIntentAnalysisRetryParams) (int64, error) {
+	if p.LeaseToken.String != s.leaseToken {
+		return 0, nil
+	}
 	s.claimed = false
 	s.attempts++
 	return 1, nil
 }
-func (s *intentRetryStoreFake) MarkAICCIntentAnalysisRetryProcessed(context.Context, sqlc.MarkAICCIntentAnalysisRetryProcessedParams) (int64, error) {
+
+func (s *intentRetryStoreFake) MarkAICCIntentAnalysisRetryProcessed(_ context.Context, p sqlc.MarkAICCIntentAnalysisRetryProcessedParams) (int64, error) {
+	if p.LeaseToken.String != s.leaseToken {
+		return 0, nil
+	}
 	s.processed = true
 	return 1, nil
 }
@@ -179,4 +189,16 @@ func TestAICCIntentRetryLeaseBehavior(t *testing.T) {
 	assert.True(t, store.processed)
 	require.NoError(t, d.RetryPendingAICCIntentAnalysis(context.Background()))
 	assert.True(t, store.processed)
+}
+
+// TestAICCIntentRetryRejectsStaleLease 验证过期 worker 的完成或释放请求均不会改变当前租约。
+func TestAICCIntentRetryRejectsStaleLease(t *testing.T) {
+	store := &intentRetryStoreFake{aiccDispatcherStoreFake: newAICCDispatcherStoreFake(), row: true, claimed: true, leaseToken: "current"}
+	marked, err := store.MarkAICCIntentAnalysisRetryProcessed(context.Background(), sqlc.MarkAICCIntentAnalysisRetryProcessedParams{LeaseToken: null.StringFrom("stale")})
+	require.NoError(t, err)
+	assert.Zero(t, marked)
+	rescheduled, err := store.RescheduleClaimedAICCIntentAnalysisRetry(context.Background(), sqlc.RescheduleClaimedAICCIntentAnalysisRetryParams{LeaseToken: null.StringFrom("stale")})
+	require.NoError(t, err)
+	assert.Zero(t, rescheduled)
+	assert.True(t, store.claimed)
 }
