@@ -34,6 +34,10 @@ var aiccOperationCompletedPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?:部署|发布).{0,6}(?:已|已经|成功).{0,6}(?:完成|上线)`),
 }
 
+// aiccEnterpriseNetworkDisclosurePattern 要求访客可见正文明确披露企业相关网页只是
+// 未经企业确认的公开资料。仅在 source.unconfirmed 中标记不足以让访客理解信息边界。
+var aiccEnterpriseNetworkDisclosurePattern = regexp.MustCompile(`公开(?:网络|资料|信息).{0,16}(?:未经|未获|尚未).{0,8}企业确认|(?:未经|未获|尚未).{0,8}企业确认.{0,16}公开(?:网络|资料|信息)`)
+
 // AICCResponseToolAudit 是 manager 从当前轮受信任工具执行记录构造的引用白名单。
 // key 是工具返回的稳定 reference_id，value 是该记录允许回显的来源事实。
 type AICCResponseToolAudit map[string]AICCResponseSource
@@ -90,6 +94,9 @@ func validateAICCResponseEnvelope(reply AICCResponseEnvelope, audit AICCResponse
 	}
 	if aiccResponseHasKnowledgeSource(reply.Sources) && aiccResponseHasEnterpriseNetworkSource(reply.Sources) {
 		return AICCResponseEnvelope{}, fmt.Errorf("%w: enterprise knowledge takes precedence over enterprise network", ErrAICCResponsePolicy)
+	}
+	if aiccResponseHasEnterpriseNetworkSource(reply.Sources) && !aiccEnterpriseNetworkDisclosurePattern.MatchString(reply.Text) {
+		return AICCResponseEnvelope{}, fmt.Errorf("%w: enterprise network source requires public-network unconfirmed disclosure", ErrAICCResponsePolicy)
 	}
 	if aiccResponseClaimsEnterprisePrice(reply.Text) && !aiccResponseHasKnowledgeSource(reply.Sources) {
 		return AICCResponseEnvelope{}, fmt.Errorf("%w: enterprise price needs knowledge source", ErrAICCResponsePolicy)

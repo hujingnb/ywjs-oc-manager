@@ -413,7 +413,7 @@ func TestAICCDispatcherDoesNotRetryLegalFirstJSON(t *testing.T) {
 func TestAICCDispatcherPersistsEnterpriseNetworkSourceFromHermesTranscript(t *testing.T) {
 	s := newAICCDispatcherStoreFake()
 	ops := &fakeConversationOps{
-		chatOut: ocops.ConversationChatResult{Message: ocops.ConversationMessage{Content: `{"text":"公开网络有相关介绍，请以企业确认信息为准。","sources":[{"type":"web","title":"企业官网","url":"https://www.example.com/product","scope":"enterprise_network","reference_id":"web:enterprise_network:0:abc","unconfirmed":true}],"next_action":"none","flags":{}}`}},
+		chatOut: ocops.ConversationChatResult{Message: ocops.ConversationMessage{Content: `{"text":"该信息来自公开网络，未经企业确认，请以企业正式答复为准。","sources":[{"type":"web","title":"企业官网","url":"https://www.example.com/product","scope":"enterprise_network","reference_id":"web:enterprise_network:0:abc","unconfirmed":true}],"next_action":"none","flags":{}}`}},
 		messages: []ocops.ConversationMessage{
 			// 此载荷模拟 AICC 受控网页工具已经完成的结果，模型只能回显其中 reference_id。
 			{Role: "tool", ToolName: "web_extract", Content: `{"aicc_response_sources":[{"type":"web","title":"企业官网","url":"https://www.example.com/product","scope":"enterprise_network","reference_id":"web:enterprise_network:0:abc","unconfirmed":true}]}`},

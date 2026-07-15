@@ -107,6 +107,20 @@ func TestParseAndValidateAICCResponseEnvelopeRejectsEnterpriseNetworkWhenKnowled
 	require.ErrorIs(t, err, ErrAICCResponsePolicy)
 }
 
+// TestParseAndValidateAICCResponseEnvelopeRequiresEnterpriseNetworkDisclosure 覆盖企业网络来源：
+// source 标记 unconfirmed 后，正文仍必须让访客看到“来自公开网络，未经企业确认”的信息边界。
+func TestParseAndValidateAICCResponseEnvelopeRequiresEnterpriseNetworkDisclosure(t *testing.T) {
+	audit := AICCResponseToolAudit{"web-1": {Type: "web", Title: "企业官网", URL: "https://example.com/product", Scope: "enterprise_network", ReferenceID: "web-1", Unconfirmed: true}}
+	withoutDisclosure := `{"text":"该页面介绍了企业服务。","sources":[{"type":"web","title":"企业官网","url":"https://example.com/product","scope":"enterprise_network","reference_id":"web-1","unconfirmed":true}],"next_action":"none","flags":{}}`
+	withDisclosure := `{"text":"该信息来自公开网络，未经企业确认，请以企业正式答复为准。","sources":[{"type":"web","title":"企业官网","url":"https://example.com/product","scope":"enterprise_network","reference_id":"web-1","unconfirmed":true}],"next_action":"none","flags":{}}`
+
+	_, err := ParseAndValidateAICCResponse(withoutDisclosure, audit)
+	require.ErrorIs(t, err, ErrAICCResponsePolicy)
+	valid, err := ParseAndValidateAICCResponse(withDisclosure, audit)
+	require.NoError(t, err)
+	assert.Equal(t, "web-1", valid.Sources[0].ReferenceID)
+}
+
 // TestParseAndValidateAICCResponseEnvelopeRejectsChineseOperationalVariants 覆盖常见中文操作完成声称：
 // 客服不能因账号开通或重置密码等表达而伪装完成外部操作。
 func TestParseAndValidateAICCResponseEnvelopeRejectsChineseOperationalVariants(t *testing.T) {
