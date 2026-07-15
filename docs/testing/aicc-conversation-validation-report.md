@@ -16,12 +16,13 @@
 | Chrome 页面层检查 | PASS | `OCM_E2E_NO_SEED=1 npx playwright test --project=chrome-headed tests/e2e/login.spec.ts` 退出码 0，实际运行 2 个登录页面场景。 |
 | AICC 用例可发现性 | PASS | `npx playwright test --list --project=chrome-headed tests/e2e/aicc-conversation-*.spec.ts` 列出 3 文件共 34 个场景。 |
 | RAGFlow | PASS | `ocm/ragflow-6b569494f6-7lgp5` 为 `1/1 Running`，此前代理连接拒绝已消除。 |
-| 直连公网渲染与工具策略 | PASS | `go test ./internal/integrations/k8sorch -run 'TestRenderAICC(NetworkPolicy|DeploymentDoesNotInheritPodProxy)' -count=1` 通过；`pytest -q .../test_aicc_tool_policy.py` 为 12 passed。渲染允许公网 TCP 80/443，且无 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY`；高风险 action 工具仍被拒绝。 |
+| 直连公网渲染与工具策略 | PASS | `go test ./internal/integrations/k8sorch -run TestRenderAICCNetworkPolicy -count=1` 通过（该测试同时断言公网 TCP 80/443 和无 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY`）；`pytest -q .../test_aicc_tool_policy.py` 为 12 passed。高风险 action 工具仍被拒绝。 |
 | AICC 全链路 | BLOCKED | 真实 Chrome 首个 fixture 启动时，`oc-aicc` 既有运行时 Pod 的 `restore` initContainer 调 manager bootstrap 连续返回 HTTP 401，随后 manager 记录 `circuit_open`。因此没有任何对话场景完成，不能把启动了 Chrome 或发现 34 个场景记为通过。 |
+| AICC 镜像重建 | BLOCKED | `make local-build` 的 AICC runtime 构建期自检为 256 passed、11 failed：若干测试在镜像内仍按源码同级目录读取 `oc-entrypoint.py` 与 `skills`，但 Dockerfile 仅复制 tests；另有一项 channel 登录断言与当前 SDK 报错文本不一致。该独立构建测试问题尚未定位，未据此推断 Chrome bootstrap HTTP 401 的根因。 |
 
 客服运行时前置条件为：集群 DNS 和公网 TCP 80/443 可达，供 Hermes 原生只读 `web_search`/`web_extract`
-使用；AICC 不再部署或依赖受控网页检索代理，也不注入代理环境变量。当前 HTTP 401 是 bootstrap 鉴权/现有
-运行时镜像问题，不是公网 DNS/TCP 或直连出口问题；本任务不通过伪造回答或降低浏览器断言绕过它。
+使用；AICC 不再部署或依赖受控网页检索代理，也不注入代理环境变量。当前 HTTP 401 的 bootstrap 鉴权/运行时
+契约仍待定位；它不是已验证的公网 DNS/TCP 或直连出口问题，本任务不通过伪造回答或降低浏览器断言绕过它。
 
 ## 已实现的 Chrome 场景映射
 
@@ -86,7 +87,7 @@ npx playwright test --list --project=chrome-headed ...  # PASS，34 tests
 OCM_E2E_NO_SEED=1 npx playwright test --project=chrome-headed tests/e2e/login.spec.ts # PASS
 OCM_AICC_CONVERSATION_E2E=1 ... --project=chrome                       # BLOCKED：项目名不存在
 OCM_AICC_CONVERSATION_E2E=1 ... --project=chrome-headed                # BLOCKED：真实 Chrome 启动，0/34 完成，AICC bootstrap HTTP 401
-go test ./internal/integrations/k8sorch -run 'TestRenderAICC(NetworkPolicy|DeploymentDoesNotInheritPodProxy)' -count=1 # PASS
+go test ./internal/integrations/k8sorch -run TestRenderAICCNetworkPolicy -count=1 # PASS
 PYTHONPATH=runtime/hermes/hermes-aicc pytest -q runtime/hermes/hermes-aicc/tests # PASS：267 passed, 1 warning
 go test ./internal/... ./cmd/server -count=1                            # BLOCKED：绝大多数包已输出 ok；`internal/service` 子进程运行逾 2 分 45 秒未完成，已按防卡死规则中止，不能记为全量通过
 cd web && npm test -- --run && npm run typecheck && npm run build       # PASS：105 files / 754 tests；typecheck/build 通过
