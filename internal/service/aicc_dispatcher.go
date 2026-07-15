@@ -172,6 +172,17 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 				return err
 			}
 		}
+		// 首次邀约只有在助手回复与任务完成同一事务成功后才消费；事务回滚时仍保持
+		// not_invited，下一次任务重试会再次强制展示本轮 offer_lead。
+		if intentDecision.AllowOffer {
+			if intentStore, ok := s.(interface {
+				UpdateAICCSessionIntentInviteStatus(context.Context, sqlc.UpdateAICCSessionIntentInviteStatusParams) (int64, error)
+			}); ok {
+				if _, err := intentStore.UpdateAICCSessionIntentInviteStatus(ctx, sqlc.UpdateAICCSessionIntentInviteStatusParams{SessionID: task.SessionID, InviteStatus: "invited"}); err != nil {
+					return err
+				}
+			}
+		}
 		rows, err := s.CompleteAICCMessageTask(ctx, sqlc.CompleteAICCMessageTaskParams{ID: task.ID, LeaseToken: null.StringFrom(token)})
 		if err != nil {
 			return err

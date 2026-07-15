@@ -125,9 +125,13 @@ func (d *AICCDispatcher) analyzeAICCIntent(ctx context.Context, task sqlc.AiccMe
 		return aiccIntentDecision{}, false
 	}
 	allowOffer := analysis.Level == "high" && inviteStatus == "not_invited"
-	inviteStatus = nextAICCInviteStatus(analysis.Level, inviteStatus)
+	// 首次高意向的展示许可在回复事务成功后才消费；此处保持 not_invited，
+	// 以便主回复失败重试时仍可再次得到同一个首次邀约机会。
+	if !allowOffer {
+		inviteStatus = nextAICCInviteStatus(analysis.Level, inviteStatus)
+	}
 	// 既有字段只能在本会话历史证据仍可回溯时保留；本轮同名字段以最新访客明确表达为准。
-	mergeAICCIntentFields(&analysis, previous, visitorText)
+	mergeAICCIntentFields(&analysis, previous, visitorMessages)
 	fields, _ := json.Marshal(analysis.Fields)
 	confidence, _ := json.Marshal(analysis.Confidence)
 	evidence, _ := json.Marshal(analysis.Evidence)
@@ -211,7 +215,7 @@ func aiccSessionVisitorMessages(conversation AICCConversationContext, current sq
 	return items
 }
 
-func mergeAICCIntentFields(analysis *aiccIntentAnalysis, previous sqlc.AiccSessionIntent, visitorText string) {
+func mergeAICCIntentFields(analysis *aiccIntentAnalysis, previous sqlc.AiccSessionIntent, visitorMessages map[string]string) {
 	if previous.ID == "" {
 		return
 	}
@@ -221,7 +225,8 @@ func mergeAICCIntentFields(analysis *aiccIntentAnalysis, previous sqlc.AiccSessi
 		return
 	}
 	for key, value := range fields {
-		if _, exists := analysis.Fields[key]; exists || strings.TrimSpace(evidence[key].Text) == "" || !strings.Contains(visitorText, evidence[key].Text) {
+		messageText, belongs := visitorMessages[evidence[key].MessageID]
+		if _, exists := analysis.Fields[key]; exists || strings.TrimSpace(evidence[key].Text) == "" || !belongs || !strings.Contains(messageText, evidence[key].Text) {
 			continue
 		}
 		analysis.Fields[key], analysis.Evidence[key] = value, evidence[key]
@@ -231,6 +236,10 @@ func mergeAICCIntentFields(analysis *aiccIntentAnalysis, previous sqlc.AiccSessi
 // constrainAICCIntentNextAction 是模型输出后的服务端最终防线。只有 manager 判定的首次高意向
 // 才允许 offer_lead；其它任何状态一律剥离该动作，不能依赖提示词自觉。
 func constrainAICCIntentNextAction(reply AICCResponseEnvelope, decision aiccIntentDecision) AICCResponseEnvelope {
+	if decision.AllowOffer {
+		reply.NextAction = "offer_lead"
+		return reply
+	}
 	if !decision.AllowOffer {
 		if reply.NextAction == "offer_lead" {
 			reply.NextAction = "none"

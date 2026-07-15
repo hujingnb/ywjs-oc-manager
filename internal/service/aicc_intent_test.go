@@ -79,7 +79,7 @@ func TestAICCSessionVisitorTextAndMergeFields(t *testing.T) {
 	visitorText := aiccSessionVisitorText(conversation, "下个月上线")
 	assert.Equal(t, "预算 10 万\n下个月上线", visitorText)
 	analysis := aiccIntentAnalysis{Fields: map[string]string{"timeline": "下个月上线"}, Evidence: map[string]aiccIntentEvidence{"timeline": {MessageID: "m2", Text: "下个月上线"}}}
-	mergeAICCIntentFields(&analysis, sqlc.AiccSessionIntent{ID: "intent", FieldsJson: []byte(`{"budget":"预算 10 万"}`), EvidenceJson: []byte(`{"budget":{"message_id":"m1","text":"预算 10 万"}}`)}, visitorText)
+	mergeAICCIntentFields(&analysis, sqlc.AiccSessionIntent{ID: "intent", FieldsJson: []byte(`{"budget":"预算 10 万"}`), EvidenceJson: []byte(`{"budget":{"message_id":"m1","text":"预算 10 万"}}`)}, map[string]string{"m1": "预算 10 万", "m2": "下个月上线"})
 	assert.Equal(t, map[string]string{"budget": "预算 10 万", "timeline": "下个月上线"}, analysis.Fields)
 }
 
@@ -87,4 +87,6 @@ func TestAICCSessionVisitorTextAndMergeFields(t *testing.T) {
 func TestConstrainAICCIntentNextAction(t *testing.T) {
 	assert.Equal(t, "none", constrainAICCIntentNextAction(AICCResponseEnvelope{NextAction: "offer_lead"}, aiccIntentDecision{InviteStatus: "declined"}).NextAction)
 	assert.Equal(t, "offer_lead", constrainAICCIntentNextAction(AICCResponseEnvelope{NextAction: "offer_lead"}, aiccIntentDecision{InviteStatus: "invited", AllowOffer: true}).NextAction)
+	// 即使模型遗漏动作，manager 仍必须让首次高意向访客看见留资入口。
+	assert.Equal(t, "offer_lead", constrainAICCIntentNextAction(AICCResponseEnvelope{NextAction: "none"}, aiccIntentDecision{AllowOffer: true}).NextAction)
 }
