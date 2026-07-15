@@ -64,6 +64,8 @@ func TestRenderDeployment(t *testing.T) {
 func TestRenderDeploymentAICC(t *testing.T) {
 	spec := testSpec()
 	spec.AppType = domain.AppTypeAICC
+	// 即使控制面为普通应用配置了代理，AICC 也不能继承这些通用出口变量。
+	spec.Proxy = ProxyEnv{HTTPProxy: "http://pod-proxy:7890", HTTPSProxy: "http://pod-proxy:7890", NoProxy: "localhost,.svc"}
 
 	dep := RenderDeployment(spec, "oc-apps")
 	require.Len(t, dep.Spec.Template.Spec.InitContainers, 1, "AICC 必须只渲染一个初始化容器")
@@ -98,6 +100,10 @@ func TestRenderDeploymentAICC(t *testing.T) {
 	assert.NotZero(t, ocops.Resources.Requests.Cpu().MilliValue())
 	assert.NotZero(t, ocops.Resources.Requests.Memory().Value())
 	for _, c := range append(dep.Spec.Template.Spec.InitContainers, dep.Spec.Template.Spec.Containers...) {
+		// AICC 的初始化和常驻容器均不得误继承普通应用 PodProxy。
+		assert.Nil(t, envByName(&c, "HTTP_PROXY"), "%s 不得注入 HTTP_PROXY", c.Name)
+		assert.Nil(t, envByName(&c, "HTTPS_PROXY"), "%s 不得注入 HTTPS_PROXY", c.Name)
+		assert.Nil(t, envByName(&c, "NO_PROXY"), "%s 不得注入 NO_PROXY", c.Name)
 		assert.Nil(t, envByName(&c, "AWS_ACCESS_KEY_ID"), "%s 不得注入 AWS 凭证", c.Name)
 		assert.Nil(t, envByName(&c, "AWS_SECRET_ACCESS_KEY"), "%s 不得注入 AWS 凭证", c.Name)
 		assert.Nil(t, envByName(&c, "AWS_ENDPOINT_URL"), "%s 不得注入 AWS/S3 endpoint", c.Name)
@@ -118,6 +124,8 @@ func TestRenderDeploymentAICC(t *testing.T) {
 func TestRenderAICCNetworkPolicy(t *testing.T) {
 	spec := testSpec()
 	spec.AppType = domain.AppTypeAICC
+	// 覆盖普通应用代理已配置时，客服容器仍不得继承该配置的回归场景。
+	spec.Proxy = ProxyEnv{HTTPProxy: "http://pod-proxy:7890", HTTPSProxy: "http://pod-proxy:7890", NoProxy: "localhost,.svc"}
 
 	policy := RenderAICCNetworkPolicy(spec, "oc-aicc")
 
