@@ -3117,7 +3117,11 @@ INSERT INTO aicc_intent_analysis_retries (session_id, message_id, attempts, run_
 VALUES (?, ?, 1, DATE_ADD(NOW(6), INTERVAL 1 SECOND), ?)
 ON DUPLICATE KEY UPDATE
     message_id = VALUES(message_id), attempts = attempts + 1,
-    run_after = DATE_ADD(NOW(6), INTERVAL LEAST(attempts, 5) SECOND), last_error = VALUES(last_error)
+    run_after = DATE_ADD(NOW(6), INTERVAL LEAST(attempts, 5) SECOND), last_error = VALUES(last_error),
+    -- cleanup 留下 processed 记录时，新的主回复分析失败必须能重新排队；未处理/已领取记录不重置。
+    lease_token = IF(processed_at IS NOT NULL, NULL, lease_token),
+    lease_expires_at = IF(processed_at IS NOT NULL, NULL, lease_expires_at),
+    processed_at = IF(processed_at IS NOT NULL, NULL, processed_at)
 `
 
 type UpsertAICCIntentAnalysisRetryParams struct {
