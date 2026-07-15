@@ -14,6 +14,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 )
@@ -270,12 +271,22 @@ func (a *KubernetesAdapter) Delete(ctx context.Context, appID string) error {
 		if err := a.deleteHPA(ctx, appID); err != nil {
 			return err
 		}
-		// 保留默认拒绝 egress 策略直至 app ID 被彻底回收：Deployment 删除是异步的，若先删
-		// 策略会在残余 Pod 的终止窗口形成未受限出网。后续同 ID EnsureApp 会幂等覆盖策略。
+		// 先以 foreground 级联删除 Deployment，并等待其 Pod 实际消失；否则异步终止窗口若
+		// 先删策略会形成未受限 egress。确认没有任何同 app 标签 Pod 后才回收策略。
+		if err := a.deleteAICCDeploymentAndWait(ctx, appID); err != nil {
+			return err
+		}
+		if err := a.deleteAICCNetworkPolicy(ctx, appID); err != nil {
+			return err
+		}
+		// Deployment 已在上方处理，下面只删除 Service 与 Secret。
+		goto deleteSupportingResources
 	}
 	if err := a.client.AppsV1().Deployments(a.namespace).Delete(ctx, deploymentName(appID), del); err != nil && !apierrors.IsNotFound(err) {
 		return wrapK8s("删除 Deployment", err)
 	}
+
+deleteSupportingResources:
 	if err := a.client.CoreV1().Services(a.namespace).Delete(ctx, serviceName(appID), del); err != nil && !apierrors.IsNotFound(err) {
 		return wrapK8s("删除 Service", err)
 	}
@@ -283,6 +294,39 @@ func (a *KubernetesAdapter) Delete(ctx context.Context, appID string) error {
 		return wrapK8s("删除 Secret", err)
 	}
 	return nil
+}
+
+// deleteAICCDeploymentAndWait 前台删除 AICC Deployment 后持续确认同 app 标签的 Pod 已不存在。
+// 不设置额外短超时，调用方 context 是唯一的生命周期边界，容纳客服 Pod 的优雅终止窗口。
+func (a *KubernetesAdapter) deleteAICCDeploymentAndWait(ctx context.Context, appID string) error {
+	foreground := metav1.DeletePropagationForeground
+	err := a.client.AppsV1().Deployments(a.namespace).Delete(ctx, deploymentName(appID), metav1.DeleteOptions{PropagationPolicy: &foreground})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return wrapK8s("删除 AICC Deployment", err)
+	}
+	return wait.PollUntilContextCancel(ctx, 250*time.Millisecond, true, func(ctx context.Context) (bool, error) {
+		_, err := a.client.AppsV1().Deployments(a.namespace).Get(ctx, deploymentName(appID), metav1.GetOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return false, wrapK8s("确认 AICC Deployment 删除", err)
+		}
+		if err == nil {
+			return false, nil
+		}
+		pods, err := a.client.CoreV1().Pods(a.namespace).List(ctx, metav1.ListOptions{LabelSelector: "app=" + appID})
+		if err != nil {
+			return false, wrapK8s("确认 AICC Pod 删除", err)
+		}
+		return len(pods.Items) == 0, nil
+	})
+}
+
+// deleteAICCNetworkPolicy 仅在 Deployment 与对应 Pod 都已消失后调用，回收逐应用 egress 策略。
+func (a *KubernetesAdapter) deleteAICCNetworkPolicy(ctx context.Context, appID string) error {
+	err := a.client.NetworkingV1().NetworkPolicies(a.namespace).Delete(ctx, aiccNetworkPolicyName(appID), metav1.DeleteOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return wrapK8s("删除 AICC NetworkPolicy", err)
 }
 
 // deleteHPA 幂等删除 AICC HPA；NotFound 表示已停止或已删除，按成功处理。

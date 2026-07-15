@@ -78,9 +78,9 @@ func TestDeleteAICCDeletesHPA(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestDeleteAICCKeepsNetworkPolicyUntilPodReclaimed 验证删除 AICC 时保留专属 egress 策略，
-// 防止 Deployment 异步删除的残余 Pod 在终止窗口失去出网约束。
-func TestDeleteAICCKeepsNetworkPolicyUntilPodReclaimed(t *testing.T) {
+// TestDeleteAICCDeletesNetworkPolicyAfterPodReclaimed 验证 AICC 的 Deployment 与 Pod 已回收后，
+// 专属 egress 策略会被删除，避免 app ID 长期积累不可审计的孤儿 NetworkPolicy。
+func TestDeleteAICCDeletesNetworkPolicyAfterPodReclaimed(t *testing.T) {
 	cs := fake.NewSimpleClientset()
 	a := NewAICCKubernetesAdapter(cs, "oc-aicc")
 	spec := testSpec()
@@ -89,7 +89,7 @@ func TestDeleteAICCKeepsNetworkPolicyUntilPodReclaimed(t *testing.T) {
 
 	require.NoError(t, a.Delete(context.Background(), spec.AppID))
 	_, err := cs.NetworkingV1().NetworkPolicies("oc-aicc").Get(context.Background(), "app-a1-egress", metav1.GetOptions{})
-	require.NoError(t, err)
+	require.Error(t, err)
 }
 
 // TestStartStopNormalAppKeepsLegacyScaleSemantics 验证普通应用停止和启动仅缩放 Deployment，
