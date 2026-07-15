@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/guregu/null/v5"
@@ -23,15 +24,20 @@ type intentRetryStoreFake struct {
 	chatFail   bool
 	deleteFail bool
 	leaseToken string
+	mu         sync.Mutex
 }
 
 func (s *intentRetryStoreFake) ListReadyAICCIntentAnalysisRetries(context.Context, int32) ([]sqlc.ListReadyAICCIntentAnalysisRetriesRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.row && !s.processed && !s.claimed {
 		return []sqlc.ListReadyAICCIntentAnalysisRetriesRow{{SessionID: "s", MessageID: "m", AgentID: "a", OrgID: "o", AppID: "p"}}, nil
 	}
 	return nil, nil
 }
 func (s *intentRetryStoreFake) ClaimAICCIntentAnalysisRetry(_ context.Context, p sqlc.ClaimAICCIntentAnalysisRetryParams) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.claimed {
 		return 0, nil
 	}
@@ -201,4 +207,27 @@ func TestAICCIntentRetryRejectsStaleLease(t *testing.T) {
 	require.NoError(t, err)
 	assert.Zero(t, rescheduled)
 	assert.True(t, store.claimed)
+}
+
+// TestAICCIntentRetryConcurrentClaim 验证两个 worker 同时扫描同一任务时只有领取者调用模型。
+func TestAICCIntentRetryConcurrentClaim(t *testing.T) {
+	store := &intentRetryStoreFake{aiccDispatcherStoreFake: newAICCDispatcherStoreFake(), row: true}
+	var mu sync.Mutex
+	calls := 0
+	chat := aiccDispatcherChatFake{run: func(context.Context) (string, error) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		return `{"level":"low","fields":{},"confidence":{},"evidence":{}}`, nil
+	}}
+	d := NewAICCDispatcher(store, nil, chat, nil)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() { defer wg.Done(); require.NoError(t, d.RetryPendingAICCIntentAnalysis(context.Background())) }()
+	}
+	wg.Wait()
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, 1, calls)
 }
