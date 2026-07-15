@@ -322,7 +322,7 @@ func TestAICCConversationIntelligenceMigration(t *testing.T) {
 	assert.Contains(t, up, "summary_version INT NOT NULL DEFAULT 1")
 	assert.Contains(t, up, "CONSTRAINT aicc_session_contexts_version_check CHECK (summary_version >= 1)")
 	assert.Contains(t, up, "CONSTRAINT fk_aicc_session_contexts_session FOREIGN KEY (session_id) REFERENCES aicc_sessions(id) ON DELETE CASCADE")
-	assert.Contains(t, up, "CONSTRAINT fk_aicc_session_contexts_message FOREIGN KEY (summarized_through_message_id) REFERENCES aicc_messages(id) ON DELETE CASCADE")
+	assert.Contains(t, up, "CONSTRAINT fk_aicc_session_contexts_message FOREIGN KEY (summarized_through_message_id, session_id)\n        REFERENCES aicc_messages(id, session_id) ON DELETE CASCADE")
 
 	// 每条助手消息可持久化多个知识或公开网络来源，企业公开网络结果必须另行标记未确认。
 	assert.Contains(t, up, "CREATE TABLE aicc_message_sources")
@@ -336,7 +336,12 @@ func TestAICCConversationIntelligenceMigration(t *testing.T) {
 	assert.Contains(t, up, "CONSTRAINT aicc_session_intents_level_check CHECK (intent_level IN ('low','medium','high'))")
 	assert.Contains(t, up, "CONSTRAINT aicc_session_intents_invite_check CHECK (invite_status IN ('not_invited','invited','declined','submitted'))")
 	assert.Contains(t, up, "CONSTRAINT fk_aicc_session_intents_session FOREIGN KEY (session_id) REFERENCES aicc_sessions(id) ON DELETE CASCADE")
-	assert.Contains(t, up, "CONSTRAINT fk_aicc_session_intents_message FOREIGN KEY (analyzed_message_id) REFERENCES aicc_messages(id) ON DELETE CASCADE")
+	assert.Contains(t, up, "CONSTRAINT fk_aicc_session_intents_message FOREIGN KEY (analyzed_message_id, session_id)\n        REFERENCES aicc_messages(id, session_id) ON DELETE CASCADE")
+
+	// 复合子外键必须引用既有消息复合唯一键，才能在数据库层拒绝跨 session 的摘要水位与分析证据。
+	messagesBytes, err := FS.ReadFile("000028_aicc.up.sql")
+	require.NoError(t, err)
+	assert.Contains(t, string(messagesBytes), "UNIQUE KEY uk_aicc_messages_session_identity (id, session_id)")
 
 	downBytes, err := FS.ReadFile("000037_aicc_conversation_intelligence.down.sql")
 	require.NoError(t, err)
@@ -650,6 +655,54 @@ func TestAICCMigrationExecutesOnMySQL(t *testing.T) {
 	)
 	require.Error(t, err)
 
+	// 升级到对话事实表后，复合消息外键必须将摘要水位和分析证据限制在同一会话。
+	require.NoError(t, migrator.Migrate(37))
+	mustExecMigrationSQL(t, testDB, "INSERT INTO aicc_sessions (id, agent_id, org_id, session_token, expires_at) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)",
+		"session-b", "agent-b", "org-b", "session-token-b", time.Now().Add(24*time.Hour),
+		"session-cross", "agent-a", "org-a", "session-token-cross", time.Now().Add(24*time.Hour),
+	)
+	mustExecMigrationSQL(t, testDB, `INSERT INTO aicc_messages (
+		id, session_id, agent_id, direction, content_type, text_content
+	) VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)`,
+		"message-context-a", "session-a", "agent-a", "visitor", "text", "会话 A 证据",
+		"message-context-b", "session-b", "agent-b", "visitor", "text", "会话 B 证据",
+	)
+
+	// 正常路径：摘要和意向引用本会话的消息可以写入。
+	mustExecMigrationSQL(t, testDB, `INSERT INTO aicc_session_contexts (
+		id, session_id, summary, summarized_through_message_id, summary_version
+	) VALUES (?, ?, ?, ?, ?)`,
+		"context-a", "session-a", "会话 A 摘要", "message-context-a", 1,
+	)
+	mustExecMigrationSQL(t, testDB, `INSERT INTO aicc_session_intents (
+		id, session_id, intent_level, analyzer_version, analyzed_message_id, invite_status
+	) VALUES (?, ?, ?, ?, ?, ?)`,
+		"intent-a", "session-a", "high", "test-v1", "message-context-a", "not_invited",
+	)
+
+	// 边界路径：即使消息真实存在，也不得把另一 session 的消息作为本会话摘要或分析证据。
+	_, err = testDB.Exec(`INSERT INTO aicc_session_contexts (
+		id, session_id, summary, summarized_through_message_id, summary_version
+	) VALUES (?, ?, ?, ?, ?)`,
+		"context-cross-session", "session-cross", "错误摘要", "message-context-b", 1,
+	)
+	require.Error(t, err)
+	_, err = testDB.Exec(`INSERT INTO aicc_session_intents (
+		id, session_id, intent_level, analyzer_version, analyzed_message_id, invite_status
+	) VALUES (?, ?, ?, ?, ?, ?)`,
+		"intent-cross-session", "session-cross", "medium", "test-v1", "message-context-b", "not_invited",
+	)
+	require.Error(t, err)
+
+	// 先回滚 000037，三张对话事实表必须随迁移一起移除。
+	require.NoError(t, migrator.Steps(-1))
+	var contextTable string
+	err = testDB.QueryRow("SHOW TABLES LIKE 'aicc_session_contexts'").Scan(&contextTable)
+	require.ErrorIs(t, err, sql.ErrNoRows)
+
+	// 000036 与 000035 只引入队列锁和消息关联列，分别回滚后才回到任务表版本。
+	require.NoError(t, migrator.Steps(-1))
+	require.NoError(t, migrator.Steps(-1))
 	// 单步回滚 000034 后任务表必须消失，证明回滚不残留依赖表。
 	require.NoError(t, migrator.Steps(-1))
 	var taskTable string
