@@ -56,6 +56,8 @@ type AICCPublicStore interface {
 	GetAICCAgentByWidgetToken(ctx context.Context, widgetToken string) (sqlc.AiccAgent, error)
 	// GetAICCSessionByToken 通过访客 session token 定位单个公开会话。
 	GetAICCSessionByToken(ctx context.Context, token string) (sqlc.AiccSession, error)
+	// GetAICCSessionIntent 读取会话级意向事实，用于将留资卡片绑定到首次高意向回复。
+	GetAICCSessionIntent(ctx context.Context, sessionID string) (sqlc.AiccSessionIntent, error)
 	// LockAICCSessionForUpdate 在事务内锁定会话行，序列化公开消息额度预约。
 	LockAICCSessionForUpdate(ctx context.Context, id string) (sqlc.AiccSession, error)
 	// GetAICCAgentSettings 读取智能体运营配置；历史智能体可能没有配置行。
@@ -68,6 +70,8 @@ type AICCPublicStore interface {
 	CountActiveAICCMessageTasks(ctx context.Context) (int64, error)
 	// ListAICCMessagesBySession 读取当前会话消息，用于访客刷新页面后恢复对话内容。
 	ListAICCMessagesBySession(ctx context.Context, sessionID string) ([]sqlc.AiccMessage, error)
+	// ListAICCMessageSources 读取已审计持久化的助手答复来源。
+	ListAICCMessageSources(ctx context.Context, messageID string) ([]sqlc.AiccMessageSource, error)
 	// GetActiveAICCBlockedVisitor 按匿名访客 hash 查询有效封禁记录，避免公开端继续消耗模型。
 	GetActiveAICCBlockedVisitor(ctx context.Context, arg sqlc.GetActiveAICCBlockedVisitorParams) (sqlc.AiccBlockedVisitor, error)
 	// CreateAICCSession 创建公开访客会话。
@@ -108,12 +112,10 @@ type AICCPublicStore interface {
 	ListRequiredAICCLeadFieldsMissing(ctx context.Context, sessionID string) ([]sqlc.AiccLeadField, error)
 	// UpdateAICCSessionLeadStatus 同步会话留资完成状态。
 	UpdateAICCSessionLeadStatus(ctx context.Context, arg sqlc.UpdateAICCSessionLeadStatusParams) error
-	// GetAICCAssistantMessageForFeedback 查询可反馈的未过期助手消息。
-	GetAICCAssistantMessageForFeedback(ctx context.Context, arg sqlc.GetAICCAssistantMessageForFeedbackParams) (sqlc.AiccMessage, error)
-	// UpsertAICCFeedback 写入或覆盖单条助手消息反馈。
-	UpsertAICCFeedback(ctx context.Context, arg sqlc.UpsertAICCFeedbackParams) error
-	// UpdateAICCSessionResolutionStatus 根据反馈同步会话解决状态。
+	// UpdateAICCSessionResolutionStatus 写入会话级解决状态。
 	UpdateAICCSessionResolutionStatus(ctx context.Context, arg sqlc.UpdateAICCSessionResolutionStatusParams) error
+	// ResetAICCSessionResolutionForNewPhase 仅在已确认状态后记录下一阶段的首条访客消息。
+	ResetAICCSessionResolutionForNewPhase(ctx context.Context, arg sqlc.ResetAICCSessionResolutionForNewPhaseParams) error
 }
 
 // AICCPublicTxRunner 为公开组合写操作提供事务边界，避免多字段或多表写入半成功。
@@ -128,7 +130,7 @@ type AICCPublicImageBlob interface {
 
 // AICCHermesChat 抽象转发隐藏 app/hermes 的聊天能力。
 type AICCHermesChat interface {
-	ChatAICC(ctx context.Context, appID, sessionID, text string) (string, error)
+	ChatAICC(ctx context.Context, turn AICCInboundTurn) (AICCResponseEnvelope, error)
 }
 
 // AICCPublicSessionInput 是访客创建会话时携带的来源信息。
@@ -194,6 +196,10 @@ type AICCPublicMessageResult struct {
 	Status string `json:"status"`
 	// Text 仅在本地拒答或已完成且已持久化助手回复时返回。
 	Text string `json:"text,omitempty"`
+	// Sources 是当前助手答复已校验的公开来源。
+	Sources []AICCResponseSource `json:"sources,omitempty"`
+	// NextAction 是 manager 计算后的下一步展示动作。
+	NextAction string `json:"next_action,omitempty"`
 	// RetryAfterSeconds 仅在 retry_wait 时返回，表示建议客户端下次查询前等待的秒数。
 	RetryAfterSeconds *int64 `json:"retry_after_seconds,omitempty"`
 }
@@ -223,18 +229,6 @@ type AICCPublicLeadValuesInput struct {
 type AICCPublicLeadValuesResult struct {
 	LeadStatus          string   `json:"lead_status"`
 	MissingRequiredKeys []string `json:"missing_required_keys,omitempty"`
-}
-
-// AICCPublicFeedbackInput 是访客提交助手回复反馈的入参。
-type AICCPublicFeedbackInput struct {
-	SessionToken string
-	MessageID    string
-	Helpful      bool
-}
-
-// AICCPublicFeedbackResult 描述反馈提交后的会话解决状态。
-type AICCPublicFeedbackResult struct {
-	ResolutionStatus string `json:"resolution_status"`
 }
 
 // AICCPublicResolutionInput 是访客更新当前会话解决状态的入参。
@@ -404,6 +398,17 @@ func (s *AICCPublicService) GetSession(ctx context.Context, sessionToken string)
 	}
 	for _, row := range messages {
 		message := toAICCMessageResult(row)
+		if row.Direction == domain.AICCMessageDirectionAssistant {
+			sources, sourceErr := s.aiccMessageSources(ctx, row.ID)
+			if sourceErr != nil {
+				return AICCPublicSessionDetailResult{}, sourceErr
+			}
+			message.Sources = sources
+			message.NextAction = s.aiccAssistantNextAction(ctx, row, session.ResolutionPhaseStartMessageID.String)
+			if session.ResolutionStatus != "" && session.ResolutionStatus != domain.AICCResolutionUnknown && message.NextAction == "ask_resolution" {
+				message.NextAction = "none"
+			}
+		}
 		if row.Direction == domain.AICCMessageDirectionVisitor {
 			task, taskErr := s.aiccMessageTaskResult(ctx, row.ID)
 			if taskErr == nil {
@@ -456,13 +461,8 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 	if agent.PrivacyMode == domain.AICCPrivacyModeConsentRequired && !session.PrivacyConsentedAt.Valid {
 		return AICCPublicMessageResult{}, ErrAICCConsentRequired
 	}
-	missing, err := s.store.ListRequiredAICCLeadFieldsMissing(ctx, session.ID)
-	if err != nil {
-		return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 必填留资字段失败: %w", err)
-	}
-	if len(missing) > 0 {
-		return AICCPublicMessageResult{}, ErrAICCLeadRequired
-	}
+	// 留资仅在访客明确选择提交时校验。客服对话不能因表单尚未填写而被阻断，
+	// 否则会把高意向识别误变成强制留资。
 	settings, err := s.loadPublicSettings(ctx, session.AgentID)
 	if err != nil {
 		return AICCPublicMessageResult{}, err
@@ -494,7 +494,7 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 					return AICCPublicMessageResult{}, requeueErr
 				}
 			}
-			return s.aiccMessageTaskResult(ctx, existing.ID)
+			return s.aiccMessageTaskResultForSession(ctx, existing.ID, session)
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 幂等消息失败: %w", err)
@@ -539,7 +539,7 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 	isPromptInjection := isAICCPromptInjection(text)
 	var assistantMessage *sqlc.CreateAICCMessageParams
 	if isPromptInjection {
-		message := sqlc.CreateAICCMessageParams{ID: newUUID(), SessionID: session.ID, AgentID: session.AgentID, Direction: domain.AICCMessageDirectionAssistant, ContentType: domain.AICCMessageContentTypeText, TextContent: nullStr(aiccPromptInjectionReply), ClientMessageID: nullStr(clientMessageID), ReplyToMessageID: null.StringFrom(visitorMessage.ID)}
+		message := sqlc.CreateAICCMessageParams{ID: newUUID(), SessionID: session.ID, AgentID: session.AgentID, Direction: domain.AICCMessageDirectionAssistant, ContentType: domain.AICCMessageContentTypeText, TextContent: nullStr(aiccPromptInjectionReply), ClientMessageID: nullStr(clientMessageID), ReplyToMessageID: null.StringFrom(visitorMessage.ID), IsRefusal: true}
 		assistantMessage = &message
 	}
 	existingMessageID, err := s.reserveAICCVisitorMessage(ctx, session, settings.MessageLimitPerSession, visitorMessage, agent.AppID, !isPromptInjection, assistantMessage)
@@ -604,7 +604,24 @@ func (s *AICCPublicService) GetMessageStatus(ctx context.Context, sessionToken, 
 	if message.SessionID != session.ID || message.Direction != domain.AICCMessageDirectionVisitor {
 		return AICCPublicMessageResult{}, ErrAICCInvalidMessage
 	}
-	return s.aiccMessageTaskResult(ctx, message.ID)
+	result, err := s.aiccMessageTaskResult(ctx, message.ID)
+	if err != nil {
+		return AICCPublicMessageResult{}, err
+	}
+	// 访客已经明确选择结果后，轮询旧消息不能再次弹出解决状态卡片。
+	if session.ResolutionStatus != "" && session.ResolutionStatus != domain.AICCResolutionUnknown && result.NextAction == "ask_resolution" {
+		result.NextAction = "none"
+	}
+	if result.Status == "completed" {
+		assistant, assistantErr := s.store.GetAICCAssistantMessageByVisitorMessageID(ctx, null.StringFrom(message.ID))
+		if assistantErr == nil {
+			result.NextAction = s.aiccAssistantNextAction(ctx, assistant, session.ResolutionPhaseStartMessageID.String)
+		}
+	}
+	if session.ResolutionStatus != "" && session.ResolutionStatus != domain.AICCResolutionUnknown && result.NextAction == "ask_resolution" {
+		result.NextAction = "none"
+	}
+	return result, nil
 }
 
 func (s *AICCPublicService) reserveAICCVisitorMessage(ctx context.Context, session sqlc.AiccSession, limit int32, visitorMessage sqlc.CreateAICCMessageParams, appID string, createTask bool, assistantMessage *sqlc.CreateAICCMessageParams) (string, error) {
@@ -632,6 +649,12 @@ func (s *AICCPublicService) reserveAICCVisitorMessage(ctx context.Context, sessi
 		}
 		if err := ensureMessageLimit(ctx, store, session.ID, limit); err != nil {
 			return err
+		}
+		// 已确认会话收到新问题即开始新的咨询阶段；状态更新与消息创建同一事务提交。
+		if locked.ResolutionStatus == domain.AICCResolutionResolved || locked.ResolutionStatus == domain.AICCResolutionUnresolved {
+			if err := store.ResetAICCSessionResolutionForNewPhase(ctx, sqlc.ResetAICCSessionResolutionForNewPhaseParams{ID: locked.ID, ResolutionPhaseStartMessageID: null.StringFrom(visitorMessage.ID)}); err != nil {
+				return fmt.Errorf("重置 AICC 会话解决状态失败: %w", err)
+			}
 		}
 		if createTask {
 			if s.queueCapacity <= 0 {
@@ -693,6 +716,12 @@ func (s *AICCPublicService) aiccMessageTaskResult(ctx context.Context, messageID
 			assistant, assistantErr := s.store.GetAICCAssistantMessageByVisitorMessageID(ctx, null.StringFrom(messageID))
 			if assistantErr == nil {
 				result.Text = assistant.TextContent.String
+				sources, sourceErr := s.aiccMessageSources(ctx, assistant.ID)
+				if sourceErr != nil {
+					return AICCPublicMessageResult{}, sourceErr
+				}
+				result.Sources = sources
+				result.NextAction = s.aiccAssistantNextAction(ctx, assistant, "")
 			} else if !errors.Is(assistantErr, sql.ErrNoRows) {
 				return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 已完成助手回复失败: %w", assistantErr)
 			}
@@ -704,12 +733,86 @@ func (s *AICCPublicService) aiccMessageTaskResult(ctx context.Context, messageID
 	}
 	assistant, err := s.store.GetAICCAssistantMessageByVisitorMessageID(ctx, null.StringFrom(messageID))
 	if err == nil {
-		return AICCPublicMessageResult{MessageID: messageID, Status: "completed", Text: assistant.TextContent.String}, nil
+		sources, sourceErr := s.aiccMessageSources(ctx, assistant.ID)
+		if sourceErr != nil {
+			return AICCPublicMessageResult{}, sourceErr
+		}
+		return AICCPublicMessageResult{MessageID: messageID, Status: "completed", Text: assistant.TextContent.String, Sources: sources, NextAction: s.aiccAssistantNextAction(ctx, assistant, "")}, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 幂等助手回复失败: %w", err)
 	}
 	return AICCPublicMessageResult{}, fmt.Errorf("查询 AICC 幂等任务失败: %w", sql.ErrNoRows)
+}
+
+// aiccMessageTaskResultForSession 让幂等重试复用当前会话阶段和解决状态，而不是回放旧卡片动作。
+func (s *AICCPublicService) aiccMessageTaskResultForSession(ctx context.Context, messageID string, session sqlc.AiccSession) (AICCPublicMessageResult, error) {
+	result, err := s.aiccMessageTaskResult(ctx, messageID)
+	if err != nil || result.Status != "completed" {
+		return result, err
+	}
+	assistant, assistantErr := s.store.GetAICCAssistantMessageByVisitorMessageID(ctx, null.StringFrom(messageID))
+	if assistantErr == nil {
+		result.NextAction = s.aiccAssistantNextAction(ctx, assistant, session.ResolutionPhaseStartMessageID.String)
+	}
+	if session.ResolutionStatus != "" && session.ResolutionStatus != domain.AICCResolutionUnknown && result.NextAction == "ask_resolution" {
+		result.NextAction = "none"
+	}
+	return result, nil
+}
+
+// aiccMessageSources 将数据库来源行转换为公开响应模型；来源已在 dispatcher 写入时完成校验，
+// 这里不暴露任何运行时审计字段。
+func (s *AICCPublicService) aiccMessageSources(ctx context.Context, messageID string) ([]AICCResponseSource, error) {
+	rows, err := s.store.ListAICCMessageSources(ctx, messageID)
+	if err != nil {
+		return nil, fmt.Errorf("读取 AICC 回复来源失败: %w", err)
+	}
+	result := make([]AICCResponseSource, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, AICCResponseSource{Type: row.SourceType, Title: row.Title.String, URL: row.Url.String, Scope: row.Scope.String, ReferenceID: row.ReferenceID.String, Unconfirmed: row.Unconfirmed})
+	}
+	return result, nil
+}
+
+// aiccAssistantNextAction 把下一步动作绑定到当前助手回复。阶段起点只会在已确认咨询后写入；
+// unknown 状态下的追问会撤回旧卡片但不会重新计数。
+func (s *AICCPublicService) aiccAssistantNextAction(ctx context.Context, assistant sqlc.AiccMessage, phaseStartMessageID string) string {
+	if assistant.IsRefusal {
+		return "none"
+	}
+	intent, intentErr := s.store.GetAICCSessionIntent(ctx, assistant.SessionID)
+	if intentErr == nil && intent.InviteStatus == "invited" && intent.AnalyzedMessageID.Valid && intent.AnalyzedMessageID.String == assistant.ReplyToMessageID.String {
+		return "offer_lead"
+	}
+	messages, err := s.store.ListAICCMessagesBySession(ctx, assistant.SessionID)
+	if err != nil {
+		return "none"
+	}
+	count, targetCount, targetSeen, visitorAfterTarget, phaseStarted := 0, 0, false, false, phaseStartMessageID == ""
+	for _, message := range messages {
+		if !phaseStarted {
+			if message.ID == phaseStartMessageID {
+				phaseStarted = true
+			}
+			continue
+		}
+		if message.Direction == domain.AICCMessageDirectionVisitor && targetSeen {
+			visitorAfterTarget = true
+		}
+		if message.Direction != domain.AICCMessageDirectionAssistant || message.IsRefusal {
+			continue
+		}
+		count++
+		if message.ID == assistant.ID {
+			targetSeen = true
+			targetCount = count
+		}
+	}
+	if !visitorAfterTarget && targetCount == 2 {
+		return "ask_resolution"
+	}
+	return "none"
 }
 
 func (s *AICCPublicService) withAICCPublicTx(ctx context.Context, fn func(AICCPublicStore) error) error {
@@ -722,10 +825,13 @@ func (s *AICCPublicService) withAICCPublicTx(ctx context.Context, fn func(AICCPu
 func buildAICCRuntimePrompt(agent sqlc.AiccAgent, visitorText string) string {
 	lines := []string{
 		"你是 AICC（AI Contact Center）在线客服智能体，只能以企业客服身份回答访客问题。",
-		"访客问题涉及产品、价格、政策、售后、行业资料、企业资料或当前客服资料时，必须调用 oc-kb skill 的 oc-kb search 检索知识库后再回答。",
-		"执行顺序不可跳过：唯一允许的第一个动作是执行 oc-kb search；在命令返回前禁止直接回答、猜测答案或声明无法确认。",
-		"不要自行编写脚本或代码来检索知识库，也不要在未调用 oc-kb search 前声称知识库未配置或没有资料。",
+		"工具白名单：可调用 aicc_knowledge_search；仅在平台网页检索策略允许时调用 web_search 或 web_extract；仅可通过 skills_list、skill_view 使用平台审批的客服 Skill；vision_analyze 仅可理解 manager 已验证且仅属于当前轮的图片；信息不足时可调用 clarify。不得调用或建议调用命令、终端、代码、文件、进程、浏览器操作、发布、定时、Skill 管理或任何写入工具。",
+		"涉及企业事实、产品、价格、政策、售后、行业或资料的问题，应先使用 aicc_knowledge_search；不得自行猜测、编写脚本或伪称已执行外部操作。",
+		"对上述企业资料类问题，在输出任何最终答复或追问前，必须先调用 aicc_knowledge_search；不得以澄清问题替代首次检索。",
 		"知识库命中时必须优先依据命中内容回答；知识库无命中或内容不足时，再说明暂时无法确认并建议访客联系人工客服。",
+		"若知识库与企业相关公开网络信息冲突，只采用知识库结论；企业相关公开网络信息必须说明未经企业确认。",
+		"最终回复只能输出一个 JSON 对象，且必须严格包含 text、sources、next_action、flags 四个字段：{\"text\":\"\",\"sources\":[],\"next_action\":\"none\",\"flags\":{}}。不得输出 Markdown、解释或 JSON 之外的内容。",
+		"sources 只能复用本轮受控工具结果 aicc_response_sources 中完全一致的 type、title、url、scope、unconfirmed 和 reference_id；没有可复用来源时必须输出空数组。next_action 只能为 none、offer_lead 或 ask_resolution。",
 		"问题超出业务场景、回答边界或需要人工审批时，应明确说明暂时无法确认，并建议访客联系人工客服。",
 	}
 	if scenario := strings.TrimSpace(strOrEmpty(agent.Scenario)); scenario != "" {
@@ -1056,6 +1162,10 @@ func (s *AICCPublicService) submitLeadValues(ctx context.Context, input AICCPubl
 	status := domain.AICCLeadStatusPending
 	if len(missing) == 0 {
 		status = domain.AICCLeadStatusComplete
+	}
+	// 联系方式是访客主动提交的显式字段，优先级高于模型画像；即使其它可选或必填字段
+	// 尚未补齐，也应立即归并正式线索，避免高意向客户在后续刷新前丢失。
+	if primaryAICCContactValue(fieldsByKey, input.Values) != "" {
 		if err := s.upsertLeadForCompletedSession(ctx, session, fieldsByKey, input.Values); err != nil {
 			return AICCPublicLeadValuesResult{}, err
 		}
@@ -1066,7 +1176,37 @@ func (s *AICCPublicService) submitLeadValues(ctx context.Context, input AICCPubl
 	}); err != nil {
 		return AICCPublicLeadValuesResult{}, fmt.Errorf("更新 AICC 留资状态失败: %w", err)
 	}
+	// 已提交联系方式后，匿名候选应退出邀约流程；没有意向画像时保持兼容旧会话。
+	if intentStore, ok := s.store.(interface {
+		UpdateAICCSessionIntentInviteStatus(context.Context, sqlc.UpdateAICCSessionIntentInviteStatusParams) (int64, error)
+	}); ok {
+		if _, err := intentStore.UpdateAICCSessionIntentInviteStatus(ctx, sqlc.UpdateAICCSessionIntentInviteStatusParams{SessionID: session.ID, InviteStatus: "submitted"}); err != nil {
+			return AICCPublicLeadValuesResult{}, fmt.Errorf("更新 AICC 意向邀约状态失败: %w", err)
+		}
+	}
 	return AICCPublicLeadValuesResult{LeadStatus: status, MissingRequiredKeys: aiccLeadFieldKeys(missing)}, nil
+}
+
+// DeclineLeadInvitation 仅记录当前访客明确拒绝留资，后续高意向分析不得再次弹出邀约。
+func (s *AICCPublicService) DeclineLeadInvitation(ctx context.Context, sessionToken string) error {
+	session, err := s.store.GetAICCSessionByToken(ctx, strings.TrimSpace(sessionToken))
+	if err != nil || !session.ExpiresAt.After(s.now()) {
+		return ErrAICCInvalidSession
+	}
+	if _, err := s.activeAgentBySession(ctx, session); err != nil {
+		return err
+	}
+	intentStore, ok := s.store.(interface {
+		UpdateAICCSessionIntentInviteStatus(context.Context, sqlc.UpdateAICCSessionIntentInviteStatusParams) (int64, error)
+	})
+	if !ok {
+		return ErrAICCSessionStoreUnavailable
+	}
+	_, err = intentStore.UpdateAICCSessionIntentInviteStatus(ctx, sqlc.UpdateAICCSessionIntentInviteStatusParams{SessionID: session.ID, InviteStatus: "declined"})
+	if err != nil {
+		return fmt.Errorf("拒绝 AICC 留资邀约失败: %w", err)
+	}
+	return nil
 }
 
 func (s *AICCPublicService) upsertLeadForCompletedSession(ctx context.Context, session sqlc.AiccSession, fieldsByKey map[string]sqlc.AiccLeadField, values map[string]string) error {
@@ -1097,22 +1237,6 @@ func (s *AICCPublicService) upsertLeadForCompletedSession(ctx context.Context, s
 		return fmt.Errorf("关联 AICC 留资字段失败: %w", err)
 	}
 	return nil
-}
-
-// SubmitFeedback 写入助手回复反馈，并同步会话解决状态。
-func (s *AICCPublicService) SubmitFeedback(ctx context.Context, input AICCPublicFeedbackInput) (AICCPublicFeedbackResult, error) {
-	if s.tx != nil {
-		var result AICCPublicFeedbackResult
-		err := s.tx.WithAICCPublicTx(ctx, func(store AICCPublicStore) error {
-			next := *s
-			next.store = store
-			var runErr error
-			result, runErr = next.submitFeedback(ctx, input)
-			return runErr
-		})
-		return result, err
-	}
-	return s.submitFeedback(ctx, input)
 }
 
 // ResolveSession 将公开访客当前会话标记为已解决。
@@ -1160,46 +1284,6 @@ func (s *AICCPublicService) updateSessionResolution(ctx context.Context, input A
 		return AICCPublicResolutionResult{}, fmt.Errorf("更新 AICC 会话解决状态失败: %w", err)
 	}
 	return AICCPublicResolutionResult{ResolutionStatus: status}, nil
-}
-
-func (s *AICCPublicService) submitFeedback(ctx context.Context, input AICCPublicFeedbackInput) (AICCPublicFeedbackResult, error) {
-	messageID := strings.TrimSpace(input.MessageID)
-	sessionToken := strings.TrimSpace(input.SessionToken)
-	if messageID == "" || sessionToken == "" {
-		return AICCPublicFeedbackResult{}, ErrAICCInvalidMessage
-	}
-	message, err := s.store.GetAICCAssistantMessageForFeedback(ctx, sqlc.GetAICCAssistantMessageForFeedbackParams{
-		ID:           messageID,
-		SessionToken: sessionToken,
-	})
-	if errors.Is(err, sql.ErrNoRows) {
-		return AICCPublicFeedbackResult{}, ErrAICCInvalidMessage
-	}
-	if err != nil {
-		return AICCPublicFeedbackResult{}, fmt.Errorf("查询 AICC 反馈消息失败: %w", err)
-	}
-	if _, err := s.activeAgentByMessage(ctx, message); err != nil {
-		return AICCPublicFeedbackResult{}, err
-	}
-	if err := s.store.UpsertAICCFeedback(ctx, sqlc.UpsertAICCFeedbackParams{
-		ID:        newUUID(),
-		SessionID: message.SessionID,
-		MessageID: message.ID,
-		Helpful:   input.Helpful,
-	}); err != nil {
-		return AICCPublicFeedbackResult{}, fmt.Errorf("保存 AICC 回复反馈失败: %w", err)
-	}
-	status := domain.AICCResolutionUnresolved
-	if input.Helpful {
-		status = domain.AICCResolutionResolved
-	}
-	if err := s.store.UpdateAICCSessionResolutionStatus(ctx, sqlc.UpdateAICCSessionResolutionStatusParams{
-		ID:               message.SessionID,
-		ResolutionStatus: status,
-	}); err != nil {
-		return AICCPublicFeedbackResult{}, fmt.Errorf("更新 AICC 会话解决状态失败: %w", err)
-	}
-	return AICCPublicFeedbackResult{ResolutionStatus: status}, nil
 }
 
 func (s *AICCPublicService) activeAgentByToken(ctx context.Context, publicToken, channel string) (sqlc.AiccAgent, error) {
@@ -1410,11 +1494,8 @@ func primaryAICCContactValue(fieldsByKey map[string]sqlc.AiccLeadField, values m
 			}
 		}
 	}
-	for _, key := range keys {
-		if value := strings.TrimSpace(values[key]); value != "" {
-			return value
-		}
-	}
+	// 非联系方式字段只用于补全匿名候选画像；不能作为跨会话归并依据，避免把企业名称、预算等
+	// 普通表单项错误创建为正式线索。
 	return ""
 }
 

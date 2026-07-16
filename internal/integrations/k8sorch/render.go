@@ -6,16 +6,18 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 // 资源命名约定（manager 按 appID 确定性寻址，无需存 pod 标识）。
-func deploymentName(appID string) string { return "app-" + appID }
-func serviceName(appID string) string    { return "app-" + appID + "-ocops" }
-func secretName(appID string) string     { return "app-" + appID + "-token" }
-func hpaName(appID string) string        { return deploymentName(appID) }
+func deploymentName(appID string) string        { return "app-" + appID }
+func serviceName(appID string) string           { return "app-" + appID + "-ocops" }
+func secretName(appID string) string            { return "app-" + appID + "-token" }
+func hpaName(appID string) string               { return deploymentName(appID) }
+func aiccNetworkPolicyName(appID string) string { return deploymentName(appID) + "-egress" }
 
 // appLabels 是资源 ObjectMeta 与 pod template 的完整 label（含分组维度 part-of）。
 func appLabels(appID string) map[string]string {
@@ -62,6 +64,46 @@ func RenderService(spec AppSpec, namespace string) *corev1.Service {
 		Spec: corev1.ServiceSpec{
 			Selector: selectorLabels(spec.AppID),
 			Ports:    []corev1.ServicePort{{Name: "oc-ops", Port: 8080, TargetPort: intstr.FromInt32(8080)}},
+		},
+	}
+}
+
+// RenderAICCNetworkPolicy 为单个客服 Pod 建立默认拒绝的 egress 边界：仅允许解析 DNS、访问
+// manager-api、new-api 和共享 Firecrawl 正文提取服务，以及 Hermes 原生只读网页检索直连 HTTP/HTTPS
+// 公网。函数保留以便应用删除时可按既有生命周期清理 NetworkPolicy。
+func RenderAICCNetworkPolicy(spec AppSpec, namespace string) *networkingv1.NetworkPolicy {
+	protocolTCP, protocolUDP := corev1.ProtocolTCP, corev1.ProtocolUDP
+	port := func(protocol corev1.Protocol, number int) networkingv1.NetworkPolicyPort {
+		value := intstr.FromInt(number)
+		return networkingv1.NetworkPolicyPort{Protocol: &protocol, Port: &value}
+	}
+	peer := func(namespace, app string) networkingv1.NetworkPolicyPeer {
+		return networkingv1.NetworkPolicyPeer{
+			NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": namespace}},
+			PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"app": app}},
+		}
+	}
+	dnsPeer := networkingv1.NetworkPolicyPeer{
+		NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kube-system"}},
+		PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"k8s-app": "kube-dns"}},
+	}
+	return &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: aiccNetworkPolicyName(spec.AppID), Namespace: namespace, Labels: appLabels(spec.AppID)},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{MatchLabels: selectorLabels(spec.AppID)},
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
+			Egress: []networkingv1.NetworkPolicyEgressRule{
+				// CoreDNS 同时支持 UDP/TCP；只选 kube-system 中的 kube-dns Pod，避免开放任意 53 端口。
+				{To: []networkingv1.NetworkPolicyPeer{dnsPeer}, Ports: []networkingv1.NetworkPolicyPort{port(protocolUDP, 53), port(protocolTCP, 53)}},
+				// manager-api 提供 token bootstrap 与受 app token 保护的知识检索入口。
+				{To: []networkingv1.NetworkPolicyPeer{peer("ocm", "manager-api")}, Ports: []networkingv1.NetworkPolicyPort{port(protocolTCP, 8080)}},
+				// new-api 是模型请求的唯一内网网关，禁止客服 Pod 直连任意外部模型服务。
+				{To: []networkingv1.NetworkPolicyPeer{peer("ocm", "new-api")}, Ports: []networkingv1.NetworkPolicyPort{port(protocolTCP, 3000)}},
+				// Firecrawl 以集群内服务提供网页正文读取；其余 Firecrawl 组件不向 AICC Pod 暴露。
+				{To: []networkingv1.NetworkPolicyPeer{peer("oc-firecrawl", "firecrawl-api")}, Ports: []networkingv1.NetworkPolicyPort{port(protocolTCP, 3002)}},
+				// Hermes 原生网页检索只需读取公开网页，直连公网时仅放行 HTTP/HTTPS，其他端口仍默认拒绝。
+				{To: []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: "0.0.0.0/0"}}}, Ports: []networkingv1.NetworkPolicyPort{port(protocolTCP, 80), port(protocolTCP, 443)}},
+			},
 		},
 	}
 }
@@ -144,6 +186,8 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 	inputMount := corev1.VolumeMount{Name: "oc-input", MountPath: "/opt/oc-input"}
 	// inputMountRO 是 hermes 只读消费 oc-input（防止主容器误写共享配置卷）。
 	inputMountRO := corev1.VolumeMount{Name: "oc-input", MountPath: "/opt/oc-input", ReadOnly: true}
+	// bootstrapTmpMount 仅供 AICC 初始化容器的 mktemp 使用；根文件系统只读时不能依赖镜像内 /tmp。
+	bootstrapTmpMount := corev1.VolumeMount{Name: "bootstrap-tmp", MountPath: "/tmp"}
 	// reqs/lims 从 ResourceLimits 字符串解析为 k8s resource.Quantity。
 	reqs := corev1.ResourceList{
 		corev1.ResourceCPU:    resource.MustParse(spec.Resources.RequestsCPU),
@@ -169,8 +213,30 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 	}
 	if domain.IsAICCAppType(spec.AppType) {
 		initContainer.Command = []string{"oc-bootstrap"}
-		// AICC bootstrap 只生成 hermes 消费的输入配置，不恢复标准应用的数据目录。
-		initContainer.VolumeMounts = []corev1.VolumeMount{inputMount}
+		// AICC bootstrap 只生成 hermes 消费的输入配置，不恢复标准应用的数据目录；但其会创建
+		// 首次启动状态目录 /opt/data。只读根文件系统下将这两个写入位置都显式挂到 emptyDir。
+		initContainer.VolumeMounts = []corev1.VolumeMount{inputMount, dataMount, bootstrapTmpMount}
+	}
+	hermesEnv := []corev1.EnvVar{
+		{Name: "HERMES_HOME", Value: "/opt/data"},
+		{Name: "API_SERVER_ENABLED", Value: "true"},
+		{Name: "API_SERVER_KEY", ValueFrom: ctrlTokenEnv.ValueFrom},
+		// 共享 Firecrawl 仅供 Hermes 网页正文读取；只注入常驻主容器，避免 sidecar 与初始化容器获得无关能力。
+		{Name: "FIRECRAWL_API_URL", Value: "http://firecrawl-api.oc-firecrawl.svc.cluster.local:3002"},
+	}
+	// 客服容器不接入消息渠道，也不具备发布能力；模型、知识 API 与网页后端配置均由
+	// oc-bootstrap 生成的只读运行时配置提供，避免以环境变量横向暴露通用应用能力。
+	if !domain.IsAICCAppType(spec.AppType) {
+		hermesEnv = append(hermesEnv, proxyEnv...)
+		hermesEnv = append(append(append(hermesEnv, feishuOptionalEnv(spec.AppID)...), workWechatOptionalEnv(spec.AppID)...), dingtalkOptionalEnv(spec.AppID)...)
+	}
+	ocOpsEnv := []corev1.EnvVar{
+		{Name: "OC_OPS_TOKEN", ValueFrom: ctrlTokenEnv.ValueFrom},
+		{Name: "API_SERVER_KEY", ValueFrom: ctrlTokenEnv.ValueFrom},
+		{Name: "PYTHONPATH", Value: "/usr/local/lib"},
+	}
+	if !domain.IsAICCAppType(spec.AppType) {
+		ocOpsEnv = append(ocOpsEnv, proxyEnv...)
 	}
 	containers := []corev1.Container{
 		{
@@ -183,13 +249,8 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 			// 拒绝启动（含 loopback-only 绑定）。复用 per-app control-token 作为 key——
 			// api_server 仅绑 127.0.0.1、只有同 pod 内 oc-ops 可达，per-app 密钥安全足够；
 			// oc-ops 容器注入同一 key（见下）后即可鉴权调用 /api/sessions。
-			// 飞书三条 env 永久注入 hermes 容器；未绑定时 Secret 无对应 key，optional=true 使
-			// env 不注入，引擎 getenv 为空 → 飞书平台不启用。Deployment 模板永不因绑定变化。
-			Env: append(append(append(append([]corev1.EnvVar{
-				{Name: "HERMES_HOME", Value: "/opt/data"},
-				{Name: "API_SERVER_ENABLED", Value: "true"},
-				{Name: "API_SERVER_KEY", ValueFrom: ctrlTokenEnv.ValueFrom},
-			}, feishuOptionalEnv(spec.AppID)...), workWechatOptionalEnv(spec.AppID)...), dingtalkOptionalEnv(spec.AppID)...), proxyEnv...),
+			// 标准应用才挂载飞书、企业微信和钉钉渠道 env；AICC 专用镜像不接收这些通用渠道能力。
+			Env:          hermesEnv,
 			VolumeMounts: []corev1.VolumeMount{inputMountRO, dataMount},
 			Resources:    corev1.ResourceRequirements{Requests: reqs, Limits: lims},
 			// readinessProbe：exec hermes gateway status，验证网关真正就绪。
@@ -221,11 +282,7 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 			// API_SERVER_KEY 与 hermes 容器同源（control-token），让 oc-ops 调
 			// hermes api_server /api/sessions 时带 Bearer 鉴权（conversation._api_server_key
 			// 优先读此 env）；两容器同 key 才能互通。
-			Env: append([]corev1.EnvVar{
-				{Name: "OC_OPS_TOKEN", ValueFrom: ctrlTokenEnv.ValueFrom},
-				{Name: "API_SERVER_KEY", ValueFrom: ctrlTokenEnv.ValueFrom},
-				{Name: "PYTHONPATH", Value: "/usr/local/lib"},
-			}, proxyEnv...),
+			Env:   ocOpsEnv,
 			Ports: []corev1.ContainerPort{{ContainerPort: 8080}},
 			// readinessProbe：healthz 仅验证同 Pod api_server 的轻量会话读取，
 			// 不触发模型或渠道请求。TCP listen 早于 api_server 状态恢复，若只探端口，
@@ -256,9 +313,19 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 			},
 		})
 	}
+	volumes := []corev1.Volume{
+		// oc-input：initContainer restore 输出 → hermes/oc-ops 消费，生命周期与 pod 同步。
+		{Name: "oc-input", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+		// data：hermes 运行时数据目录，s3-sync 负责持久化到 S3。
+		{Name: "data", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+	}
 	strategy := appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
 	var terminationGracePeriodSeconds *int64
 	if domain.IsAICCAppType(spec.AppType) {
+		// bootstrap-tmp 只挂给 initContainer，避免常驻客服进程获得额外可写目录。
+		volumes = append(volumes, corev1.Volume{
+			Name: "bootstrap-tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+		})
 		// AICC 允许 HPA 同时保有多副本；滚动更新中旧副本持续服务至新副本 Ready。
 		maxUnavailable, maxSurge := intstr.FromInt(0), intstr.FromInt(1)
 		strategy = appsv1.DeploymentStrategy{
@@ -271,6 +338,15 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 		grace := int64(90)
 		terminationGracePeriodSeconds = &grace
 		for i := range containers {
+			// AICC 运行时不需要提权或写入镜像根文件系统；data / oc-input 均为显式 emptyDir，
+			// capability broker 之外的文件与进程操作在容器层进一步收敛。
+			readOnlyRootFilesystem := true
+			allowPrivilegeEscalation := false
+			containers[i].SecurityContext = &corev1.SecurityContext{
+				ReadOnlyRootFilesystem:   &readOnlyRootFilesystem,
+				AllowPrivilegeEscalation: &allowPrivilegeEscalation,
+				Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+			}
 			if containers[i].Name == "oc-ops" {
 				// HPA 的 CPU/内存 utilization 要求 Pod 内所有常驻容器都有对应 request；
 				// oc-ops 为轻量控制 sidecar，使用固定小 request，避免放大客服主进程配额。
@@ -282,6 +358,14 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 			// 不调用容器内未定义的业务 drain 命令；仅等待 endpoints 摘除传播，
 			// 随后由 Kubernetes 在 90 秒终止窗口内发送 SIGTERM 并回收 Pod。
 			containers[i].Lifecycle = &corev1.Lifecycle{PreStop: &corev1.LifecycleHandler{Sleep: &corev1.SleepAction{Seconds: 10}}}
+		}
+		// initContainer 同样不需要写镜像根目录或 Linux capabilities，只能把 bootstrap 输出写入 oc-input。
+		readOnlyRootFilesystem := true
+		allowPrivilegeEscalation := false
+		initContainer.SecurityContext = &corev1.SecurityContext{
+			ReadOnlyRootFilesystem:   &readOnlyRootFilesystem,
+			AllowPrivilegeEscalation: &allowPrivilegeEscalation,
+			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 		}
 	}
 	dep := &appsv1.Deployment{
@@ -303,12 +387,7 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 					ImagePullSecrets: imagePullSecrets,
 					InitContainers:   []corev1.Container{initContainer},
 					Containers:       containers,
-					Volumes: []corev1.Volume{
-						// oc-input：initContainer restore 输出 → hermes/oc-ops 消费，生命周期与 pod 同步。
-						{Name: "oc-input", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
-						// data：hermes 运行时数据目录，s3-sync 负责持久化到 S3。
-						{Name: "data", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
-					},
+					Volumes:          volumes,
 				},
 			},
 		},

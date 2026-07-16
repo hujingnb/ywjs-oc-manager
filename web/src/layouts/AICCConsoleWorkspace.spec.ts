@@ -332,14 +332,14 @@ describe('AICCConsoleWorkspace', () => {
     expect(agentsState.lastEnabled.value?.()).toBe(true)
   })
 
-  // 覆盖平台管理员代管入口：已通过 org_id 选定开通企业后，顶部应提供新建该企业客服的入口。
-  it('shows the create agent action for platform_admin with a selected organization', () => {
+  // 覆盖平台管理员只读边界：即使通过 org_id 选定企业，也不能从工作台创建该企业客服。
+  it('hides the create agent action for platform_admin with a selected organization', () => {
     authState.user = makeAuthUser({ id: 'platform-1', username: 'platform', display_name: '平台管理员', role: 'platform_admin', org_id: undefined })
     routeState.query = { org_id: 'org-2' }
 
     const wrapper = mountWorkspace()
 
-    expect(wrapper.findAll('button').some(button => button.text().includes('新建智能体'))).toBe(true)
+    expect(wrapper.findAll('button').some(button => button.text().includes('新建智能体'))).toBe(false)
   })
 
   // 覆盖智能体加载与失败状态：上下文条必须复用 i18n 文案提示当前数据状态。

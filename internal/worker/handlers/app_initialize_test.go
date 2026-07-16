@@ -1048,6 +1048,29 @@ func TestAppInitialize_AICCHiddenAppUsesDedicatedRuntimeImage(t *testing.T) {
 	assert.Equal(t, aiccImageRef, store.lastAppliedVersion.AppliedImageRef)
 }
 
+// TestAppInitialize_AICCAllowsDirectPublicEgress 验证 AICC 未配置专属网页检索代理时仍可初始化，
+// 并创建使用客服专用镜像的 AppSpec，由运行时直接访问公网。
+func TestAppInitialize_AICCAllowsDirectPublicEgress(t *testing.T) {
+	store := newAppInitStub(t)
+	store.app.AppType = string(domain.AppTypeAICC)
+	handler := NewAppInitializeHandler(store, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}, AppInitializeConfig{
+		Cipher:              testCipher(t),
+		ResolveRuntimeImage: testResolveRuntimeImage,
+		ResolveAICCRuntimeImage: func() (string, bool) {
+			return "registry.example.com/app/oc-manager-aigowork-aicc:v1", true
+		},
+	})
+	orch := &fakeOrchestrator{}
+	handler.SetOrchestrator(orch, AppInitializeK8sConfig{})
+
+	require.NoError(t, handler.Handle(context.Background(), buildJob(t, testAppID, "")))
+	require.Len(t, orch.ensureAppCalls, 1, "未配置专属代理时仍应创建 AICC AppSpec")
+	assert.Equal(t, domain.AppTypeAICC, orch.ensureAppCalls[0].AppType,
+		"创建的 AppSpec 必须保留 AICC 应用类型")
+	assert.Equal(t, "registry.example.com/app/oc-manager-aigowork-aicc:v1", orch.ensureAppCalls[0].HermesImage,
+		"创建的 AppSpec 必须使用 AICC 专用运行时镜像")
+}
+
 // TestAppInitialize_AICCHiddenAppFailsWithoutDedicatedRuntimeImage 验证客服专用镜像缺失时，
 // AICC 初始化应明确失败，不能使用绑定版本的普通实例镜像继续启动。
 func TestAppInitialize_AICCHiddenAppFailsWithoutDedicatedRuntimeImage(t *testing.T) {

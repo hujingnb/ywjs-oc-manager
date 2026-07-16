@@ -8,7 +8,6 @@ package reaper
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -30,7 +29,7 @@ type Store interface {
 	// ClearAppProgress 清空 progress_current / progress_total,避免前端继续看到旧值。
 	ClearAppProgress(ctx context.Context, id string) error
 	// GetLatestAppInitJob 取最近一份 app_initialize job;不存在返回 sql.ErrNoRows。
-	GetLatestAppInitJob(ctx context.Context, appID json.RawMessage) (sqlc.Job, error)
+	GetLatestAppInitJob(ctx context.Context, appID string) (sqlc.Job, error)
 	// RequeueJob 把 running / succeeded 的 job 重置回 pending。
 	RequeueJob(ctx context.Context, id string) error
 	// CreateJob 没有历史 job 时新建一份。

@@ -81,30 +81,24 @@ def _manifest_with_knowledge() -> Manifest:
 
 
 def test_knowledge_guide_rendered_when_configured(tmp_input: Path, tmp_data: Path) -> None:
-    # 配了 manifest.knowledge 时，SOUL.md 必须给出"强制优先知识库"的指引：
-    # 既要包含 oc-kb search / add 两个命令，也要明确"先检索知识库、别用网络搜索代替"。
+    # 配了 manifest.knowledge 时，SOUL.md 必须给出只读知识检索与企业信息优先规则。
     _setup(tmp_input, persona="P body", platform="PLT")
     render(_manifest_with_knowledge(), tmp_input, tmp_data)
     soul = (tmp_data / "SOUL.md").read_text()
-    assert "oc-kb search" in soul  # 检索主入口必须出现
-    assert "oc-kb add" in soul  # 写入命令必须出现
+    assert "aicc_knowledge_search" in soul  # 只读检索主入口必须出现
     assert "知识库" in soul  # 指引以中文呈现
-    # 强制优先语气：必须告知不要用网络搜索 / 记忆代替知识库检索
-    assert "网络搜索" in soul
+    assert "公开网络、未经企业确认" in soul
+    assert "oc-kb add" not in soul
 
 
-def test_knowledge_guide_mandates_search_first_unconditionally(tmp_input: Path, tmp_data: Path) -> None:
-    # 加强后的指引语义：不再让模型先判断"问题是否依赖知识库"，而是要求对【每一次提问】
-    # 把 oc-kb search 当作第一个动作，且禁止先于检索就用浏览器 / 网络搜索。
-    # 本用例锁住这一无条件语义，防止后续改动退回到"可能依赖才查"的旧弱约束。
+def test_knowledge_guide_limits_to_read_only_customer_research(tmp_input: Path, tmp_data: Path) -> None:
+    # 客服知识指引只允许检索和讲解，不能把旧工作区写入能力带回 AICC。
     _setup(tmp_input, persona="P body", platform="PLT")
     render(_manifest_with_knowledge(), tmp_input, tmp_data)
     soul = (tmp_data / "SOUL.md").read_text()
-    assert "每一次提问" in soul  # 触发条件必须是无条件的"每一次"，而非"可能依赖时"
-    assert "第一个动作" in soul  # 必须把 oc-kb search 明确为第一个动作
-    assert "浏览器" in soul  # 必须显式禁止"先用浏览器搜"这一退化行为
-    # 不得再出现旧版本"可能依赖……才查"式的有条件前置判断措辞
-    assert "只要用户的问题可能依赖" not in soul
+    assert "只能检索和讲解" in soul
+    assert "不得添加、修改或发布" in soul
+    assert "其它信息源" not in soul
 
 
 def test_knowledge_guide_mentions_industry_results_when_configured(tmp_input: Path, tmp_data: Path) -> None:
@@ -123,7 +117,7 @@ def test_knowledge_guide_absent_when_not_configured(tmp_input: Path, tmp_data: P
     _setup(tmp_input, persona="P body", platform="PLT")
     render(make_manifest(), tmp_input, tmp_data)  # make_manifest 默认不含 knowledge
     soul = (tmp_data / "SOUL.md").read_text()
-    assert "oc-kb" not in soul
+    assert "aicc_knowledge_search" not in soul
 
 
 def test_render_drops_org_and_app_layers(tmp_input: Path, tmp_data: Path) -> None:

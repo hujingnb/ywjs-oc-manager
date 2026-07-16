@@ -16,7 +16,9 @@ func TestAICCDispatcherObservabilityIntegration(t *testing.T) {
 	observer := &aiccDispatchObservationRecorder{}
 	newDispatcher := func(chat aiccDispatcherChatFake) (*AICCDispatcher, *aiccDispatcherStoreFake) {
 		store := newAICCDispatcherStoreFake()
-		dispatcher := NewAICCDispatcher(store, aiccDispatcherTxFake{store}, chat, nil)
+		// 该用例覆盖调度生命周期观测，不验证限流拒绝；注入允许通过的 limiter，
+		// 确保任务可进入成功、重试、失败和熔断的真实分支。
+		dispatcher := NewAICCDispatcher(store, aiccDispatcherTxFake{store}, chat, aiccDispatcherAllowLimiter{})
 		dispatcher.SetObserver(observer)
 		return dispatcher, store
 	}

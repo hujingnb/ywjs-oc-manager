@@ -735,14 +735,6 @@ components:
         quote_amount_cents:
           type: integer
       type: object
-    handlers.SubmitAICCFeedbackRequest:
-      properties:
-        helpful:
-          description: Helpful 表示该回答是否有帮助。
-          type: boolean
-      required:
-      - helpful
-      type: object
     handlers.SubmitAICCLeadValuesRequest:
       properties:
         values:
@@ -1014,6 +1006,9 @@ components:
             「数字→字符串」解码失败（与 session 时间戳同源问题）；前端不渲染此字段。
         tool_calls:
           description: 工具调用（透传，前端可忽略）
+        tool_name:
+          description: ToolName 仅在 role=tool 的受控运行时转录中出现；AICC 用它限定哪些工具结果可形成来源审计。
+          type: string
       type: object
     ocops.ConversationSession:
       properties:
@@ -1799,9 +1794,18 @@ components:
         is_refusal:
           description: IsRefusal 表示是否为拒答。
           type: boolean
+        next_action:
+          description: NextAction 是当前助手回复对应的下一步展示动作，公开端据此渲染留资或解决状态卡片。
+          type: string
         retry_after_seconds:
           description: RetryAfterSeconds 是 retry_wait 状态的建议轮询等待秒数。
           type: integer
+        sources:
+          description: Sources 是助手回复已校验的知识库或网络依据；公开端仅展示其中安全字段。
+          items:
+            $ref: '#/components/schemas/service.AICCResponseSource'
+          type: array
+          uniqueItems: false
         task_status:
           description: TaskStatus 是访客消息异步任务状态；仅公开会话恢复时补充。
           type: string
@@ -1827,11 +1831,6 @@ components:
         retention_days:
           type: integer
       type: object
-    service.AICCPublicFeedbackResult:
-      properties:
-        resolution_status:
-          type: string
-      type: object
     service.AICCPublicImageResult:
       properties:
         image_file_id:
@@ -1856,9 +1855,18 @@ components:
         message_id:
           description: MessageID 是访客消息 ID，也是异步任务的幂等关联键。
           type: string
+        next_action:
+          description: NextAction 是 manager 计算后的下一步展示动作。
+          type: string
         retry_after_seconds:
           description: RetryAfterSeconds 仅在 retry_wait 时返回，表示建议客户端下次查询前等待的秒数。
           type: integer
+        sources:
+          description: Sources 是当前助手答复已校验的公开来源。
+          items:
+            $ref: '#/components/schemas/service.AICCResponseSource'
+          type: array
+          uniqueItems: false
         status:
           description: Status 为 queued、processing、retry_wait、completed 或 failed。
           type: string
@@ -1899,8 +1907,25 @@ components:
         session_token:
           type: string
       type: object
+    service.AICCResponseSource:
+      properties:
+        reference_id:
+          type: string
+        scope:
+          type: string
+        title:
+          type: string
+        type:
+          type: string
+        unconfirmed:
+          type: boolean
+        url:
+          type: string
+      type: object
     service.AICCSessionDetailResult:
       properties:
+        intent:
+          $ref: '#/components/schemas/service.AICCSessionIntentResult'
         lead_values:
           description: LeadValues 是本会话已提交的留资字段值，便于运营结合对话上下文回看。
           items:
@@ -1915,6 +1940,31 @@ components:
           uniqueItems: false
         session:
           $ref: '#/components/schemas/service.AICCSessionResult'
+      type: object
+    service.AICCSessionIntentResult:
+      description: Intent 是会话意向画像及逐字段访客原话证据，供运营在不要求留资的前提下判断跟进价值。
+      properties:
+        confidence:
+          additionalProperties:
+            type: number
+          description: Confidence 表示各字段的分析置信度，取值范围为 0 到 1。
+          type: object
+        evidence:
+          additionalProperties:
+            type: string
+          description: Evidence 是字段在访客原话中的直接证据，供运营回溯核验。
+          type: object
+        fields:
+          additionalProperties:
+            type: string
+          description: Fields 是审核白名单内的业务意向字段。
+          type: object
+        intent_level:
+          description: IntentLevel 是 low、medium 或 high 三档意向等级。
+          type: string
+        invite_status:
+          description: InviteStatus 表示 not_invited、invited、declined 或 submitted。
+          type: string
       type: object
     service.AICCSessionListResult:
       properties:
@@ -12239,6 +12289,34 @@ paths:
       summary: 上传 AICC 公开图片
       tags:
       - public-aicc
+  /public/aicc/sessions/{sessionToken}/lead-invitation/decline:
+    post:
+      description: 访客拒绝当前会话的留资邀请后，不再重复弹出邀请
+      parameters:
+      - description: 会话 token
+        in: path
+        name: sessionToken
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      summary: 拒绝 AICC 留资邀请
+      tags:
+      - public-aicc
   /public/aicc/sessions/{sessionToken}/lead-values:
     post:
       description: 访客提交当前会话的留资字段，字段 key 必须来自智能体配置
@@ -12410,63 +12488,6 @@ paths:
                 $ref: '#/components/schemas/handlers.ErrorResponse'
           description: Internal Server Error
       summary: 查询 AICC 公开消息状态
-      tags:
-      - public-aicc
-  /public/aicc/sessions/{sessionToken}/messages/{messageId}/feedback:
-    post:
-      description: 访客反馈助手回复是否有帮助，并同步会话解决状态
-      parameters:
-      - description: 会话 token
-        in: path
-        name: sessionToken
-        required: true
-        schema:
-          type: string
-      - description: 消息 ID
-        in: path
-        name: messageId
-        required: true
-        schema:
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              oneOf:
-              - type: object
-              - $ref: '#/components/schemas/handlers.SubmitAICCFeedbackRequest'
-                description: 反馈内容
-                summary: body
-        description: 反馈内容
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                additionalProperties:
-                  $ref: '#/components/schemas/service.AICCPublicFeedbackResult'
-                type: object
-          description: OK
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Bad Request
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Not Found
-        "500":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/handlers.ErrorResponse'
-          description: Internal Server Error
-      summary: 提交 AICC 回复反馈
       tags:
       - public-aicc
   /public/aicc/sessions/{sessionToken}/resolution:
@@ -12714,6 +12735,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/handlers.ErrorResponse'
           description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
         "409":
           content:
             application/json:

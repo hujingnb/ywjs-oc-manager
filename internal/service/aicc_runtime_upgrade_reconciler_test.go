@@ -62,7 +62,7 @@ func (s *aiccRuntimeUpgradeStoreStub) ListStaleAICCRuntimeApps(_ context.Context
 	return s.staleAppIDs, nil
 }
 
-func (s *aiccRuntimeUpgradeStoreStub) GetLatestAppInitJob(_ context.Context, _ json.RawMessage) (sqlc.Job, error) {
+func (s *aiccRuntimeUpgradeStoreStub) GetLatestAppInitJob(_ context.Context, _ string) (sqlc.Job, error) {
 	if s.latestJob.ID == "" {
 		return sqlc.Job{}, sql.ErrNoRows
 	}

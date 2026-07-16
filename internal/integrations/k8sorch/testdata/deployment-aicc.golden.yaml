@@ -4,7 +4,7 @@ metadata:
     app: a1
     app.kubernetes.io/part-of: oc-manager
   name: app-a1
-  namespace: oc-apps
+  namespace: oc-aicc
 spec:
   replicas: 1
   selector:
@@ -33,48 +33,8 @@ spec:
             secretKeyRef:
               key: control-token
               name: app-a1-token
-        - name: FEISHU_APP_ID
-          valueFrom:
-            secretKeyRef:
-              key: feishu-app-id
-              name: app-a1-token
-              optional: true
-        - name: FEISHU_APP_SECRET
-          valueFrom:
-            secretKeyRef:
-              key: feishu-app-secret
-              name: app-a1-token
-              optional: true
-        - name: FEISHU_DOMAIN
-          valueFrom:
-            secretKeyRef:
-              key: feishu-domain
-              name: app-a1-token
-              optional: true
-        - name: WECOM_BOT_ID
-          valueFrom:
-            secretKeyRef:
-              key: wecom-bot-id
-              name: app-a1-token
-              optional: true
-        - name: WECOM_SECRET
-          valueFrom:
-            secretKeyRef:
-              key: wecom-secret
-              name: app-a1-token
-              optional: true
-        - name: DINGTALK_CLIENT_ID
-          valueFrom:
-            secretKeyRef:
-              key: dingtalk-client-id
-              name: app-a1-token
-              optional: true
-        - name: DINGTALK_CLIENT_SECRET
-          valueFrom:
-            secretKeyRef:
-              key: dingtalk-client-secret
-              name: app-a1-token
-              optional: true
+        - name: FIRECRAWL_API_URL
+          value: http://firecrawl-api.oc-firecrawl.svc.cluster.local:3002
         image: registry/hermes:v1
         lifecycle:
           preStop:
@@ -97,6 +57,12 @@ spec:
           requests:
             cpu: 250m
             memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
         volumeMounts:
         - mountPath: /opt/oc-input
           name: oc-input
@@ -144,6 +110,12 @@ spec:
           requests:
             cpu: 100m
             memory: 128Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
         volumeMounts:
         - mountPath: /opt/data
           name: data
@@ -163,13 +135,25 @@ spec:
         image: registry/ops:dev
         name: restore
         resources: {}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
         volumeMounts:
         - mountPath: /opt/oc-input
           name: oc-input
+        - mountPath: /opt/data
+          name: data
+        - mountPath: /tmp
+          name: bootstrap-tmp
       terminationGracePeriodSeconds: 90
       volumes:
       - emptyDir: {}
         name: oc-input
       - emptyDir: {}
         name: data
+      - emptyDir: {}
+        name: bootstrap-tmp
 status: {}

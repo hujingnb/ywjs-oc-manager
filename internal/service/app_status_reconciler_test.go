@@ -4,7 +4,6 @@ package service
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -102,7 +101,7 @@ func (f *fakeAppStatusStore) ListRestartingApps(_ context.Context) ([]string, er
 }
 
 // GetLatestAppInitJob：latestInitJob.ID 为空时模拟无历史 job（sql.ErrNoRows），否则返回它。
-func (f *fakeAppStatusStore) GetLatestAppInitJob(_ context.Context, _ json.RawMessage) (sqlc.Job, error) {
+func (f *fakeAppStatusStore) GetLatestAppInitJob(_ context.Context, _ string) (sqlc.Job, error) {
 	if f.latestInitJob.ID == "" {
 		return sqlc.Job{}, sql.ErrNoRows
 	}

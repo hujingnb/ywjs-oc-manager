@@ -18,7 +18,7 @@ const apiState = vi.hoisted(() => ({
   fetchSession: vi.fn(),
   consent: vi.fn(),
   submitLeadValues: vi.fn(),
-  submitFeedback: vi.fn(),
+  declineLead: vi.fn(),
   updateResolution: vi.fn(),
   uploadImage: vi.fn(),
   readStoredSession: vi.fn(),
@@ -39,7 +39,7 @@ vi.mock('@/api/hooks/useAICC', () => ({
   fetchAICCPublicMessageStatus: apiState.fetchMessageStatus,
   consentAICCPublicSession: apiState.consent,
   submitAICCPublicLeadValues: apiState.submitLeadValues,
-  submitAICCPublicFeedback: apiState.submitFeedback,
+  declineAICCPublicLeadInvitation: apiState.declineLead,
   updateAICCPublicSessionResolution: apiState.updateResolution,
   uploadAICCPublicImage: apiState.uploadImage,
 }))
@@ -112,7 +112,7 @@ describe('PublicAICCChatPage', () => {
     apiState.fetchSession.mockReset()
     apiState.consent.mockReset()
     apiState.submitLeadValues.mockReset()
-    apiState.submitFeedback.mockReset()
+    apiState.declineLead.mockReset()
     apiState.updateResolution.mockReset()
     apiState.uploadImage.mockReset()
     apiState.readStoredSession.mockReset()
@@ -551,15 +551,121 @@ describe('PublicAICCChatPage', () => {
 
     expect(wrapper.text()).toContain('收到')
     expect(wrapper.find('.feedback-row').exists()).toBe(false)
-    expect(apiState.submitFeedback).not.toHaveBeenCalled()
+    expect(apiState.declineLead).not.toHaveBeenCalled()
   })
 
-  // 场景：访客点击顶部“已解决/未解决”时，只标记当前会话，不依赖任何 message id。
-  it('marks the current session resolved or unresolved from header actions', async () => {
-    apiState.readStoredSession.mockReturnValue('stored-session-token')
+  // 场景：高意向回复才展示留资邀请；访客拒绝后仍可继续匿名咨询，且不再阻塞输入框。
+  it('shows a server-driven lead invitation with a decline path', async () => {
+    apiState.fetchConfig.mockResolvedValue({
+      name: '售前接待', greeting: '您好', privacy_mode: 'notice', lead_fields: [
+        { field_key: 'phone', label: '联系电话', field_type: 'phone', required: true },
+      ],
+    })
+    apiState.sendMessage.mockResolvedValue({ message_id: 'message-1', status: 'completed', text: '可以为您安排演示', next_action: 'offer_lead' })
     const wrapper = mountPublicChat()
     await flushPromises()
 
+    expect(wrapper.find('textarea').attributes('disabled')).toBeUndefined()
+    await wrapper.find('textarea').setValue('想预约演示')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('暂不留资，继续咨询')
+    await wrapper.findAll('button').find(button => button.text().includes('暂不留资'))?.trigger('click')
+    await flushPromises()
+    expect(apiState.declineLead).toHaveBeenCalledWith('session-token')
+    expect(wrapper.find('.lead-gate').exists()).toBe(false)
+    expect(wrapper.find('textarea').attributes('disabled')).toBeUndefined()
+  })
+
+  // 场景：高意向留资卡已有 session 时，访客提交后必须立即写入服务端；失败时保留卡片供访客修正重试。
+  it('persists offered lead values immediately and keeps the form visible on failure', async () => {
+    apiState.fetchConfig.mockResolvedValue({
+      name: '售前接待', greeting: '您好', privacy_mode: 'notice', lead_fields: [
+        { field_key: 'phone', label: '联系电话', field_type: 'phone', required: true },
+      ],
+    })
+    apiState.sendMessage.mockResolvedValue({ message_id: 'message-1', status: 'completed', text: '可以为您安排演示', next_action: 'offer_lead' })
+    apiState.submitLeadValues.mockResolvedValue({ lead_status: 'complete' })
+    const wrapper = mountPublicChat()
+    await flushPromises()
+    await wrapper.find('textarea').setValue('想预约演示')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+
+    await wrapper.find('.lead-gate input').setValue('13800138000')
+    await wrapper.find('.lead-gate').trigger('submit')
+    await flushPromises()
+    expect(apiState.submitLeadValues).toHaveBeenCalledWith('session-token', { phone: '13800138000' })
+    expect(wrapper.find('.lead-gate').exists()).toBe(false)
+
+  })
+
+  // 场景：留资接口失败时不能假装留资完成，卡片必须继续可见以便访客重试。
+  it('keeps an offered lead form visible when persistence fails', async () => {
+    apiState.fetchConfig.mockResolvedValue({
+      name: '售前接待', greeting: '您好', privacy_mode: 'notice', lead_fields: [
+        { field_key: 'phone', label: '联系电话', field_type: 'phone', required: true },
+      ],
+    })
+    apiState.submitLeadValues.mockRejectedValueOnce(new Error('保存失败'))
+    apiState.sendMessage.mockResolvedValue({ message_id: 'message-1', status: 'completed', text: '邀请留资', next_action: 'offer_lead' })
+    const wrapper = mountPublicChat()
+    await flushPromises()
+    await wrapper.find('textarea').setValue('继续咨询')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+    await wrapper.find('.lead-gate input').setValue('13900139000')
+    await wrapper.find('.lead-gate').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('.lead-gate').exists()).toBe(true)
+    expect(wrapper.text()).toContain('保存失败')
+  })
+
+  // 场景：公开网络补充内容必须贴上“未经企业确认”标签，避免访客误以为是企业承诺。
+  it('labels unconfirmed web sources on an assistant reply', async () => {
+    apiState.sendMessage.mockResolvedValue({
+      message_id: 'message-1', status: 'completed', text: '公开资料显示',
+      sources: [{ reference_id: 'web-1', title: '公开网页', unconfirmed: true }],
+    })
+    const wrapper = mountPublicChat()
+    await flushPromises()
+    await wrapper.find('textarea').setValue('查询')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('公开网页')
+    expect(wrapper.text()).toContain('公开网络，未经企业确认')
+  })
+
+  // 场景：公开网络来源仅在 HTTPS 地址通过服务端校验后渲染外链，并隔离 opener，
+  // 让访客可以核验事实而不会让公开页获得第三方页面控制权。
+  it('renders a safe HTTPS source as a hardened external link', async () => {
+    apiState.sendMessage.mockResolvedValue({
+      message_id: 'message-1', status: 'completed', text: '公开资料显示',
+      sources: [{ reference_id: 'web-1', title: '公开网页', url: 'https://example.com/source', unconfirmed: true }],
+    })
+    const wrapper = mountPublicChat()
+    await flushPromises()
+    await wrapper.find('textarea').setValue('查询')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+
+    const link = wrapper.get('.source-label a')
+    expect(link.attributes('href')).toBe('https://example.com/source')
+    expect(link.attributes('target')).toBe('_blank')
+    expect(link.attributes('rel')).toContain('noopener')
+  })
+
+  // 场景：服务端要求确认解决状态时，访客可从会话级卡片标记结果或继续咨询。
+  it('marks resolution from the server-driven resolution card and can dismiss it', async () => {
+    apiState.sendMessage.mockResolvedValue({ message_id: 'message-1', status: 'completed', text: '已回答', next_action: 'ask_resolution' })
+    const wrapper = mountPublicChat()
+    await flushPromises()
+
+    await wrapper.find('textarea').setValue('问题')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
     expect(wrapper.text()).toContain('已解决')
     expect(wrapper.text()).toContain('未解决')
 
@@ -567,20 +673,38 @@ describe('PublicAICCChatPage', () => {
     await flushPromises()
     await nextTick()
 
-    expect(apiState.updateResolution).toHaveBeenLastCalledWith('stored-session-token', 'unresolved')
-    expect(apiState.submitFeedback).not.toHaveBeenCalled()
-    expect(wrapper.findAll('button').find(button => button.text().includes('未解决'))?.attributes('disabled')).toBeDefined()
-
-    await wrapper.findAll('button').find(button => button.text().includes('已解决'))?.trigger('click')
-    await flushPromises()
-    await nextTick()
-
-    expect(apiState.updateResolution).toHaveBeenLastCalledWith('stored-session-token', 'resolved')
-    expect(apiState.submitFeedback).not.toHaveBeenCalled()
+    expect(apiState.updateResolution).toHaveBeenLastCalledWith('session-token', 'unresolved')
+    expect(apiState.declineLead).not.toHaveBeenCalled()
+    expect(wrapper.find('.resolution-card').exists()).toBe(false)
   })
 
-  // 场景：访客主动新建对话时只清除当前会话，下一次发送才懒创建新 session，避免空会话。
-  it('clears the current session when starting a new conversation', async () => {
+  // 场景：第二条非拒答回复被服务端标记为 ask_resolution 后，“继续咨询”只收起卡片，输入区仍能发送下一轮消息。
+  it('hides the second-response resolution card and keeps the composer usable', async () => {
+    apiState.sendMessage
+      .mockResolvedValueOnce({ message_id: 'message-1', status: 'completed', text: '第一条回复' })
+      .mockResolvedValueOnce({ message_id: 'message-2', status: 'completed', text: '第二条回复', next_action: 'ask_resolution' })
+      .mockResolvedValueOnce({ message_id: 'message-3', status: 'completed', text: '继续答复' })
+    const wrapper = mountPublicChat()
+    await flushPromises()
+    await wrapper.find('textarea').setValue('第一个问题')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+    await wrapper.find('textarea').setValue('第二个问题')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.find('.resolution-card').exists()).toBe(true)
+    await wrapper.findAll('button').find(button => button.text().includes('继续咨询'))?.trigger('click')
+    expect(wrapper.find('.resolution-card').exists()).toBe(false)
+    expect(wrapper.find('textarea').attributes('disabled')).toBeUndefined()
+    await wrapper.find('textarea').setValue('补充问题')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+    expect(apiState.sendMessage).toHaveBeenLastCalledWith('session-token', expect.objectContaining({ text: '补充问题' }))
+  })
+
+  // 场景：顶部次要操作必须结束本次咨询，清除续接凭证并禁止继续发送，而不是静默新建会话。
+  it('ends the current consultation instead of starting a new conversation', async () => {
     apiState.readStoredSession.mockReturnValue('stored-session-token')
     const wrapper = mountPublicChat()
     await flushPromises()
@@ -591,21 +715,29 @@ describe('PublicAICCChatPage', () => {
     await nextTick()
     expect(wrapper.text()).toContain('旧会话消息')
 
-    await wrapper.findAll('button').find(button => button.text().includes('新建对话'))?.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('结束本次咨询'))?.trigger('click')
     await nextTick()
 
     expect(apiState.clearStoredSession).toHaveBeenCalledWith('public-token', 'web_link')
     expect(apiState.createSession).not.toHaveBeenCalled()
     expect(wrapper.text()).not.toContain('旧会话消息')
-    expect(wrapper.text()).toContain('您好，请问有什么可以帮您？')
+    expect(apiState.createSession).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('本次咨询已结束')
+    expect(wrapper.find('textarea').attributes('disabled')).toBeDefined()
+  })
 
-    await wrapper.find('textarea').setValue('新会话消息')
+  // 场景：窄屏下公开页必须保留可收缩的消息区和输入区，不因头部操作或长消息产生横向页面滚动。
+  it('keeps mobile chat containers shrinkable for narrow screens', async () => {
+    const wrapper = mountPublicChat()
+    await flushPromises()
+
+    expect(wrapper.find('.public-chat').exists()).toBe(true)
+    expect(wrapper.find('.chat-window').exists()).toBe(true)
+    expect(wrapper.find('.composer').exists()).toBe(true)
+    await wrapper.find('textarea').setValue('https://example.com/' + 'unbroken-token-'.repeat(80))
     await wrapper.find('form.composer').trigger('submit')
     await flushPromises()
-    await nextTick()
-
-    expect(apiState.createSession).toHaveBeenCalledTimes(1)
-    expect(apiState.sendMessage).toHaveBeenLastCalledWith('session-token', expect.objectContaining({ client_message_id: expect.any(String), text: '新会话消息', image_file_id: undefined }))
+    expect(wrapper.find('.message-row.visitor .bubble').text()).toContain('unbroken-token')
   })
 
   // 场景：选择非图片文件时前端立即提示，不能创建图片预览或调用上传接口。

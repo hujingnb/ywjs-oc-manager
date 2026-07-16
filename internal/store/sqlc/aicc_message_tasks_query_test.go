@@ -26,6 +26,17 @@ func TestAICCMessageTaskLeaseRequiresEarliestSessionMessage(t *testing.T) {
 	assert.Contains(t, query, "earlier_message.created_at < task_message.created_at")
 }
 
+// TestAICCMessageTaskLeaseQualifiesUpdatedColumns 验证租约查询关联 processing 与 earlier 表后，
+// 写入目标仍明确限定为 task，避免 MySQL 将同名 status 字段判为歧义并阻塞整条客服消息队列。
+func TestAICCMessageTaskLeaseQualifiesUpdatedColumns(t *testing.T) {
+	query := normalizedSQL(leaseAICCMessageTask)
+	assert.Contains(t, query, "set task.status = 'processing'")
+	assert.Contains(t, query, "task.lease_token = ?")
+	assert.Contains(t, query, "task.lease_expires_at = date_add(now(6), interval 30 second)")
+	assert.Contains(t, query, "task.attempts = task.attempts + 1")
+	assert.Contains(t, query, "task.updated_at = now(6)")
+}
+
 // TestCountReadyAICCMessageTasksByAppExcludesExhaustedTasks 验证 HPA queue gauge 与实际
 // 租约边界一致：queued/retry_wait 状态但已耗尽尝试次数的任务不能再计入任何应用积压。
 func TestCountReadyAICCMessageTasksByAppExcludesExhaustedTasks(t *testing.T) {
@@ -41,4 +52,58 @@ func TestRequeueFailedAICCMessageTaskOnlyResetsTerminalFailure(t *testing.T) {
 	assert.Contains(t, query, "attempts = 0")
 	assert.Contains(t, query, "last_error = null")
 	assert.Contains(t, query, "where message_id = ? and status = 'failed'")
+}
+
+// TestAICCConversationIntelligenceQueriesUseStableOrdering 验证上下文、来源和匿名意向候选
+// 都显式使用时间与主键排序，避免同一时间写入的记录在不同数据库执行计划下顺序漂移。
+func TestAICCConversationIntelligenceQueriesUseStableOrdering(t *testing.T) {
+	// 上下文构建器需要按完整会话消息流截取最近窗口，升序结果可直接保留自然对话顺序。
+	assert.Contains(t, normalizedSQL(listAICCContextMessages), "order by created_at asc, id asc")
+	// 一条回复的多条引用必须稳定显示，防止相同来源在前端每次刷新时重排。
+	assert.Contains(t, normalizedSQL(listAICCMessageSources), "order by created_at asc, id asc")
+	// 匿名候选排除已形成正式线索的会话，并以可复现顺序供后台分页或导出。
+	candidates := normalizedSQL(listAICCAnonymousIntentCandidates)
+	assert.Contains(t, candidates, "where s.org_id = ?")
+	assert.Contains(t, candidates, "v.lead_id is not null")
+	assert.Contains(t, candidates, "order by i.created_at asc, i.id asc")
+}
+
+// TestAICCConversationIntelligenceQueriesKeepSessionAndMessageIsolation 验证摘要、原始消息、
+// 意向画像及其来源均以 session 或 message 主键精确过滤，不能在无状态续聊时串入其它访客数据。
+func TestAICCConversationIntelligenceQueriesKeepSessionAndMessageIsolation(t *testing.T) {
+	// 正常路径：指定 session 后才能读取其摘要与已分析意向，查询不应接受空的全局筛选条件。
+	assert.Contains(t, normalizedSQL(getAICCSessionContext), "from aicc_session_contexts where session_id = ?")
+	assert.Contains(t, normalizedSQL(getAICCSessionIntent), "from aicc_session_intents where session_id = ?")
+	// 边界路径：同一时间写入的多条消息仍限定在一个 session，不能因排序窗口混入其它会话。
+	contextMessages := normalizedSQL(listAICCContextMessages)
+	assert.Contains(t, contextMessages, "from aicc_messages where session_id = ?")
+	assert.NotContains(t, contextMessages, "join aicc_sessions")
+	// 每个来源只由对应助手消息读取，调用方无法通过来源查询枚举其它消息的引用。
+	assert.Contains(t, normalizedSQL(listAICCMessageSources), "from aicc_message_sources where message_id = ?")
+}
+
+// TestAICCConversationIntelligenceUpsertsReplaceSingleSessionFact 验证重复分析同一会话时
+// 会更新既有摘要或意向，而不是创建第二行；来源则按单条消息写入多个独立证据。
+func TestAICCConversationIntelligenceUpsertsReplaceSingleSessionFact(t *testing.T) {
+	// 正常路径：摘要写入覆盖正文、处理水位和版本，使下一个新 Pod 使用最新事实恢复上下文。
+	context := normalizedSQL(upsertAICCSessionContext)
+	assert.Contains(t, context, "insert into aicc_session_contexts")
+	assert.Contains(t, context, "on duplicate key update")
+	assert.Contains(t, context, "summary = values(summary)")
+	assert.Contains(t, context, "summarized_through_message_id = values(summarized_through_message_id)")
+	assert.Contains(t, context, "summary_version = values(summary_version)")
+	// 边界路径：意向重新分析必须同步覆盖 JSON 证据和分析版本；首次邀约已经展示后，
+	// 关联的访客消息必须保持不变，避免公开页把留资卡片移到另一条历史回复上。
+	intent := normalizedSQL(upsertAICCSessionIntent)
+	assert.Contains(t, intent, "insert into aicc_session_intents")
+	assert.Contains(t, intent, "fields_json = values(fields_json)")
+	assert.Contains(t, intent, "confidence_json = values(confidence_json)")
+	assert.Contains(t, intent, "evidence_json = values(evidence_json)")
+	assert.Contains(t, intent, "analyzed_message_id = if(invite_status = 'not_invited', values(analyzed_message_id), analyzed_message_id)")
+	assert.NotContains(t, intent, "invite_status = values(invite_status)")
+	// 一条助手消息可以保留多条工具审计来源，因此创建查询不得错误使用 upsert 或遗漏未确认标记。
+	source := normalizedSQL(createAICCMessageSource)
+	assert.Contains(t, source, "insert into aicc_message_sources")
+	assert.Contains(t, source, "source_type, title, url, scope, reference_id, unconfirmed, retrieved_at")
+	assert.NotContains(t, source, "on duplicate key update")
 }

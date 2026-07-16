@@ -454,16 +454,11 @@ export async function submitAICCPublicLeadValues(
   return response.lead
 }
 
-// submitAICCPublicFeedback 把访客对某条助手回复的评价绑定到当前会话。
-export async function submitAICCPublicFeedback(
-  sessionToken: string,
-  messageId: string,
-  helpful: boolean,
-): Promise<void> {
-  await apiRequest<void>(`/api/v1/public/aicc/sessions/${sessionToken}/messages/${messageId}/feedback`, {
+// declineAICCPublicLeadInvitation 记录访客明确拒绝留资，避免当前会话重复弹出邀请。
+export async function declineAICCPublicLeadInvitation(sessionToken: string): Promise<void> {
+  await apiRequest<void>(`/api/v1/public/aicc/sessions/${sessionToken}/lead-invitation/decline`, {
     method: 'POST',
     withAuth: false,
-    body: { helpful },
   })
 }
 

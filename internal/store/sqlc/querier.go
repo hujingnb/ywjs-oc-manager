@@ -6,7 +6,6 @@ package sqlc
 
 import (
 	"context"
-	"encoding/json"
 
 	null "github.com/guregu/null/v5"
 )
@@ -23,12 +22,16 @@ type Querier interface {
 	// 重新扫码），则直接把 status 推到 running，避免概览页长期卡在「待绑定」。
 	AppHasBoundChannelBinding(ctx context.Context, appID string) (bool, error)
 	AttachAICCLeadValuesToLead(ctx context.Context, arg AttachAICCLeadValuesToLeadParams) error
+	// 意向分析可能等待上游模型，租约需覆盖主请求超时和一次网络抖动，避免 30 秒后重复分析。
+	ClaimAICCIntentAnalysisRetry(ctx context.Context, arg ClaimAICCIntentAnalysisRetryParams) (int64, error)
 	// 抢占 failed 或超时 creating 的 dataset 创建租约；只有成功更新行的调用方允许访问 RAGFlow 创建远端 dataset。
 	ClaimRAGFlowDatasetCreation(ctx context.Context, arg ClaimRAGFlowDatasetCreationParams) error
 	ClearAICCLeadLatestSession(ctx context.Context, latestSessionID null.String) error
 	// transitionTo / RequestInitialize 强制清空进度字段。
 	ClearAppProgress(ctx context.Context, id string) error
 	CompleteAICCMessageTask(ctx context.Context, arg CompleteAICCMessageTaskParams) (int64, error)
+	// 首次邀约只能从 not_invited 原子推进到 invited，不能覆盖访客已拒绝或已提交的决定。
+	ConsumeAICCSessionIntentInvitation(ctx context.Context, sessionID string) (int64, error)
 	CountAICCAgentsByOrg(ctx context.Context, orgID string) (int64, error)
 	CountAICCCompletedLeadSessions(ctx context.Context, orgID string) (int64, error)
 	CountAICCCompletedLeadSessionsInRange(ctx context.Context, arg CountAICCCompletedLeadSessionsInRangeParams) (int64, error)
@@ -76,6 +79,7 @@ type Querier interface {
 	CreateAICCAgent(ctx context.Context, arg CreateAICCAgentParams) error
 	CreateAICCImage(ctx context.Context, arg CreateAICCImageParams) error
 	CreateAICCMessage(ctx context.Context, arg CreateAICCMessageParams) error
+	CreateAICCMessageSource(ctx context.Context, arg CreateAICCMessageSourceParams) error
 	CreateAICCMessageTask(ctx context.Context, arg CreateAICCMessageTaskParams) error
 	CreateAICCSession(ctx context.Context, arg CreateAICCSessionParams) error
 	// k8s 模型下 app 对应 Deployment，pod 落点由调度器决定，不再写 runtime_node_id。
@@ -117,12 +121,14 @@ type Querier interface {
 	DeleteAICCAgentIndustryKnowledgeNotAuthorizedByOrg(ctx context.Context, orgID string) error
 	DeleteAICCAgentKnowledgeByAgent(ctx context.Context, agentID string) error
 	DeleteAICCBlockedVisitor(ctx context.Context, arg DeleteAICCBlockedVisitorParams) (int64, error)
+	DeleteAICCIntentAnalysisRetry(ctx context.Context, arg DeleteAICCIntentAnalysisRetryParams) error
 	DeleteAICCSession(ctx context.Context, id string) error
 	DeleteAppSkillByAppAndName(ctx context.Context, arg DeleteAppSkillByAppAndNameParams) error
 	DeleteCustomSkillTargetsByName(ctx context.Context, customSkillName string) error
 	DeleteExpiredRefreshTokens(ctx context.Context) error
 	DeleteOrphanAICCLeadsByOrg(ctx context.Context, orgID string) error
 	DeletePlatformSkill(ctx context.Context, id string) error
+	DeleteProcessedAICCIntentAnalysisRetry(ctx context.Context, arg DeleteProcessedAICCIntentAnalysisRetryParams) (int64, error)
 	// 删除本地 dataset 映射；document 缓存通过外键级联清理。
 	DeleteRAGFlowDatasetMapping(ctx context.Context, id string) error
 	// 删除本地 document 缓存；RAGFlow 远端删除由 service 在同一业务流程中处理。
@@ -144,6 +150,8 @@ type Querier interface {
 	GetAICCMessageTaskByMessageID(ctx context.Context, messageID string) (AiccMessageTask, error)
 	GetAICCSession(ctx context.Context, id string) (AiccSession, error)
 	GetAICCSessionByToken(ctx context.Context, sessionToken string) (AiccSession, error)
+	GetAICCSessionContext(ctx context.Context, sessionID string) (AiccSessionContext, error)
+	GetAICCSessionIntent(ctx context.Context, sessionID string) (AiccSessionIntent, error)
 	GetActiveAICCBlockedVisitor(ctx context.Context, arg GetActiveAICCBlockedVisitorParams) (AiccBlockedVisitor, error)
 	GetActiveAppByOwner(ctx context.Context, ownerUserID string) (App, error)
 	GetApp(ctx context.Context, id string) (App, error)
@@ -168,7 +176,7 @@ type Querier interface {
 	GetJob(ctx context.Context, id string) (Job, error)
 	// reaper 通过 payload_json->>'$.app_id' 查最近一份 app_initialize job。
 	// 用 ORDER BY created_at DESC + LIMIT 1 取最新；不存在返回 sql.ErrNoRows。
-	GetLatestAppInitJob(ctx context.Context, appID json.RawMessage) (Job, error)
+	GetLatestAppInitJob(ctx context.Context, appID string) (Job, error)
 	GetLatestCustomSkillByName(ctx context.Context, name string) (CustomSkill, error)
 	// 组织列表复制登录信息时只需要一个可登录的组织管理员用户名。
 	// 密码明文不落库，因此这里只返回账号名，密码提示由调用方生成。
@@ -213,12 +221,17 @@ type Querier interface {
 	LeaseAICCMessageTask(ctx context.Context, arg LeaseAICCMessageTaskParams) (int64, error)
 	ListAICCAgentKnowledge(ctx context.Context, agentID string) ([]AiccAgentKnowledge, error)
 	ListAICCAgentsByOrg(ctx context.Context, arg ListAICCAgentsByOrgParams) ([]AiccAgent, error)
+	// 已关联正式线索的会话不再作为匿名候选，避免后台对同一客户出现两份待跟进记录。
+	ListAICCAnonymousIntentCandidates(ctx context.Context, orgID string) ([]AiccSessionIntent, error)
 	ListAICCBlockedVisitorsByAgent(ctx context.Context, arg ListAICCBlockedVisitorsByAgentParams) ([]AiccBlockedVisitor, error)
+	// 上下文构建器从稳定升序消息流中截取最近窗口，不能依赖数据库未声明的自然顺序。
+	ListAICCContextMessages(ctx context.Context, arg ListAICCContextMessagesParams) ([]AiccMessage, error)
 	ListAICCImageObjectKeysBySession(ctx context.Context, sessionID string) ([]string, error)
 	ListAICCLeadFieldsByAgent(ctx context.Context, agentID string) ([]AiccLeadField, error)
 	ListAICCLeadValuesByLead(ctx context.Context, arg ListAICCLeadValuesByLeadParams) ([]ListAICCLeadValuesByLeadRow, error)
 	ListAICCLeadValuesBySession(ctx context.Context, sessionID string) ([]ListAICCLeadValuesBySessionRow, error)
 	ListAICCLeadsByOrg(ctx context.Context, arg ListAICCLeadsByOrgParams) ([]AiccLead, error)
+	ListAICCMessageSources(ctx context.Context, messageID string) ([]AiccMessageSource, error)
 	ListAICCMessagesBySession(ctx context.Context, sessionID string) ([]AiccMessage, error)
 	ListAICCRegionsInRange(ctx context.Context, arg ListAICCRegionsInRangeParams) ([]ListAICCRegionsInRangeRow, error)
 	ListAICCSessionTrendByDay(ctx context.Context, arg ListAICCSessionTrendByDayParams) ([]ListAICCSessionTrendByDayRow, error)
@@ -285,6 +298,7 @@ type Querier interface {
 	// 全库列出 running 超过给定时刻仍未推进(updated_at 即「进入 running 时刻」,刷新任务状态不变时不写库)的文档,
 	// 供自愈任务 stop_parsing→reparse。只取 running、不取 queued(排队是正常积压,不在此恢复)。
 	ListRAGFlowStuckRunningDocumentsForHeal(ctx context.Context, arg ListRAGFlowStuckRunningDocumentsForHealParams) ([]ListRAGFlowStuckRunningDocumentsForHealRow, error)
+	ListReadyAICCIntentAnalysisRetries(ctx context.Context, limit int32) ([]ListReadyAICCIntentAnalysisRetriesRow, error)
 	// 只返回当前到期且所在会话没有执行中任务的任务；租约时仍会再次原子校验，列表结果不能视作所有权。
 	ListReadyAICCMessageTasks(ctx context.Context, limit int32) ([]AiccMessageTask, error)
 	ListReadyJobs(ctx context.Context, limit int32) ([]Job, error)
@@ -329,6 +343,7 @@ type Querier interface {
 	LockAICCQueueGovernance(ctx context.Context) (int8, error)
 	LockAICCSessionForUpdate(ctx context.Context, id string) (AiccSession, error)
 	LockJobForUpdate(ctx context.Context, id string) (Job, error)
+	MarkAICCIntentAnalysisRetryProcessed(ctx context.Context, arg MarkAICCIntentAnalysisRetryProcessedParams) (int64, error)
 	MarkAICCLeadRead(ctx context.Context, arg MarkAICCLeadReadParams) (int64, error)
 	MarkAICCSessionConsented(ctx context.Context, sessionToken string) (int64, error)
 	// AICC app 不出现在普通实例列表中；创建时已写入 aicc，此查询用于幂等补标记。
@@ -367,6 +382,9 @@ type Querier interface {
 	// locked_by / locked_at 一并清空避免被旧 worker 误识别为本机持有。
 	// 注意：jobs 表无 started_at 列，仅清 locked_* / last_error / 状态。
 	RequeueJob(ctx context.Context, id string) error
+	RescheduleClaimedAICCIntentAnalysisRetry(ctx context.Context, arg RescheduleClaimedAICCIntentAnalysisRetryParams) (int64, error)
+	// 仅在访客已明确选择结果后写入阶段起点；未知状态下的追问不能伪造新阶段。
+	ResetAICCSessionResolutionForNewPhase(ctx context.Context, arg ResetAICCSessionResolutionForNewPhaseParams) error
 	// 整库 embedding 模型切换后，把该 dataset 下所有本地 document 状态重置为 queued，交给现有刷新任务继续推进。
 	ResetRAGFlowDocumentsParseStatusByDataset(ctx context.Context, datasetID string) error
 	// 重试请求会在同一更新内判定上限；最后一次失败直接终态化，且继续记录 worker 返回的错误摘要。
@@ -446,6 +464,8 @@ type Querier interface {
 	TouchApp(ctx context.Context, id string) error
 	TouchSkillTicket(ctx context.Context, id string) error
 	UpdateAICCAgentProfile(ctx context.Context, arg UpdateAICCAgentProfileParams) error
+	// 访客的拒绝或显式提交只改变本会话的邀约状态，绝不能影响其它匿名会话。
+	UpdateAICCSessionIntentInviteStatus(ctx context.Context, arg UpdateAICCSessionIntentInviteStatusParams) (int64, error)
 	UpdateAICCSessionLeadStatus(ctx context.Context, arg UpdateAICCSessionLeadStatusParams) error
 	UpdateAICCSessionResolutionStatus(ctx context.Context, arg UpdateAICCSessionResolutionStatusParams) error
 	// 更新实例语言偏好（hermes 对终端用户说话的语言）。locale 由 service 层校验合法取值后传入。
@@ -472,9 +492,12 @@ type Querier interface {
 	UpsertAICCAgentSettings(ctx context.Context, arg UpsertAICCAgentSettingsParams) error
 	UpsertAICCBlockedVisitor(ctx context.Context, arg UpsertAICCBlockedVisitorParams) error
 	UpsertAICCFeedback(ctx context.Context, arg UpsertAICCFeedbackParams) error
+	UpsertAICCIntentAnalysisRetry(ctx context.Context, arg UpsertAICCIntentAnalysisRetryParams) error
 	UpsertAICCLead(ctx context.Context, arg UpsertAICCLeadParams) error
 	UpsertAICCLeadField(ctx context.Context, arg UpsertAICCLeadFieldParams) error
 	UpsertAICCLeadValue(ctx context.Context, arg UpsertAICCLeadValueParams) error
+	UpsertAICCSessionContext(ctx context.Context, arg UpsertAICCSessionContextParams) error
+	UpsertAICCSessionIntent(ctx context.Context, arg UpsertAICCSessionIntentParams) error
 	// 飞书无预建绑定行，BeginAuth 时 create-on-demand（已存在则忽略）。
 	// app_active_key 是 VIRTUAL 生成列（非 deleted 行 = app_id），不能显式赋值，
 	// ON DUPLICATE KEY 命中唯一约束 (app_active_key, channel_type) 时做 no-op。

@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/guregu/null/v5"
@@ -38,6 +39,7 @@ type AICCConcurrencyLimiter interface {
 // AICCDispatcherStore 是 dispatcher 读取任务上下文并更新任务状态的最小持久化接口。
 type AICCDispatcherStore interface {
 	GetAICCMessageByID(context.Context, string) (sqlc.AiccMessage, error)
+	GetAICCSession(context.Context, string) (sqlc.AiccSession, error)
 	GetAICCAgent(context.Context, string) (sqlc.AiccAgent, error)
 	LeaseAICCMessageTask(context.Context, sqlc.LeaseAICCMessageTaskParams) (int64, error)
 	CompleteAICCMessageTask(context.Context, sqlc.CompleteAICCMessageTaskParams) (int64, error)
@@ -46,6 +48,10 @@ type AICCDispatcherStore interface {
 	RenewAICCMessageTaskLease(context.Context, sqlc.RenewAICCMessageTaskLeaseParams) (int64, error)
 	RecoverExpiredAICCMessageTaskLeases(context.Context) (int64, error)
 	CreateAICCMessage(context.Context, sqlc.CreateAICCMessageParams) error
+	CreateAICCMessageSource(context.Context, sqlc.CreateAICCMessageSourceParams) error
+	GetAICCSessionContext(context.Context, string) (sqlc.AiccSessionContext, error)
+	ListAICCContextMessages(context.Context, sqlc.ListAICCContextMessagesParams) ([]sqlc.AiccMessage, error)
+	ConsumeAICCSessionIntentInvitation(context.Context, string) (int64, error)
 }
 
 // AICCDispatcherTxRunner 保证助手消息镜像和 completed 状态不会半成功。
@@ -67,6 +73,25 @@ type AICCDispatcher struct {
 	overloads    int
 	circuitUntil time.Time
 	halfOpen     bool
+	// testFailIntentOnce 仅由本地 E2E 控制面装配；CompareAndSwap 保证多 worker 竞争时只失败一次。
+	testFailIntentOnce atomic.Bool
+	// testPauseIntentRetries 仅由本地 E2E 控制面装配，确保测试能先观察到失败重试事实再释放恢复。
+	testPauseIntentRetries atomic.Bool
+}
+
+// EnableLocalAICCIntentFailureOnce 仅供本地 E2E 注入一次意向分析失败，验证持久化重试与首次邀约幂等。
+// 生产入口不会调用此方法，避免将浏览器测试控制面暴露为公开 API。
+func (d *AICCDispatcher) EnableLocalAICCIntentFailureOnce() {
+	if d != nil {
+		d.testFailIntentOnce.Store(true)
+	}
+}
+
+// PauseLocalAICCIntentRetries 暂停本地 E2E 的意向重试扫描；恢复由新进程不带该开关启动完成。
+func (d *AICCDispatcher) PauseLocalAICCIntentRetries() {
+	if d != nil {
+		d.testPauseIntentRetries.Store(true)
+	}
 }
 
 // NewAICCDispatcher 创建可在 worker 中复用的单任务调度器。
@@ -126,22 +151,67 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 	if err != nil {
 		return d.finishError(ctx, task, token, err)
 	}
+	session, err := d.store.GetAICCSession(ctx, task.SessionID)
+	if err != nil {
+		return d.finishError(ctx, task, token, err)
+	}
 	agent, err := d.store.GetAICCAgent(ctx, task.AgentID)
+	if err != nil {
+		return d.finishError(ctx, task, token, err)
+	}
+	conversationContext, err := BuildAICCConversationContext(ctx, d.store, task.SessionID, task.MessageID)
 	if err != nil {
 		return d.finishError(ctx, task, token, err)
 	}
 	chatCtx, cancelChat := context.WithCancel(ctx)
 	stopHeartbeat := d.startLeaseHeartbeat(chatCtx, cancelChat, task.ID, token)
-	reply, err := d.chat.ChatAICC(chatCtx, task.AppID, task.SessionID, buildAICCRuntimePrompt(agent, visitor.TextContent.String))
+	// 意向画像先于主回复生成，manager 据此把本轮可用 next_action 收紧为确定值；
+	// 运行时模型没有权力自行决定是否索取联系方式。
+	intentDecision, intentReady := d.analyzeAICCIntent(chatCtx, task, visitor, conversationContext)
+	if !intentReady {
+		d.queueAICCIntentRetry(ctx, task, "initial intent analysis failed")
+	}
+	channel := strings.TrimSpace(session.Channel)
+	if channel == "" {
+		channel = "web_link"
+	}
+	turn := AICCInboundTurn{TurnID: task.MessageID, SessionID: task.SessionID, Channel: channel, Text: visitor.TextContent.String, OccurredAt: d.now(), Context: conversationContext, Instruction: buildAICCRuntimePrompt(agent, ""), AppID: task.AppID}
+	if intentReady && intentDecision.AllowOffer {
+		turn.Instruction += "\n本轮 manager 已允许且仅允许 next_action 使用 offer_lead；其它场景不得使用 offer_lead。"
+	} else {
+		turn.Instruction += "\n本轮 manager 未允许邀约，next_action 必须为 none 或 ask_resolution，禁止 offer_lead。"
+	}
+	reply, err := d.chat.ChatAICC(chatCtx, turn)
 	if err != nil {
 		if heartbeatErr := stopHeartbeat(); heartbeatErr != nil {
 			return heartbeatErr
 		}
 		return d.finishError(ctx, task, token, err)
 	}
+	// 运行时的原始输出首次不合规时，只给予一次固定重写机会；不能把校验细节交给模型，
+	// 以免提示词注入借错误信息探测策略。第二次仍失败时改为 manager 固定兜底。
+	reply = d.validateOrFallbackAICCResponse(chatCtx, turn, reply)
+	reply = constrainAICCIntentNextAction(reply, intentDecision)
 	write := func(s AICCDispatcherStore) error {
-		if err := s.CreateAICCMessage(ctx, sqlc.CreateAICCMessageParams{ID: newUUID(), SessionID: task.SessionID, AgentID: task.AgentID, Direction: domain.AICCMessageDirectionAssistant, ContentType: domain.AICCMessageContentTypeText, TextContent: null.StringFrom(reply), ClientMessageID: visitor.ClientMessageID, ReplyToMessageID: null.StringFrom(task.MessageID)}); err != nil {
+		messageID := newUUID()
+		if err := s.CreateAICCMessage(ctx, sqlc.CreateAICCMessageParams{ID: messageID, SessionID: task.SessionID, AgentID: task.AgentID, Direction: domain.AICCMessageDirectionAssistant, ContentType: domain.AICCMessageContentTypeText, TextContent: null.StringFrom(reply.Text), ClientMessageID: visitor.ClientMessageID, ReplyToMessageID: null.StringFrom(task.MessageID), IsFallback: reply.Fallback, IsRefusal: reply.Refusal}); err != nil {
 			return err
+		}
+		for _, source := range reply.Sources {
+			if err := s.CreateAICCMessageSource(ctx, sqlc.CreateAICCMessageSourceParams{ID: newUUID(), MessageID: messageID, SourceType: source.Type, Title: nullStr(source.Title), Url: nullStr(source.URL), Scope: nullStr(source.Scope), ReferenceID: nullStr(source.ReferenceID), Unconfirmed: source.Unconfirmed, RetrievedAt: d.now()}); err != nil {
+				return err
+			}
+		}
+		// 首次邀约只有在助手回复与任务完成同一事务成功后才消费；事务回滚时仍保持
+		// not_invited，下一次任务重试会再次强制展示本轮 offer_lead。
+		if intentDecision.AllowOffer {
+			updated, err := s.ConsumeAICCSessionIntentInvitation(ctx, task.SessionID)
+			if err != nil {
+				return err
+			}
+			if updated != 1 {
+				return fmt.Errorf("AICC 首次邀约状态未命中当前会话")
+			}
 		}
 		rows, err := s.CompleteAICCMessageTask(ctx, sqlc.CompleteAICCMessageTaskParams{ID: task.ID, LeaseToken: null.StringFrom(token)})
 		if err != nil {
@@ -172,6 +242,36 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 	}
 	d.observe(ctx, task, "completed", "completed")
 	return nil
+}
+
+const aiccResponseRewriteInstruction = "你的上一条输出未通过客服安全格式校验。仅输出一个 JSON 对象：{\"text\":\"\",\"sources\":[],\"next_action\":\"none\",\"flags\":{}}。不得添加 Markdown、解释或执行操作声称。"
+
+// validateOrFallbackAICCResponse 将 wire 输出解析为渠道响应。只有 AICCPublicHermesChat 设置 Raw，
+// 测试或未来受信任渠道适配器可以直接传入已验证 envelope；后者仍接受基础策略校验。
+func (d *AICCDispatcher) validateOrFallbackAICCResponse(ctx context.Context, turn AICCInboundTurn, reply AICCResponseEnvelope) AICCResponseEnvelope {
+	if reply.Raw == "" {
+		if checked, err := validateAICCResponseEnvelope(reply, reply.ToolAudit); err == nil {
+			return checked
+		}
+		return aiccSafeFallbackResponse()
+	}
+	if checked, err := ParseAndValidateAICCResponse(reply.Raw, reply.ToolAudit); err == nil {
+		return checked
+	}
+	rewrite := turn
+	rewrite.Instruction = strings.TrimSpace(turn.Instruction + "\n" + aiccResponseRewriteInstruction)
+	retried, err := d.chat.ChatAICC(ctx, rewrite)
+	if err == nil && retried.Raw != "" {
+		if checked, parseErr := ParseAndValidateAICCResponse(retried.Raw, retried.ToolAudit); parseErr == nil {
+			return checked
+		}
+	}
+	return aiccSafeFallbackResponse()
+}
+
+// aiccSafeFallbackResponse 由 manager 固定生成，不携带来源、不作企业承诺，也不触发页面动作。
+func aiccSafeFallbackResponse() AICCResponseEnvelope {
+	return AICCResponseEnvelope{Text: "抱歉，我暂时无法依据可确认的信息回答这个问题。请联系企业客服进一步确认。", NextAction: "none", Fallback: true}
 }
 
 // RecoverExpiredLeases 由扫库 worker 定期调用，使宕机 worker 的任务重新可领取。
@@ -324,7 +424,10 @@ func aiccErrorSummary(err error) string {
 	return s
 }
 func isAICCRetryable(err error) bool {
-	if errors.Is(err, ErrAICCConcurrencyLimited) {
+	// 弹性扩容、滚动更新与容器冷启动期间，app 的业务状态可能已经 running，
+	// 但 runtime_phase 尚未来得及被 reconcile 为 ready。公开消息保留在队列中重试，
+	// 才不会把短暂就绪空窗错误地展示给访客。
+	if errors.Is(err, ErrAICCConcurrencyLimited) || errors.Is(err, ErrConversationRuntimeUnavailable) {
 		return true
 	}
 	var status *AICCUpstreamStatusError

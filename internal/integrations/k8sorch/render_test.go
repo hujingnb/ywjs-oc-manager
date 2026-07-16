@@ -10,6 +10,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/yaml"
@@ -55,7 +56,14 @@ func assertGolden(t *testing.T, name string, obj any) {
 
 // TestRenderDeployment 验证 Deployment 渲染与 golden 一致（含 initContainer/三容器/卷/probe）。
 func TestRenderDeployment(t *testing.T) {
-	assertGolden(t, "deployment.golden.yaml", RenderDeployment(testSpec(), "oc-apps"))
+	dep := RenderDeployment(testSpec(), "oc-apps")
+	// 普通 Hermes 启动时必须直连共享 Firecrawl API，网页正文读取无需等待运行时再配置。
+	hermes := containerByName(dep, "hermes")
+	require.NotNil(t, hermes)
+	firecrawlAPIURL := envByName(hermes, "FIRECRAWL_API_URL")
+	require.NotNil(t, firecrawlAPIURL)
+	assert.Equal(t, "http://firecrawl-api.oc-firecrawl.svc.cluster.local:3002", firecrawlAPIURL.Value)
+	assertGolden(t, "deployment.golden.yaml", dep)
 }
 
 // TestRenderDeploymentAICC 验证 AICC 运行时使用无状态启动方式：由 oc-bootstrap 初始化，
@@ -63,14 +71,29 @@ func TestRenderDeployment(t *testing.T) {
 func TestRenderDeploymentAICC(t *testing.T) {
 	spec := testSpec()
 	spec.AppType = domain.AppTypeAICC
+	// 即使控制面为普通应用配置了代理，AICC 也不能继承这些通用出口变量。
+	spec.Proxy = ProxyEnv{HTTPProxy: "http://pod-proxy:7890", HTTPSProxy: "http://pod-proxy:7890", NoProxy: "localhost,.svc"}
 
-	dep := RenderDeployment(spec, "oc-apps")
+	dep := RenderDeployment(spec, "oc-aicc")
 	require.Len(t, dep.Spec.Template.Spec.InitContainers, 1, "AICC 必须只渲染一个初始化容器")
 	assert.Equal(t, []string{"oc-bootstrap"}, dep.Spec.Template.Spec.InitContainers[0].Command)
+	// oc-bootstrap 在只读根文件系统下仍需用 mktemp 原子写入启动输入，必须显式挂载临时卷。
+	assert.Contains(t, dep.Spec.Template.Spec.InitContainers[0].VolumeMounts, corev1.VolumeMount{Name: "bootstrap-tmp", MountPath: "/tmp"})
+	assert.Contains(t, dep.Spec.Template.Spec.Volumes, corev1.Volume{Name: "bootstrap-tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}})
 	require.Len(t, dep.Spec.Template.Spec.Containers, 2, "AICC Pod 只能包含 hermes 与 oc-ops")
 	assert.NotNil(t, containerByName(dep, "hermes"))
 	assert.NotNil(t, containerByName(dep, "oc-ops"))
 	assert.Nil(t, containerByName(dep, "s3-sync"))
+	hermes := containerByName(dep, "hermes")
+	require.NotNil(t, hermes)
+	// AICC Hermes 与普通实例共用 Firecrawl 正文提取服务，但不继承普通应用的代理变量。
+	firecrawlAPIURL := envByName(hermes, "FIRECRAWL_API_URL")
+	require.NotNil(t, firecrawlAPIURL)
+	assert.Equal(t, "http://firecrawl-api.oc-firecrawl.svc.cluster.local:3002", firecrawlAPIURL.Value)
+	// 客服 Hermes 原生只读网页检索直连公网，不携带专属受控出口代理变量。
+	assert.Nil(t, envByName(hermes, "HTTP_PROXY"))
+	assert.Nil(t, envByName(hermes, "HTTPS_PROXY"))
+	assert.Nil(t, envByName(hermes, "NO_PROXY"))
 	// AICC 可以弹性扩容，更新时必须保留旧副本直至新副本就绪，避免客服会话入口中断。
 	require.NotNil(t, dep.Spec.Strategy.RollingUpdate)
 	assert.Equal(t, appsv1.RollingUpdateDeploymentStrategyType, dep.Spec.Strategy.Type)
@@ -90,12 +113,81 @@ func TestRenderDeploymentAICC(t *testing.T) {
 	require.NotNil(t, ocops)
 	assert.NotZero(t, ocops.Resources.Requests.Cpu().MilliValue())
 	assert.NotZero(t, ocops.Resources.Requests.Memory().Value())
+	// oc-bootstrap 会将首次启动状态写入 /opt/data；只读根文件系统下必须复用 app 的临时数据卷。
+	require.Len(t, dep.Spec.Template.Spec.InitContainers, 1)
+	restore := dep.Spec.Template.Spec.InitContainers[0]
+	assert.Equal(t, "restore", restore.Name)
+	assert.Contains(t, restore.VolumeMounts, corev1.VolumeMount{Name: "data", MountPath: "/opt/data"})
 	for _, c := range append(dep.Spec.Template.Spec.InitContainers, dep.Spec.Template.Spec.Containers...) {
+		// AICC 的初始化和常驻容器均不得误继承普通应用 PodProxy。
+		assert.Nil(t, envByName(&c, "HTTP_PROXY"), "%s 不得注入 HTTP_PROXY", c.Name)
+		assert.Nil(t, envByName(&c, "HTTPS_PROXY"), "%s 不得注入 HTTPS_PROXY", c.Name)
+		assert.Nil(t, envByName(&c, "NO_PROXY"), "%s 不得注入 NO_PROXY", c.Name)
 		assert.Nil(t, envByName(&c, "AWS_ACCESS_KEY_ID"), "%s 不得注入 AWS 凭证", c.Name)
 		assert.Nil(t, envByName(&c, "AWS_SECRET_ACCESS_KEY"), "%s 不得注入 AWS 凭证", c.Name)
 		assert.Nil(t, envByName(&c, "AWS_ENDPOINT_URL"), "%s 不得注入 AWS/S3 endpoint", c.Name)
+		assert.Nil(t, envByName(&c, "OC_WEB_PUBLISH_URL"), "%s 不得注入发布能力配置", c.Name)
+		require.NotNil(t, c.SecurityContext, "%s 必须显式限制容器安全上下文", c.Name)
+		require.NotNil(t, c.SecurityContext.ReadOnlyRootFilesystem)
+		assert.True(t, *c.SecurityContext.ReadOnlyRootFilesystem)
+		require.NotNil(t, c.SecurityContext.AllowPrivilegeEscalation)
+		assert.False(t, *c.SecurityContext.AllowPrivilegeEscalation)
+		require.NotNil(t, c.SecurityContext.Capabilities)
+		assert.Equal(t, []corev1.Capability{"ALL"}, c.SecurityContext.Capabilities.Drop)
 	}
 	assertGolden(t, "deployment-aicc.golden.yaml", dep)
+}
+
+// TestRenderAICCNetworkPolicy 验证客服 Pod 默认拒绝出网，仅允许解析 DNS、访问 manager 知识 API、
+// 模型网关、共享 Firecrawl 正文提取服务，以及 Hermes 原生只读网页检索直连 HTTP/HTTPS 公网。
+func TestRenderAICCNetworkPolicy(t *testing.T) {
+	spec := testSpec()
+	spec.AppType = domain.AppTypeAICC
+	// 覆盖普通应用代理已配置时，客服容器仍不得继承该配置的回归场景。
+	spec.Proxy = ProxyEnv{HTTPProxy: "http://pod-proxy:7890", HTTPSProxy: "http://pod-proxy:7890", NoProxy: "localhost,.svc"}
+
+	policy := RenderAICCNetworkPolicy(spec, "oc-aicc")
+
+	assert.Equal(t, "app-a1-egress", policy.Name)
+	assert.Equal(t, "oc-aicc", policy.Namespace)
+	assert.Equal(t, selectorLabels(spec.AppID), policy.Spec.PodSelector.MatchLabels)
+	assert.Equal(t, []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}, policy.Spec.PolicyTypes)
+	require.Len(t, policy.Spec.Egress, 5)
+	for _, rule := range policy.Spec.Egress[:4] {
+		require.Len(t, rule.To, 1)
+		assert.Nil(t, rule.To[0].IPBlock)
+	}
+	assert.Equal(t, "kube-system", policy.Spec.Egress[0].To[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"])
+	assert.Equal(t, "kube-dns", policy.Spec.Egress[0].To[0].PodSelector.MatchLabels["k8s-app"])
+	assert.Equal(t, int32(53), policy.Spec.Egress[0].Ports[0].Port.IntVal)
+	assert.Equal(t, "ocm", policy.Spec.Egress[1].To[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"])
+	assert.Equal(t, "manager-api", policy.Spec.Egress[1].To[0].PodSelector.MatchLabels["app"])
+	assert.Equal(t, int32(8080), policy.Spec.Egress[1].Ports[0].Port.IntVal)
+	assert.Equal(t, "new-api", policy.Spec.Egress[2].To[0].PodSelector.MatchLabels["app"])
+	assert.Equal(t, int32(3000), policy.Spec.Egress[2].Ports[0].Port.IntVal)
+	// AICC 通过共享 Firecrawl 读取网页正文，不能仅放行公网 HTTP/HTTPS 后遗漏集群内服务端口。
+	assert.Equal(t, "oc-firecrawl", policy.Spec.Egress[3].To[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"])
+	assert.Equal(t, "firecrawl-api", policy.Spec.Egress[3].To[0].PodSelector.MatchLabels["app"])
+	assert.Equal(t, int32(3002), policy.Spec.Egress[3].Ports[0].Port.IntVal)
+	// Hermes 原生只读网页检索可直连 HTTP/HTTPS 公网；不再选择 app=aicc-web-egress-proxy。
+	require.Len(t, policy.Spec.Egress[4].To, 1)
+	require.NotNil(t, policy.Spec.Egress[4].To[0].IPBlock)
+	assert.Equal(t, "0.0.0.0/0", policy.Spec.Egress[4].To[0].IPBlock.CIDR)
+	require.Len(t, policy.Spec.Egress[4].Ports, 2)
+	assert.Equal(t, int32(80), policy.Spec.Egress[4].Ports[0].Port.IntVal)
+	assert.Equal(t, int32(443), policy.Spec.Egress[4].Ports[1].Port.IntVal)
+	assert.Equal(t, corev1.ProtocolTCP, *policy.Spec.Egress[4].Ports[0].Protocol)
+	assert.Equal(t, corev1.ProtocolTCP, *policy.Spec.Egress[4].Ports[1].Protocol)
+	hermes := containerByName(RenderDeployment(spec, "oc-aicc"), "hermes")
+	require.NotNil(t, hermes)
+	assert.Nil(t, envByName(hermes, "HTTP_PROXY"))
+	assert.Nil(t, envByName(hermes, "HTTPS_PROXY"))
+	assert.Nil(t, envByName(hermes, "NO_PROXY"))
+	ocOps := containerByName(RenderDeployment(spec, "oc-aicc"), "oc-ops")
+	require.NotNil(t, ocOps)
+	assert.Nil(t, envByName(ocOps, "HTTP_PROXY"))
+	assert.Nil(t, envByName(ocOps, "HTTPS_PROXY"))
+	assert.Nil(t, envByName(ocOps, "NO_PROXY"))
 }
 
 // TestRenderAICCHPA 验证未配置外部指标适配器时，AICC HPA 只使用集群已提供的 CPU、内存指标。

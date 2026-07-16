@@ -80,14 +80,16 @@ const getLatestAppInitJob = `-- name: GetLatestAppInitJob :one
 SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
 FROM jobs
 WHERE type = 'app_initialize'
-  AND payload_json->>'$.app_id' = ?
+  -- 调用方为保持 JSON 参数类型传入带双引号的 app_id；必须先解包再与 ->> 的文本结果比较，
+  -- 否则已存在的初始化任务会被误判为不存在，造成并发重复初始化及非法状态转换。
+  AND payload_json->>'$.app_id' = JSON_UNQUOTE(?)
 ORDER BY created_at DESC
 LIMIT 1
 `
 
 // reaper 通过 payload_json->>'$.app_id' 查最近一份 app_initialize job。
 // 用 ORDER BY created_at DESC + LIMIT 1 取最新；不存在返回 sql.ErrNoRows。
-func (q *Queries) GetLatestAppInitJob(ctx context.Context, appID json.RawMessage) (Job, error) {
+func (q *Queries) GetLatestAppInitJob(ctx context.Context, appID string) (Job, error) {
 	row := q.db.QueryRowContext(ctx, getLatestAppInitJob, appID)
 	var i Job
 	err := row.Scan(

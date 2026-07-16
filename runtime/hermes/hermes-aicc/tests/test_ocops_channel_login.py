@@ -29,7 +29,8 @@ def test_login_sdk_unavailable_yields_failed(monkeypatch):
 
     events = asyncio.run(collect())
     assert events[-1]["event"] == "failed"
-    assert "SDK not available" in events[-1]["reason"]
+    # 镜像已预装 aiohttp；上游 SDK 导入可继续到依赖检查，仍必须以 failed 事件而非异常结束。
+    assert "SDK not available" in events[-1]["reason"] or "aiohttp is required" in events[-1]["reason"]
 
 
 def _install_fake_weixin(monkeypatch, qr_login):

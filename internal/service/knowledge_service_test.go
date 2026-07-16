@@ -911,6 +911,35 @@ func TestRuntimeAddWritesOnlyCurrentAppDataset(t *testing.T) {
 	assert.Equal(t, "app", store.createdDocs[0].ScopeType)
 }
 
+// TestRuntimeAddRejectsAICCOperation 验证 AICC runtime token 只能检索知识，不能借由统一 runtime
+// 文件接口向知识库写入内容；拒绝必须发生在解析 token 后、调用 RAGFlow 前。
+func TestRuntimeAddRejectsAICCOperation(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	app := store.apps[testKnowledgeApp]
+	app.AppType = string(domain.AppTypeAICC)
+	store.apps[testKnowledgeApp] = app
+	store.appsByToken[HashAppRuntimeToken(testRuntimeToken)] = app
+
+	_, err := svc.RuntimeAddFile(context.Background(), testRuntimeToken, "research.md", strings.NewReader("report"), 6)
+
+	require.ErrorIs(t, err, ErrAICCOperationForbidden)
+	assert.Empty(t, rf.uploadCalls)
+}
+
+// TestRuntimeSearchKeepsAICCKnowledgeRead 验证 AICC 禁止 runtime 写入后，既有知识检索仍可用。
+func TestRuntimeSearchKeepsAICCKnowledgeRead(t *testing.T) {
+	svc, store, rf := newRAGFlowKnowledgeTestService(t)
+	app := store.apps[testKnowledgeApp]
+	app.AppType = string(domain.AppTypeAICC)
+	store.apps[testKnowledgeApp] = app
+	store.appsByToken[HashAppRuntimeToken(testRuntimeToken)] = app
+
+	_, err := svc.RuntimeSearch(context.Background(), testRuntimeToken, "退款政策", 8)
+
+	require.NoError(t, err)
+	require.NotEmpty(t, rf.retrieveCalls)
+}
+
 // TestRuntimeAddRejectsQuotaExceeded 验证 runtime token 写入实例知识库也不能绕过容量限制。
 func TestRuntimeAddRejectsQuotaExceeded(t *testing.T) {
 	svc, store, rf := newRAGFlowKnowledgeTestService(t)

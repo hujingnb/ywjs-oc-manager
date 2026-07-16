@@ -227,12 +227,6 @@ type SubmitAICCLeadValuesRequest struct {
 	Values map[string]string `json:"values" binding:"required"`
 }
 
-// SubmitAICCFeedbackRequest 是访客反馈单条回答是否有帮助的请求体。
-type SubmitAICCFeedbackRequest struct {
-	// Helpful 表示该回答是否有帮助。
-	Helpful *bool `json:"helpful" binding:"required"`
-}
-
 // UpdateAICCSessionResolutionRequest 是访客更新当前会话解决状态的请求体。
 type UpdateAICCSessionResolutionRequest struct {
 	// ResolutionStatus 是访客选择的会话状态：resolved / unresolved。

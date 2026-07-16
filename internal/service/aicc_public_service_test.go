@@ -21,6 +21,30 @@ import (
 
 var aiccPublicTestNow = time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
 
+// TestBuildAICCRuntimePromptRestrictsToolsAndFinalSchema 覆盖客服运行时指令：
+// 提示词只能引导只读白名单工具，并强制最终答复使用可由 manager 校验的 JSON 信封。
+func TestBuildAICCRuntimePromptRestrictsToolsAndFinalSchema(t *testing.T) {
+	prompt := buildAICCRuntimePrompt(sqlc.AiccAgent{}, "企业版价格是多少？")
+
+	assert.Contains(t, prompt, "aicc_knowledge_search")
+	assert.Contains(t, prompt, "web_search")
+	assert.Contains(t, prompt, "web_extract")
+	assert.Contains(t, prompt, "skills_list")
+	assert.Contains(t, prompt, "skill_view")
+	assert.Contains(t, prompt, "审批的客服 Skill")
+	assert.Contains(t, prompt, "vision_analyze")
+	assert.Contains(t, prompt, "manager 已验证且仅属于当前轮的图片")
+	assert.Contains(t, prompt, "clarify")
+	assert.Contains(t, prompt, "aicc_response_sources")
+	assert.Contains(t, prompt, `{"text":"","sources":[],"next_action":"none","flags":{}}`)
+	assert.Contains(t, prompt, "在输出任何最终答复或追问前，必须先调用 aicc_knowledge_search")
+	assert.Contains(t, prompt, "不得以澄清问题替代首次检索")
+	assert.NotContains(t, prompt, "oc-kb")
+	assert.NotContains(t, prompt, "执行 oc-kb")
+	assert.Contains(t, prompt, "不得调用或建议调用命令、终端、代码、文件、进程")
+	assert.Contains(t, prompt, "Skill 管理")
+}
+
 // TestAICCPublicSendMessageRejectsFullGlobalQueue 验证全局队列已满时事务回滚，不能留下访客消息或任务孤儿。
 func TestAICCPublicSendMessageRejectsFullGlobalQueue(t *testing.T) {
 	store := newAICCPublicMessageStore()
@@ -40,9 +64,10 @@ func TestAICCPublicSendMessageRejectsFullGlobalQueue(t *testing.T) {
 // TestAICCPublicChatRequiresConsent 覆盖隐私强同意模式：未同意前拒绝访客继续聊天。
 func TestAICCPublicChatRequiresConsent(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
-		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeConsentRequired},
-		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+		org:                sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:              sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeConsentRequired},
+		session:            sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+		intentInviteStatus: "invited",
 	}
 	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
 	svc.now = func() time.Time { return aiccPublicTestNow }
@@ -52,8 +77,8 @@ func TestAICCPublicChatRequiresConsent(t *testing.T) {
 	require.ErrorIs(t, err, ErrAICCConsentRequired)
 }
 
-// TestAICCPublicChatRequiresLeadFields 覆盖必填留资阻断：必填字段未完成时不能继续提问。
-func TestAICCPublicChatRequiresLeadFields(t *testing.T) {
+// TestAICCPublicChatDoesNotRequireLeadFields 覆盖对话优先边界：访客未填写表单时仍可继续咨询。
+func TestAICCPublicChatDoesNotRequireLeadFields(t *testing.T) {
 	store := &fakeAICCPublicStore{
 		org:                sqlc.Organization{ID: "org-1", AiccEnabled: true},
 		agent:              sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
@@ -64,9 +89,10 @@ func TestAICCPublicChatRequiresLeadFields(t *testing.T) {
 	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
 	svc.now = func() time.Time { return aiccPublicTestNow }
 
-	_, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "报价多少"})
+	result, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "报价多少"})
 
-	require.ErrorIs(t, err, ErrAICCLeadRequired)
+	require.NoError(t, err)
+	assert.Equal(t, "queued", result.Status)
 }
 
 // TestAICCPublicGetSessionReturnsMessages 覆盖公开页刷新恢复：
@@ -142,10 +168,11 @@ func TestAICCPublicGetSessionMapsStoreUnavailable(t *testing.T) {
 // 必填字段写入后 session 标记完成，同时生成企业线索主记录供管理端列表和导出使用。
 func TestAICCPublicSubmitLeadValuesCompletesRequiredFields(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:        sqlc.Organization{ID: "org-1", AiccEnabled: true},
-		agent:      sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
-		session:    sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
-		leadFields: []sqlc.AiccLeadField{{ID: "field-phone", AgentID: "agent-1", Required: true, FieldKey: "phone", Label: "手机号", FieldType: "phone"}},
+		org:                sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:              sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		session:            sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+		leadFields:         []sqlc.AiccLeadField{{ID: "field-phone", AgentID: "agent-1", Required: true, FieldKey: "phone", Label: "手机号", FieldType: "phone"}},
+		intentInviteStatus: "invited",
 	}
 	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
 	svc.now = func() time.Time { return aiccPublicTestNow }
@@ -166,6 +193,7 @@ func TestAICCPublicSubmitLeadValuesCompletesRequiredFields(t *testing.T) {
 	assert.Equal(t, "session-1", store.leads[0].LatestSessionID.String)
 	assert.Equal(t, store.leads[0].ID, store.attachedLeadID)
 	assert.Equal(t, "org-1", store.attachedLeadOrgID)
+	assert.Equal(t, "submitted", store.intentInviteStatus)
 }
 
 // TestAICCPublicSubmitLeadValuesRejectsUnknownField 覆盖留资字段配置边界：未配置的 field_key 不能写入。
@@ -183,6 +211,72 @@ func TestAICCPublicSubmitLeadValuesRejectsUnknownField(t *testing.T) {
 
 	require.ErrorIs(t, err, ErrInvalidArgument)
 	assert.Empty(t, store.leadValues)
+}
+
+// TestAICCPublicSubmitLeadValuesConsumesInvitationWithoutContact 覆盖显式表单提交：未填写联系方式也应结束邀约，但不能创建正式线索。
+func TestAICCPublicSubmitLeadValuesConsumesInvitationWithoutContact(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:                sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:              sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive},
+		session:            sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+		leadFields:         []sqlc.AiccLeadField{{ID: "field-company", AgentID: "agent-1", FieldKey: "company", Label: "企业名称"}},
+		intentInviteStatus: "invited",
+	}
+	svc := NewAICCPublicService(store, nil)
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	_, err := svc.SubmitLeadValues(context.Background(), AICCPublicLeadValuesInput{SessionToken: "tok", Values: map[string]string{"company": "示例企业"}})
+
+	require.NoError(t, err)
+	assert.Equal(t, "submitted", store.intentInviteStatus)
+	assert.Empty(t, store.leads)
+}
+
+// TestAICCPublicDeclineLeadInvitationOnlyUpdatesCurrentSession 验证访客拒绝仅写当前会话的邀约状态。
+func TestAICCPublicDeclineLeadInvitationOnlyUpdatesCurrentSession(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:                sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:              sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive},
+		session:            sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+		intentInviteStatus: "invited",
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	require.NoError(t, svc.DeclineLeadInvitation(context.Background(), "tok"))
+	assert.Equal(t, "declined", store.intentInviteStatus)
+}
+
+// TestAICCPublicDeclineLeadInvitationDoesNotOverwriteSubmitted 覆盖提交优先：已提交联系方式后拒绝请求不能回写邀约状态。
+func TestAICCPublicDeclineLeadInvitationDoesNotOverwriteSubmitted(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:                sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:              sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive},
+		session:            sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+		intentInviteStatus: "submitted",
+	}
+	svc := NewAICCPublicService(store, nil)
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	require.NoError(t, svc.DeclineLeadInvitation(context.Background(), "tok"))
+	assert.Equal(t, "submitted", store.intentInviteStatus)
+}
+
+// TestAICCPublicDeclineLeadInvitationRejectsDisabledAgent 覆盖下线边界：智能体下线后不能继续写入邀约状态。
+func TestAICCPublicDeclineLeadInvitationRejectsDisabledAgent(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:                sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		agent:              sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: "disabled"},
+		session:            sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+		intentInviteStatus: "invited",
+	}
+	svc := NewAICCPublicService(store, nil)
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	err := svc.DeclineLeadInvitation(context.Background(), "tok")
+
+	require.ErrorIs(t, err, ErrAICCOffline)
+	assert.Equal(t, "invited", store.intentInviteStatus)
 }
 
 // TestAICCPublicChatRespondsToPromptInjectionWithoutCallingRuntime 覆盖公开客服的提示词注入边界：
@@ -206,6 +300,36 @@ func TestAICCPublicChatRespondsToPromptInjectionWithoutCallingRuntime(t *testing
 	require.Len(t, store.createdMessages, 2)
 	assert.Equal(t, domain.AICCMessageDirectionAssistant, store.createdMessages[1].Direction)
 	assert.Equal(t, "该请求包含无法处理的指令内容，请提出产品、价格或售后相关问题。", store.createdMessages[1].TextContent.String)
+	assert.True(t, store.createdMessages[1].IsRefusal)
+}
+
+// TestAICCPublicResolutionActionDoesNotCountPromptInjectionRefusal 覆盖固定拒答：提示词注入拒答不属于正常客服答复轮次。
+func TestAICCPublicResolutionActionDoesNotCountPromptInjectionRefusal(t *testing.T) {
+	store := newAICCPublicMessageStore()
+	store.messages = []sqlc.AiccMessage{
+		{ID: "injection-refusal", SessionID: "session-1", Direction: domain.AICCMessageDirectionAssistant, IsRefusal: true}, // 场景：本地提示词注入固定拒答。
+		{ID: "normal-reply", SessionID: "session-1", Direction: domain.AICCMessageDirectionAssistant},                       // 场景：后续第一条正常客服答复。
+	}
+	svc := NewAICCPublicService(store, nil)
+
+	assert.Equal(t, "none", svc.aiccAssistantNextAction(context.Background(), store.messages[1], ""))
+}
+
+// TestAICCPublicIdempotentMessageUsesCurrentResolutionState 覆盖幂等重试：已解决后查询旧任务不能重新展示解决状态卡片。
+func TestAICCPublicIdempotentMessageUsesCurrentResolutionState(t *testing.T) {
+	store := newAICCPublicMessageStore()
+	store.createdTasks = []sqlc.CreateAICCMessageTaskParams{{ID: "task-2", MessageID: "visitor-2"}}
+	store.taskStatus = "completed"
+	store.messages = []sqlc.AiccMessage{
+		{ID: "assistant-1", SessionID: "session-1", Direction: domain.AICCMessageDirectionAssistant},                                                 // 场景：首条正常回复。
+		{ID: "assistant-2", SessionID: "session-1", Direction: domain.AICCMessageDirectionAssistant, ReplyToMessageID: null.StringFrom("visitor-2")}, // 场景：第二条回复原本提示确认。
+	}
+	svc := NewAICCPublicService(store, nil)
+
+	result, err := svc.aiccMessageTaskResultForSession(context.Background(), "visitor-2", sqlc.AiccSession{ID: "session-1", ResolutionStatus: domain.AICCResolutionResolved})
+
+	require.NoError(t, err)
+	assert.Equal(t, "none", result.NextAction)
 }
 
 // TestAICCPublicPromptInjectionRollsBackAndRetriesAfterAssistantWriteFailure 覆盖本地拒答原子性：
@@ -398,9 +522,9 @@ func TestAICCPublicSendMessageDoesNotRequeueFailedTaskWithoutConsent(t *testing.
 	assert.Empty(t, store.requeuedMessageID)
 }
 
-// TestAICCPublicSendMessageDoesNotRequeueFailedTaskWithNewRequiredLead 覆盖动态留资规则：
-// 已失败消息重试时若管理员新增必填字段，缺失留资必须阻止任务恢复。
-func TestAICCPublicSendMessageDoesNotRequeueFailedTaskWithNewRequiredLead(t *testing.T) {
+// TestAICCPublicSendMessageRequeuesFailedTaskWithNewRequiredLead 覆盖动态留资规则：
+// 已失败消息重试时即使管理员新增必填字段，也必须允许继续咨询并恢复既有任务。
+func TestAICCPublicSendMessageRequeuesFailedTaskWithNewRequiredLead(t *testing.T) {
 	store := newAICCPublicMessageStore()
 	store.requiredLeadFields = []sqlc.AiccLeadField{{ID: "field-phone", Required: true, FieldKey: "phone", Label: "手机号"}}
 	store.messages = []sqlc.AiccMessage{{ID: "message-1", SessionID: "session-1", Direction: domain.AICCMessageDirectionVisitor, ClientMessageID: null.StringFrom("retry-client"), TextContent: null.StringFrom("报价多少")}}
@@ -411,8 +535,8 @@ func TestAICCPublicSendMessageDoesNotRequeueFailedTaskWithNewRequiredLead(t *tes
 
 	_, err := service.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", ClientMessageID: "retry-client", Text: "报价多少"})
 
-	require.ErrorIs(t, err, ErrAICCLeadRequired)
-	assert.Empty(t, store.requeuedMessageID)
+	require.NoError(t, err)
+	assert.Equal(t, "message-1", store.requeuedMessageID)
 }
 
 // TestAICCPublicSendMessageDoesNotRequeueFailedTaskWithNewSensitiveWord 覆盖内容策略变化：
@@ -1172,53 +1296,100 @@ func TestAICCPublicCreateSessionRejectsWidgetTokenAsWebLink(t *testing.T) {
 	assert.Empty(t, store.createdSession.ID)
 }
 
-// TestAICCPublicSubmitFeedbackUpdatesResolution 覆盖反馈正常路径：助手回复可写入反馈并同步会话解决状态。
-func TestAICCPublicSubmitFeedbackUpdatesResolution(t *testing.T) {
-	store := &fakeAICCPublicStore{
-		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
-		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive},
-		session: sqlc.AiccSession{ID: "session-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
-		message: sqlc.AiccMessage{ID: "msg-1", SessionID: "session-1", AgentID: "agent-1", Direction: domain.AICCMessageDirectionAssistant},
+// TestAICCPublicMessageStatusReturnsSourcesAndResolutionAction 覆盖第二条非拒答回复：公开状态携带来源并提示解决状态选择。
+func TestAICCPublicMessageStatusReturnsSourcesAndResolutionAction(t *testing.T) {
+	store := newAICCPublicMessageStore()
+	store.message = sqlc.AiccMessage{ID: "visitor-2", SessionID: "session-1", AgentID: "agent-1", Direction: domain.AICCMessageDirectionVisitor}
+	store.createdTasks = []sqlc.CreateAICCMessageTaskParams{{ID: "task-2", MessageID: "visitor-2"}}
+	store.taskStatus = "completed"
+	store.messages = []sqlc.AiccMessage{
+		{ID: "assistant-1", SessionID: "session-1", Direction: domain.AICCMessageDirectionAssistant, TextContent: null.StringFrom("第一条")}, // 场景：第一条正常客服回复。
+		{ID: "assistant-2", SessionID: "session-1", Direction: domain.AICCMessageDirectionAssistant, TextContent: null.StringFrom("第二条")}, // 场景：第二条正常客服回复触发询问。
 	}
-	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	store.messages[1].ReplyToMessageID = null.StringFrom("visitor-2")
+	store.messageSources = map[string][]sqlc.AiccMessageSource{"assistant-2": {{SourceType: "knowledge", Title: null.StringFrom("产品手册"), ReferenceID: null.StringFrom("kb-1")}}}
+	svc := NewAICCPublicService(store, nil)
+	svc.now = func() time.Time { return aiccPublicTestNow }
 
-	result, err := svc.SubmitFeedback(context.Background(), AICCPublicFeedbackInput{SessionToken: "tok", MessageID: "msg-1", Helpful: false})
+	result, err := svc.GetMessageStatus(context.Background(), "tok", "visitor-2")
 
 	require.NoError(t, err)
-	assert.Equal(t, domain.AICCResolutionUnresolved, result.ResolutionStatus)
-	assert.False(t, store.feedback.Helpful)
-	assert.Equal(t, domain.AICCResolutionUnresolved, store.resolutionStatus)
+	assert.Equal(t, "ask_resolution", result.NextAction)
+	require.Len(t, result.Sources, 1)
+	assert.Equal(t, "kb-1", result.Sources[0].ReferenceID)
 }
 
-// TestAICCPublicSubmitFeedbackRejectsVisitorMessage 覆盖反馈边界：访客消息或不存在消息不能被反馈。
-func TestAICCPublicSubmitFeedbackRejectsVisitorMessage(t *testing.T) {
-	store := &fakeAICCPublicStore{
-		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
-		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive},
-		session: sqlc.AiccSession{ID: "session-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
-		message: sqlc.AiccMessage{ID: "msg-1", SessionID: "session-1", AgentID: "agent-1", Direction: domain.AICCMessageDirectionVisitor},
-	}
-	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+// TestAICCPublicMessageStatusReturnsLeadInvitationForHighIntentReply 覆盖高意向留资卡片：动作只能绑定首次高意向对应的助手回复。
+func TestAICCPublicMessageStatusReturnsLeadInvitationForHighIntentReply(t *testing.T) {
+	store := newAICCPublicMessageStore()
+	store.message = sqlc.AiccMessage{ID: "visitor-high", SessionID: "session-1", AgentID: "agent-1", Direction: domain.AICCMessageDirectionVisitor}
+	store.createdTasks = []sqlc.CreateAICCMessageTaskParams{{ID: "task-high", MessageID: "visitor-high"}}
+	store.taskStatus = "completed"
+	store.messages = []sqlc.AiccMessage{{ID: "assistant-high", SessionID: "session-1", Direction: domain.AICCMessageDirectionAssistant, TextContent: null.StringFrom("欢迎留下联系方式"), ReplyToMessageID: null.StringFrom("visitor-high")}}
+	store.intent = sqlc.AiccSessionIntent{SessionID: "session-1", InviteStatus: "invited", AnalyzedMessageID: null.StringFrom("visitor-high")}
+	svc := NewAICCPublicService(store, nil)
+	svc.now = func() time.Time { return aiccPublicTestNow }
 
-	_, err := svc.SubmitFeedback(context.Background(), AICCPublicFeedbackInput{SessionToken: "tok", MessageID: "msg-1", Helpful: true})
+	result, err := svc.GetMessageStatus(context.Background(), "tok", "visitor-high")
 
-	require.ErrorIs(t, err, ErrAICCInvalidMessage)
+	require.NoError(t, err)
+	assert.Equal(t, "offer_lead", result.NextAction)
+
+	session, err := svc.GetSession(context.Background(), "tok")
+	require.NoError(t, err)
+	require.Len(t, session.Messages, 1)
+	assert.Equal(t, "offer_lead", session.Messages[0].NextAction)
 }
 
-// TestAICCPublicSubmitFeedbackRejectsWrongSession 覆盖反馈授权边界：只有持有该会话 token 的访客可反馈消息。
-func TestAICCPublicSubmitFeedbackRejectsWrongSession(t *testing.T) {
-	store := &fakeAICCPublicStore{
-		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
-		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive},
-		session: sqlc.AiccSession{ID: "session-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
-		message: sqlc.AiccMessage{ID: "msg-1", SessionID: "session-1", AgentID: "agent-1", Direction: domain.AICCMessageDirectionAssistant},
+// TestAICCPublicSendMessageResetsConfirmedResolution 覆盖新访客问题：两种已确认状态均必须在同一事务内重置为 unknown。
+func TestAICCPublicSendMessageResetsConfirmedResolution(t *testing.T) {
+	for _, status := range []string{domain.AICCResolutionResolved, domain.AICCResolutionUnresolved} {
+		status := status
+		t.Run(status, func(t *testing.T) {
+			store := newAICCPublicMessageStore()
+			store.session.ResolutionStatus = status
+			svc := NewAICCPublicService(store, nil)
+			svc.now = func() time.Time { return aiccPublicTestNow }
+			svc.SetTxRunner(&fakeAICCPublicTxRunner{store: store})
+
+			_, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "继续问一个问题"})
+
+			require.NoError(t, err)
+			assert.Equal(t, domain.AICCResolutionUnknown, store.session.ResolutionStatus)
+			assert.True(t, store.session.ResolutionPhaseStartMessageID.Valid)
+		})
 	}
-	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+}
 
-	_, err := svc.SubmitFeedback(context.Background(), AICCPublicFeedbackInput{SessionToken: "other-token", MessageID: "msg-1", Helpful: true})
+// TestAICCPublicUnknownContinuationRetractsResolutionAction 覆盖未确认追问：旧卡片消失且同一阶段不再重复询问。
+func TestAICCPublicUnknownContinuationRetractsResolutionAction(t *testing.T) {
+	store := newAICCPublicMessageStore()
+	store.messages = []sqlc.AiccMessage{
+		{ID: "assistant-1", SessionID: "session-1", Direction: domain.AICCMessageDirectionAssistant}, // 场景：第一阶段第一条正常回复。
+		{ID: "assistant-2", SessionID: "session-1", Direction: domain.AICCMessageDirectionAssistant}, // 场景：第一阶段第二条回复原本展示卡片。
+		{ID: "visitor-next", SessionID: "session-1", Direction: domain.AICCMessageDirectionVisitor},  // 场景：unknown 状态继续追问，撤回旧卡片。
+		{ID: "assistant-3", SessionID: "session-1", Direction: domain.AICCMessageDirectionAssistant}, // 场景：同一阶段第三条回复不得重新询问。
+	}
+	svc := NewAICCPublicService(store, nil)
 
-	require.ErrorIs(t, err, ErrAICCInvalidMessage)
-	assert.Equal(t, "", store.resolutionStatus)
+	assert.Equal(t, "none", svc.aiccAssistantNextAction(context.Background(), store.messages[1], ""))
+	assert.Equal(t, "none", svc.aiccAssistantNextAction(context.Background(), store.messages[3], ""))
+}
+
+// TestAICCPublicConfirmedResolutionStartsNewPhase 覆盖访客确认后再提问：持久化阶段起点让第二条回复重新出现一次询问。
+func TestAICCPublicConfirmedResolutionStartsNewPhase(t *testing.T) {
+	store := newAICCPublicMessageStore()
+	store.messages = []sqlc.AiccMessage{
+		{ID: "assistant-old-1", SessionID: "session-1", Direction: domain.AICCMessageDirectionAssistant}, // 场景：旧阶段第一条回复。
+		{ID: "assistant-old-2", SessionID: "session-1", Direction: domain.AICCMessageDirectionAssistant}, // 场景：旧阶段第二条回复。
+		{ID: "visitor-phase", SessionID: "session-1", Direction: domain.AICCMessageDirectionVisitor},     // 场景：确认后新问题的持久化阶段起点。
+		{ID: "assistant-new-1", SessionID: "session-1", Direction: domain.AICCMessageDirectionAssistant}, // 场景：新阶段第一条回复。
+		{ID: "assistant-new-2", SessionID: "session-1", Direction: domain.AICCMessageDirectionAssistant}, // 场景：新阶段第二条回复。
+	}
+	svc := NewAICCPublicService(store, nil)
+
+	assert.Equal(t, "none", svc.aiccAssistantNextAction(context.Background(), store.messages[1], "visitor-phase"))
+	assert.Equal(t, "ask_resolution", svc.aiccAssistantNextAction(context.Background(), store.messages[4], "visitor-phase"))
 }
 
 // TestAICCPublicResolveSessionMarksSessionResolved 覆盖公开会话级解决入口：
@@ -1312,11 +1483,13 @@ type fakeAICCPublicStore struct {
 	org                       sqlc.Organization
 	agent                     sqlc.AiccAgent
 	session                   sqlc.AiccSession
+	intent                    sqlc.AiccSessionIntent
 	sessionErr                error
 	message                   sqlc.AiccMessage
 	taskStatus                string
 	requeuedMessageID         string
 	messages                  []sqlc.AiccMessage
+	messageSources            map[string][]sqlc.AiccMessageSource
 	image                     sqlc.AiccImage
 	settings                  sqlc.AiccAgentSetting
 	blockedVisitor            sqlc.AiccBlockedVisitor
@@ -1335,6 +1508,7 @@ type fakeAICCPublicStore struct {
 	leadValues                []sqlc.UpsertAICCLeadValueParams
 	attachedLeadID            string
 	attachedLeadOrgID         string
+	intentInviteStatus        string
 	feedback                  sqlc.UpsertAICCFeedbackParams
 	resolutionStatus          string
 	touchedSessionID          string
@@ -1477,6 +1651,14 @@ func (f *fakeAICCPublicStore) GetAICCAgentSettings(_ context.Context, agentID st
 	return f.settings, nil
 }
 
+// GetAICCSessionIntent 返回当前测试会话的意向事实；无记录时保持数据库的 no rows 语义。
+func (f *fakeAICCPublicStore) GetAICCSessionIntent(_ context.Context, sessionID string) (sqlc.AiccSessionIntent, error) {
+	if f.intent.SessionID != sessionID {
+		return sqlc.AiccSessionIntent{}, sql.ErrNoRows
+	}
+	return f.intent, nil
+}
+
 func (f *fakeAICCPublicStore) CountAICCVisitorMessagesBySession(_ context.Context, sessionID string) (int64, error) {
 	if f.session.ID != sessionID {
 		return 0, sql.ErrNoRows
@@ -1497,6 +1679,11 @@ func (f *fakeAICCPublicStore) ListAICCMessagesBySession(_ context.Context, sessi
 		return nil, sql.ErrNoRows
 	}
 	return f.messages, nil
+}
+
+// ListAICCMessageSources 返回测试预置的已审计来源，模拟公开端只读展示持久化来源。
+func (f *fakeAICCPublicStore) ListAICCMessageSources(_ context.Context, messageID string) ([]sqlc.AiccMessageSource, error) {
+	return f.messageSources[messageID], nil
 }
 
 func (f *fakeAICCPublicStore) GetActiveAICCBlockedVisitor(_ context.Context, arg sqlc.GetActiveAICCBlockedVisitorParams) (sqlc.AiccBlockedVisitor, error) {
@@ -1689,6 +1876,15 @@ func (f *fakeAICCPublicStore) AttachAICCLeadValuesToLead(_ context.Context, arg 
 	return nil
 }
 
+// UpdateAICCSessionIntentInviteStatus 模拟访客只影响自身会话的邀约选择。
+func (f *fakeAICCPublicStore) UpdateAICCSessionIntentInviteStatus(_ context.Context, arg sqlc.UpdateAICCSessionIntentInviteStatusParams) (int64, error) {
+	if arg.SessionID != f.session.ID || f.intentInviteStatus != "invited" {
+		return 0, nil
+	}
+	f.intentInviteStatus = arg.InviteStatus
+	return 1, nil
+}
+
 func (f *fakeAICCPublicStore) ListRequiredAICCLeadFieldsMissing(_ context.Context, _ string) ([]sqlc.AiccLeadField, error) {
 	if len(f.requiredLeadFields) > 0 {
 		return f.requiredLeadFields, nil
@@ -1725,6 +1921,18 @@ func (f *fakeAICCPublicStore) UpsertAICCFeedback(_ context.Context, arg sqlc.Ups
 
 func (f *fakeAICCPublicStore) UpdateAICCSessionResolutionStatus(_ context.Context, arg sqlc.UpdateAICCSessionResolutionStatusParams) error {
 	f.resolutionStatus = arg.ResolutionStatus
+	if f.session.ID == arg.ID {
+		f.session.ResolutionStatus = arg.ResolutionStatus
+	}
+	return nil
+}
+
+// ResetAICCSessionResolutionForNewPhase 模拟已确认状态下开始新阶段的条件更新。
+func (f *fakeAICCPublicStore) ResetAICCSessionResolutionForNewPhase(_ context.Context, arg sqlc.ResetAICCSessionResolutionForNewPhaseParams) error {
+	if f.session.ID == arg.ID && (f.session.ResolutionStatus == domain.AICCResolutionResolved || f.session.ResolutionStatus == domain.AICCResolutionUnresolved) {
+		f.session.ResolutionStatus = domain.AICCResolutionUnknown
+		f.session.ResolutionPhaseStartMessageID = arg.ResolutionPhaseStartMessageID
+	}
 	return nil
 }
 
@@ -1736,13 +1944,13 @@ type fakeAICCHermesChat struct {
 	onChat func()
 }
 
-func (f *fakeAICCHermesChat) ChatAICC(_ context.Context, appID, _ string, text string) (string, error) {
-	f.appID = appID
-	f.text = text
+func (f *fakeAICCHermesChat) ChatAICC(_ context.Context, turn AICCInboundTurn) (AICCResponseEnvelope, error) {
+	f.appID = turn.AppID
+	f.text = turn.Text
 	if f.onChat != nil {
 		f.onChat()
 	}
-	return f.reply, f.err
+	return AICCResponseEnvelope{Text: f.reply}, f.err
 }
 
 type fakeAICCRateLimiter struct {

@@ -67,6 +67,10 @@ var ErrAICCConcurrencyLimited = errors.New("aicc concurrency limited")
 // ErrAICCVisitorBlocked 表示当前访客命中了智能体有效封禁名单。
 var ErrAICCVisitorBlocked = errors.New("aicc visitor blocked")
 
+// ErrAICCOperationForbidden 表示智能客服 runtime 试图执行超出只读问答边界的操作。
+// AICC 仅允许知识检索、受控网页检索与受控回复，不允许把运行时内容写回知识库。
+var ErrAICCOperationForbidden = errors.New("aicc operation forbidden")
+
 // ErrInvalidResourceRange 表示资源趋势查询的时间范围或聚合粒度非法，handler 层应映射为 400。
 var ErrInvalidResourceRange = errors.New("资源查询范围不合法")
 

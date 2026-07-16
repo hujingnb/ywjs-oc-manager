@@ -31,6 +31,15 @@ def test_render_writes_expected_fields(tmp_data: Path) -> None:
     assert out["terminal"]["cwd"] == "/opt/data/workspace"
 
 
+def test_render_configures_web_without_replacing_api_server_defaults(tmp_data: Path) -> None:
+    # 普通 Hermes 的 API Server 保留上游完整预设，并显式加入 web，不能只写 web 覆盖其他工具集。
+    # 搜索走 DDGS，网页正文由共享 Firecrawl 提取服务处理。
+    render(make_manifest(), tmp_data)
+    out = yaml.safe_load((tmp_data / "config.yaml").read_text())
+    assert out["platform_toolsets"]["api_server"] == ["hermes-api-server", "web"]
+    assert out["web"] == {"search_backend": "ddgs", "extract_backend": "firecrawl"}
+
+
 def test_render_auxiliary_all_main_when_routing_empty(tmp_data: Path) -> None:
     # routing 为空时，8 个 auxiliary 槽位全部 { provider: main }。
     render(make_manifest(), tmp_data)

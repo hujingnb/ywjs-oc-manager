@@ -24,7 +24,8 @@ spec:
       containers:
         - name: manager-web
           image: k3d-ocm-registry.localhost:5000/oc-manager-web:dev
-          imagePullPolicy: Always
+          # 本地 make local-build 会把同一标签的新镜像直接导入 k3d 节点，避免节点重拉时依赖 Docker 内部 DNS。
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
           readinessProbe:

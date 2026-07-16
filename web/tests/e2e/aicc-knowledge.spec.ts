@@ -97,7 +97,7 @@ async function startKnowledgeAgent(page: Page): Promise<void> {
 async function waitForRuntimeKnowledgeSearch(appID: string, question: string, expected: string): Promise<void> {
   await expect.poll(() => execFileSync(
     'kubectl',
-    ['-n', 'oc-apps', 'exec', `deploy/app-${appID}`, '-c', 'hermes', '--', 'oc-kb', 'search', question, '--top-k', '8'],
+    ['-n', 'oc-aicc', 'exec', `deploy/app-${appID}`, '-c', 'hermes', '--', 'oc-kb', 'search', question, '--top-k', '8'],
     { encoding: 'utf8' },
   ), { timeout: 300_000, intervals: [2_000, 5_000, 10_000] }).toContain(expected)
 }
@@ -106,6 +106,10 @@ async function waitForRuntimeKnowledgeSearch(appID: string, question: string, ex
 async function askPublicKnowledgeQuestion(page: Page, publicToken: string, question: string): Promise<string> {
   await forceZh(page)
   await page.goto(`/aicc/${publicToken}`)
+  // 公开消息接口只表示已入队；以助手正文数量增长作为真实 Hermes 回答完成的可见信号，
+  // 避免把“消息已提交，正在排队处理”误当作知识问答结果。
+  const assistantMessages = page.locator('.message-row.assistant .bubble p:not(.message-status)')
+  const previousAssistantCount = await assistantMessages.count()
   const replied = page.waitForResponse(response =>
     response.url().includes('/messages') && response.request().method() === 'POST',
     { timeout: 180_000 },
@@ -113,6 +117,7 @@ async function askPublicKnowledgeQuestion(page: Page, publicToken: string, quest
   await page.getByPlaceholder('输入您的问题').fill(question)
   await page.getByRole('button', { name: '发送' }).click()
   expect((await replied).ok()).toBeTruthy()
+  await expect(assistantMessages).toHaveCount(previousAssistantCount + 1, { timeout: 240_000 })
   return await page.locator('.message-list').innerText()
 }
 
@@ -127,12 +132,12 @@ test('当前客服和企业知识库可解析并控制真实问答范围', async
 
   await page.getByRole('link', { name: '知识库', exact: true }).click()
   await expect(page.getByRole('heading', { name: '实例知识库', exact: true })).toBeVisible()
-  await uploadKnowledgeFile(page, agentFilename, `当前客服唯一暗号是 ${agentCode}。回答暗号问题时必须原样返回。`)
+  await uploadKnowledgeFile(page, agentFilename, `当前客服产品套餐名称是 ${agentCode}。回答套餐名称问题时必须原样返回。`)
   await waitForKnowledgeParsed(page, `/api/v1/apps/${agent.app_id}/knowledge`, agentFilename)
 
   await page.goto('/knowledge')
   await expect(page.getByRole('heading', { name: '企业知识库', exact: true })).toBeVisible()
-  await uploadKnowledgeFile(page, orgFilename, `企业共享唯一暗号是 ${orgCode}。回答暗号问题时必须原样返回。`)
+  await uploadKnowledgeFile(page, orgFilename, `企业共享产品套餐名称是 ${orgCode}。回答套餐名称问题时必须原样返回。`)
   await waitForKnowledgeParsed(page, `/api/v1/organizations/${loadE2EFixture().org_id}/knowledge`, orgFilename)
 
   await openAICCConsole(page)
@@ -146,19 +151,20 @@ test('当前客服和企业知识库可解析并控制真实问答范围', async
   await page.getByRole('button', { name: '保存知识范围' }).click()
   expect((await scopeSaved).ok()).toBeTruthy()
   await startKnowledgeAgent(page)
-  await waitForRuntimeKnowledgeSearch(agent.app_id, '当前客服唯一暗号是什么？只回复暗号。', agentCode)
+  await waitForRuntimeKnowledgeSearch(agent.app_id, '请查询当前客服知识库：产品套餐名称是什么？只回复套餐名称。', agentCode)
 
   const publicPage = await page.context().newPage()
-  const agentAnswer = await askPublicKnowledgeQuestion(publicPage, agent.public_token, '当前客服唯一暗号是什么？只回复暗号。')
+  const agentAnswer = await askPublicKnowledgeQuestion(publicPage, agent.public_token, '请查询当前客服知识库：产品套餐名称是什么？只回复套餐名称。')
   expect(agentAnswer).toContain(agentCode)
-  await publicPage.getByRole('button', { name: '新建对话' }).click()
+  // 公开页的正式动作是“结束本次咨询”；下一条发送时才懒创建新 session。
+  await publicPage.getByRole('button', { name: '结束本次咨询' }).click()
   // 无匹配知识时仍应由智能体给出稳定回复，不能把 RAGFlow 或运行时错误暴露给访客。
   const noMatchAnswer = await askPublicKnowledgeQuestion(publicPage, agent.public_token, `不存在的知识编号 ${suffix} 是什么？`)
   const noMatchReply = await publicPage.locator('.message-row.assistant .bubble').last().innerText()
   expect(noMatchReply.trim()).not.toBe('')
   expect(noMatchAnswer).not.toMatch(/api call failed|connection error|dial tcp|traceback|stack trace|upstream/i)
-  await publicPage.getByRole('button', { name: '新建对话' }).click()
-  const orgAnswer = await askPublicKnowledgeQuestion(publicPage, agent.public_token, '企业共享唯一暗号是什么？只回复暗号。')
+  await publicPage.getByRole('button', { name: '结束本次咨询' }).click()
+  const orgAnswer = await askPublicKnowledgeQuestion(publicPage, agent.public_token, '请查询企业知识库：企业共享产品套餐名称是什么？只回复套餐名称。')
   expect(orgAnswer).toContain(orgCode)
   await publicPage.close()
 
@@ -175,10 +181,10 @@ test('当前客服和企业知识库可解析并控制真实问答范围', async
 
   const isolatedPage = await page.context().newPage()
   await forceZh(isolatedPage)
-  const isolatedAgentAnswer = await askPublicKnowledgeQuestion(isolatedPage, agent.public_token, '当前客服唯一暗号是什么？只回复暗号。')
+  const isolatedAgentAnswer = await askPublicKnowledgeQuestion(isolatedPage, agent.public_token, '请查询当前客服知识库：产品套餐名称是什么？只回复套餐名称。')
   expect(isolatedAgentAnswer).toContain(agentCode)
-  await isolatedPage.getByRole('button', { name: '新建对话' }).click()
-  const isolatedOrgAnswer = await askPublicKnowledgeQuestion(isolatedPage, agent.public_token, '企业共享唯一暗号是什么？只回复暗号。')
+  await isolatedPage.getByRole('button', { name: '结束本次咨询' }).click()
+  const isolatedOrgAnswer = await askPublicKnowledgeQuestion(isolatedPage, agent.public_token, '请查询企业知识库：企业共享产品套餐名称是什么？只回复套餐名称。')
   expect(isolatedOrgAnswer).not.toContain(orgCode)
   await isolatedPage.close()
 

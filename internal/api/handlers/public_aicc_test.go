@@ -30,8 +30,6 @@ type publicAICCServiceStub struct {
 	messageStatusErr    error
 	leadResult          service.AICCPublicLeadValuesResult
 	leadErr             error
-	feedbackResult      service.AICCPublicFeedbackResult
-	feedbackErr         error
 	resolveResult       service.AICCPublicResolutionResult
 	resolveErr          error
 	consentErr          error
@@ -45,7 +43,7 @@ type publicAICCServiceStub struct {
 	lastStatusSessionToken string
 	lastStatusMessageID    string
 	lastLeadInput          service.AICCPublicLeadValuesInput
-	lastFeedbackInput      service.AICCPublicFeedbackInput
+	lastDeclineToken       string
 	lastResolveToken       string
 	lastResolution         service.AICCPublicResolutionInput
 }
@@ -93,9 +91,9 @@ func (s *publicAICCServiceStub) SubmitLeadValues(_ context.Context, input servic
 	return s.leadResult, s.leadErr
 }
 
-func (s *publicAICCServiceStub) SubmitFeedback(_ context.Context, input service.AICCPublicFeedbackInput) (service.AICCPublicFeedbackResult, error) {
-	s.lastFeedbackInput = input
-	return s.feedbackResult, s.feedbackErr
+func (s *publicAICCServiceStub) DeclineLeadInvitation(_ context.Context, sessionToken string) error {
+	s.lastDeclineToken = sessionToken
+	return s.consentErr
 }
 
 func (s *publicAICCServiceStub) ResolveSession(_ context.Context, sessionToken string) (service.AICCPublicResolutionResult, error) {
@@ -227,33 +225,22 @@ func TestPublicAICCHandlerSubmitLeadValues(t *testing.T) {
 	assert.Equal(t, "13800000000", svc.lastLeadInput.Values["phone"])
 }
 
-// TestPublicAICCHandlerSubmitFeedback 覆盖公开反馈入口：session token/message id 来自路径，helpful 来自请求体。
-func TestPublicAICCHandlerSubmitFeedback(t *testing.T) {
-	svc := &publicAICCServiceStub{feedbackResult: service.AICCPublicFeedbackResult{ResolutionStatus: "resolved"}}
-	router := newPublicAICCTestRouter(t, svc)
-
+// TestPublicAICCHandlerDoesNotExposeMessageFeedback 覆盖产品边界：公开页面不再暴露逐条反馈接口。
+func TestPublicAICCHandlerDoesNotExposeMessageFeedback(t *testing.T) {
+	router := newPublicAICCTestRouter(t, &publicAICCServiceStub{})
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/sessions/sess-1/messages/msg-1/feedback", bytes.NewBufferString(`{"helpful":true}`))
-	request.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusOK, recorder.Code)
-	assert.Contains(t, recorder.Body.String(), "resolved")
-	assert.Equal(t, "sess-1", svc.lastFeedbackInput.SessionToken)
-	assert.Equal(t, "msg-1", svc.lastFeedbackInput.MessageID)
-	assert.True(t, svc.lastFeedbackInput.Helpful)
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/sessions/sess-1/messages/msg-1/feedback", nil))
+	assert.Equal(t, http.StatusNotFound, recorder.Code)
 }
 
-// TestPublicAICCHandlerSubmitFeedbackRequiresHelpful 覆盖反馈入口：缺少 helpful 时不能默认为没帮助。
-func TestPublicAICCHandlerSubmitFeedbackRequiresHelpful(t *testing.T) {
-	router := newPublicAICCTestRouter(t, &publicAICCServiceStub{})
-
+// TestPublicAICCHandlerDeclinesLeadInvitation 覆盖访客拒绝留资：仅作用于当前会话。
+func TestPublicAICCHandlerDeclinesLeadInvitation(t *testing.T) {
+	svc := &publicAICCServiceStub{}
+	router := newPublicAICCTestRouter(t, svc)
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/sessions/sess-1/messages/msg-1/feedback", bytes.NewBufferString(`{}`))
-	request.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/sessions/sess-1/lead-invitation/decline", nil))
+	require.Equal(t, http.StatusNoContent, recorder.Code)
+	assert.Equal(t, "sess-1", svc.lastDeclineToken)
 }
 
 // TestPublicAICCHandlerResolveSession 覆盖公开会话级已解决入口：
@@ -374,19 +361,6 @@ func TestPublicAICCHandlerMapsSessionStoreUnavailable(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), "AICC_SESSION_STORE_UNAVAILABLE")
 	assert.Contains(t, recorder.Body.String(), "客服暂时不可用，请稍后再试")
-}
-
-// TestPublicAICCHandlerMapsInvalidMessage 覆盖反馈入口：不可反馈消息返回稳定 code。
-func TestPublicAICCHandlerMapsInvalidMessage(t *testing.T) {
-	router := newPublicAICCTestRouter(t, &publicAICCServiceStub{feedbackErr: service.ErrAICCInvalidMessage})
-
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/public/aicc/sessions/sess-1/messages/msg-1/feedback", bytes.NewBufferString(`{"helpful":false}`))
-	request.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusNotFound, recorder.Code)
-	assert.Contains(t, recorder.Body.String(), "AICC_INVALID_MESSAGE")
 }
 
 // TestPublicAICCHandlerMapsImageTooLarge 覆盖公开图片上传：超过限制时返回 413 而非 500。

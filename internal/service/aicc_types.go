@@ -120,6 +120,21 @@ type AICCSessionListResult struct {
 	Offset int32 `json:"offset"`
 }
 
+// AICCSessionIntentResult 是会话级意向画像的可解释视图。字段和值均由当前会话访客原话证据约束，
+// 其中不包含自动提取的联系方式等敏感数据。
+type AICCSessionIntentResult struct {
+	// IntentLevel 是 low、medium 或 high 三档意向等级。
+	IntentLevel string `json:"intent_level"`
+	// Fields 是审核白名单内的业务意向字段。
+	Fields map[string]string `json:"fields"`
+	// Confidence 表示各字段的分析置信度，取值范围为 0 到 1。
+	Confidence map[string]float64 `json:"confidence"`
+	// Evidence 是字段在访客原话中的直接证据，供运营回溯核验。
+	Evidence map[string]string `json:"evidence"`
+	// InviteStatus 表示 not_invited、invited、declined 或 submitted。
+	InviteStatus string `json:"invite_status"`
+}
+
 // AICCMessageResult 是管理端会话详情中的消息镜像。
 type AICCMessageResult struct {
 	// ID 是消息主键。
@@ -148,6 +163,10 @@ type AICCMessageResult struct {
 	IsRefusal bool `json:"is_refusal"`
 	// ErrorSummary 是运行时错误摘要。
 	ErrorSummary string `json:"error_summary,omitempty"`
+	// Sources 是助手回复已校验的知识库或网络依据；公开端仅展示其中安全字段。
+	Sources []AICCResponseSource `json:"sources,omitempty"`
+	// NextAction 是当前助手回复对应的下一步展示动作，公开端据此渲染留资或解决状态卡片。
+	NextAction string `json:"next_action,omitempty"`
 	// CreatedAt 是消息创建时间。
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -160,6 +179,8 @@ type AICCSessionDetailResult struct {
 	LeadValues []AICCLeadValueResult `json:"lead_values"`
 	// Messages 是会话消息镜像。
 	Messages []AICCMessageResult `json:"messages"`
+	// Intent 是会话意向画像及逐字段访客原话证据，供运营在不要求留资的前提下判断跟进价值。
+	Intent *AICCSessionIntentResult `json:"intent,omitempty"`
 }
 
 // AICCSessionListOptions 是管理端会话列表筛选条件。

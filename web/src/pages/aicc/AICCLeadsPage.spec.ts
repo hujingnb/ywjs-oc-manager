@@ -109,6 +109,13 @@ describe('AICCLeadsPage', () => {
         { id: 'msg-1', direction: 'visitor', text: '我想了解报价', created_at: '2026-07-11T10:00:00Z' },
         { id: 'msg-2', direction: 'assistant', text: '您好，请问需要哪个版本？', created_at: '2026-07-11T10:00:01Z' },
       ],
+      intent: {
+        intent_level: 'high',
+        fields: { budget: '预算 10 万' },
+        confidence: { budget: 0.9 },
+        evidence: { budget: 'msg-1' },
+        invite_status: 'invited',
+      },
     }
     queryState.selectedSessionId = undefined
     queryState.markRead.mockReset()
@@ -129,5 +136,39 @@ describe('AICCLeadsPage', () => {
     expect(wrapper.text()).toContain('我想了解报价')
     expect(wrapper.text()).toContain('您好，请问需要哪个版本？')
     expect(wrapper.text()).toContain('联系电话')
+    expect(wrapper.text()).toContain('高意向')
+    expect(wrapper.find('.intent-fields button').text()).toContain('预算 10 万')
+  })
+
+  // 场景：运营点击意向字段时必须定位到对应访客原话；缺少证据的字段不得触发滚动或猜测位置。
+  it('scrolls to the exact visitor evidence and ignores fields without evidence', async () => {
+    const scrollIntoView = vi.fn()
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView })
+    const wrapper = mountLeadsPage()
+    const viewButton = wrapper.findAll('button').find(item => item.text().includes('查看对话'))
+    await viewButton?.trigger('click')
+    const evidenceButton = wrapper.find('.intent-fields button')
+
+    await evidenceButton.trigger('click')
+    expect(scrollIntoView).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-message-id="msg-1"]').exists()).toBe(true)
+
+    queryState.detail.data.value = {
+      ...queryState.detail.data.value!,
+      intent: { ...queryState.detail.data.value!.intent!, fields: { timeline: '下个月上线' }, evidence: {} },
+    }
+    await wrapper.vm.$nextTick()
+    await wrapper.find('.intent-fields button').trigger('click')
+    expect(scrollIntoView).toHaveBeenCalledTimes(1)
+  })
+
+  // 场景：未留联系方式的高意向访客仍应作为匿名线索展示，运营可从对话依据回看判断。
+  it('labels a lead without contact values as an anonymous interested visitor', async () => {
+    queryState.leads.data.value = [{
+      id: 'lead-anonymous', latest_session_id: 'session-2', unread: true, values: [], updated_at: '2026-07-11T10:00:00Z',
+    }]
+    const wrapper = mountLeadsPage()
+
+    expect(wrapper.text()).toContain('匿名意向访客')
   })
 })

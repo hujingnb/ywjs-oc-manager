@@ -30,6 +30,8 @@ spec:
             secretKeyRef:
               key: control-token
               name: app-a1-token
+        - name: FIRECRAWL_API_URL
+          value: http://firecrawl-api.oc-firecrawl.svc.cluster.local:3002
         - name: FEISHU_APP_ID
           valueFrom:
             secretKeyRef:

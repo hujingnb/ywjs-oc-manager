@@ -3,6 +3,7 @@ package aicc
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -52,6 +53,17 @@ func TestMessageDispatchLoopTelemetryCoversQueueAndConcurrency(t *testing.T) {
 	close(dispatcher.release)
 	loop.Wait()
 	assert.Zero(t, observer.Metrics().Inflight)
+}
+
+// TestMessageDispatchLoopRetriesIntentAnalysis 验证意向分析重试使用独立后台路径，不依赖新访客消息入队。
+func TestMessageDispatchLoopRetriesIntentAnalysis(t *testing.T) {
+	queue := redis.NewMemoryQueue()
+	store := &messageTaskStoreStub{}
+	dispatcher := &intentRetryDispatcherStub{}
+	loop := NewMessageDispatchLoop(store, queue, dispatcher, slog.Default())
+
+	require.NoError(t, loop.Tick(context.Background()))
+	assert.Equal(t, 1, dispatcher.retryCalls)
 }
 
 // TestMessageDispatchLoopTelemetrySeparatesBusinessGaugesByHiddenApp 验证同一 manager
@@ -318,6 +330,16 @@ func (*loopRealDispatcherStore) GetAICCMessageByID(context.Context, string) (sql
 func (*loopRealDispatcherStore) GetAICCAgent(context.Context, string) (sqlc.AiccAgent, error) {
 	return sqlc.AiccAgent{}, nil
 }
+
+// GetAICCSessionContext 覆盖无摘要的冷启动会话，真实 dispatcher 仍应正常派发。
+func (*loopRealDispatcherStore) GetAICCSessionContext(context.Context, string) (sqlc.AiccSessionContext, error) {
+	return sqlc.AiccSessionContext{}, sql.ErrNoRows
+}
+
+// ListAICCContextMessages 覆盖没有历史消息的新会话上下文。
+func (*loopRealDispatcherStore) ListAICCContextMessages(context.Context, sqlc.ListAICCContextMessagesParams) ([]sqlc.AiccMessage, error) {
+	return nil, nil
+}
 func (*loopRealDispatcherStore) CompleteAICCMessageTask(context.Context, sqlc.CompleteAICCMessageTaskParams) (int64, error) {
 	return 1, nil
 }
@@ -333,6 +355,9 @@ func (*loopRealDispatcherStore) RenewAICCMessageTaskLease(context.Context, sqlc.
 func (*loopRealDispatcherStore) CreateAICCMessage(context.Context, sqlc.CreateAICCMessageParams) error {
 	return nil
 }
+func (*loopRealDispatcherStore) CreateAICCMessageSource(context.Context, sqlc.CreateAICCMessageSourceParams) error {
+	return nil
+}
 
 type loopRealDispatcherTx struct{ store *loopRealDispatcherStore }
 
@@ -345,8 +370,8 @@ type loopRealDispatcherChat struct {
 	reply string
 }
 
-func (c loopRealDispatcherChat) ChatAICC(context.Context, string, string, string) (string, error) {
-	return c.reply, c.err
+func (c loopRealDispatcherChat) ChatAICC(context.Context, service.AICCInboundTurn) (service.AICCResponseEnvelope, error) {
+	return service.AICCResponseEnvelope{Text: c.reply}, c.err
 }
 
 func hasMetricPrefix(counters map[string]uint64, prefix string) bool {
@@ -430,6 +455,17 @@ type messageTaskDispatcherStub struct {
 	mu           sync.Mutex
 	tasks        []sqlc.AiccMessageTask
 	recoverCalls int64
+}
+
+// intentRetryDispatcherStub 仅实现可选重试接口，证明循环不会要求主消息 dispatcher 改变契约。
+type intentRetryDispatcherStub struct {
+	messageTaskDispatcherStub
+	retryCalls int
+}
+
+func (d *intentRetryDispatcherStub) RetryPendingAICCIntentAnalysis(context.Context) error {
+	d.retryCalls++
+	return nil
 }
 
 func (d *messageTaskDispatcherStub) Dispatch(_ context.Context, task sqlc.AiccMessageTask) error {

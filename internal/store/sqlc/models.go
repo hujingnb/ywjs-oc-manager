@@ -89,6 +89,19 @@ type AiccImage struct {
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
+type AiccIntentAnalysisRetry struct {
+	SessionID      string      `db:"session_id" json:"session_id"`
+	MessageID      string      `db:"message_id" json:"message_id"`
+	Attempts       int32       `db:"attempts" json:"attempts"`
+	RunAfter       time.Time   `db:"run_after" json:"run_after"`
+	LastError      null.String `db:"last_error" json:"last_error"`
+	LeaseToken     null.String `db:"lease_token" json:"lease_token"`
+	LeaseExpiresAt null.Time   `db:"lease_expires_at" json:"lease_expires_at"`
+	ProcessedAt    null.Time   `db:"processed_at" json:"processed_at"`
+	CreatedAt      time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt      time.Time   `db:"updated_at" json:"updated_at"`
+}
+
 type AiccLead struct {
 	ID                 string      `db:"id" json:"id"`
 	OrgID              string      `db:"org_id" json:"org_id"`
@@ -148,6 +161,19 @@ type AiccMessage struct {
 	ReplyToMessageID null.String `db:"reply_to_message_id" json:"reply_to_message_id"`
 }
 
+type AiccMessageSource struct {
+	ID          string      `db:"id" json:"id"`
+	MessageID   string      `db:"message_id" json:"message_id"`
+	SourceType  string      `db:"source_type" json:"source_type"`
+	Title       null.String `db:"title" json:"title"`
+	Url         null.String `db:"url" json:"url"`
+	Scope       null.String `db:"scope" json:"scope"`
+	ReferenceID null.String `db:"reference_id" json:"reference_id"`
+	Unconfirmed bool        `db:"unconfirmed" json:"unconfirmed"`
+	RetrievedAt time.Time   `db:"retrieved_at" json:"retrieved_at"`
+	CreatedAt   time.Time   `db:"created_at" json:"created_at"`
+}
+
 type AiccMessageTask struct {
 	ID                   string      `db:"id" json:"id"`
 	MessageID            string      `db:"message_id" json:"message_id"`
@@ -172,24 +198,49 @@ type AiccQueueGovernance struct {
 }
 
 type AiccSession struct {
-	ID                 string      `db:"id" json:"id"`
-	AgentID            string      `db:"agent_id" json:"agent_id"`
-	OrgID              string      `db:"org_id" json:"org_id"`
-	SessionToken       string      `db:"session_token" json:"session_token"`
-	Channel            string      `db:"channel" json:"channel"`
-	SourceUrl          null.String `db:"source_url" json:"source_url"`
-	Referrer           null.String `db:"referrer" json:"referrer"`
-	Region             null.String `db:"region" json:"region"`
-	IpHash             null.String `db:"ip_hash" json:"ip_hash"`
-	UserAgentHash      null.String `db:"user_agent_hash" json:"user_agent_hash"`
-	PrivacyNoticeShown bool        `db:"privacy_notice_shown" json:"privacy_notice_shown"`
-	PrivacyConsentedAt null.Time   `db:"privacy_consented_at" json:"privacy_consented_at"`
-	ResolutionStatus   string      `db:"resolution_status" json:"resolution_status"`
-	LeadStatus         string      `db:"lead_status" json:"lead_status"`
-	LastActiveAt       time.Time   `db:"last_active_at" json:"last_active_at"`
-	ExpiresAt          time.Time   `db:"expires_at" json:"expires_at"`
-	CreatedAt          time.Time   `db:"created_at" json:"created_at"`
-	UpdatedAt          time.Time   `db:"updated_at" json:"updated_at"`
+	ID                            string      `db:"id" json:"id"`
+	AgentID                       string      `db:"agent_id" json:"agent_id"`
+	OrgID                         string      `db:"org_id" json:"org_id"`
+	SessionToken                  string      `db:"session_token" json:"session_token"`
+	Channel                       string      `db:"channel" json:"channel"`
+	SourceUrl                     null.String `db:"source_url" json:"source_url"`
+	Referrer                      null.String `db:"referrer" json:"referrer"`
+	Region                        null.String `db:"region" json:"region"`
+	IpHash                        null.String `db:"ip_hash" json:"ip_hash"`
+	UserAgentHash                 null.String `db:"user_agent_hash" json:"user_agent_hash"`
+	PrivacyNoticeShown            bool        `db:"privacy_notice_shown" json:"privacy_notice_shown"`
+	PrivacyConsentedAt            null.Time   `db:"privacy_consented_at" json:"privacy_consented_at"`
+	ResolutionStatus              string      `db:"resolution_status" json:"resolution_status"`
+	LeadStatus                    string      `db:"lead_status" json:"lead_status"`
+	LastActiveAt                  time.Time   `db:"last_active_at" json:"last_active_at"`
+	ExpiresAt                     time.Time   `db:"expires_at" json:"expires_at"`
+	CreatedAt                     time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt                     time.Time   `db:"updated_at" json:"updated_at"`
+	ResolutionPhaseStartMessageID null.String `db:"resolution_phase_start_message_id" json:"resolution_phase_start_message_id"`
+}
+
+type AiccSessionContext struct {
+	ID                         string      `db:"id" json:"id"`
+	SessionID                  string      `db:"session_id" json:"session_id"`
+	Summary                    string      `db:"summary" json:"summary"`
+	SummarizedThroughMessageID null.String `db:"summarized_through_message_id" json:"summarized_through_message_id"`
+	SummaryVersion             int32       `db:"summary_version" json:"summary_version"`
+	CreatedAt                  time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt                  time.Time   `db:"updated_at" json:"updated_at"`
+}
+
+type AiccSessionIntent struct {
+	ID                string      `db:"id" json:"id"`
+	SessionID         string      `db:"session_id" json:"session_id"`
+	IntentLevel       string      `db:"intent_level" json:"intent_level"`
+	FieldsJson        []byte      `db:"fields_json" json:"fields_json"`
+	ConfidenceJson    []byte      `db:"confidence_json" json:"confidence_json"`
+	EvidenceJson      []byte      `db:"evidence_json" json:"evidence_json"`
+	AnalyzerVersion   string      `db:"analyzer_version" json:"analyzer_version"`
+	AnalyzedMessageID null.String `db:"analyzed_message_id" json:"analyzed_message_id"`
+	InviteStatus      string      `db:"invite_status" json:"invite_status"`
+	CreatedAt         time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt         time.Time   `db:"updated_at" json:"updated_at"`
 }
 
 type App struct {

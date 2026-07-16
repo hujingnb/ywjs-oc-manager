@@ -12,7 +12,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 
 	"oc-manager/internal/domain"
 	"oc-manager/internal/integrations/k8sorch"
@@ -40,7 +39,7 @@ type appStatusStore interface {
 	// ListRestartingApps 返回 status=restarting 的 app id，供收敛「解绑触发重启」过渡态。
 	ListRestartingApps(ctx context.Context) ([]string, error)
 	// 以下三个方法供 jobutil.EnsureInitJob 重新入队 app_initialize job（兜底恢复用）。
-	GetLatestAppInitJob(ctx context.Context, appID json.RawMessage) (sqlc.Job, error)
+	GetLatestAppInitJob(ctx context.Context, appID string) (sqlc.Job, error)
 	RequeueJob(ctx context.Context, id string) error
 	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) error
 }

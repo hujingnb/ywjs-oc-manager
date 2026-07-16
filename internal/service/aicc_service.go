@@ -658,7 +658,40 @@ func (s *AICCService) GetSession(ctx context.Context, principal auth.Principal, 
 	for _, row := range messages {
 		result.Messages = append(result.Messages, toAICCMessageResult(row))
 	}
+	// 意向画像属于 Task8 的独立持久化事实。用窄接口读取以兼容没有该表的旧测试存根；读取失败
+	// 不应阻断管理员查看原始会话，但存在合法记录时必须带回可点击证据。
+	if intentStore, ok := s.store.(interface {
+		GetAICCSessionIntent(context.Context, string) (sqlc.AiccSessionIntent, error)
+	}); ok {
+		intent, intentErr := intentStore.GetAICCSessionIntent(ctx, session.ID)
+		if intentErr == nil {
+			result.Intent = toAICCSessionIntentResult(intent)
+		}
+	}
 	return result, nil
+}
+
+// toAICCSessionIntentResult 将数据库 JSON 收敛为管理端安全视图。证据只保留已通过分析器校验的原话片段，
+// 不输出模型原始 JSON 或任何可能被错误扩展的联系方式字段。
+func toAICCSessionIntentResult(intent sqlc.AiccSessionIntent) *AICCSessionIntentResult {
+	result := &AICCSessionIntentResult{IntentLevel: intent.IntentLevel, Fields: map[string]string{}, Confidence: map[string]float64{}, Evidence: map[string]string{}, InviteStatus: intent.InviteStatus}
+	var fields map[string]string
+	var confidence map[string]float64
+	var evidence map[string]aiccIntentEvidence
+	if json.Unmarshal(intent.FieldsJson, &fields) == nil {
+		result.Fields = fields
+	}
+	if json.Unmarshal(intent.ConfidenceJson, &confidence) == nil {
+		result.Confidence = confidence
+	}
+	if json.Unmarshal(intent.EvidenceJson, &evidence) == nil {
+		for key, item := range evidence {
+			if item.MessageID != "" && strings.TrimSpace(item.Text) != "" {
+				result.Evidence[key] = item.MessageID
+			}
+		}
+	}
+	return result
 }
 
 // ListLeads 列出企业 AICC 线索；orgID 为空时回退当前主体企业。

@@ -44,7 +44,7 @@ func (s *fakeStore) ClearAppProgress(_ context.Context, id string) error {
 	s.clearCalls = append(s.clearCalls, id)
 	return nil
 }
-func (s *fakeStore) GetLatestAppInitJob(_ context.Context, _ json.RawMessage) (sqlc.Job, error) {
+func (s *fakeStore) GetLatestAppInitJob(_ context.Context, _ string) (sqlc.Job, error) {
 	return s.latestJob, s.latestJobErr
 }
 func (s *fakeStore) RequeueJob(_ context.Context, id string) error {

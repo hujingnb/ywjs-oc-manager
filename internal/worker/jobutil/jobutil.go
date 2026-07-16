@@ -18,8 +18,8 @@ import (
 
 // InitJobStore 是 EnsureInitJob 需要的最小数据访问能力；sqlc 生成的 *sqlc.Queries 直接满足。
 type InitJobStore interface {
-	// GetLatestAppInitJob 取最近一份 app_initialize job；不存在返回 sql.ErrNoRows。
-	GetLatestAppInitJob(ctx context.Context, appID json.RawMessage) (sqlc.Job, error)
+	// GetLatestAppInitJob 取最近一份 app_initialize job；参数为未加 JSON 引号的 app ID。
+	GetLatestAppInitJob(ctx context.Context, appID string) (sqlc.Job, error)
 	// RequeueJob 把 running / succeeded 的 job 重置回 pending。
 	RequeueJob(ctx context.Context, id string) error
 	// CreateJob 没有历史 job 时新建一份。
@@ -34,9 +34,9 @@ type InitJobStore interface {
 // reaper（回收 init 子状态孤儿）与 reconciler（兜底 error 但 pod 已 Ready）共用此逻辑，
 // 使「重新入队初始化」的行为单点维护、不漂移。
 func EnsureInitJob(ctx context.Context, store InitJobStore, appID string) (string, error) {
-	// GetLatestAppInitJob 参数是 app ID 的 JSON 字符串字面量（带双引号），MySQL 端做 JSON 比较。
-	appIDJSON, _ := json.Marshal(appID)
-	job, err := store.GetLatestAppInitJob(ctx, json.RawMessage(appIDJSON))
+	// 查询层负责将 JSON payload 中的 app_id 解包为文本，因此这里传业务侧原始 app ID，
+	// 避免带双引号的 JSON 字面量与文本比较时误判为不存在。
+	job, err := store.GetLatestAppInitJob(ctx, appID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", fmt.Errorf("查 job: %w", err)
 	}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"sync"
 	"testing"
@@ -11,42 +12,77 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"oc-manager/internal/domain"
+	"oc-manager/internal/integrations/ocops"
 	"oc-manager/internal/store/sqlc"
 )
 
+// TestAICCRuntimeUnavailableIsRetryable 覆盖弹性扩容中的短暂就绪空窗：
+// 客服实例仍处于启动流程时，任务必须等待后重试，不能直接把访客消息标为失败。
+func TestAICCRuntimeUnavailableIsRetryable(t *testing.T) {
+	assert.True(t, isAICCRetryable(ErrConversationRuntimeUnavailable))
+}
+
 type aiccDispatcherStoreFake struct {
-	task       sqlc.AiccMessageTask
-	visitor    sqlc.AiccMessage
-	agent      sqlc.AiccAgent
-	leased     sqlc.LeaseAICCMessageTaskParams
-	retry      sqlc.RetryAICCMessageTaskParams
-	failed     sqlc.FailAICCMessageTaskParams
-	assistant  []sqlc.CreateAICCMessageParams
-	complete   int64
-	recover    int64
-	retryRows  int64
-	failRows   int64
-	lostRetry  bool
-	lostFail   bool
-	renews     int
-	leaseMu    sync.Mutex
-	exclusive  bool
-	claimed    bool
-	leaseNow   func() time.Time
-	expiresAt  time.Time
-	leaseCalls int
-	renewed    chan struct{}
-	blockRenew chan struct{}
-	leaseRows  int64
-	leaseErr   error
-	unclaimed  bool
+	task            sqlc.AiccMessageTask
+	visitor         sqlc.AiccMessage
+	session         sqlc.AiccSession
+	agent           sqlc.AiccAgent
+	contextRow      sqlc.AiccSessionContext
+	contextMessages []sqlc.AiccMessage
+	leased          sqlc.LeaseAICCMessageTaskParams
+	retry           sqlc.RetryAICCMessageTaskParams
+	failed          sqlc.FailAICCMessageTaskParams
+	assistant       []sqlc.CreateAICCMessageParams
+	sources         []sqlc.CreateAICCMessageSourceParams
+	inviteUpdates   []string
+	inviteRows      int64
+	inviteErr       error
+	complete        int64
+	completed       int
+	recover         int64
+	retryRows       int64
+	failRows        int64
+	lostRetry       bool
+	lostFail        bool
+	renews          int
+	leaseMu         sync.Mutex
+	exclusive       bool
+	claimed         bool
+	leaseNow        func() time.Time
+	expiresAt       time.Time
+	leaseCalls      int
+	renewed         chan struct{}
+	blockRenew      chan struct{}
+	leaseRows       int64
+	leaseErr        error
+	unclaimed       bool
 }
 
 func (s *aiccDispatcherStoreFake) GetAICCMessageByID(context.Context, string) (sqlc.AiccMessage, error) {
 	return s.visitor, nil
 }
+func (s *aiccDispatcherStoreFake) GetAICCSession(context.Context, string) (sqlc.AiccSession, error) {
+	return s.session, nil
+}
 func (s *aiccDispatcherStoreFake) GetAICCAgent(context.Context, string) (sqlc.AiccAgent, error) {
 	return s.agent, nil
+}
+
+// GetAICCSessionContext 模拟当前会话的持久化摘要。
+func (s *aiccDispatcherStoreFake) GetAICCSessionContext(context.Context, string) (sqlc.AiccSessionContext, error) {
+	return s.contextRow, nil
+}
+
+// ListAICCContextMessages 模拟当前会话按稳定顺序读取的原消息。
+func (s *aiccDispatcherStoreFake) ListAICCContextMessages(_ context.Context, arg sqlc.ListAICCContextMessagesParams) ([]sqlc.AiccMessage, error) {
+	items := make([]sqlc.AiccMessage, 0, len(s.contextMessages))
+	for _, message := range s.contextMessages {
+		if message.ID != arg.ExcludeMessageID {
+			items = append(items, message)
+		}
+	}
+	return items, nil
 }
 func (s *aiccDispatcherStoreFake) LeaseAICCMessageTask(_ context.Context, p sqlc.LeaseAICCMessageTaskParams) (int64, error) {
 	s.leaseMu.Lock()
@@ -71,6 +107,7 @@ func (s *aiccDispatcherStoreFake) CompleteAICCMessageTask(context.Context, sqlc.
 	s.leaseMu.Lock()
 	s.claimed = false
 	s.leaseMu.Unlock()
+	s.completed++
 	return s.complete, nil
 }
 func (s *aiccDispatcherStoreFake) RetryAICCMessageTask(_ context.Context, p sqlc.RetryAICCMessageTaskParams) (int64, error) {
@@ -128,21 +165,105 @@ func (s *aiccDispatcherStoreFake) CreateAICCMessage(_ context.Context, p sqlc.Cr
 	s.assistant = append(s.assistant, p)
 	return nil
 }
-
-type aiccDispatcherChatFake struct {
-	reply string
-	err   error
-	run   func(context.Context) (string, error)
+func (s *aiccDispatcherStoreFake) CreateAICCMessageSource(_ context.Context, p sqlc.CreateAICCMessageSourceParams) error {
+	s.sources = append(s.sources, p)
+	return nil
 }
 
-func (c aiccDispatcherChatFake) ChatAICC(ctx context.Context, _ string, _ string, _ string) (string, error) {
-	if c.run != nil {
-		return c.run(ctx)
+// ConsumeAICCSessionIntentInvitation 模拟条件消费首次邀约；默认命中一行。
+func (s *aiccDispatcherStoreFake) ConsumeAICCSessionIntentInvitation(_ context.Context, sessionID string) (int64, error) {
+	s.inviteUpdates = append(s.inviteUpdates, sessionID)
+	if s.inviteErr != nil {
+		return 0, s.inviteErr
 	}
-	return c.reply, c.err
+	if s.inviteRows != 0 {
+		return s.inviteRows, nil
+	}
+	return 1, nil
+}
+
+type aiccDispatcherChatFake struct {
+	reply         string
+	replyEnvelope AICCResponseEnvelope
+	err           error
+	run           func(context.Context) (string, error)
+}
+
+func (c aiccDispatcherChatFake) ChatAICC(ctx context.Context, _ AICCInboundTurn) (AICCResponseEnvelope, error) {
+	if c.run != nil {
+		reply, err := c.run(ctx)
+		return AICCResponseEnvelope{Text: reply}, err
+	}
+	if c.replyEnvelope.Text != "" || c.replyEnvelope.Raw != "" {
+		return c.replyEnvelope, c.err
+	}
+	return AICCResponseEnvelope{Text: c.reply}, c.err
+}
+
+// aiccDispatcherTurnChatFake 记录 dispatcher 交给运行时的 Turn，验证无状态恢复输入。
+type aiccDispatcherTurnChatFake struct{ turn AICCInboundTurn }
+
+func (c *aiccDispatcherTurnChatFake) ChatAICC(_ context.Context, turn AICCInboundTurn) (AICCResponseEnvelope, error) {
+	c.turn = turn
+	return AICCResponseEnvelope{Text: "答复"}, nil
+}
+
+// aiccDispatcherSequenceChatFake 记录运行时调用次数，用于验证合法首轮回复不会被无谓重写。
+type aiccDispatcherSequenceChatFake struct {
+	replies []AICCResponseEnvelope
+	calls   int
+}
+
+func (c *aiccDispatcherSequenceChatFake) ChatAICC(_ context.Context, _ AICCInboundTurn) (AICCResponseEnvelope, error) {
+	if c.calls >= len(c.replies) {
+		return AICCResponseEnvelope{}, errors.New("unexpected AICC retry")
+	}
+	reply := c.replies[c.calls]
+	c.calls++
+	return reply, nil
 }
 
 type aiccDispatcherTxFake struct{ store *aiccDispatcherStoreFake }
+
+// intentDispatcherStoreFake 仅在意向事务测试中暴露画像查询，避免普通 dispatcher 用例额外触发分析 Turn。
+type intentDispatcherStoreFake struct {
+	*aiccDispatcherStoreFake
+	intent          sqlc.AiccSessionIntent
+	intentRows      int64
+	forceIntentRows bool
+	intentErr       error
+}
+
+func (s *intentDispatcherStoreFake) GetAICCSessionIntent(context.Context, string) (sqlc.AiccSessionIntent, error) {
+	return s.intent, sql.ErrNoRows
+}
+func (s *intentDispatcherStoreFake) UpsertAICCSessionIntent(context.Context, sqlc.UpsertAICCSessionIntentParams) error {
+	return nil
+}
+func (s *intentDispatcherStoreFake) ConsumeAICCSessionIntentInvitation(context.Context, string) (int64, error) {
+	s.inviteUpdates = append(s.inviteUpdates, "session")
+	if s.intentErr != nil {
+		return 0, s.intentErr
+	}
+	if s.forceIntentRows {
+		return s.intentRows, nil
+	}
+	return 1, nil
+}
+
+type intentDispatcherRollbackTx struct{ store *intentDispatcherStoreFake }
+
+func (t intentDispatcherRollbackTx) WithAICCDispatcherTx(_ context.Context, fn func(AICCDispatcherStore) error) error {
+	beforeAssistant := append([]sqlc.CreateAICCMessageParams(nil), t.store.assistant...)
+	beforeSources := append([]sqlc.CreateAICCMessageSourceParams(nil), t.store.sources...)
+	beforeInvites := append([]string(nil), t.store.inviteUpdates...)
+	beforeCompleted := t.store.completed
+	if err := fn(t.store); err != nil {
+		t.store.assistant, t.store.sources, t.store.inviteUpdates, t.store.completed = beforeAssistant, beforeSources, beforeInvites, beforeCompleted
+		return err
+	}
+	return nil
+}
 
 // aiccDispatcherAllowLimiter 显式模拟测试环境可获得的运行额度，避免成功路径依赖生产 Redis。
 type aiccDispatcherAllowLimiter struct{}
@@ -153,6 +274,57 @@ func (aiccDispatcherAllowLimiter) Acquire(context.Context, string, string, strin
 
 func (t aiccDispatcherTxFake) WithAICCDispatcherTx(ctx context.Context, fn func(AICCDispatcherStore) error) error {
 	return fn(t.store)
+}
+
+// aiccDispatcherRollbackTxFake 在单测中模拟数据库事务：回调返回错误时丢弃本轮的消息、来源和完成标记。
+// 它专门验证租约丢失不会留下任何访客可见的半成品记录。
+type aiccDispatcherRollbackTxFake struct{ store *aiccDispatcherStoreFake }
+
+func (t aiccDispatcherRollbackTxFake) WithAICCDispatcherTx(_ context.Context, fn func(AICCDispatcherStore) error) error {
+	beforeAssistant := append([]sqlc.CreateAICCMessageParams(nil), t.store.assistant...)
+	beforeSources := append([]sqlc.CreateAICCMessageSourceParams(nil), t.store.sources...)
+	beforeInvites := append([]string(nil), t.store.inviteUpdates...)
+	beforeCompleted := t.store.completed
+	if err := fn(t.store); err != nil {
+		t.store.assistant = beforeAssistant
+		t.store.sources = beforeSources
+		t.store.inviteUpdates = beforeInvites
+		t.store.completed = beforeCompleted
+		return err
+	}
+	return nil
+}
+
+// TestAICCDispatcherInviteConsumptionRollback 验证条件消费未命中或出错时，回复镜像、来源、任务完成和邀约消费全部回滚。
+func TestAICCDispatcherInviteConsumptionRollback(t *testing.T) {
+	tests := []struct {
+		name      string
+		rows      int64
+		forceRows bool
+		err       error
+	}{
+		// 访客已拒绝或提交导致条件更新 0 行，不能交付首次邀约回复。
+		{name: "条件更新未命中", rows: 0, forceRows: true},
+		// 数据库更新错误同样必须使整个回复事务回滚。
+		{name: "条件更新失败", err: errors.New("invite update failed")},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			base := newAICCDispatcherStoreFake()
+			store := &intentDispatcherStoreFake{aiccDispatcherStoreFake: base, intentRows: testCase.rows, forceIntentRows: testCase.forceRows, intentErr: testCase.err}
+			chat := &aiccDispatcherSequenceChatFake{replies: []AICCResponseEnvelope{
+				{Raw: `{"level":"high","fields":{},"confidence":{},"evidence":{}}`},
+				{Text: "欢迎留下联系方式", NextAction: "none"},
+			}}
+			d := NewAICCDispatcher(store, intentDispatcherRollbackTx{store: store}, chat, aiccDispatcherAllowLimiter{})
+
+			require.Error(t, d.Dispatch(context.Background(), store.task))
+			assert.Empty(t, store.assistant)
+			assert.Empty(t, store.sources)
+			assert.Empty(t, store.inviteUpdates)
+			assert.Zero(t, store.completed)
+		})
+	}
 }
 
 func newAICCDispatcherStoreFake() *aiccDispatcherStoreFake {
@@ -167,6 +339,30 @@ func TestAICCDispatcherLeaseUsesDatabaseClock(t *testing.T) {
 	require.NoError(t, d.Dispatch(context.Background(), s.task))
 	assert.Equal(t, "task", s.leased.ID)
 	assert.True(t, s.leased.LeaseToken.Valid)
+}
+
+// TestAICCDispatcherBuildsTurnFromDatabaseContext 覆盖无状态运行时调用：
+// 每轮必须以任务 MessageID 标识，并在租约内从 manager 数据库装配摘要、历史和当前访客原文。
+func TestAICCDispatcherBuildsTurnFromDatabaseContext(t *testing.T) {
+	s := newAICCDispatcherStoreFake()
+	// 场景：网页挂件会话的持久化渠道必须原样进入 runtime Turn，不能回退为公开链接渠道。
+	s.session.Channel = "web_widget"
+	s.contextRow = sqlc.AiccSessionContext{ID: "context", SessionID: "session", Summary: "已咨询企业版"}
+	s.contextMessages = []sqlc.AiccMessage{
+		// 历史访客消息必须作为普通上下文数据传入。
+		{ID: "history", SessionID: "session", Direction: domain.AICCMessageDirectionVisitor, TextContent: null.StringFrom("之前的问题")},
+	}
+	chat := &aiccDispatcherTurnChatFake{}
+	d := NewAICCDispatcher(s, aiccDispatcherTxFake{s}, chat, aiccDispatcherAllowLimiter{})
+
+	require.NoError(t, d.Dispatch(context.Background(), s.task))
+	assert.Equal(t, "visitor", chat.turn.TurnID)
+	assert.Equal(t, "session", chat.turn.SessionID)
+	assert.Equal(t, "价格", chat.turn.Text)
+	assert.Equal(t, "已咨询企业版", chat.turn.Context.Summary)
+	assert.Equal(t, "web_widget", chat.turn.Channel)
+	require.Len(t, chat.turn.Context.Messages, 1)
+	assert.Equal(t, "之前的问题", chat.turn.Context.Messages[0].Text)
 }
 
 // TestAICCDispatcherHeartbeatKeepsSlowChatLease 覆盖慢速 Hermes 调用：
@@ -279,6 +475,80 @@ func TestAICCDispatcherSuccessAtomicallyWritesAssistantAndCompletes(t *testing.T
 	require.Len(t, s.assistant, 1)
 	assert.Equal(t, "答复", s.assistant[0].TextContent.String)
 	assert.Equal(t, "visitor", s.assistant[0].ReplyToMessageID.String)
+}
+
+// TestAICCDispatcherPersistsAuditedSourcesWithAssistant 覆盖可展示来源的成功链路：
+// reference_id 通过本轮工具审计后，助手消息、来源和 completed 状态必须一起提交。
+func TestAICCDispatcherPersistsAuditedSourcesWithAssistant(t *testing.T) {
+	s := newAICCDispatcherStoreFake()
+	source := AICCResponseSource{Type: "knowledge", Title: "企业手册", ReferenceID: "kb-1"}
+	chat := aiccDispatcherChatFake{replyEnvelope: AICCResponseEnvelope{
+		Raw:       `{"text":"企业版支持知识库问答。","sources":[{"type":"knowledge","title":"企业手册","reference_id":"kb-1"}],"next_action":"none","flags":{}}`,
+		ToolAudit: AICCResponseToolAudit{"kb-1": source},
+	}}
+	d := NewAICCDispatcher(s, aiccDispatcherTxFake{s}, chat, aiccDispatcherAllowLimiter{})
+
+	require.NoError(t, d.Dispatch(context.Background(), s.task))
+	require.Len(t, s.assistant, 1)
+	require.Len(t, s.sources, 1)
+	assert.Equal(t, s.assistant[0].ID, s.sources[0].MessageID)
+	assert.Equal(t, "kb-1", s.sources[0].ReferenceID.String)
+	assert.Equal(t, 1, s.completed)
+}
+
+// TestAICCDispatcherDoesNotRetryLegalFirstJSON 覆盖首轮合法 JSON：
+// 结构与策略均通过时 dispatcher 必须直接持久化，不应额外调用 Hermes 重写。
+func TestAICCDispatcherDoesNotRetryLegalFirstJSON(t *testing.T) {
+	s := newAICCDispatcherStoreFake()
+	chat := &aiccDispatcherSequenceChatFake{replies: []AICCResponseEnvelope{{
+		Raw: `{"text":"您好，我可以介绍企业服务。","sources":[],"next_action":"none","flags":{}}`,
+	}}}
+	d := NewAICCDispatcher(s, aiccDispatcherTxFake{s}, chat, aiccDispatcherAllowLimiter{})
+
+	require.NoError(t, d.Dispatch(context.Background(), s.task))
+	assert.Equal(t, 1, chat.calls)
+	require.Len(t, s.assistant, 1)
+	assert.False(t, s.assistant[0].IsFallback)
+}
+
+// TestAICCDispatcherPersistsEnterpriseNetworkSourceFromHermesTranscript 覆盖真实运行时来源链路：
+// Hermes 当前轮 tool transcript 返回的企业网络来源必须带 unconfirmed，并经 dispatcher 校验后入库。
+func TestAICCDispatcherPersistsEnterpriseNetworkSourceFromHermesTranscript(t *testing.T) {
+	s := newAICCDispatcherStoreFake()
+	ops := &fakeConversationOps{
+		chatOut: ocops.ConversationChatResult{Message: ocops.ConversationMessage{Content: `{"text":"该信息来自公开网络，未经企业确认，请以企业正式答复为准。","sources":[{"type":"web","title":"企业官网","url":"https://www.example.com/product","scope":"enterprise_network","reference_id":"web:enterprise_network:0:abc","unconfirmed":true}],"next_action":"none","flags":{}}`}},
+		messages: []ocops.ConversationMessage{
+			// 此载荷模拟 AICC 受控网页工具已经完成的结果，模型只能回显其中 reference_id。
+			{Role: "tool", ToolName: "web_extract", Content: `{"aicc_response_sources":[{"type":"web","title":"企业官网","url":"https://www.example.com/product","scope":"enterprise_network","reference_id":"web:enterprise_network:0:abc","unconfirmed":true}]}`},
+		},
+	}
+	chat := NewAICCPublicHermesChat(ops, &fakeOcOpsResolver{loc: OcOpsAppLocation{Supported: true, Endpoint: ocops.Endpoint{BaseURL: "http://runtime"}}})
+	d := NewAICCDispatcher(s, aiccDispatcherTxFake{s}, chat, aiccDispatcherAllowLimiter{})
+
+	require.NoError(t, d.Dispatch(context.Background(), s.task))
+	require.Len(t, s.sources, 1)
+	assert.Equal(t, "enterprise_network", s.sources[0].Scope.String)
+	assert.True(t, s.sources[0].Unconfirmed)
+}
+
+// TestAICCDispatcherRollsBackAllWritesWhenLeaseLost 覆盖完成任务时租约已丢失：
+// 消息、来源与 completed 三项必须同事务回滚，后续 holder 不会遇到半成品回复。
+func TestAICCDispatcherRollsBackAllWritesWhenLeaseLost(t *testing.T) {
+	s := newAICCDispatcherStoreFake()
+	s.complete = 0
+	source := AICCResponseSource{Type: "knowledge", Title: "企业手册", ReferenceID: "kb-1"}
+	chat := aiccDispatcherChatFake{replyEnvelope: AICCResponseEnvelope{
+		Raw:       `{"text":"企业版支持知识库问答。","sources":[{"type":"knowledge","title":"企业手册","reference_id":"kb-1"}],"next_action":"none","flags":{}}`,
+		ToolAudit: AICCResponseToolAudit{"kb-1": source},
+	}}
+	d := NewAICCDispatcher(s, aiccDispatcherRollbackTxFake{s}, chat, aiccDispatcherAllowLimiter{})
+
+	err := d.Dispatch(context.Background(), s.task)
+
+	require.ErrorIs(t, err, ErrAICCLeaseLost)
+	assert.Empty(t, s.assistant)
+	assert.Empty(t, s.sources)
+	assert.Zero(t, s.completed)
 }
 
 // TestAICCDispatcherRetryableErrorsEnterRetryWait 覆盖上游限流、服务不可用、网关过载和超时：

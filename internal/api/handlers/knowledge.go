@@ -598,6 +598,9 @@ func requestContentLength(c *gin.Context) (int64, bool) {
 
 func writeKnowledgeError(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, service.ErrAICCOperationForbidden):
+		// AICC 的 runtime token 认证成功但能力被策略拒绝；使用独立 code 让容器不再重试写操作。
+		apierror.JSON(c, http.StatusForbidden, "AICC_OPERATION_FORBIDDEN", "智能客服不支持该操作")
 	case errors.Is(err, service.ErrKnowledgeForbidden):
 		apierror.JSON(c, http.StatusForbidden, "KNOWLEDGE_FORBIDDEN", apierror.MsgKnowledgeForbidden)
 	case errors.Is(err, service.ErrInvalidToken):

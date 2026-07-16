@@ -1,4 +1,4 @@
-"""验证 config.yaml 渲染：model、provider、base_url、api_key、auxiliary 8 槽位、terminal、approvals 全部就位。"""
+"""验证客服专用 config.yaml 的模型配置与最小权限运行时边界。"""
 
 from pathlib import Path
 import yaml
@@ -21,14 +21,38 @@ def make_manifest(routing: dict | None = None, app_language: str = "") -> Manife
 
 
 def test_render_writes_expected_fields(tmp_data: Path) -> None:
-    # 渲染后的 config.yaml 应包含 model.default/provider/base_url/api_key 与 terminal.cwd 等关键字段。
+    # 客服配置应保留模型连接信息，但不应向 Hermes 注册通用终端。
     render(make_manifest(), tmp_data)
     out = yaml.safe_load((tmp_data / "config.yaml").read_text())
     assert out["model"]["default"] == "claude-3.7-sonnet"
     assert out["model"]["provider"] == "custom"
     assert out["model"]["base_url"] == "http://new-api:3000/v1"
     assert out["model"]["api_key"] == "sk-test"
-    assert out["terminal"]["cwd"] == "/opt/data/workspace"
+    assert "terminal" not in out
+
+
+def test_render_limits_platform_toolsets_and_web_backends(tmp_data: Path) -> None:
+    # AICC 只声明客服只读工具集；具体工具名仍由 Task 2 的运行时策略再次收紧。
+    # 检索走无需密钥的 DDGS，正文提取走共享 Firecrawl 服务。
+    render(make_manifest(), tmp_data)
+    out = yaml.safe_load((tmp_data / "config.yaml").read_text())
+    assert out["platform_toolsets"]["api_server"] == ["aicc", "web", "skills", "vision"]
+    assert out["web"] == {"search_backend": "ddgs", "extract_backend": "firecrawl"}
+    assert "web_publish" not in out
+
+
+def test_render_disables_cross_session_memory(tmp_data: Path) -> None:
+    # AICC 的跨会话上下文以 manager 为唯一真相源，避免 Hermes 长期记忆串访客。
+    render(make_manifest(), tmp_data)
+    out = yaml.safe_load((tmp_data / "config.yaml").read_text())
+    assert out["memory"]["memory_enabled"] is False
+
+
+def test_render_disables_cross_session_user_profile(tmp_data: Path) -> None:
+    # AICC 不能维护访客跨会话画像，避免不同访客或企业之间发生信息泄漏。
+    render(make_manifest(), tmp_data)
+    out = yaml.safe_load((tmp_data / "config.yaml").read_text())
+    assert out["memory"]["user_profile_enabled"] is False
 
 
 def test_render_auxiliary_all_main_when_routing_empty(tmp_data: Path) -> None:
@@ -84,11 +108,8 @@ def test_render_display_language_en(tmp_data: Path) -> None:
     assert out["display"]["language"] == "en"
 
 
-def test_render_writes_approvals_skip_block(tmp_data: Path) -> None:
-    # 验证 approvals 段就位：mode=off 命中上游 yolo 分支跳过审批；
-    # cron_mode=approve 兜未来 mode 被改回 manual/smart 时 cron 仍放行。
-    # 业务目的：hermes 实例对话中不再每条命令都通过 messaging platform 问 /approve。
+def test_render_omits_command_approvals(tmp_data: Path) -> None:
+    # 客服镜像没有命令工具，不能携带跳过危险命令审批的 approvals 配置。
     render(make_manifest(), tmp_data)
     out = yaml.safe_load((tmp_data / "config.yaml").read_text())
-    assert out["approvals"]["mode"] == "off"
-    assert out["approvals"]["cron_mode"] == "approve"
+    assert "approvals" not in out

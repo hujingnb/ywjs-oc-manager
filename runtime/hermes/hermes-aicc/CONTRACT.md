@@ -17,3 +17,19 @@
 - Bearer OC_OPS_TOKEN 鉴权；端点见 docs（info/doctor/cron/kanban/channel 类型化 REST + SSE）
 - 运维能力统一经 HTTP 暴露；原 oc-channel-*/oc-cron/oc-kanban/oc-info/oc-doctor CLI shim 已移除，逻辑收敛到 ocops 包
 - HTTP 控制面契约由构建期注入的 `ocops-contract/` 提供，镜像内路径为 `/usr/local/lib/ocops/contract/`
+
+## AICC 启动幂等契约
+
+- 每次入口启动仅把 `config.yaml`、`.env`、`SOUL.md`、`skills/` 视为受管渲染产物；它们先写入
+  `/opt/data/.aicc-render-<pid>`，完整校验后再通过同卷 rename 发布。
+- 任意遗留的 `.aicc-render-*` 或 `.aicc-previous-*` 会在启动初始清理；清理失败即退出 1，绝不使用
+  半成品或旧策略。`migrator/`、`.oc-state.json`、Hermes 自管账号目录等非受管数据不会被清理或作为
+  渲染输入策略。
+- 运行时每个 Pod 均可从空目录、完整旧产物或半成品残留确定性重建；AICC 不依赖 S3 或上次容器内状态。
+
+## AICC 渠道出口
+
+manager 核心只接收渠道无关的文字 `AICCInboundTurn` 并输出 `AICCResponseEnvelope`。当前的 mock voice
+adapter 仅将已提供的 transcript 映射为 `voice` turn，并将 `text`、`sources`、`next_action` 映射为 mock
+事件；它不包含 ASR、TTS、音频字段、电话协议或任何厂商配置。`offer_lead` 等下一步动作原样透传，仍由
+客服能力策略决定。

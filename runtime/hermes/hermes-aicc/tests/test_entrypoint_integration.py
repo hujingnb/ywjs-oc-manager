@@ -6,6 +6,7 @@ oc-entrypoint phase 6 是 os.execvp 替换进程，不能在 pytest 中直接验
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -20,6 +21,7 @@ def _setup_input(input_root: Path) -> None:
     (input_root / "resources" / "application-rules.md").write_text("APP")
     (input_root / "manifest.yaml").write_text("""
 app: { id: x, name: X, model: m }
+capabilities: [knowledge.read, web.search, skills.read, vision.read]
 knowledge:
   runtime_base_url: http://manager-api:8080
   app_token: runtime-token
@@ -45,6 +47,7 @@ def test_entrypoint_first_boot(tmp_path: Path) -> None:
         "OC_INPUT_DIR": str(input_root),
         "OC_DATA_DIR": str(data_root),
         "OC_IMAGE_VARIANT": "hermes-v2026.7.1",
+        "OC_BUILTIN_SKILLS_DIR": str(Path(__file__).resolve().parent.parent / "skills"),
     }
     source_script = Path(__file__).resolve().parent.parent / "oc-entrypoint.py"
     # 测试既支持源码目录布局，也支持 Docker 镜像内的 /usr/local/bin 安装布局。
@@ -56,7 +59,10 @@ def test_entrypoint_first_boot(tmp_path: Path) -> None:
     assert (data_root / "config.yaml").exists()
     assert (data_root / "SOUL.md").exists()
     assert (data_root / ".env").exists()
-    assert (data_root / "skills" / "oc-kb" / "SKILL.md").exists()
+    # AICC 的知识能力来自镜像只读层，entrypoint 会复制进 emptyDir 供 Hermes 实际扫描。
+    assert not (data_root / "skills" / "oc-kb" / "SKILL.md").exists()
+    names = sorted(path.name for path in (data_root / "skills").iterdir() if path.is_dir())
+    assert names == ["aicc-customer-answer", "aicc-lead-analysis", "aicc-safe-web-research"]
     env_body = (data_root / ".env").read_text()
     assert "OC_KB_RUNTIME_BASE_URL=http://manager-api:8080" in env_body
     assert "OC_KB_APP_TOKEN=runtime-token" in env_body
@@ -66,7 +72,126 @@ def test_entrypoint_first_boot(tmp_path: Path) -> None:
     assert state["image_variant"] == "hermes-v2026.7.1"
     assert state["last_migrate_from"] is None
 
-    # render 前生成内置 skill 共享基线；首次启动时 skills/ 尚无内置目录，内容为空。
+    # render 前生成内置 skill 共享基线，三个内置 Skill 都必须被记录。
     builtin_manifest = data_root / "skills" / ".bundled_manifest"
     assert builtin_manifest.exists()
-    assert builtin_manifest.read_text(encoding="utf-8") == ""
+    assert len(builtin_manifest.read_text(encoding="utf-8").splitlines()) == 3
+
+
+def test_entrypoint_rejects_missing_aicc_capabilities(tmp_path: Path) -> None:
+    # AICC manifest 缺失最小能力集合时必须在启动前失败关闭，不能回退为上游默认工具面。
+    input_root = tmp_path / "input"
+    data_root = tmp_path / "data"
+    _setup_input(input_root)
+    manifest_path = input_root / "manifest.yaml"
+    manifest_path.write_text(manifest_path.read_text().replace(
+        "capabilities: [knowledge.read, web.search, skills.read, vision.read]\n", "",
+    ))
+
+    env = {
+        **os.environ,
+        "OC_TEST_NO_EXEC": "1",
+        "OC_INPUT_DIR": str(input_root),
+        "OC_DATA_DIR": str(data_root),
+        "OC_IMAGE_VARIANT": "hermes-aicc",
+    }
+    source_script = Path(__file__).resolve().parent.parent / "oc-entrypoint.py"
+    result = subprocess.run([sys.executable, str(source_script)], env=env, capture_output=True, text=True)
+
+    assert result.returncode == 1
+    assert "AICC_MANIFEST_CAPABILITY_MISSING" in result.stderr
+
+
+def test_entrypoint_rejects_builtin_skill_capability_outside_manifest(tmp_path: Path) -> None:
+    # 即便恶意 Skill 已在镜像源目录，启动也必须在复制到 emptyDir 之前因越权能力失败关闭。
+    input_root = tmp_path / "input"
+    data_root = tmp_path / "data"
+    source_root = tmp_path / "builtin-skills"
+    _setup_input(input_root)
+    shutil.copytree(Path(__file__).resolve().parent.parent / "skills", source_root)
+    target = source_root / "aicc-customer-answer" / "SKILL.md"
+    target.write_text(target.read_text(encoding="utf-8").replace(
+        "- knowledge.read", "- terminal.execute",
+    ), encoding="utf-8")
+
+    env = {
+        **os.environ,
+        "OC_TEST_NO_EXEC": "1",
+        "OC_INPUT_DIR": str(input_root),
+        "OC_DATA_DIR": str(data_root),
+        "OC_IMAGE_VARIANT": "hermes-aicc",
+        "OC_BUILTIN_SKILLS_DIR": str(source_root),
+    }
+    source_script = Path(__file__).resolve().parent.parent / "oc-entrypoint.py"
+    result = subprocess.run([sys.executable, str(source_script)], env=env, capture_output=True, text=True)
+
+    assert result.returncode == 1
+    assert "AICC_SKILL_CAPABILITY_FORBIDDEN: terminal.execute" in result.stderr
+    assert not (data_root / "skills" / "aicc-customer-answer").exists()
+
+
+def test_entrypoint_rebuilds_complete_and_partial_render_residue(tmp_path: Path) -> None:
+    """脏数据卷无论保留完整旧产物还是半成品，都必须重建为当前 manifest 的完整客服运行时。"""
+    input_root = tmp_path / "input"
+    data_root = tmp_path / "data"
+    _setup_input(input_root)
+    # 完整旧产物不应影响新的受管输出，普通文件和迁移状态则必须保留给其它启动阶段使用。
+    (data_root / "skills" / "obsolete-skill").mkdir(parents=True)
+    (data_root / "skills" / "obsolete-skill" / "SKILL.md").write_text("old")
+    (data_root / "config.yaml").write_text("old-config")
+    (data_root / "SOUL.md").write_text("old-soul")
+    (data_root / ".oc-state.json").write_text('{"image_variant":"old"}')
+    (data_root / "migrator-note").write_text("keep")
+    # 上一次进程中断留下的受管 staging 目录不得被当作可用配置读取。
+    staging = data_root / ".aicc-render-stale"
+    (staging / "skills" / "partial").mkdir(parents=True)
+    (staging / "config.yaml").write_text("partial-config")
+
+    env = {
+        **os.environ,
+        "OC_TEST_NO_EXEC": "1",
+        "OC_INPUT_DIR": str(input_root),
+        "OC_DATA_DIR": str(data_root),
+        "OC_IMAGE_VARIANT": "hermes-aicc",
+        "OC_BUILTIN_SKILLS_DIR": str(Path(__file__).resolve().parent.parent / "skills"),
+    }
+    source_script = Path(__file__).resolve().parent.parent / "oc-entrypoint.py"
+    first = subprocess.run([sys.executable, str(source_script)], env=env, capture_output=True, text=True)
+    assert first.returncode == 0, first.stderr
+    second = subprocess.run([sys.executable, str(source_script)], env=env, capture_output=True, text=True)
+    assert second.returncode == 0, second.stderr
+
+    assert "old-config" not in (data_root / "config.yaml").read_text()
+    assert "old-soul" not in (data_root / "SOUL.md").read_text()
+    assert not (data_root / "skills" / "obsolete-skill").exists()
+    assert not staging.exists()
+    assert (data_root / ".oc-state.json").exists()
+    assert (data_root / "migrator-note").read_text() == "keep"
+
+
+def test_entrypoint_removes_invalid_staging_before_rendering(tmp_path: Path) -> None:
+    """残留 staging 即使包含畸形策略文件，也只能被清理，不能放宽当前启动校验。"""
+    input_root = tmp_path / "input"
+    data_root = tmp_path / "data"
+    _setup_input(input_root)
+    # 当前 manifest 非法时必须失败关闭；残留目录中的伪造 config 不能让入口绕过 policy。
+    manifest_path = input_root / "manifest.yaml"
+    manifest_path.write_text(manifest_path.read_text().replace("vision.read", "terminal.execute"))
+    staging = data_root / ".aicc-render-123"
+    staging.mkdir(parents=True)
+    (staging / "config.yaml").write_text("memory: {memory_enabled: true}")
+
+    env = {
+        **os.environ,
+        "OC_TEST_NO_EXEC": "1",
+        "OC_INPUT_DIR": str(input_root),
+        "OC_DATA_DIR": str(data_root),
+        "OC_IMAGE_VARIANT": "hermes-aicc",
+        "OC_BUILTIN_SKILLS_DIR": str(Path(__file__).resolve().parent.parent / "skills"),
+    }
+    source_script = Path(__file__).resolve().parent.parent / "oc-entrypoint.py"
+    result = subprocess.run([sys.executable, str(source_script)], env=env, capture_output=True, text=True)
+
+    assert result.returncode == 1
+    assert "unknown AICC capability: terminal.execute" in result.stderr
+    assert not staging.exists()

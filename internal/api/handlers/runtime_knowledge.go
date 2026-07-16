@@ -80,6 +80,7 @@ func (h *RuntimeKnowledgeHandler) Search(c *gin.Context) {
 // @Success      202             {object}  service.KnowledgeDocumentResult
 // @Failure      400             {object}  ErrorResponse
 // @Failure      401             {object}  ErrorResponse
+// @Failure      403             {object}  ErrorResponse
 // @Failure      409             {object}  ErrorResponse
 // @Failure      503             {object}  ErrorResponse
 // @Router       /runtime/knowledge/files [post]

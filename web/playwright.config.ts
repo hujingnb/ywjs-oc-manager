@@ -23,11 +23,28 @@ export default defineConfig({
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://ocm.localhost',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
   },
   projects: [
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+    },
+    // chrome-headed 使用宿主机已安装的 Chrome Stable 做发布前验收；保留 chromium
+    // 项目供快速回归，避免日常测试必须占用图形桌面。
+    {
+      name: 'chrome-headed',
+      retries: 1,
+      use: {
+        ...devices['Desktop Chrome'],
+        channel: 'chrome',
+        headless: false,
+        trace: 'on-first-retry',
+        // Playwright 的 screenshot 仅支持 failure 模式；首轮重试失败会保留截图，
+        // 与 trace/video 的 on-first-retry 一起形成可回放证据。
+        screenshot: 'only-on-failure',
+        video: 'on-first-retry',
+      },
     },
   ],
 })

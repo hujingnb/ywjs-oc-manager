@@ -80,7 +80,7 @@ RUN mkdir -p /root/.local/bin && \
 
 # 显式预装 weixin platform 必需依赖（容器启动即 ready，不允许运行时 lazy install）。
 RUN uv pip install --python /usr/local/lib/hermes-agent/venv/bin/python --no-cache-dir \
-      aiohttp cryptography qrcode
+      aiohttp cryptography qrcode ddgs
 
 # 显式预装 feishu / lark platform 必需依赖（容器启动即 ready，不允许运行时 lazy install）。
 # 引擎 gateway/platforms/feishu.py 长连接走 lark_oapi + websockets；扫码注册用 urllib 不依赖 SDK，
@@ -147,6 +147,24 @@ COPY ocops-contract/      /usr/local/lib/ocops/contract/
 COPY oc-kb.py             /usr/local/bin/oc-kb
 COPY oc-publish.py        /usr/local/bin/oc-publish
 COPY healthcheck.sh       /usr/local/bin/oc-healthcheck
+# AICC 工具策略与知识检索工具安装到 Hermes 包同级目录，model_tools.py 可直接导入。
+# 该目录不包含 terminal/file/process 等通用执行入口，仅保留客服只读工具。
+COPY aicc_tools/          /usr/local/lib/hermes-agent/aicc_tools/
+# Hermes 运行时的工具目录保留同一份知识工具源码，便于镜像审计直接确认 AICC toolset 的实现；
+# model_tools 的构建期补丁从 aicc_tools 包显式注册它，避免通用自动发现绕过能力策略。
+COPY aicc_tools/aicc_knowledge_tool.py /usr/local/lib/hermes-agent/tools/aicc_knowledge_tool.py
+# 上游安装器会带入通用 Skill，其中可能包含文件、终端、发布等与客服无关的操作说明。
+# AICC 只保留构建期审核的三个只读 Skill，运行期 renderer 也不会再解压 manifest Skill。
+# install.sh 可能把通用 Skill 写进 /opt/data/skills。即使 Docker 匿名卷会初始化该目录，
+# 也必须在构建层清空，防止未挂载 emptyDir 的运行形态扫描到旧通用 Skill。
+RUN rm -rf /opt/data/skills /opt/oc-aicc-skills && mkdir -p /opt/oc-aicc-skills
+COPY skills/ /opt/oc-aicc-skills/
+# 构建期测试按源码同级路径读取技能和入口脚本；保留一份只读测试副本，运行时仍只从
+# /opt/oc-aicc-skills 同步到 emptyDir，不会扩大客服可见的 Skill 面。
+COPY skills/              /usr/local/lib/oc-entrypoint/skills/
+COPY oc-entrypoint.py     /usr/local/lib/oc-entrypoint/oc-entrypoint.py
+# 该副本仅供镜像内自检读取 Dockerfile 的安全构建顺序，不参与运行时执行。
+COPY Dockerfile           /usr/local/lib/oc-entrypoint/Dockerfile
 COPY lib/                 /usr/local/lib/oc-entrypoint/lib/
 COPY renderer/            /usr/local/lib/oc-entrypoint/renderer/
 COPY migrator/            /usr/local/lib/oc-entrypoint/migrator/
@@ -181,7 +199,9 @@ RUN set -e; \
     python3 /usr/local/lib/oc-entrypoint/patches/merge_oc_locales.py; \
     python3 /usr/local/lib/oc-entrypoint/patches/patch_i18n_literals.py; \
     python3 /usr/local/lib/oc-entrypoint/patches/check_oc_i18n_consistency.py; \
-    python3 /usr/local/lib/oc-entrypoint/patches/patch_api_server_reload.py
+    python3 /usr/local/lib/oc-entrypoint/patches/patch_api_server_reload.py; \
+    python3 /usr/local/lib/oc-entrypoint/patches/patch_aicc_tool_policy.py; \
+    python3 -m py_compile /usr/local/lib/hermes-agent/model_tools.py
 
 # 镜像身份信息写到固定位置，供 oc-info 读取
 ARG OC_IMAGE_VARIANT
@@ -196,7 +216,7 @@ ENV OC_IMAGE_VARIANT=${OC_IMAGE_VARIANT}
 # PYTHONPATH=/usr/local/lib 让自检 python（system python）能 import ocops，
 # 从而收集并运行 tests/ 下的 ocops 测试（含 server/SSE，依赖上面装到 system
 # python 的 starlette/anyio/httpx2）。
-RUN PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/usr/local/lib \
+RUN PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/usr/local/lib:/usr/local/lib/hermes-agent \
       python -m pytest /usr/local/lib/oc-entrypoint/tests/ -v -p no:cacheprovider
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \

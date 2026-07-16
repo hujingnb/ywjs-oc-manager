@@ -1,0 +1,407 @@
+# 共享 Firecrawl 运行时：所有任务、缓存与数据库文件都在 emptyDir，重启后自动清空。
+# 该服务仅通过 ClusterIP 提供给 oc-apps 与 oc-aicc 内的 Hermes，不提供 Ingress 或管理界面。
+apiVersion: v1
+kind: Secret
+metadata:
+  name: firecrawl-runtime
+  namespace: oc-firecrawl
+type: Opaque
+stringData:
+  # 临时 PostgreSQL 仅承载运行队列；该口令不复用于任何外部系统。
+  POSTGRES_PASSWORD: firecrawl-temporary
+  # 独立 worker 不经 harness 启动，NuQ 需显式获得可写与监听连接串。
+  NUQ_DATABASE_URL: postgres://postgres:firecrawl-temporary@firecrawl-postgres:5432/postgres
+  NUQ_DATABASE_URL_LISTEN: postgres://postgres:firecrawl-temporary@firecrawl-postgres:5432/postgres
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: firecrawl-runtime
+  namespace: oc-firecrawl
+data:
+  REDIS_URL: redis://firecrawl-redis:6379
+  REDIS_RATE_LIMIT_URL: redis://firecrawl-redis:6379
+  PLAYWRIGHT_MICROSERVICE_URL: http://firecrawl-playwright:3000/scrape
+  POSTGRES_HOST: firecrawl-postgres
+  POSTGRES_PORT: "5432"
+  POSTGRES_USER: postgres
+  POSTGRES_DB: postgres
+  NUQ_RABBITMQ_URL: amqp://firecrawl-rabbitmq:5672
+  USE_DB_AUTHENTICATION: "false"
+  NUQ_BACKEND: pg
+  NUM_WORKERS_PER_QUEUE: "1"
+  CRAWL_CONCURRENT_REQUESTS: "4"
+  MAX_CONCURRENT_JOBS: "4"
+  BROWSER_POOL_SIZE: "2"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: firecrawl-redis
+  namespace: oc-firecrawl
+  labels: { app: firecrawl-redis, app.kubernetes.io/part-of: firecrawl }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: firecrawl-redis } }
+  template:
+    metadata: { labels: { app: firecrawl-redis, app.kubernetes.io/part-of: firecrawl } }
+    spec:
+      containers:
+        - name: redis
+          image: redis:7.4.2-alpine
+          args: ["redis-server", "--appendonly", "no"]
+          ports: [{ containerPort: 6379, name: redis }]
+          resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 250m, memory: 256Mi } }
+          volumeMounts: [{ name: data, mountPath: /data }]
+      volumes: [{ name: data, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: firecrawl-redis, namespace: oc-firecrawl }
+spec:
+  selector: { app: firecrawl-redis }
+  ports: [{ name: redis, port: 6379, targetPort: redis }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: firecrawl-rabbitmq
+  namespace: oc-firecrawl
+  labels: { app: firecrawl-rabbitmq, app.kubernetes.io/part-of: firecrawl }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: firecrawl-rabbitmq } }
+  template:
+    metadata: { labels: { app: firecrawl-rabbitmq, app.kubernetes.io/part-of: firecrawl } }
+    spec:
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:4.1.3-alpine
+          ports: [{ containerPort: 5672, name: amqp }]
+          resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: 500m, memory: 512Mi } }
+          volumeMounts: [{ name: data, mountPath: /var/lib/rabbitmq }]
+      volumes: [{ name: data, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: firecrawl-rabbitmq, namespace: oc-firecrawl }
+spec:
+  selector: { app: firecrawl-rabbitmq }
+  ports: [{ name: amqp, port: 5672, targetPort: amqp }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: firecrawl-postgres
+  namespace: oc-firecrawl
+  labels: { app: firecrawl-postgres, app.kubernetes.io/part-of: firecrawl }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: firecrawl-postgres } }
+  template:
+    metadata: { labels: { app: firecrawl-postgres, app.kubernetes.io/part-of: firecrawl } }
+    spec:
+      containers:
+        - name: postgres
+          # 上游 nuq-postgres 未发布版本标签，digest 固定为当前验证过的多架构清单。
+          image: ghcr.io/firecrawl/nuq-postgres@sha256:aed86f62858f29bd971abddcdeb301c12888098d2cf5d33c1ba42b053bc460f6
+          env:
+            - { name: POSTGRES_USER, value: postgres }
+            - { name: POSTGRES_DB, value: postgres }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: firecrawl-runtime, key: POSTGRES_PASSWORD } }
+          ports: [{ containerPort: 5432, name: postgres }]
+          resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: "1", memory: 1Gi } }
+          volumeMounts: [{ name: data, mountPath: /var/lib/postgresql/data }]
+      volumes: [{ name: data, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: firecrawl-postgres, namespace: oc-firecrawl }
+spec:
+  selector: { app: firecrawl-postgres }
+  ports: [{ name: postgres, port: 5432, targetPort: postgres }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: firecrawl-playwright
+  namespace: oc-firecrawl
+  labels: { app: firecrawl-playwright, firecrawl-role: compute, app.kubernetes.io/part-of: firecrawl }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: firecrawl-playwright } }
+  template:
+    metadata: { labels: { app: firecrawl-playwright, firecrawl-role: compute, app.kubernetes.io/part-of: firecrawl } }
+    spec:
+      containers:
+        - name: playwright
+          # 上游 Playwright 服务只发布 latest；digest 使部署仍是不可变版本而非浮动标签。
+          image: ghcr.io/firecrawl/playwright-service@sha256:c2cb9d7e982f9ddaf7902ec79da1e63961ae3760f315cddaa161200a7937162b
+          env: [{ name: PORT, value: "3000" }, { name: MAX_CONCURRENT_PAGES, value: "4" }]
+          ports: [{ containerPort: 3000, name: http }]
+          resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { cpu: "2", memory: 2Gi } }
+          volumeMounts: [{ name: cache, mountPath: /tmp/.cache }]
+      volumes: [{ name: cache, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: firecrawl-playwright, namespace: oc-firecrawl }
+spec:
+  selector: { app: firecrawl-playwright }
+  ports: [{ name: http, port: 3000, targetPort: http }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: firecrawl-api
+  namespace: oc-firecrawl
+  labels: { app: firecrawl-api, firecrawl-role: compute, app.kubernetes.io/part-of: firecrawl }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: firecrawl-api } }
+  template:
+    metadata: { labels: { app: firecrawl-api, firecrawl-role: compute, app.kubernetes.io/part-of: firecrawl } }
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/firecrawl/firecrawl:2.11.110
+          command: ["node", "dist/src/index.js"]
+          envFrom: [{ configMapRef: { name: firecrawl-runtime } }, { secretRef: { name: firecrawl-runtime } }]
+          env:
+            - { name: HOST, value: 0.0.0.0 }
+            - { name: PORT, value: "3002" }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: firecrawl-runtime, key: POSTGRES_PASSWORD } }
+          ports: [{ containerPort: 3002, name: http }]
+          # 上游 API 分别暴露存活与依赖就绪端点；不能使用不存在的通用 /health。
+          livenessProbe: { httpGet: { path: /v0/health/liveness, port: http }, initialDelaySeconds: 10, periodSeconds: 10 }
+          readinessProbe: { httpGet: { path: /v0/health/readiness, port: http }, initialDelaySeconds: 10, periodSeconds: 10 }
+          resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { cpu: "2", memory: 2Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: firecrawl-api, namespace: oc-firecrawl }
+spec:
+  selector: { app: firecrawl-api }
+  ports: [{ name: http, port: 3002, targetPort: http }]
+---
+# 四个 worker 以独立 Deployment 运行，避免某一类慢任务耗尽其他队列的处理能力。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: firecrawl-scrape-worker
+  namespace: oc-firecrawl
+  labels: { app: firecrawl-scrape-worker, firecrawl-role: compute, app.kubernetes.io/part-of: firecrawl }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: firecrawl-scrape-worker } }
+  template:
+    metadata: { labels: { app: firecrawl-scrape-worker, firecrawl-role: compute, app.kubernetes.io/part-of: firecrawl } }
+    spec:
+      containers:
+        - name: scrape-worker
+          image: ghcr.io/firecrawl/firecrawl:2.11.110
+          command: ["node", "dist/src/services/queue-worker.js"]
+          envFrom: [{ configMapRef: { name: firecrawl-runtime } }, { secretRef: { name: firecrawl-runtime } }]
+          env:
+            - { name: WORKER_PORT, value: "3005" }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: firecrawl-runtime, key: POSTGRES_PASSWORD } }
+          resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { cpu: "2", memory: 2Gi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: firecrawl-extract-worker
+  namespace: oc-firecrawl
+  labels: { app: firecrawl-extract-worker, firecrawl-role: compute, app.kubernetes.io/part-of: firecrawl }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: firecrawl-extract-worker } }
+  template:
+    metadata: { labels: { app: firecrawl-extract-worker, firecrawl-role: compute, app.kubernetes.io/part-of: firecrawl } }
+    spec:
+      containers:
+        - name: extract-worker
+          image: ghcr.io/firecrawl/firecrawl:2.11.110
+          command: ["node", "dist/src/services/extract-worker.js"]
+          envFrom: [{ configMapRef: { name: firecrawl-runtime } }, { secretRef: { name: firecrawl-runtime } }]
+          env:
+            - { name: EXTRACT_WORKER_PORT, value: "3004" }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: firecrawl-runtime, key: POSTGRES_PASSWORD } }
+          resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { cpu: "2", memory: 2Gi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: firecrawl-nuq-worker
+  namespace: oc-firecrawl
+  labels: { app: firecrawl-nuq-worker, firecrawl-role: compute, app.kubernetes.io/part-of: firecrawl }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: firecrawl-nuq-worker } }
+  template:
+    metadata: { labels: { app: firecrawl-nuq-worker, firecrawl-role: compute, app.kubernetes.io/part-of: firecrawl } }
+    spec:
+      containers:
+        - name: nuq-worker
+          image: ghcr.io/firecrawl/firecrawl:2.11.110
+          command: ["node", "dist/src/services/worker/nuq-worker.js"]
+          envFrom: [{ configMapRef: { name: firecrawl-runtime } }, { secretRef: { name: firecrawl-runtime } }]
+          env:
+            - { name: NUQ_WORKER_PORT, value: "3010" }
+            - { name: NUQ_POD_NAME, value: nuq-worker }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: firecrawl-runtime, key: POSTGRES_PASSWORD } }
+          resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { cpu: "2", memory: 2Gi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: firecrawl-nuq-prefetch-worker
+  namespace: oc-firecrawl
+  labels: { app: firecrawl-nuq-prefetch-worker, firecrawl-role: compute, app.kubernetes.io/part-of: firecrawl }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: firecrawl-nuq-prefetch-worker } }
+  template:
+    metadata: { labels: { app: firecrawl-nuq-prefetch-worker, firecrawl-role: compute, app.kubernetes.io/part-of: firecrawl } }
+    spec:
+      containers:
+        - name: nuq-prefetch-worker
+          image: ghcr.io/firecrawl/firecrawl:2.11.110
+          command: ["node", "dist/src/services/worker/nuq-prefetch-worker.js"]
+          envFrom: [{ configMapRef: { name: firecrawl-runtime } }, { secretRef: { name: firecrawl-runtime } }]
+          env:
+            - { name: NUQ_PREFETCH_WORKER_PORT, value: "3011" }
+            - { name: NUQ_POD_NAME, value: nuq-prefetch-worker }
+            - { name: NUQ_PREFETCH_REPLICAS, value: "1" }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: firecrawl-runtime, key: POSTGRES_PASSWORD } }
+          resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { cpu: "2", memory: 2Gi } }
+---
+# 六个计算组件统一采用 CPU 70% 与内存 75% 阈值；worker 上限更高以消化队列积压。
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: firecrawl-api, namespace: oc-firecrawl }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: firecrawl-api }
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } }
+    - type: Resource
+      resource: { name: memory, target: { type: Utilization, averageUtilization: 75 } }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: firecrawl-scrape-worker, namespace: oc-firecrawl }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: firecrawl-scrape-worker }
+  minReplicas: 1
+  maxReplicas: 5
+  metrics: [{ type: Resource, resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } } }, { type: Resource, resource: { name: memory, target: { type: Utilization, averageUtilization: 75 } } }]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: firecrawl-extract-worker, namespace: oc-firecrawl }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: firecrawl-extract-worker }
+  minReplicas: 1
+  maxReplicas: 5
+  metrics: [{ type: Resource, resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } } }, { type: Resource, resource: { name: memory, target: { type: Utilization, averageUtilization: 75 } } }]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: firecrawl-nuq-worker, namespace: oc-firecrawl }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: firecrawl-nuq-worker }
+  minReplicas: 1
+  maxReplicas: 5
+  metrics: [{ type: Resource, resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } } }, { type: Resource, resource: { name: memory, target: { type: Utilization, averageUtilization: 75 } } }]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: firecrawl-nuq-prefetch-worker, namespace: oc-firecrawl }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: firecrawl-nuq-prefetch-worker }
+  minReplicas: 1
+  maxReplicas: 5
+  metrics: [{ type: Resource, resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } } }, { type: Resource, resource: { name: memory, target: { type: Utilization, averageUtilization: 75 } } }]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: firecrawl-playwright, namespace: oc-firecrawl }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: firecrawl-playwright }
+  minReplicas: 1
+  maxReplicas: 4
+  metrics: [{ type: Resource, resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } } }, { type: Resource, resource: { name: memory, target: { type: Utilization, averageUtilization: 75 } } }]
+---
+# 默认拒绝 namespace 内所有未显式声明的流量，避免临时依赖意外成为公网入口。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: firecrawl-default-deny, namespace: oc-firecrawl }
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# Firecrawl API 仅接收普通 Hermes 与 AICC Hermes 的集群内调用，不开放 Ingress/NodePort。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: firecrawl-api-ingress, namespace: oc-firecrawl }
+spec:
+  podSelector: { matchLabels: { app: firecrawl-api } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: oc-apps } }
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: oc-aicc } }
+      ports: [{ protocol: TCP, port: 3002 }]
+---
+# 计算组件只访问 DNS、运行时依赖与只读抓取目标的 HTTP/HTTPS；不限制 Firecrawl API 的功能集。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: firecrawl-compute-egress, namespace: oc-firecrawl }
+spec:
+  podSelector: { matchLabels: { firecrawl-role: compute } }
+  policyTypes: [Egress]
+  egress:
+    - ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+    - to:
+        - podSelector: { matchLabels: { app: firecrawl-redis } }
+      ports: [{ protocol: TCP, port: 6379 }]
+    - to:
+        - podSelector: { matchLabels: { app: firecrawl-rabbitmq } }
+      ports: [{ protocol: TCP, port: 5672 }]
+    - to:
+        - podSelector: { matchLabels: { app: firecrawl-postgres } }
+      ports: [{ protocol: TCP, port: 5432 }]
+    - to:
+        - podSelector: { matchLabels: { app: firecrawl-playwright } }
+      ports: [{ protocol: TCP, port: 3000 }]
+    # 无 to 表示外部地址；只开放网页抓取必要的 HTTP/HTTPS TCP 流量。
+    - ports: [{ protocol: TCP, port: 80 }, { protocol: TCP, port: 443 }]
+---
+# Redis、RabbitMQ 与临时 PostgreSQL 只接收 Firecrawl 自身计算 Pod 的必要端口。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: firecrawl-dependencies-ingress, namespace: oc-firecrawl }
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [firecrawl-redis, firecrawl-rabbitmq, firecrawl-postgres, firecrawl-playwright]
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { firecrawl-role: compute } }
+      ports:
+        - { protocol: TCP, port: 6379 }
+        - { protocol: TCP, port: 5672 }
+        - { protocol: TCP, port: 5432 }
+        - { protocol: TCP, port: 3000 }

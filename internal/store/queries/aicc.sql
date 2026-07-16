@@ -277,12 +277,12 @@ LEFT JOIN (
  AND earlier.status NOT IN ('completed', 'failed')
  AND (earlier_message.created_at < task_message.created_at
       OR (earlier_message.created_at = task_message.created_at AND earlier_message.id < task_message.id))
-SET status = 'processing',
-    lease_token = sqlc.arg(lease_token),
+SET task.status = 'processing',
+    task.lease_token = sqlc.arg(lease_token),
     -- 初次领取与续租都以数据库时间计算，避免 worker 时钟漂移产生错误过期时间。
-    lease_expires_at = DATE_ADD(NOW(6), INTERVAL 30 SECOND),
-    attempts = attempts + 1,
-    updated_at = NOW(6)
+    task.lease_expires_at = DATE_ADD(NOW(6), INTERVAL 30 SECOND),
+    task.attempts = task.attempts + 1,
+    task.updated_at = NOW(6)
 WHERE task.id = sqlc.arg(id)
   AND task.status IN ('queued', 'retry_wait')
   AND task.attempts < task.max_attempts
@@ -347,6 +347,135 @@ SELECT *
 FROM aicc_messages
 WHERE session_id = ?
 ORDER BY created_at ASC, id ASC;
+
+-- name: GetAICCSessionContext :one
+SELECT *
+FROM aicc_session_contexts
+WHERE session_id = ?;
+
+-- name: UpsertAICCSessionContext :exec
+INSERT INTO aicc_session_contexts (
+    id, session_id, summary, summarized_through_message_id, summary_version
+) VALUES (?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+    summary = VALUES(summary),
+    summarized_through_message_id = VALUES(summarized_through_message_id),
+    summary_version = VALUES(summary_version),
+    updated_at = now();
+
+-- name: ListAICCContextMessages :many
+-- 上下文构建器从稳定升序消息流中截取最近窗口，不能依赖数据库未声明的自然顺序。
+SELECT *
+FROM aicc_messages
+WHERE session_id = sqlc.arg(session_id)
+  AND id <> sqlc.arg(exclude_message_id)
+ORDER BY created_at ASC, id ASC;
+
+-- name: CreateAICCMessageSource :exec
+INSERT INTO aicc_message_sources (
+    id, message_id, source_type, title, url, scope, reference_id, unconfirmed, retrieved_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: ListAICCMessageSources :many
+SELECT *
+FROM aicc_message_sources
+WHERE message_id = ?
+ORDER BY created_at ASC, id ASC;
+
+-- name: GetAICCSessionIntent :one
+SELECT *
+FROM aicc_session_intents
+WHERE session_id = ?;
+
+-- name: UpsertAICCSessionIntent :exec
+INSERT INTO aicc_session_intents (
+    id, session_id, intent_level, fields_json, confidence_json, evidence_json,
+    analyzer_version, analyzed_message_id, invite_status
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+    intent_level = VALUES(intent_level),
+    fields_json = VALUES(fields_json),
+    confidence_json = VALUES(confidence_json),
+    evidence_json = VALUES(evidence_json),
+    analyzer_version = VALUES(analyzer_version),
+    -- 首次邀约已展示后保留对应访客消息，公开端据此只在那条助手回复上展示留资卡片。
+    analyzed_message_id = IF(invite_status = 'not_invited', VALUES(analyzed_message_id), analyzed_message_id),
+    -- 画像重试可能晚于访客拒绝/提交；只能更新画像，绝不能回写已消费的邀约状态。
+    updated_at = now();
+
+-- name: UpdateAICCSessionIntentInviteStatus :execrows
+-- 访客的拒绝或显式提交只改变本会话的邀约状态，绝不能影响其它匿名会话。
+UPDATE aicc_session_intents
+SET invite_status = ?, updated_at = now()
+WHERE session_id = ? AND invite_status = 'invited';
+
+-- name: ConsumeAICCSessionIntentInvitation :execrows
+-- 首次邀约只能从 not_invited 原子推进到 invited，不能覆盖访客已拒绝或已提交的决定。
+UPDATE aicc_session_intents
+SET invite_status = 'invited', updated_at = now()
+WHERE session_id = ? AND invite_status = 'not_invited';
+
+-- name: UpsertAICCIntentAnalysisRetry :exec
+INSERT INTO aicc_intent_analysis_retries (session_id, message_id, attempts, run_after, last_error)
+VALUES (?, ?, 1, DATE_ADD(NOW(6), INTERVAL 1 SECOND), ?)
+ON DUPLICATE KEY UPDATE
+    message_id = VALUES(message_id), attempts = attempts + 1,
+    run_after = DATE_ADD(NOW(6), INTERVAL LEAST(attempts, 5) SECOND), last_error = VALUES(last_error),
+    -- cleanup 留下 processed 记录时，新的主回复分析失败必须能重新排队；未处理/已领取记录不重置。
+    lease_token = IF(processed_at IS NOT NULL, NULL, lease_token),
+    lease_expires_at = IF(processed_at IS NOT NULL, NULL, lease_expires_at),
+    processed_at = IF(processed_at IS NOT NULL, NULL, processed_at);
+
+-- name: ListReadyAICCIntentAnalysisRetries :many
+SELECT r.session_id, r.message_id, s.agent_id, s.org_id, a.app_id
+FROM aicc_intent_analysis_retries r
+JOIN aicc_sessions s ON s.id = r.session_id
+JOIN aicc_agents a ON a.id = s.agent_id
+WHERE r.run_after <= NOW(6)
+  AND r.processed_at IS NULL
+ORDER BY r.run_after ASC, r.session_id ASC
+LIMIT ?;
+
+-- name: ClaimAICCIntentAnalysisRetry :execrows
+UPDATE aicc_intent_analysis_retries
+-- 意向分析可能等待上游模型，租约需覆盖主请求超时和一次网络抖动，避免 30 秒后重复分析。
+SET lease_token = ?, lease_expires_at = DATE_ADD(NOW(6), INTERVAL 5 MINUTE)
+WHERE session_id = ? AND message_id = ?
+  AND processed_at IS NULL
+  AND (lease_expires_at IS NULL OR lease_expires_at < NOW(6));
+
+-- name: MarkAICCIntentAnalysisRetryProcessed :execrows
+UPDATE aicc_intent_analysis_retries
+SET processed_at = NOW(), lease_token = NULL, lease_expires_at = NULL
+WHERE session_id = ? AND message_id = ? AND lease_token = ? AND processed_at IS NULL;
+
+-- name: RescheduleClaimedAICCIntentAnalysisRetry :execrows
+UPDATE aicc_intent_analysis_retries
+SET attempts = attempts + 1,
+    run_after = DATE_ADD(NOW(6), INTERVAL LEAST(attempts, 5) SECOND),
+    last_error = ?, lease_token = NULL, lease_expires_at = NULL
+WHERE session_id = ? AND message_id = ? AND lease_token = ? AND processed_at IS NULL;
+
+-- name: DeleteProcessedAICCIntentAnalysisRetry :execrows
+DELETE FROM aicc_intent_analysis_retries
+WHERE session_id = ? AND message_id = ? AND processed_at IS NOT NULL;
+
+-- name: DeleteAICCIntentAnalysisRetry :exec
+DELETE FROM aicc_intent_analysis_retries WHERE session_id = ? AND message_id = ?;
+
+-- name: ListAICCAnonymousIntentCandidates :many
+-- 已关联正式线索的会话不再作为匿名候选，避免后台对同一客户出现两份待跟进记录。
+SELECT i.*
+FROM aicc_session_intents i
+JOIN aicc_sessions s ON s.id = i.session_id
+WHERE s.org_id = ?
+  AND i.intent_level = 'high'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM aicc_lead_values v
+      WHERE v.session_id = i.session_id AND v.lead_id IS NOT NULL
+  )
+ORDER BY i.created_at ASC, i.id ASC;
 
 -- name: ListAICCLeadFieldsByAgent :many
 SELECT *
@@ -459,6 +588,12 @@ ON DUPLICATE KEY UPDATE
 UPDATE aicc_sessions
 SET resolution_status = ?, updated_at = now()
 WHERE id = ?;
+
+-- name: ResetAICCSessionResolutionForNewPhase :exec
+-- 仅在访客已明确选择结果后写入阶段起点；未知状态下的追问不能伪造新阶段。
+UPDATE aicc_sessions
+SET resolution_status = 'unknown', resolution_phase_start_message_id = ?, updated_at = now()
+WHERE id = ? AND resolution_status IN ('resolved', 'unresolved');
 
 -- name: ListAICCLeadsByOrg :many
 SELECT *

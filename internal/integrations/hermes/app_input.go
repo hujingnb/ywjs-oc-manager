@@ -43,6 +43,8 @@ type AppInputData struct {
 	// SkillRelPaths 已推送到 input/ 的版本 skill tar 相对路径列表，
 	// 透传到 manifest.resources.skills；空时 omitempty 省略。
 	SkillRelPaths []string
+	// Capabilities 是本次启动显式授予 runtime 的能力上限；普通应用留空，AICC 固定下发只读集合。
+	Capabilities []string
 
 	OrgName   string
 	OwnerName string

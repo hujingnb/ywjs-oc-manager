@@ -10,7 +10,9 @@ import (
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"oc-manager/internal/domain"
 )
@@ -44,6 +46,8 @@ func TestEnsureAppAICCCreatesHPA(t *testing.T) {
 	aicc := testSpec()
 	aicc.AppType = domain.AppTypeAICC
 	require.NoError(t, a.EnsureApp(context.Background(), aicc))
+	_, err := cs.NetworkingV1().NetworkPolicies("oc-aicc").Get(context.Background(), "app-a1-egress", metav1.GetOptions{})
+	require.NoError(t, err)
 	// 模拟 HPA 已将 Deployment 扩容；后续业务 reconcile 不得把副本数强制写回初始值 1。
 	require.NoError(t, a.Scale(context.Background(), aicc.AppID, 3))
 	// 重复 reconcile 应走 Update 路径并保持幂等，避免 worker 重试时因 HPA 已存在而失败。
@@ -74,6 +78,84 @@ func TestDeleteAICCDeletesHPA(t *testing.T) {
 	require.NoError(t, a.Delete(context.Background(), "a1"))
 	_, err := cs.AutoscalingV2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-a1", metav1.GetOptions{})
 	require.Error(t, err)
+}
+
+// TestDeleteAICCDeletesNetworkPolicyAfterPodReclaimed 验证 AICC 的 Deployment 与 Pod 已回收后，
+// 专属 egress 策略会被删除，避免 app ID 长期积累不可审计的孤儿 NetworkPolicy。
+func TestDeleteAICCDeletesNetworkPolicyAfterPodReclaimed(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	a := NewAICCKubernetesAdapter(cs, "oc-aicc")
+	spec := testSpec()
+	spec.AppType = domain.AppTypeAICC
+	require.NoError(t, a.EnsureApp(context.Background(), spec))
+
+	require.NoError(t, a.Delete(context.Background(), spec.AppID))
+	_, err := cs.NetworkingV1().NetworkPolicies("oc-aicc").Get(context.Background(), "app-a1-egress", metav1.GetOptions{})
+	require.Error(t, err)
+}
+
+// TestDeleteAICCWaitsForRemainingPodAndKeepsPolicy 验证 Deployment 已删除但仍有同 app 残余 Pod 时，
+// 删除流程会持续等待；调用 context 取消后返回且 NetworkPolicy 必须保留，不能留下 egress 窗口。
+func TestDeleteAICCWaitsForRemainingPodAndKeepsPolicy(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	a := NewAICCKubernetesAdapter(cs, "oc-aicc")
+	spec := testSpec()
+	spec.AppType = domain.AppTypeAICC
+	require.NoError(t, a.EnsureApp(context.Background(), spec))
+	_, err := cs.CoreV1().Pods("oc-aicc").Create(context.Background(), &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name: "app-a1-terminating", Namespace: "oc-aicc", Labels: selectorLabels(spec.AppID),
+	}}, metav1.CreateOptions{})
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+
+	err = a.Delete(ctx, spec.AppID)
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	_, policyErr := cs.NetworkingV1().NetworkPolicies("oc-aicc").Get(context.Background(), "app-a1-egress", metav1.GetOptions{})
+	require.NoError(t, policyErr)
+}
+
+// TestDeleteAICCDeletesPolicyOnlyAfterPodCleared 验证 NetworkPolicy 删除操作发生在 Deployment 已删除
+// 且标签 Pod 清零确认之后；reactor 模拟控制器在首次 Pod 列表检查时完成 Pod 回收。
+func TestDeleteAICCDeletesPolicyOnlyAfterPodCleared(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	a := NewAICCKubernetesAdapter(cs, "oc-aicc")
+	spec := testSpec()
+	spec.AppType = domain.AppTypeAICC
+	require.NoError(t, a.EnsureApp(context.Background(), spec))
+	_, err := cs.CoreV1().Pods("oc-aicc").Create(context.Background(), &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name: "app-a1-terminating", Namespace: "oc-aicc", Labels: selectorLabels(spec.AppID),
+	}}, metav1.CreateOptions{})
+	require.NoError(t, err)
+	operations := []string{}
+	podCleared := false
+	cs.PrependReactor("*", "*", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		operations = append(operations, action.GetVerb()+"/"+action.GetResource().Resource)
+		if action.GetVerb() == "list" && action.GetResource().Resource == "pods" && !podCleared {
+			podCleared = true
+			deleteErr := cs.Tracker().Delete(corev1.SchemeGroupVersion.WithResource("pods"), "oc-aicc", "app-a1-terminating")
+			require.NoError(t, deleteErr)
+		}
+		return false, nil, nil
+	})
+
+	require.NoError(t, a.Delete(context.Background(), spec.AppID))
+
+	assert.Less(t, operationIndex(t, operations, "delete/deployments"), operationIndex(t, operations, "list/pods"))
+	assert.Less(t, operationIndex(t, operations, "list/pods"), operationIndex(t, operations, "delete/networkpolicies"))
+}
+
+// operationIndex 返回记录中某个 Kubernetes 动作的索引；缺失时立即失败，避免时序断言误通过。
+func operationIndex(t *testing.T, operations []string, want string) int {
+	t.Helper()
+	for index, operation := range operations {
+		if operation == want {
+			return index
+		}
+	}
+	require.Failf(t, "缺少 Kubernetes 动作", "operations=%v want=%s", operations, want)
+	return -1
 }
 
 // TestStartStopNormalAppKeepsLegacyScaleSemantics 验证普通应用停止和启动仅缩放 Deployment，
