@@ -543,7 +543,7 @@ test('公开访客提交留资后企业管理员可查看线索和导出 CSV', a
   await leadRow.getByRole('button', { name: '查看对话' }).click()
   await expect(page.getByText('请介绍一下服务内容')).toBeVisible()
   await page.getByRole('button', { name: '关闭对话' }).click()
-  await expect(page.getByRole('button', { name: '标记已读' })).toBeDisabled()
+  await expect(leadRow.getByRole('button', { name: '标记已读' })).toBeDisabled()
   await expect(page.getByText('已读', { exact: true })).toBeVisible()
 
   await page.getByRole('link', { name: '分析', exact: true }).click()
