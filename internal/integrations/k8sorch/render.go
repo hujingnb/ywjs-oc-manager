@@ -4,7 +4,7 @@ import (
 	"oc-manager/internal/domain"
 
 	appsv1 "k8s.io/api/apps/v1"
-	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	autoscalingv2 "k8s.io/api/autoscaling/v2beta2"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -108,7 +108,7 @@ func RenderAICCNetworkPolicy(spec AppSpec, namespace string) *networkingv1.Netwo
 	}
 }
 
-// RenderAICCHPA 渲染 AICC 应用的 autoscaling/v2 HPA。最少保留一个副本维持客服入口，
+// RenderAICCHPA 渲染 AICC 应用的 autoscaling/v2beta2 HPA。最少保留一个副本维持客服入口，
 // 缩容稳定窗口避免瞬时负载下降时过快回收仍在处理会话的 Pod。未配置 external metrics
 // adapter 时仅渲染集群内置 CPU/内存指标，避免提交无法解析的无效 HPA。
 func RenderAICCHPA(spec AppSpec, namespace string, businessMetrics AICCBusinessMetricsConfig) *autoscalingv2.HorizontalPodAutoscaler {
