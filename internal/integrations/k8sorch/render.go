@@ -260,7 +260,10 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 				},
 				InitialDelaySeconds: 10,
 				PeriodSeconds:       10,
-				FailureThreshold:    6,
+				// gateway status 需读取运行时状态；线上实测约 1 秒，显式留出余量，
+				// 避免 Kubernetes 默认的一秒超时在命令刚成功前误判为未就绪。
+				TimeoutSeconds:   5,
+				FailureThreshold: 6,
 			},
 		},
 		{

@@ -85,6 +85,7 @@ spec:
           failureThreshold: 6
           initialDelaySeconds: 10
           periodSeconds: 10
+          timeoutSeconds: 5
         resources:
           limits:
             cpu: "1"

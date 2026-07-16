@@ -326,6 +326,16 @@ func TestRenderDeploymentOcOpsReadinessProbe(t *testing.T) {
 	assert.Equal(t, intstr.FromInt(8080), ocOps.ReadinessProbe.HTTPGet.Port)
 }
 
+// TestRenderDeploymentHermesReadinessProbeTimeout 覆盖 Hermes 状态命令跨越默认一秒探针超时的场景，
+// 避免网关已运行却被 kubelet 持续判为未就绪。
+func TestRenderDeploymentHermesReadinessProbeTimeout(t *testing.T) {
+	dep := RenderDeployment(testSpec(), "oc-apps")
+	hermes := containerByName(dep, "hermes")
+	require.NotNil(t, hermes, "渲染结果必须包含 hermes 容器")
+	require.NotNil(t, hermes.ReadinessProbe, "hermes 必须配置就绪探针")
+	assert.Equal(t, int32(5), hermes.ReadinessProbe.TimeoutSeconds)
+}
+
 // TestRenderDeploymentHermesAPIServer 断言 hermes 容器注入 API_SERVER_ENABLED=true。
 // hermes 内置 api_server 监听 127.0.0.1:8642，与 gateway 同进程，
 // 供 oc-ops 触发 POST /oc/skills/reload 实现免重启热加载 skill。
