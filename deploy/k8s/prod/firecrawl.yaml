@@ -308,7 +308,7 @@ spec:
           resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { cpu: "2", memory: 2Gi } }
 ---
 # 六个计算组件统一采用 CPU 70% 与内存 75% 阈值；worker 上限更高以消化队列积压。
-apiVersion: autoscaling/v2
+apiVersion: autoscaling/v2beta2
 kind: HorizontalPodAutoscaler
 metadata: { name: firecrawl-api, namespace: oc-firecrawl }
 spec:
@@ -321,7 +321,7 @@ spec:
     - type: Resource
       resource: { name: memory, target: { type: Utilization, averageUtilization: 75 } }
 ---
-apiVersion: autoscaling/v2
+apiVersion: autoscaling/v2beta2
 kind: HorizontalPodAutoscaler
 metadata: { name: firecrawl-scrape-worker, namespace: oc-firecrawl }
 spec:
@@ -330,7 +330,7 @@ spec:
   maxReplicas: 5
   metrics: [{ type: Resource, resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } } }, { type: Resource, resource: { name: memory, target: { type: Utilization, averageUtilization: 75 } } }]
 ---
-apiVersion: autoscaling/v2
+apiVersion: autoscaling/v2beta2
 kind: HorizontalPodAutoscaler
 metadata: { name: firecrawl-extract-worker, namespace: oc-firecrawl }
 spec:
@@ -339,7 +339,7 @@ spec:
   maxReplicas: 5
   metrics: [{ type: Resource, resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } } }, { type: Resource, resource: { name: memory, target: { type: Utilization, averageUtilization: 75 } } }]
 ---
-apiVersion: autoscaling/v2
+apiVersion: autoscaling/v2beta2
 kind: HorizontalPodAutoscaler
 metadata: { name: firecrawl-nuq-worker, namespace: oc-firecrawl }
 spec:
@@ -348,7 +348,7 @@ spec:
   maxReplicas: 5
   metrics: [{ type: Resource, resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } } }, { type: Resource, resource: { name: memory, target: { type: Utilization, averageUtilization: 75 } } }]
 ---
-apiVersion: autoscaling/v2
+apiVersion: autoscaling/v2beta2
 kind: HorizontalPodAutoscaler
 metadata: { name: firecrawl-nuq-prefetch-worker, namespace: oc-firecrawl }
 spec:
@@ -357,7 +357,7 @@ spec:
   maxReplicas: 5
   metrics: [{ type: Resource, resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } } }, { type: Resource, resource: { name: memory, target: { type: Utilization, averageUtilization: 75 } } }]
 ---
-apiVersion: autoscaling/v2
+apiVersion: autoscaling/v2beta2
 kind: HorizontalPodAutoscaler
 metadata: { name: firecrawl-playwright, namespace: oc-firecrawl }
 spec:
