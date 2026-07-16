@@ -328,6 +328,53 @@ func (s *AppService) SoftDeleteHiddenAICCApp(ctx context.Context, principal auth
 	return nil
 }
 
+// DeleteHiddenAICCApp 软删除 AICC 隐藏 app，并创建 app_delete 任务回收运行时资源。
+//
+// AICC 接待台删除需要立即停止公开入口，但 Kubernetes、new-api 与 RAGFlow 的回收可能短暂失败，
+// 因此不能在 HTTP 请求内同步处理。任务由 worker 幂等执行，资源已经不存在时也可安全重试。
+// 创建期回滚仍使用 SoftDeleteHiddenAICCApp，避免未完成的创建事务提前被异步 worker 回收。
+func (s *AppService) DeleteHiddenAICCApp(ctx context.Context, principal auth.Principal, appID string) error {
+	if strings.TrimSpace(appID) == "" {
+		return fmt.Errorf("%w: AICC 隐藏 app ID 不能为空", ErrInvalidArgument)
+	}
+	app, err := s.store.GetAppWithVersion(ctx, appID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("查询 AICC 隐藏 app 失败: %w", err)
+	}
+	if !domain.IsAICCAppType(domain.AppType(app.App.AppType)) {
+		return fmt.Errorf("%w: 只能清理 AICC 隐藏 app", ErrInvalidArgument)
+	}
+	if !auth.CanManageAICCAgent(principal, app.App.OrgID) {
+		return ErrForbidden
+	}
+	if err := s.store.SoftDeleteApp(ctx, appID); err != nil {
+		return fmt.Errorf("软删除 AICC 隐藏 app 失败: %w", err)
+	}
+	payload, err := json.Marshal(map[string]string{"app_id": appID})
+	if err != nil {
+		return fmt.Errorf("序列化 AICC 隐藏 app 删除任务失败: %w", err)
+	}
+	jobID := newUUID()
+	if err := s.store.CreateJob(ctx, sqlc.CreateJobParams{
+		ID:          jobID,
+		Type:        domain.JobTypeAppDelete,
+		Priority:    100,
+		RunAfter:    time.Now(),
+		MaxAttempts: 3,
+		PayloadJson: payload,
+	}); err != nil {
+		return fmt.Errorf("创建 AICC 隐藏 app 删除任务失败: %w", err)
+	}
+	if s.notifier != nil {
+		// 通知失败不回滚已持久化任务；scheduler 会扫描 pending job 兜底执行回收。
+		_ = s.notifier.Enqueue(ctx, jobID)
+	}
+	return nil
+}
+
 func toAppResult(app sqlc.App) AppResult {
 	// spec-A2b：runtime_node_id / container_id / container_name 已从 schema 删除，不再映射。
 	result := AppResult{

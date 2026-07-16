@@ -217,6 +217,28 @@ func TestCreateHiddenAICCAppCreatesHiddenAppAndInitializeJob(t *testing.T) {
 	assert.Empty(t, notifier.lastJobID, "AICC agent 写入前不应即时唤醒 worker")
 }
 
+// TestAppServiceDeleteHiddenAICCAppEnqueuesRuntimeCleanup 验证删除隐藏客服应用会软删除 app 并入队运行时资源清理任务。
+func TestAppServiceDeleteHiddenAICCAppEnqueuesRuntimeCleanup(t *testing.T) {
+	svc, store := newAppServiceWithStore(t)
+	app := store.mustSeedApp(t)
+	app.AppType = string(domain.AppTypeAICC)
+	store.app = app
+	notifier := &fakeNotifier{}
+	svc.SetJobNotifier(notifier)
+
+	err := svc.DeleteHiddenAICCApp(context.Background(), appOrgAdminPrincipal(store.organization), app.ID)
+
+	require.NoError(t, err)
+	assert.True(t, store.app.DeletedAt.Valid, "隐藏 app 必须先被软删除，避免再次被运行时调度")
+	require.Len(t, store.jobs, 1)
+	assert.Equal(t, domain.JobTypeAppDelete, store.jobs[0].Type)
+	assert.EqualValues(t, 100, store.jobs[0].Priority)
+	assert.EqualValues(t, 3, store.jobs[0].MaxAttempts)
+	assert.JSONEq(t, `{"app_id":"`+app.ID+`"}`, string(store.jobs[0].PayloadJson))
+	assert.NotEmpty(t, notifier.lastJobID, "任务入库后应立即通知 worker")
+	assert.Equal(t, store.jobs[0].ID, notifier.lastJobID)
+}
+
 // TestCreateHiddenAICCAppRejectsMissingVersionAllowlist 覆盖异常路径：企业未配置模型和技能初始化版本时拒绝创建隐藏 app；
 // 客服镜像来自独立配置，不影响该版本依赖。
 func TestCreateHiddenAICCAppRejectsMissingVersionAllowlist(t *testing.T) {
