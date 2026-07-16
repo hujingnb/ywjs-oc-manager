@@ -641,8 +641,10 @@ type fakeAICCHiddenAppCreator struct {
 	appID       string
 	lastInput   AICCHiddenAppInput
 	rollbackID  string
+	deleteID    string
 	err         error
 	rollbackErr error
+	deleteErr   error
 }
 
 // CreateHiddenAICCApp 模拟生产隐藏 app 创建链路。
@@ -661,6 +663,12 @@ func (f *fakeAICCHiddenAppCreator) CreateHiddenAICCApp(_ context.Context, _ auth
 func (f *fakeAICCHiddenAppCreator) SoftDeleteHiddenAICCApp(_ context.Context, _ auth.Principal, appID string) error {
 	f.rollbackID = appID
 	return f.rollbackErr
+}
+
+// DeleteHiddenAICCApp 记录接待台删除时请求清理的隐藏 app，模拟异步运行时回收任务的创建入口。
+func (f *fakeAICCHiddenAppCreator) DeleteHiddenAICCApp(_ context.Context, _ auth.Principal, appID string) error {
+	f.deleteID = appID
+	return f.deleteErr
 }
 
 func aiccOrgAdmin() auth.Principal {
@@ -1097,14 +1105,31 @@ func TestAICCServiceStatusAndDelete(t *testing.T) {
 
 	t.Run("delete 软删除智能体", func(t *testing.T) {
 		store := seededAICCStore()
-		svc := NewAICCService(store, &fakeAICCHiddenAppCreator{})
+		apps := &fakeAICCHiddenAppCreator{}
+		svc := NewAICCService(store, apps)
 
 		err := svc.DeleteAgent(context.Background(), aiccOrgAdmin(), "agent-1")
 
 		require.NoError(t, err)
 		assert.Equal(t, "agent-1", store.deletedID)
+		assert.Equal(t, "app-hidden-1", apps.deleteID, "删除智能体必须调度关联隐藏 app 的运行时回收")
+		_, sessionExists := store.sessions["session-1"]
+		assert.True(t, sessionExists, "删除智能体不得删除历史会话")
+		assert.NotEmpty(t, store.messages["session-1"], "删除智能体不得删除历史消息")
 		require.Len(t, store.audits, 1)
 		assert.Equal(t, "delete", store.audits[0].Action)
+	})
+
+	t.Run("隐藏 app 清理任务创建失败时返回错误且不写删除审计", func(t *testing.T) {
+		store := seededAICCStore()
+		apps := &fakeAICCHiddenAppCreator{deleteErr: errors.New("enqueue failed")}
+		svc := NewAICCService(store, apps)
+
+		err := svc.DeleteAgent(context.Background(), aiccOrgAdmin(), "agent-1")
+
+		require.ErrorContains(t, err, "enqueue failed")
+		assert.Empty(t, store.deletedID, "隐藏 app 未能进入回收流程时不得软删除智能体")
+		assert.Empty(t, store.audits, "隐藏 app 清理失败时不得记录成功删除审计")
 	})
 }
 

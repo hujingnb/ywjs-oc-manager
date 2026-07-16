@@ -147,6 +147,14 @@ type AICCHiddenAppRollbacker interface {
 	SoftDeleteHiddenAICCApp(ctx context.Context, principal auth.Principal, appID string) error
 }
 
+// AICCHiddenAppDeleter 表示删除已创建 AICC 隐藏 app 并入队运行时回收的能力。
+//
+// 与创建失败后的 AICCHiddenAppRollbacker 不同，该入口会创建 app_delete 任务，交由 worker
+// 幂等删除 Deployment、Service、Secret、HPA 和 NetworkPolicy 等外部资源。
+type AICCHiddenAppDeleter interface {
+	DeleteHiddenAICCApp(ctx context.Context, principal auth.Principal, appID string) error
+}
+
 // AICCService 负责 AICC 智能体管理与隐藏 app 绑定。
 type AICCService struct {
 	store AICCStore
@@ -451,7 +459,8 @@ func (s *AICCService) SetAgentStatus(ctx context.Context, principal auth.Princip
 	return s.toAICCAgentResult(ctx, row)
 }
 
-// DeleteAgent 软删除智能体；隐藏 app 保留给后续清理任务或审计排查，不在本管理接口直接硬删。
+// DeleteAgent 软删除智能体并调度关联隐藏 app 的运行时资源回收。
+// 会话、消息和线索属于企业运营历史，仍通过智能体外键保留，不能与运行时资源一并删除。
 func (s *AICCService) DeleteAgent(ctx context.Context, principal auth.Principal, agentID string) error {
 	row, err := s.getAgentRow(ctx, agentID)
 	if err != nil {
@@ -459,6 +468,13 @@ func (s *AICCService) DeleteAgent(ctx context.Context, principal auth.Principal,
 	}
 	if !auth.CanManageAICCAgent(principal, row.OrgID) {
 		return ErrForbidden
+	}
+	deleter, ok := s.apps.(AICCHiddenAppDeleter)
+	if !ok {
+		return fmt.Errorf("AICC 隐藏 app 删除器未配置")
+	}
+	if err := deleter.DeleteHiddenAICCApp(ctx, principal, row.AppID); err != nil {
+		return fmt.Errorf("清理 AICC 隐藏 app 失败: %w", err)
 	}
 	if err := s.store.SoftDeleteAICCAgent(ctx, agentID); errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
