@@ -94,6 +94,7 @@ export default {
       ready: '待接待',
       receiving: '接待中',
       error: '异常',
+      errorDetail: '运行异常详情',
     },
     form: {
       name: '智能体名称',

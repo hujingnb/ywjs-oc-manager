@@ -252,6 +252,20 @@ describe('AICCManagerPage', () => {
     openSpy.mockRestore()
   })
 
+  // 覆盖运行时初始化失败：接待台必须展示后端提供的安全错误摘要，便于企业管理员定位异常。
+  it('shows the runtime error detail when the selected agent is abnormal', () => {
+    const { context } = makeConsoleContext()
+    const agents = context.agents.value
+    agents[0] = makeAgent({
+      runtime_status: 'error',
+      runtime_message: '创建 AICC Deployment 失败：集群拒绝该资源版本',
+    })
+    const wrapper = mountManager(context, { initialSection: 'reception' })
+
+    expect(wrapper.text()).toContain('运行异常详情')
+    expect(wrapper.text()).toContain('创建 AICC Deployment 失败：集群拒绝该资源版本')
+  })
+
   // 覆盖左侧菜单语义：设置页承载规则配置，不再重复展示接待台投放概览。
   it('renders settings as the dedicated configuration page', () => {
     const { context } = makeConsoleContext()

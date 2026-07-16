@@ -49,6 +49,16 @@
             </div>
           </div>
 
+          <n-alert
+            v-if="isReceptionRoute && selectedAgent?.runtime_status === 'error' && selectedAgent.runtime_message"
+            type="error"
+            :bordered="false"
+            class="runtime-error-detail"
+          >
+            <strong>{{ t('aicc.manager.status.errorDetail') }}</strong>
+            <p>{{ selectedAgent.runtime_message }}</p>
+          </n-alert>
+
           <n-form v-if="isSettingsRoute" class="agent-form" :model="form" label-placement="top" @submit.prevent="submitForm">
             <div class="agent-fields">
               <div>

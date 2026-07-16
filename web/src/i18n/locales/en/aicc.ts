@@ -94,6 +94,7 @@ export default {
       ready: 'Ready to receive',
       receiving: 'Receiving',
       error: 'Error',
+      errorDetail: 'Runtime error details',
     },
     form: {
       name: 'Agent name',
