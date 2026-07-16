@@ -356,8 +356,12 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 				}
 			}
 			// 不调用容器内未定义的业务 drain 命令；仅等待 endpoints 摘除传播，
-			// 随后由 Kubernetes 在 90 秒终止窗口内发送 SIGTERM 并回收 Pod。
-			containers[i].Lifecycle = &corev1.Lifecycle{PreStop: &corev1.LifecycleHandler{Sleep: &corev1.SleepAction{Seconds: 10}}}
+			// 随后由 Kubernetes 在 90 秒终止窗口内发送 SIGTERM 并回收 Pod。线上集群仍为
+			// Kubernetes v1.21，不识别 LifecycleHandler.Sleep；若提交该字段会被丢弃并变成
+			// 空 handler，因此使用所有目标镜像均具备的 POSIX sh 保持同样的十秒延迟语义。
+			containers[i].Lifecycle = &corev1.Lifecycle{PreStop: &corev1.LifecycleHandler{
+				Exec: &corev1.ExecAction{Command: []string{"sh", "-c", "sleep 10"}},
+			}}
 		}
 		// initContainer 同样不需要写镜像根目录或 Linux capabilities，只能把 bootstrap 输出写入 oc-input。
 		readOnlyRootFilesystem := true

@@ -38,8 +38,11 @@ spec:
         image: registry/hermes:v1
         lifecycle:
           preStop:
-            sleep:
-              seconds: 10
+            exec:
+              command:
+              - sh
+              - -c
+              - sleep 10
         name: hermes
         readinessProbe:
           exec:
@@ -94,8 +97,11 @@ spec:
         image: registry/hermes:v1
         lifecycle:
           preStop:
-            sleep:
-              seconds: 10
+            exec:
+              command:
+              - sh
+              - -c
+              - sleep 10
         name: oc-ops
         ports:
         - containerPort: 8080

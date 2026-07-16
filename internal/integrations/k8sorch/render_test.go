@@ -102,11 +102,11 @@ func TestRenderDeploymentAICC(t *testing.T) {
 	require.NotNil(t, dep.Spec.Template.Spec.TerminationGracePeriodSeconds)
 	assert.Equal(t, int64(90), *dep.Spec.Template.Spec.TerminationGracePeriodSeconds)
 	for _, c := range dep.Spec.Template.Spec.Containers {
-		// preStop 等待 Service endpoints 传播后再终止，保证 Kubernetes 层面的优雅摘流。
+		// preStop 使用 v1.21 已支持的 Exec 延迟，保证旧集群不会把未知 Sleep 字段丢成空 handler。
 		require.NotNil(t, c.Lifecycle)
 		require.NotNil(t, c.Lifecycle.PreStop)
-		require.NotNil(t, c.Lifecycle.PreStop.Sleep)
-		assert.Equal(t, int64(10), c.Lifecycle.PreStop.Sleep.Seconds)
+		require.NotNil(t, c.Lifecycle.PreStop.Exec)
+		assert.Equal(t, []string{"sh", "-c", "sleep 10"}, c.Lifecycle.PreStop.Exec.Command)
 	}
 	// HPA 的 utilization 指标要求每个常驻容器都有资源 request，否则该 Pod 的指标会变为 unknown。
 	ocops := containerByName(dep, "oc-ops")
