@@ -21,6 +21,10 @@ test.describe('AICC 客服无状态运行时与故障恢复', () => {
     await forceZh(page)
     await page.goto(`/aicc/${agent.publicToken}`)
     await sendPublicAICCMessage(page, '请记住本轮关键词：无状态续聊验证。')
+    await expect.poll(async () => page.evaluate(
+      token => window.localStorage.getItem(`aicc:session:${token}:web_link`),
+      agent.publicToken,
+    )).not.toBeNull()
     const storedToken = await page.evaluate(token => window.localStorage.getItem(`aicc:session:${token}:web_link`), agent.publicToken)
     expect(storedToken).toBeTruthy()
 

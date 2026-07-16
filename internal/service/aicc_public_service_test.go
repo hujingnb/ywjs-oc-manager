@@ -37,6 +37,8 @@ func TestBuildAICCRuntimePromptRestrictsToolsAndFinalSchema(t *testing.T) {
 	assert.Contains(t, prompt, "clarify")
 	assert.Contains(t, prompt, "aicc_response_sources")
 	assert.Contains(t, prompt, `{"text":"","sources":[],"next_action":"none","flags":{}}`)
+	assert.Contains(t, prompt, "在输出任何最终答复或追问前，必须先调用 aicc_knowledge_search")
+	assert.Contains(t, prompt, "不得以澄清问题替代首次检索")
 	assert.NotContains(t, prompt, "oc-kb")
 	assert.NotContains(t, prompt, "执行 oc-kb")
 	assert.Contains(t, prompt, "不得调用或建议调用命令、终端、代码、文件、进程")

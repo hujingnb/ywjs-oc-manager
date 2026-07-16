@@ -17,6 +17,12 @@ import (
 	"oc-manager/internal/store/sqlc"
 )
 
+// TestAICCRuntimeUnavailableIsRetryable 覆盖弹性扩容中的短暂就绪空窗：
+// 客服实例仍处于启动流程时，任务必须等待后重试，不能直接把访客消息标为失败。
+func TestAICCRuntimeUnavailableIsRetryable(t *testing.T) {
+	assert.True(t, isAICCRetryable(ErrConversationRuntimeUnavailable))
+}
+
 type aiccDispatcherStoreFake struct {
 	task            sqlc.AiccMessageTask
 	visitor         sqlc.AiccMessage

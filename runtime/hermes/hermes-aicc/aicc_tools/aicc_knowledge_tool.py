@@ -26,8 +26,14 @@ def _runtime_configuration() -> tuple[str, str]:
     return base_url, app_token
 
 
-def search_knowledge(question: str) -> dict[str, Any]:
-    """检索当前客服所属企业的知识库，并附带 manager 可审计的稳定来源引用。"""
+def search_knowledge(arguments: dict[str, Any], **_task_metadata: Any) -> str:
+    """检索当前客服所属企业的知识库，并附带 manager 可审计的稳定来源引用。
+
+    Hermes registry 将 schema 参数整体作为字典传给 handler，并额外注入 ``task_id``
+    等只读追踪元数据；后者不是工具契约的一部分，必须忽略。不能把字典误当作问题
+    字符串，否则模型会反复收到无效参数错误并退化到不必要的公网检索。
+    """
+    question = arguments.get("question") if isinstance(arguments, dict) else None
     if not isinstance(question, str) or not question.strip():
         raise ValueError("AICC_KNOWLEDGE_SEARCH_INVALID_QUESTION")
     base_url, app_token = _runtime_configuration()
@@ -37,6 +43,9 @@ def search_knowledge(question: str) -> dict[str, Any]:
         data=payload,
         headers={
             "Authorization": f"Bearer {app_token}",
+            # manager runtime knowledge API 以 app-scoped header 做鉴权；Bearer 仅保留给
+            # 同一 bootstrap token 约定的兼容链路，不能替代该头。
+            "X-OC-App-Token": app_token,
             "Content-Type": "application/json",
             "Accept": "application/json",
         },
@@ -54,7 +63,9 @@ def search_knowledge(question: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise RuntimeError("AICC_KNOWLEDGE_SEARCH_INVALID_RESPONSE")
     parsed["aicc_response_sources"] = _response_sources(parsed.get("results"))
-    return parsed
+    # Hermes 会把工具返回值写进 OpenAI-compatible tool message；该协议的 content 只能
+    # 是字符串或 parts，直接返回 Python dict 会使后续模型调用 400 中断。
+    return json.dumps(parsed, ensure_ascii=False)
 
 
 def _response_sources(results: Any) -> list[dict[str, Any]]:

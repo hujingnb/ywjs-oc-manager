@@ -261,11 +261,12 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 
 	// oc-ops HTTP 客户端 + app 坐标解析器：cron / kanban / 微信扫码登录均走
 	// oc-ops 类型化 REST / SSE 长连接。
-	// 30s 超时仅约束普通 RPC（DoJSON）；SSE 长连接（kanban watch / 微信扫码，
+	// 90s 超时约束普通 RPC：AICC 的 Hermes 可先进行一次 30s 网页检索、再由模型整合答案，
+	// 30s 会在工具正常完成前取消请求并触发重复任务。SSE 长连接（kanban watch / 微信扫码，
 	// pod 侧 qr_login 超时达 480s）由 ocops.Client 内部的无 Timeout streamHTTP 执行、
 	// 生命周期靠调用方 ctx 控制——http.Client.Timeout 会一并中断 Body 读取，不能用于
 	// SSE 流式订阅（需靠 ctx cancel 而非 http 超时来终止）。
-	ocopsClient := ocops.NewClient(&http.Client{Timeout: 30 * time.Second})
+	ocopsClient := ocops.NewClient(&http.Client{Timeout: 90 * time.Second})
 	// ocopsResolver 把 appID 解析为 oc-ops 调用坐标。
 	// spec-A 已落地真实 k8s 寻址：基址即 render.go 渲染的 oc-ops Service DNS
 	// （serviceName=app-<id>-ocops），namespace 跟随 cfg.Kubernetes.Namespace 参数化

@@ -79,6 +79,55 @@ func looksLikeAICCSensitiveValue(value string) bool {
 	return digits >= 8 || strings.Contains(value, "@")
 }
 
+// fallbackAICCIntentAnalysis 仅在 Hermes Skill 没有返回可解析 JSON 时兜底分类。
+// 它故意只识别“明确采购动作 + 至少两个商业信号”的高意向组合，宁可漏掉模糊机会，
+// 也不能把泛咨询、求职或投诉错误地变成留资弹窗。降级结果不提取任何字段，避免绕过
+// 模型证据校验或把敏感信息写入画像。
+func fallbackAICCIntentAnalysis(visitorMessages map[string]string) aiccIntentAnalysis {
+	allText := strings.ToLower(strings.Join(mapValuesAICCIntentMessages(visitorMessages), "\n"))
+	hasPurchase := containsAnyAICCIntentSignal(allText, "采购", "购买", "下单", "buy", "purchase", "procure")
+	commercialSignals := 0
+	for _, signals := range [][]string{
+		{"预算", "budget", "报价", "quote"},
+		{"席位", "账号数", "团队规模", "seats", "licenses"},
+		{"演示", "demo", "试用", "poc"},
+		{"本季度", "下月", "尽快", "上线", "timeline"},
+	} {
+		if containsAnyAICCIntentSignal(allText, signals...) {
+			commercialSignals++
+		}
+	}
+	level := "low"
+	if hasPurchase && commercialSignals >= 2 {
+		level = "high"
+	}
+	return aiccIntentAnalysis{Level: level, Fields: map[string]string{}, Confidence: map[string]float64{}, Evidence: map[string]aiccIntentEvidence{}}
+}
+
+// mapValuesAICCIntentMessages 将同一会话访客文本按稳定顺序拼接，避免 map 遍历随机性影响降级分类输入。
+func mapValuesAICCIntentMessages(visitorMessages map[string]string) []string {
+	ids := make([]string, 0, len(visitorMessages))
+	for id := range visitorMessages {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	values := make([]string, 0, len(ids))
+	for _, id := range ids {
+		values = append(values, visitorMessages[id])
+	}
+	return values
+}
+
+// containsAnyAICCIntentSignal 只做关键短语存在性判断；调用方负责组合阈值，不能单独据此放宽留资条件。
+func containsAnyAICCIntentSignal(text string, signals ...string) bool {
+	for _, signal := range signals {
+		if strings.Contains(text, signal) {
+			return true
+		}
+	}
+	return false
+}
+
 // aiccIntentDecision 是 manager 在本轮回复前形成的唯一邀约决策；模型只能服从该决策，
 // 不得自行把普通咨询升级为留资弹窗。
 type aiccIntentDecision struct {
@@ -119,7 +168,9 @@ func (d *AICCDispatcher) analyzeAICCIntent(ctx context.Context, task sqlc.AiccMe
 	}
 	analysis, valid := parseAICCIntentAnalysis(raw, visitorMessages)
 	if !valid {
-		return aiccIntentDecision{}, false
+		// Hermes 的自由文本答复偶发遗漏 JSON 外壳。此时用保守规则保住显式采购客户，
+		// 同时不提取任何字段；通信错误仍由上方 err 分支进入持久化重试。
+		analysis = fallbackAICCIntentAnalysis(visitorMessages)
 	}
 	inviteStatus := "not_invited"
 	previous, err := store.GetAICCSessionIntent(ctx, task.SessionID)

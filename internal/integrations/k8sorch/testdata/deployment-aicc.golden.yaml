@@ -4,7 +4,7 @@ metadata:
     app: a1
     app.kubernetes.io/part-of: oc-manager
   name: app-a1
-  namespace: oc-apps
+  namespace: oc-aicc
 spec:
   replicas: 1
   selector:
@@ -144,10 +144,16 @@ spec:
         volumeMounts:
         - mountPath: /opt/oc-input
           name: oc-input
+        - mountPath: /opt/data
+          name: data
+        - mountPath: /tmp
+          name: bootstrap-tmp
       terminationGracePeriodSeconds: 90
       volumes:
       - emptyDir: {}
         name: oc-input
       - emptyDir: {}
         name: data
+      - emptyDir: {}
+        name: bootstrap-tmp
 status: {}

@@ -118,11 +118,31 @@ def test_knowledge_search_posts_only_question_and_fixed_top_k(monkeypatch: pytes
     monkeypatch.setenv("OC_KB_APP_TOKEN", "app-scoped-token")
     monkeypatch.setattr("aicc_tools.aicc_knowledge_tool.urlopen", fake_urlopen)
 
-    assert search_knowledge("套餐价格") == {"results": [{"content": "answer"}], "aicc_response_sources": []}
+    assert json.loads(search_knowledge({"question": "套餐价格"})) == {"results": [{"content": "answer"}], "aicc_response_sources": []}
     assert captured["url"] == "http://manager-runtime/api/v1/runtime/knowledge/search"
     assert captured["method"] == "POST"
     assert captured["body"] == {"question": "套餐价格", "top_k": 8}
     assert captured["headers"]["Authorization"] == "Bearer app-scoped-token"
+    assert captured["headers"]["X-oc-app-token"] == "app-scoped-token"
+
+
+def test_knowledge_search_ignores_hermes_task_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hermes registry 会注入任务元数据，客服检索工具不能因只读追踪字段而拒绝访客问题。"""
+    class Response:
+        def read(self) -> bytes:
+            return b'{"results": []}'
+
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    monkeypatch.setenv("OC_KB_RUNTIME_BASE_URL", "http://manager-runtime")
+    monkeypatch.setenv("OC_KB_APP_TOKEN", "app-scoped-token")
+    monkeypatch.setattr("aicc_tools.aicc_knowledge_tool.urlopen", lambda *_args, **_kwargs: Response())
+
+    assert json.loads(search_knowledge({"question": "套餐价格"}, task_id="task-1")) == {"results": [], "aicc_response_sources": []}
 
 
 # 覆盖：知识工具必须把实际检索命中变成稳定来源引用，供 manager 从本轮 tool transcript 重建白名单。
@@ -141,7 +161,7 @@ def test_knowledge_search_returns_auditable_response_sources(monkeypatch: pytest
     monkeypatch.setenv("OC_KB_APP_TOKEN", "app-scoped-token")
     monkeypatch.setattr("aicc_tools.aicc_knowledge_tool.urlopen", lambda *_args, **_kwargs: Response())
 
-    result = search_knowledge("企业版功能")
+    result = json.loads(search_knowledge({"question": "企业版功能"}))
 
     assert result["aicc_response_sources"] == [
         {"type": "knowledge", "title": "企业手册", "scope": "app", "reference_id": "knowledge:app:doc-1:0"}
@@ -174,7 +194,7 @@ def test_knowledge_search_raises_runtime_error_for_manager_failure(monkeypatch: 
     monkeypatch.setattr("aicc_tools.aicc_knowledge_tool.urlopen", failing_urlopen)
 
     with pytest.raises(RuntimeError, match="AICC_KNOWLEDGE_SEARCH_FAILED"):
-        search_knowledge("售后政策")
+        search_knowledge({"question": "售后政策"})
 
 
 # 覆盖：构建期补丁对上游五个插入点各替换一次，且补丁结果可编译、dispatcher 守卫先于桥接工具分支。

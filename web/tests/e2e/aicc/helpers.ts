@@ -20,7 +20,7 @@ export function assertLocalK3DContext(): void {
 export function deleteLocalAICCPod(appID: string): void {
   assertLocalK3DContext()
   execFileSync('kubectl', [
-    '--context', localK3DContext, '-n', 'oc-apps', 'delete', 'pod', '-l', `app=${appID}`, '--wait=true',
+    '--context', localK3DContext, '-n', 'oc-aicc', 'delete', 'pod', '-l', `app=${appID}`, '--wait=true',
   ], { stdio: 'pipe' })
 }
 
@@ -161,7 +161,10 @@ export async function createStartedAICCConversationFixture(page: Page, prefix: s
   const fieldsSaved = page.waitForResponse(response => response.url().includes('/lead-fields') && response.request().method() === 'PUT')
   await page.getByRole('button', { name: '保存留资字段' }).click()
   expect((await fieldsSaved).ok()).toBeTruthy()
-  await page.getByRole('link', { name: '接待台', exact: true }).click()
+  // 意向场景把单测总时限放宽到 10 分钟以覆盖真实模型回复；这里仍须保留页面跳转的独立上限，
+  // 否则路由链接因状态切换暂时不可点击时会把整套回归无诊断地卡满 10 分钟。
+  await page.getByRole('link', { name: '接待台', exact: true }).click({ timeout: 30_000 })
+  await expect(page.getByRole('button', { name: '启动接待' })).toBeVisible({ timeout: 30_000 })
   const started = page.waitForResponse(response => response.url().includes('/start') && response.request().method() === 'POST')
   await page.getByRole('button', { name: '启动接待' }).click()
   expect((await started).ok()).toBeTruthy()
@@ -171,10 +174,14 @@ export async function createStartedAICCConversationFixture(page: Page, prefix: s
 // sendPublicAICCMessage 只通过公开页面表单发言，并等待异步轮询得到实际客服回复。
 // 使用可访问名称和 placeholder，不依赖 Vue/Naive UI 的内部 DOM 层级。
 export async function sendPublicAICCMessage(page: Page, question: string): Promise<string> {
-  await page.getByPlaceholder('输入您的问题').fill(question)
-  await page.getByRole('button', { name: '发送' }).click()
-  // 排队/处理中占位同样位于 bubble，必须排除 status，确保断言的是服务端完成的真实文本。
-  const assistant = page.locator('.message-row.assistant .bubble p:not(.message-status)').last()
+	// 公开页初始即有欢迎语；记录发送前的助手正文数量，避免把它误判为本轮异步任务的完成回复。
+	const assistantMessages = page.locator('.message-row.assistant .bubble p:not(.message-status)')
+	const previousAssistantCount = await assistantMessages.count()
+	await page.getByPlaceholder('输入您的问题').fill(question)
+	await page.getByRole('button', { name: '发送' }).click()
+	// 排队/处理中占位同样位于 bubble，必须排除 status；数量增长才表示服务端完成了本轮真实回复。
+	await expect(assistantMessages).toHaveCount(previousAssistantCount + 1, { timeout: 240_000 })
+	const assistant = assistantMessages.last()
   await expect(assistant).toBeVisible({ timeout: 240_000 })
   return (await assistant.innerText()).trim()
 }
@@ -184,15 +191,17 @@ export async function waitForAICCRuntime(appId: string): Promise<void> {
   assertLocalK3DContext()
   await expect.poll(() => execFileSync(
     'kubectl',
-    ['--context', localK3DContext, '-n', 'oc-apps', 'get', 'pods', '-l', `app=${appId}`, '-o', 'name'],
+    ['--context', localK3DContext, '-n', 'oc-aicc', 'get', 'pods', '-l', `app=${appId}`, '-o', 'name'],
     { encoding: 'utf8' },
   ).trim(), { timeout: 180_000 }).not.toBe('')
 
-  execFileSync(
+  // 不使用 kubectl wait：删除重建窗口内 selector 可能短暂同时命中 Terminating 与新 Pod，
+  // kubectl wait 会继续等待已终止副本，掩盖新运行时已经就绪的真实状态。
+  await expect.poll(() => execFileSync(
     'kubectl',
-    ['--context', localK3DContext, '-n', 'oc-apps', 'wait', '--for=condition=Ready', 'pod', '-l', `app=${appId}`, '--timeout=180s'],
-    { stdio: 'pipe' },
-  )
+    ['--context', localK3DContext, '-n', 'oc-aicc', 'get', 'pods', '-l', `app=${appId}`, '-o', 'jsonpath={range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{","}{end}'],
+    { encoding: 'utf8' },
+  ).trim(), { timeout: 180_000 }).toMatch(/^True,$/)
 
   await expect.poll(() => execFileSync(
     'kubectl',
@@ -201,7 +210,10 @@ export async function waitForAICCRuntime(appId: string): Promise<void> {
       `mysql -uroot -p"$MYSQL_ROOT_PASSWORD" ocm -N -e "SELECT runtime_phase FROM apps WHERE id='${appId}'" 2>/dev/null`,
     ],
     { encoding: 'utf8' },
-  ).trim(), { timeout: 60_000 }).toBe('ready')
+  // Pod Ready 与 manager 的状态收敛由独立的 leader worker 执行；在镜像重建或
+  // 控制器切主期间，数据库 runtime_phase 可能晚于 Kubernetes Ready 一个轮询周期。
+  // 与 Pod 就绪窗口保持一致，避免真实运行时已可用时把 E2E 误报为启动失败。
+  ).trim(), { timeout: 180_000 }).toBe('ready')
 }
 
 // seedAICCSessionsForPagination 为浏览器分页场景补充带消息的历史会话。

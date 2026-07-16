@@ -69,8 +69,8 @@ func RenderService(spec AppSpec, namespace string) *corev1.Service {
 }
 
 // RenderAICCNetworkPolicy 为单个客服 Pod 建立默认拒绝的 egress 边界：仅允许解析 DNS、访问
-// manager-api 和 new-api，以及 Hermes 原生只读网页检索直连 HTTP/HTTPS 公网。函数保留以便
-// 应用删除时可按既有生命周期清理 NetworkPolicy。
+// manager-api、new-api 和共享 Firecrawl 正文提取服务，以及 Hermes 原生只读网页检索直连 HTTP/HTTPS
+// 公网。函数保留以便应用删除时可按既有生命周期清理 NetworkPolicy。
 func RenderAICCNetworkPolicy(spec AppSpec, namespace string) *networkingv1.NetworkPolicy {
 	protocolTCP, protocolUDP := corev1.ProtocolTCP, corev1.ProtocolUDP
 	port := func(protocol corev1.Protocol, number int) networkingv1.NetworkPolicyPort {
@@ -99,6 +99,8 @@ func RenderAICCNetworkPolicy(spec AppSpec, namespace string) *networkingv1.Netwo
 				{To: []networkingv1.NetworkPolicyPeer{peer("ocm", "manager-api")}, Ports: []networkingv1.NetworkPolicyPort{port(protocolTCP, 8080)}},
 				// new-api 是模型请求的唯一内网网关，禁止客服 Pod 直连任意外部模型服务。
 				{To: []networkingv1.NetworkPolicyPeer{peer("ocm", "new-api")}, Ports: []networkingv1.NetworkPolicyPort{port(protocolTCP, 3000)}},
+				// Firecrawl 以集群内服务提供网页正文读取；其余 Firecrawl 组件不向 AICC Pod 暴露。
+				{To: []networkingv1.NetworkPolicyPeer{peer("oc-firecrawl", "firecrawl-api")}, Ports: []networkingv1.NetworkPolicyPort{port(protocolTCP, 3002)}},
 				// Hermes 原生网页检索只需读取公开网页，直连公网时仅放行 HTTP/HTTPS，其他端口仍默认拒绝。
 				{To: []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: "0.0.0.0/0"}}}, Ports: []networkingv1.NetworkPolicyPort{port(protocolTCP, 80), port(protocolTCP, 443)}},
 			},
@@ -184,6 +186,8 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 	inputMount := corev1.VolumeMount{Name: "oc-input", MountPath: "/opt/oc-input"}
 	// inputMountRO 是 hermes 只读消费 oc-input（防止主容器误写共享配置卷）。
 	inputMountRO := corev1.VolumeMount{Name: "oc-input", MountPath: "/opt/oc-input", ReadOnly: true}
+	// bootstrapTmpMount 仅供 AICC 初始化容器的 mktemp 使用；根文件系统只读时不能依赖镜像内 /tmp。
+	bootstrapTmpMount := corev1.VolumeMount{Name: "bootstrap-tmp", MountPath: "/tmp"}
 	// reqs/lims 从 ResourceLimits 字符串解析为 k8s resource.Quantity。
 	reqs := corev1.ResourceList{
 		corev1.ResourceCPU:    resource.MustParse(spec.Resources.RequestsCPU),
@@ -209,8 +213,9 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 	}
 	if domain.IsAICCAppType(spec.AppType) {
 		initContainer.Command = []string{"oc-bootstrap"}
-		// AICC bootstrap 只生成 hermes 消费的输入配置，不恢复标准应用的数据目录。
-		initContainer.VolumeMounts = []corev1.VolumeMount{inputMount}
+		// AICC bootstrap 只生成 hermes 消费的输入配置，不恢复标准应用的数据目录；但其会创建
+		// 首次启动状态目录 /opt/data。只读根文件系统下将这两个写入位置都显式挂到 emptyDir。
+		initContainer.VolumeMounts = []corev1.VolumeMount{inputMount, dataMount, bootstrapTmpMount}
 	}
 	hermesEnv := []corev1.EnvVar{
 		{Name: "HERMES_HOME", Value: "/opt/data"},
@@ -308,9 +313,19 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 			},
 		})
 	}
+	volumes := []corev1.Volume{
+		// oc-input：initContainer restore 输出 → hermes/oc-ops 消费，生命周期与 pod 同步。
+		{Name: "oc-input", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+		// data：hermes 运行时数据目录，s3-sync 负责持久化到 S3。
+		{Name: "data", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+	}
 	strategy := appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType}
 	var terminationGracePeriodSeconds *int64
 	if domain.IsAICCAppType(spec.AppType) {
+		// bootstrap-tmp 只挂给 initContainer，避免常驻客服进程获得额外可写目录。
+		volumes = append(volumes, corev1.Volume{
+			Name: "bootstrap-tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+		})
 		// AICC 允许 HPA 同时保有多副本；滚动更新中旧副本持续服务至新副本 Ready。
 		maxUnavailable, maxSurge := intstr.FromInt(0), intstr.FromInt(1)
 		strategy = appsv1.DeploymentStrategy{
@@ -372,12 +387,7 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 					ImagePullSecrets: imagePullSecrets,
 					InitContainers:   []corev1.Container{initContainer},
 					Containers:       containers,
-					Volumes: []corev1.Volume{
-						// oc-input：initContainer restore 输出 → hermes/oc-ops 消费，生命周期与 pod 同步。
-						{Name: "oc-input", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
-						// data：hermes 运行时数据目录，s3-sync 负责持久化到 S3。
-						{Name: "data", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
-					},
+					Volumes:          volumes,
 				},
 			},
 		},

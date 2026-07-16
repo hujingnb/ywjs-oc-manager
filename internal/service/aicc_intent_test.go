@@ -124,6 +124,31 @@ func TestParseAICCIntentAnalysis(t *testing.T) {
 	}
 }
 
+// TestFallbackAICCIntentAnalysis 覆盖 Hermes Skill 输出格式异常时的保守降级：仅明确采购且同时给出多个商业信号才触发首次留资。
+func TestFallbackAICCIntentAnalysis(t *testing.T) {
+	tests := []struct {
+		name     string
+		messages map[string]string
+		level    string
+	}{
+		// 场景：采购、席位、预算和演示均由访客明确表达，降级分析应保住高意向客户。
+		{name: "明确采购高意向", messages: map[string]string{"m-1": "我们计划本季度采购 50 个席位，预算已批准，请联系我安排产品演示。"}, level: "high"},
+		// 场景：仅调研资料，不具备采购承诺和多个商业信号，不能擅自弹出留资表单。
+		{name: "资料调研低意向", messages: map[string]string{"m-1": "我们正在调研同类产品，能发一份功能介绍吗？"}, level: "low"},
+		// 场景：求职文本即使包含联系方式语义，也不属于采购意向。
+		{name: "求职不误判", messages: map[string]string{"m-1": "请问贵司是否有前端工程师职位？我想投递简历。"}, level: "low"},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			analysis := fallbackAICCIntentAnalysis(testCase.messages)
+
+			assert.Equal(t, testCase.level, analysis.Level)
+			assert.Empty(t, analysis.Fields)
+			assert.Empty(t, analysis.Evidence)
+		})
+	}
+}
+
 // TestEnableLocalAICCIntentFailureOnce 覆盖本地 E2E 注入器：并发安全的一次性失败只能被首个分析任务消费。
 func TestEnableLocalAICCIntentFailureOnce(t *testing.T) {
 	dispatcher := NewAICCDispatcher(nil, nil, nil, nil)

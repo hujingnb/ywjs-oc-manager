@@ -424,7 +424,10 @@ func aiccErrorSummary(err error) string {
 	return s
 }
 func isAICCRetryable(err error) bool {
-	if errors.Is(err, ErrAICCConcurrencyLimited) {
+	// 弹性扩容、滚动更新与容器冷启动期间，app 的业务状态可能已经 running，
+	// 但 runtime_phase 尚未来得及被 reconcile 为 ready。公开消息保留在队列中重试，
+	// 才不会把短暂就绪空窗错误地展示给访客。
+	if errors.Is(err, ErrAICCConcurrencyLimited) || errors.Is(err, ErrConversationRuntimeUnavailable) {
 		return true
 	}
 	var status *AICCUpstreamStatusError

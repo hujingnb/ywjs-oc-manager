@@ -27,6 +27,10 @@ async function globalSetup() {
     'kubectl -n oc-apps delete deployment,service,secret -l app.kubernetes.io/part-of=oc-manager --ignore-not-found=true --wait=true',
     { cwd: repoRoot, stdio: 'inherit' },
   )
+  execSync(
+    'kubectl -n oc-aicc delete deployment,service,secret,networkpolicy,horizontalpodautoscaler -l app.kubernetes.io/part-of=oc-manager --ignore-not-found=true --wait=true',
+    { cwd: repoRoot, stdio: 'inherit' },
+  )
   const stdout = execSync('make seed-e2e', { cwd: repoRoot }).toString('utf8')
   const lines = stdout.trim().split(/\r?\n/).filter(Boolean)
   // 递归 make 会在业务输出后追加「make[1]: 离开目录…」等噪声行，fixture JSON 未必是末行。

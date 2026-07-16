@@ -26,6 +26,17 @@ func TestAICCMessageTaskLeaseRequiresEarliestSessionMessage(t *testing.T) {
 	assert.Contains(t, query, "earlier_message.created_at < task_message.created_at")
 }
 
+// TestAICCMessageTaskLeaseQualifiesUpdatedColumns 验证租约查询关联 processing 与 earlier 表后，
+// 写入目标仍明确限定为 task，避免 MySQL 将同名 status 字段判为歧义并阻塞整条客服消息队列。
+func TestAICCMessageTaskLeaseQualifiesUpdatedColumns(t *testing.T) {
+	query := normalizedSQL(leaseAICCMessageTask)
+	assert.Contains(t, query, "set task.status = 'processing'")
+	assert.Contains(t, query, "task.lease_token = ?")
+	assert.Contains(t, query, "task.lease_expires_at = date_add(now(6), interval 30 second)")
+	assert.Contains(t, query, "task.attempts = task.attempts + 1")
+	assert.Contains(t, query, "task.updated_at = now(6)")
+}
+
 // TestCountReadyAICCMessageTasksByAppExcludesExhaustedTasks 验证 HPA queue gauge 与实际
 // 租约边界一致：queued/retry_wait 状态但已耗尽尝试次数的任务不能再计入任何应用积压。
 func TestCountReadyAICCMessageTasksByAppExcludesExhaustedTasks(t *testing.T) {
@@ -81,13 +92,14 @@ func TestAICCConversationIntelligenceUpsertsReplaceSingleSessionFact(t *testing.
 	assert.Contains(t, context, "summary = values(summary)")
 	assert.Contains(t, context, "summarized_through_message_id = values(summarized_through_message_id)")
 	assert.Contains(t, context, "summary_version = values(summary_version)")
-	// 边界路径：意向重新分析必须同步覆盖 JSON 证据、分析版本和邀请状态，不能遗留旧轮次判断。
+	// 边界路径：意向重新分析必须同步覆盖 JSON 证据和分析版本；首次邀约已经展示后，
+	// 关联的访客消息必须保持不变，避免公开页把留资卡片移到另一条历史回复上。
 	intent := normalizedSQL(upsertAICCSessionIntent)
 	assert.Contains(t, intent, "insert into aicc_session_intents")
 	assert.Contains(t, intent, "fields_json = values(fields_json)")
 	assert.Contains(t, intent, "confidence_json = values(confidence_json)")
 	assert.Contains(t, intent, "evidence_json = values(evidence_json)")
-	assert.Contains(t, intent, "analyzed_message_id = values(analyzed_message_id)")
+	assert.Contains(t, intent, "analyzed_message_id = if(invite_status = 'not_invited', values(analyzed_message_id), analyzed_message_id)")
 	assert.NotContains(t, intent, "invite_status = values(invite_status)")
 	// 一条助手消息可以保留多条工具审计来源，因此创建查询不得错误使用 upsert 或遗漏未确认标记。
 	source := normalizedSQL(createAICCMessageSource)

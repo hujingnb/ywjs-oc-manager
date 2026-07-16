@@ -78,7 +78,9 @@ WHERE id = ?;
 SELECT *
 FROM jobs
 WHERE type = 'app_initialize'
-  AND payload_json->>'$.app_id' = sqlc.arg(app_id)
+  -- 调用方为保持 JSON 参数类型传入带双引号的 app_id；必须先解包再与 ->> 的文本结果比较，
+  -- 否则已存在的初始化任务会被误判为不存在，造成并发重复初始化及非法状态转换。
+  AND payload_json->>'$.app_id' = JSON_UNQUOTE(sqlc.arg(app_id))
 ORDER BY created_at DESC
 LIMIT 1;
 

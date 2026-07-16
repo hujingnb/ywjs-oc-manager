@@ -159,6 +159,12 @@ COPY aicc_tools/aicc_knowledge_tool.py /usr/local/lib/hermes-agent/tools/aicc_kn
 # 也必须在构建层清空，防止未挂载 emptyDir 的运行形态扫描到旧通用 Skill。
 RUN rm -rf /opt/data/skills /opt/oc-aicc-skills && mkdir -p /opt/oc-aicc-skills
 COPY skills/ /opt/oc-aicc-skills/
+# 构建期测试按源码同级路径读取技能和入口脚本；保留一份只读测试副本，运行时仍只从
+# /opt/oc-aicc-skills 同步到 emptyDir，不会扩大客服可见的 Skill 面。
+COPY skills/              /usr/local/lib/oc-entrypoint/skills/
+COPY oc-entrypoint.py     /usr/local/lib/oc-entrypoint/oc-entrypoint.py
+# 该副本仅供镜像内自检读取 Dockerfile 的安全构建顺序，不参与运行时执行。
+COPY Dockerfile           /usr/local/lib/oc-entrypoint/Dockerfile
 COPY lib/                 /usr/local/lib/oc-entrypoint/lib/
 COPY renderer/            /usr/local/lib/oc-entrypoint/renderer/
 COPY migrator/            /usr/local/lib/oc-entrypoint/migrator/

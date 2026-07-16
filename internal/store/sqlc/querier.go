@@ -6,7 +6,6 @@ package sqlc
 
 import (
 	"context"
-	"encoding/json"
 
 	null "github.com/guregu/null/v5"
 )
@@ -177,7 +176,7 @@ type Querier interface {
 	GetJob(ctx context.Context, id string) (Job, error)
 	// reaper 通过 payload_json->>'$.app_id' 查最近一份 app_initialize job。
 	// 用 ORDER BY created_at DESC + LIMIT 1 取最新；不存在返回 sql.ErrNoRows。
-	GetLatestAppInitJob(ctx context.Context, appID json.RawMessage) (Job, error)
+	GetLatestAppInitJob(ctx context.Context, appID string) (Job, error)
 	GetLatestCustomSkillByName(ctx context.Context, name string) (CustomSkill, error)
 	// 组织列表复制登录信息时只需要一个可登录的组织管理员用户名。
 	// 密码明文不落库，因此这里只返回账号名，密码提示由调用方生成。

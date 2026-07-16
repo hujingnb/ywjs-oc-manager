@@ -277,12 +277,12 @@ LEFT JOIN (
  AND earlier.status NOT IN ('completed', 'failed')
  AND (earlier_message.created_at < task_message.created_at
       OR (earlier_message.created_at = task_message.created_at AND earlier_message.id < task_message.id))
-SET status = 'processing',
-    lease_token = sqlc.arg(lease_token),
+SET task.status = 'processing',
+    task.lease_token = sqlc.arg(lease_token),
     -- 初次领取与续租都以数据库时间计算，避免 worker 时钟漂移产生错误过期时间。
-    lease_expires_at = DATE_ADD(NOW(6), INTERVAL 30 SECOND),
-    attempts = attempts + 1,
-    updated_at = NOW(6)
+    task.lease_expires_at = DATE_ADD(NOW(6), INTERVAL 30 SECOND),
+    task.attempts = task.attempts + 1,
+    task.updated_at = NOW(6)
 WHERE task.id = sqlc.arg(id)
   AND task.status IN ('queued', 'retry_wait')
   AND task.attempts < task.max_attempts

@@ -75,7 +75,7 @@ test.describe('AICC 客服意向与会话状态', () => {
     await sendPublicAICCMessage(page, '我们计划下月采购 100 个席位，请安排演示。')
     await expect(page.getByRole('button', { name: '暂不留资' })).toBeVisible()
     await page.getByPlaceholder('联系电话').fill('13800000000')
-    await page.getByRole('button', { name: '提交信息' }).click()
+    await page.getByRole('button', { name: '提交联系信息' }).click()
     await sendPublicAICCMessage(page, '更正一下：我们暂时不采购，只是做技术调研。')
     await expect(page.locator('.message-list')).toContainText('更正一下')
     // 公开页留资后切换到真实企业后台，验证匿名候选已合并为可见线索而非仅浏览器内存状态。
@@ -83,7 +83,8 @@ test.describe('AICC 客服意向与会话状态', () => {
     await loginAs(page, 'org_admin', loadE2EFixture(), 'zh')
     await openAICCConsole(page)
     await page.getByRole('link', { name: '线索', exact: true }).click()
-    await expect(page.getByText('13800000000')).toBeVisible()
+    // 线索卡同时显示号码标题和“联系电话”字段摘要；精确匹配标题，避免严格模式把两个合法节点误判为失败。
+    await expect(page.getByText('13800000000', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: '查看对话' }).first().click()
     // 后台证据抽屉必须显示可核验画像，并可定位到包含联系方式的访客原文。
     await expect(page.getByLabel('意向画像')).toContainText(/高意向|中意向|低意向/)
@@ -139,8 +140,8 @@ test.describe('AICC 客服意向与会话状态', () => {
       const submittedA = pageA.waitForResponse(response => response.url().includes('/lead-values') && response.request().method() === 'POST')
       const submittedB = pageB.waitForResponse(response => response.url().includes('/lead-values') && response.request().method() === 'POST')
       await Promise.all([
-        pageA.getByPlaceholder('联系电话').fill('13800000000').then(() => pageA.getByRole('button', { name: '提交信息' }).click()),
-        pageB.getByPlaceholder('联系电话').fill('13800000000').then(() => pageB.getByRole('button', { name: '提交信息' }).click()),
+        pageA.getByPlaceholder('联系电话').fill('13800000000').then(() => pageA.getByRole('button', { name: '提交联系信息' }).click()),
+        pageB.getByPlaceholder('联系电话').fill('13800000000').then(() => pageB.getByRole('button', { name: '提交联系信息' }).click()),
       ])
       const [responseA, responseB] = await Promise.all([submittedA, submittedB])
       expect(responseA.ok()).toBeTruthy()
