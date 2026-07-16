@@ -46,9 +46,12 @@ spec:
   template:
     metadata: { labels: { app: firecrawl-redis, app.kubernetes.io/part-of: firecrawl } }
     spec:
+      imagePullSecrets:
+        - name: secret-registry-ywjs-26257ea5.ecis.huabei-3.cmecloud.cn
       containers:
         - name: redis
-          image: redis:7.4.2-alpine
+          # 原始上游镜像：redis:7.4.2-alpine；已镜像至本项目 ACR。
+          image: ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/redis:7.4.2-alpine
           args: ["redis-server", "--appendonly", "no"]
           ports: [{ containerPort: 6379, name: redis }]
           resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { cpu: 250m, memory: 256Mi } }
@@ -74,9 +77,12 @@ spec:
   template:
     metadata: { labels: { app: firecrawl-rabbitmq, app.kubernetes.io/part-of: firecrawl } }
     spec:
+      imagePullSecrets:
+        - name: secret-registry-ywjs-26257ea5.ecis.huabei-3.cmecloud.cn
       containers:
         - name: rabbitmq
-          image: rabbitmq:4.1.3-alpine
+          # 原始上游镜像：rabbitmq:4.1.3-alpine；已镜像至本项目 ACR。
+          image: ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/rabbitmq:4.1.3-alpine
           ports: [{ containerPort: 5672, name: amqp }]
           resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { cpu: 500m, memory: 512Mi } }
           volumeMounts: [{ name: data, mountPath: /var/lib/rabbitmq }]
@@ -101,10 +107,12 @@ spec:
   template:
     metadata: { labels: { app: firecrawl-postgres, app.kubernetes.io/part-of: firecrawl } }
     spec:
+      imagePullSecrets:
+        - name: secret-registry-ywjs-26257ea5.ecis.huabei-3.cmecloud.cn
       containers:
         - name: postgres
-          # 上游 nuq-postgres 未发布版本标签，digest 固定为当前验证过的多架构清单。
-          image: ghcr.io/firecrawl/nuq-postgres@sha256:aed86f62858f29bd971abddcdeb301c12888098d2cf5d33c1ba42b053bc460f6
+          # 原始上游镜像：ghcr.io/firecrawl/nuq-postgres@sha256:aed86f62858f29bd971abddcdeb301c12888098d2cf5d33c1ba42b053bc460f6；未发布版本标签，使用固定 digest 后镜像至 ACR。
+          image: ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/firecrawl/nuq-postgres:sha-aed86f62858f
           env:
             - { name: POSTGRES_USER, value: postgres }
             - { name: POSTGRES_DB, value: postgres }
@@ -134,10 +142,12 @@ spec:
   template:
     metadata: { labels: { app: firecrawl-playwright, firecrawl-role: compute, app.kubernetes.io/part-of: firecrawl } }
     spec:
+      imagePullSecrets:
+        - name: secret-registry-ywjs-26257ea5.ecis.huabei-3.cmecloud.cn
       containers:
         - name: playwright
-          # 上游 Playwright 服务只发布 latest；digest 使部署仍是不可变版本而非浮动标签。
-          image: ghcr.io/firecrawl/playwright-service@sha256:c2cb9d7e982f9ddaf7902ec79da1e63961ae3760f315cddaa161200a7937162b
+          # 原始上游镜像：ghcr.io/firecrawl/playwright-service@sha256:c2cb9d7e982f9ddaf7902ec79da1e63961ae3760f315cddaa161200a7937162b；上游只发布 latest，使用固定 digest 后镜像至 ACR。
+          image: ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/firecrawl/playwright-service:sha-c2cb9d7e982f
           env: [{ name: PORT, value: "3000" }, { name: MAX_CONCURRENT_PAGES, value: "4" }]
           ports: [{ containerPort: 3000, name: http }]
           resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { cpu: "2", memory: 2Gi } }
@@ -163,9 +173,12 @@ spec:
   template:
     metadata: { labels: { app: firecrawl-api, firecrawl-role: compute, app.kubernetes.io/part-of: firecrawl } }
     spec:
+      imagePullSecrets:
+        - name: secret-registry-ywjs-26257ea5.ecis.huabei-3.cmecloud.cn
       containers:
         - name: api
-          image: ghcr.io/firecrawl/firecrawl:2.11.110
+          # 原始上游镜像：ghcr.io/firecrawl/firecrawl:2.11.110；已镜像至本项目 ACR。
+          image: ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/firecrawl/firecrawl:2.11.110
           command: ["node", "dist/src/index.js"]
           envFrom: [{ configMapRef: { name: firecrawl-runtime } }, { secretRef: { name: firecrawl-runtime } }]
           env:
@@ -199,9 +212,12 @@ spec:
   template:
     metadata: { labels: { app: firecrawl-scrape-worker, firecrawl-role: compute, app.kubernetes.io/part-of: firecrawl } }
     spec:
+      imagePullSecrets:
+        - name: secret-registry-ywjs-26257ea5.ecis.huabei-3.cmecloud.cn
       containers:
         - name: scrape-worker
-          image: ghcr.io/firecrawl/firecrawl:2.11.110
+          # 原始上游镜像：ghcr.io/firecrawl/firecrawl:2.11.110；已镜像至本项目 ACR。
+          image: ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/firecrawl/firecrawl:2.11.110
           command: ["node", "dist/src/services/queue-worker.js"]
           envFrom: [{ configMapRef: { name: firecrawl-runtime } }, { secretRef: { name: firecrawl-runtime } }]
           env:
@@ -222,9 +238,12 @@ spec:
   template:
     metadata: { labels: { app: firecrawl-extract-worker, firecrawl-role: compute, app.kubernetes.io/part-of: firecrawl } }
     spec:
+      imagePullSecrets:
+        - name: secret-registry-ywjs-26257ea5.ecis.huabei-3.cmecloud.cn
       containers:
         - name: extract-worker
-          image: ghcr.io/firecrawl/firecrawl:2.11.110
+          # 原始上游镜像：ghcr.io/firecrawl/firecrawl:2.11.110；已镜像至本项目 ACR。
+          image: ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/firecrawl/firecrawl:2.11.110
           command: ["node", "dist/src/services/extract-worker.js"]
           envFrom: [{ configMapRef: { name: firecrawl-runtime } }, { secretRef: { name: firecrawl-runtime } }]
           env:
@@ -245,9 +264,12 @@ spec:
   template:
     metadata: { labels: { app: firecrawl-nuq-worker, firecrawl-role: compute, app.kubernetes.io/part-of: firecrawl } }
     spec:
+      imagePullSecrets:
+        - name: secret-registry-ywjs-26257ea5.ecis.huabei-3.cmecloud.cn
       containers:
         - name: nuq-worker
-          image: ghcr.io/firecrawl/firecrawl:2.11.110
+          # 原始上游镜像：ghcr.io/firecrawl/firecrawl:2.11.110；已镜像至本项目 ACR。
+          image: ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/firecrawl/firecrawl:2.11.110
           command: ["node", "dist/src/services/worker/nuq-worker.js"]
           envFrom: [{ configMapRef: { name: firecrawl-runtime } }, { secretRef: { name: firecrawl-runtime } }]
           env:
@@ -269,9 +291,12 @@ spec:
   template:
     metadata: { labels: { app: firecrawl-nuq-prefetch-worker, firecrawl-role: compute, app.kubernetes.io/part-of: firecrawl } }
     spec:
+      imagePullSecrets:
+        - name: secret-registry-ywjs-26257ea5.ecis.huabei-3.cmecloud.cn
       containers:
         - name: nuq-prefetch-worker
-          image: ghcr.io/firecrawl/firecrawl:2.11.110
+          # 原始上游镜像：ghcr.io/firecrawl/firecrawl:2.11.110；已镜像至本项目 ACR。
+          image: ywjs-26257ea5.ecis.huabei-3.cmecloud.cn/public/firecrawl/firecrawl:2.11.110
           command: ["node", "dist/src/services/worker/nuq-prefetch-worker.js"]
           envFrom: [{ configMapRef: { name: firecrawl-runtime } }, { secretRef: { name: firecrawl-runtime } }]
           env:
