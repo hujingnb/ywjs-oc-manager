@@ -537,9 +537,10 @@ test('公开访客提交留资后企业管理员可查看线索和导出 CSV', a
 
   await openAICCConsole(page)
   await page.getByRole('link', { name: '线索', exact: true }).click()
-  await expect(page.getByText(phone, { exact: true })).toBeVisible()
-  await expect(page.getByText('未读', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '查看对话' }).click()
+  const leadRow = page.locator('.lead-row').filter({ hasText: phone })
+  await expect(leadRow).toBeVisible()
+  await expect(leadRow.getByText('未读', { exact: true })).toBeVisible()
+  await leadRow.getByRole('button', { name: '查看对话' }).click()
   await expect(page.getByText('请介绍一下服务内容')).toBeVisible()
   await page.getByRole('button', { name: '关闭对话' }).click()
   await expect(page.getByRole('button', { name: '标记已读' })).toBeDisabled()

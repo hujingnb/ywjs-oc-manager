@@ -31,6 +31,13 @@ async function globalSetup() {
     'kubectl -n oc-aicc delete deployment,service,secret,networkpolicy,horizontalpodautoscaler -l app.kubernetes.io/part-of=oc-manager --ignore-not-found=true --wait=true',
     { cwd: repoRoot, stdio: 'inherit' },
   )
+  // 删除 Deployment 完成只代表控制器对象已消失，级联删除的 Hermes Pod 仍可能处于
+  // Terminating。必须等它们全部退出后再 seed 并创建下一轮客服，避免旧运行时占用
+  // 本地 k3d 容量，导致新应用初始化任务超过 E2E 的就绪窗口。
+  execSync(
+    'kubectl -n oc-aicc wait --for=delete pod -l app.kubernetes.io/part-of=oc-manager --timeout=180s',
+    { cwd: repoRoot, stdio: 'inherit' },
+  )
   const stdout = execSync('make seed-e2e', { cwd: repoRoot }).toString('utf8')
   const lines = stdout.trim().split(/\r?\n/).filter(Boolean)
   // 递归 make 会在业务输出后追加「make[1]: 离开目录…」等噪声行，fixture JSON 未必是末行。
