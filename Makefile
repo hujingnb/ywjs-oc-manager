@@ -1,4 +1,4 @@
-.PHONY: test test-hermes-version-guard vet build sqlc-generate migrate-up migrate-down web-test web-typecheck web-build build-hermes-runtime hermes-inject-contract seed-e2e openapi-gen web-types-gen openapi-check local-up local-down local-reset local-stop local-start local-build local-preload local-migrate local-seed local-seed-e2e local-mc-init local-status local-logs local-shell cluster-create .guard-k3d-hosts build-ops-runtime local-build-ops local-init-models
+.PHONY: test test-hermes-version-guard vet build sqlc-generate migrate-up migrate-down web-test web-typecheck web-build e2e build-hermes-runtime hermes-inject-contract seed-e2e openapi-gen web-types-gen openapi-check local-up local-down local-reset local-stop local-start local-build local-preload local-migrate local-seed local-seed-e2e local-mc-init local-status local-logs local-shell cluster-create .guard-k3d-hosts build-ops-runtime local-build-ops local-init-models
 
 SWAG_VERSION := v2.0.0-rc5
 OPENAPI_TS_VERSION := 7.13.0
@@ -408,6 +408,9 @@ web-typecheck: ## 在 web/ 跑 vue-tsc --noEmit
 
 web-build: ## 在 web/ 跑 vite build
 	cd web && npm install && npm run build
+
+e2e: ## 无头运行全部 Playwright E2E（会重置本地 E2E 数据）
+	cd web && npx playwright test --project=chromium --retries=0
 
 ##@ Hermes runtime 镜像
 
