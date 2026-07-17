@@ -6,7 +6,7 @@ import { loadE2EFixture, loginAs } from './fixtures'
 //
 // AppDetailPage 用 <RouterLink> 实现 tab，对应 a 标签 role=link，
 // 因此用 getByRole('link', ...)；每切一次 tab 后断言无红色 error 文本。
-test('实例详情 5 tab 全部可渲染', async ({ page }) => {
+test('实例详情 5 tab 全部可渲染', { tag: '@quick' }, async ({ page }) => {
   const fx = loadE2EFixture()
   await loginAs(page, 'org_admin', fx)
   await page.goto(`/apps/${fx.app_id}/overview`)

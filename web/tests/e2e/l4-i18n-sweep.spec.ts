@@ -104,7 +104,7 @@ test.afterAll(() => {
 
 // 每个角色一个用例：登录后按 en、zh 两遍遍历其全部可见页面。
 for (const role of ['platform_admin', 'org_admin', 'org_member'] as const) {
-  test(`L4 i18n 清扫 - ${role}`, async ({ page }) => {
+  test(`L4 i18n 清扫 - ${role}`, { tag: ['@slow', '@i18n-sweep'] }, async ({ page }) => {
     let fx
     try {
       fx = loadE2EFixture()

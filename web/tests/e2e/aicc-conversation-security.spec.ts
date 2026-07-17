@@ -8,7 +8,7 @@ test.setTimeout(900_000)
 
 // 安全、来源与隔离验收：只有显式启用时才创建真实客服并调用本地模型，
 // 防止常规 Chromium 快速回归意外消耗本地模型配额。
-test.describe('AICC 客服安全、来源与访客隔离', () => {
+test.describe('AICC 客服安全、来源与访客隔离', { tag: ['@slow', '@model'] }, () => {
   test.skip(process.env.OCM_AICC_CONVERSATION_E2E !== '1', '需 OCM_AICC_CONVERSATION_E2E=1 显式启用本地真实客服验收')
 
   // 访客提出命令、文件和建站要求时，公开页只能展示安全拒绝，且浏览器侧不应出现管理或运行时写请求。
@@ -93,14 +93,14 @@ test.describe('AICC 客服安全、来源与访客隔离', () => {
   })
 
   // 域名来源限制必须由预置的 allowed_domains fixture 拒绝；普通 fixture 默认允许所有域名，不能伪造该覆盖。
-  test('非允许域名不能加载网页挂件', async ({ page }) => {
+  test('非允许域名不能加载网页挂件', { tag: '@widget-domain' }, async ({ page }) => {
     test.skip(process.env.OCM_AICC_WIDGET_DOMAIN_FIXTURE !== '1', '需预置仅允许指定客户域名的 widget token')
     await page.goto('/aicc-widget-preview/fixture-domain-restricted-token')
     await expect(page.getByRole('alert')).toContainText(/域名|禁止|不允许/)
   })
 
   // 图片只作为当前轮输入传给 vision 工具；需可重复的本地 vision fixture 才能验证语义，不以文件上传成功替代理解。
-  test('当前轮图片理解不读取历史附件', async ({ page }) => {
+  test('当前轮图片理解不读取历史附件', { tag: '@vision' }, async ({ page }) => {
     test.skip(process.env.OCM_AICC_VISION_FIXTURE !== '1', '需预置可重复的本地 vision 响应与当前轮图片 fixture')
     const agent = await createStartedAICCConversationFixture(page, '图片边界客服')
     await page.goto(`/aicc/${agent.publicToken}`)
@@ -160,7 +160,7 @@ test.describe('AICC 客服安全、来源与访客隔离', () => {
     { name: '公开网络未确认标识', question: '请用公开网络补充一个企业知识库没有的通用概念并标明来源。', title: 'AICC E2E 公开网络资料', unconfirmed: true },
   ]) {
     // 场景：来源和冲突策略经真实公开聊天页传递，不能由模型文本自行伪造来源标签。
-    test(`知识来源：${scenario.name}`, async ({ page }) => {
+    test(`知识来源：${scenario.name}`, { tag: '@rag' }, async ({ page }) => {
       // 固定三层语料、绑定关系和网络冲突页尚未由 seed-e2e 创建；没有该 fixture 时只跳过当前
       // 数据依赖场景，不能把测试名字本身或普通 runtime 开关误当成“已完成知识验收”。
       test.skip(process.env.OCM_AICC_KNOWLEDGE_FIXTURE !== '1', '需预置三层固定知识、冲突页和来源标题的本地 AICC 知识 fixture')

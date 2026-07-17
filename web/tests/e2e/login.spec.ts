@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test'
 //
 // 前置：manager-api 起来 + 数据库里有 platform_admin admin2 / Admin@1234（chunk-3 验证时创建）。
 // 如果 CI 没这个账号，可以预先 seed-admin 一次。
-test('登录成功后跳转到平台总览', async ({ page }) => {
+test('登录成功后跳转到平台总览', { tag: '@quick' }, async ({ page }) => {
   await page.goto('/login')
   await page.getByLabel('账号').fill('admin2')
   await page.getByLabel('密码').fill('Admin@1234')
@@ -13,7 +13,7 @@ test('登录成功后跳转到平台总览', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '控制台' })).toBeVisible()
 })
 
-test('密码错误返回错误提示', async ({ page }) => {
+test('密码错误返回错误提示', { tag: '@quick' }, async ({ page }) => {
   await page.goto('/login')
   await page.getByLabel('账号').fill('admin2')
   await page.getByLabel('密码').fill('wrong-password')

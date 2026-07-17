@@ -12,7 +12,7 @@ import { loadE2EFixture, loginAs } from './fixtures'
 
 // ─── 登录页：语言选择器出现 ────────────────────────────────────────────────
 
-test('登录页右上角渲染语言选择器', async ({ page }) => {
+test('登录页右上角渲染语言选择器', { tag: '@quick' }, async ({ page }) => {
   // 导航到登录页，不依赖后端数据，只验证 LocaleSwitcher 组件是否挂载。
   await page.goto('/login')
 

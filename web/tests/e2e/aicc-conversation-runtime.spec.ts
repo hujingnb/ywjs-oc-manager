@@ -12,11 +12,11 @@ import {
 test.setTimeout(600_000)
 
 // 无状态运行时验收：从真实公开页面发起首轮，删除本地 Pod 后等待控制器重建，再验证同一浏览器会话可续聊。
-test.describe('AICC 客服无状态运行时与故障恢复', () => {
+test.describe('AICC 客服无状态运行时与故障恢复', { tag: ['@slow', '@model'] }, () => {
   test.skip(process.env.OCM_AICC_CONVERSATION_E2E !== '1', '需 OCM_AICC_CONVERSATION_E2E=1 显式启用本地真实客服验收')
 
   // Pod 重建后 manager 重新注入受控摘要和近期消息，页面 session token 保持不变且能得到新回复。
-  test('删除本地 AICC Pod 后同一公开会话可继续对话', async ({ page }) => {
+  test('删除本地 AICC Pod 后同一公开会话可继续对话', { tag: '@k8s-disruptive' }, async ({ page }) => {
     const agent = await createStartedAICCConversationFixture(page, '重启验收客服')
     await forceZh(page)
     await page.goto(`/aicc/${agent.publicToken}`)
@@ -36,7 +36,7 @@ test.describe('AICC 客服无状态运行时与故障恢复', () => {
   })
 
   // 公开页失败态必须保留可访问的重试动作；此场景由本地运行时故障注入环境启用，避免普通验收主动损坏服务。
-  test('模型或队列故障时公开页展示可重试动作', async ({ page }) => {
+  test('模型或队列故障时公开页展示可重试动作', { tag: '@k8s-disruptive' }, async ({ page }) => {
     test.skip(process.env.OCM_AICC_FAULT_INJECTION !== '1', '需由本地故障注入环境显式启用')
     const agent = await createStartedAICCConversationFixture(page, '故障验收客服')
     await forceZh(page)
@@ -52,7 +52,7 @@ test.describe('AICC 客服无状态运行时与故障恢复', () => {
   // 故障注入由本地测试部署显式提供，避免 E2E 为了覆盖而修改任意运行时配置；每类失败都必须可恢复。
   for (const scenario of ['RAGFlow 检索失败', '公开网络搜索超时', '模型响应超时', '异步队列失败']) {
     // 场景：依赖故障返回安全失败态，恢复后同一会话仍可继续发送。
-    test(`${scenario}后可恢复咨询`, async ({ page }) => {
+    test(`${scenario}后可恢复咨询`, { tag: '@k8s-disruptive' }, async ({ page }) => {
       test.skip(process.env.OCM_AICC_FAULT_INJECTION !== '1', '需由本地故障注入环境显式启用')
       const agent = await createStartedAICCConversationFixture(page, `恢复-${scenario}`)
       await page.goto(`/aicc/${agent.publicToken}`)

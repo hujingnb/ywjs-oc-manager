@@ -6,7 +6,7 @@ import { loadE2EFixture, loginAs } from './fixtures'
 test.setTimeout(600_000)
 
 // 意向、留资与会话状态验收仅使用公开访客界面，验证模型输出的结构化动作能被页面安全消费。
-test.describe('AICC 客服意向与会话状态', () => {
+test.describe('AICC 客服意向与会话状态', { tag: ['@slow', '@model'] }, () => {
   test.skip(process.env.OCM_AICC_CONVERSATION_E2E !== '1', '需 OCM_AICC_CONVERSATION_E2E=1 显式启用本地真实客服验收')
 
   // 高意向首轮必须给出一次留资邀请；访客拒绝后继续提问时不能重复强迫填写。
@@ -92,7 +92,7 @@ test.describe('AICC 客服意向与会话状态', () => {
   })
 
   // 注入器先让意向分析失败一次后恢复；同一 session 只能展示一次邀请，避免恢复 worker 重放造成骚扰。
-  test('意向分析失败重试恢复后不会重复邀请', async ({ page }) => {
+  test('意向分析失败重试恢复后不会重复邀请', { tag: '@intent-retry' }, async ({ page }) => {
     test.skip(process.env.OCM_AICC_INTENT_RETRY_FIXTURE !== '1', '需显式授权本地 k3d 重启 manager-api 进行一次性失败注入')
     setLocalAICCIntentFailureOnce(true)
     try {
@@ -117,7 +117,7 @@ test.describe('AICC 客服意向与会话状态', () => {
   })
 
   // 两个标签页复用同一 visitor session 并同时提交表单；后台最终只能出现一个正式联系方式线索。
-  test('同一会话双标签并发留资不会重复创建线索', async ({ browser }) => {
+  test('同一会话双标签并发留资不会重复创建线索', { tag: '@intent-retry' }, async ({ browser }) => {
     test.skip(process.env.OCM_AICC_INTENT_RETRY_FIXTURE !== '1', '需显式启用本地高意向测试 fixture')
     const admin = await browser.newContext({ baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://ocm.localhost' })
     const setup = await admin.newPage()

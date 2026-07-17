@@ -72,7 +72,7 @@ async function expectChartVisible(page: Page, tabName: string): Promise<void> {
 }
 
 // 验证平台管理员连续切换三类图表三轮后，首次访问并保留的图表在反复显隐时仍保持 canvas。
-test('平台控制台图表连续切换三轮后仍保持显示', async ({ page }) => {
+test('平台控制台图表连续切换三轮后仍保持显示', { tag: '@quick' }, async ({ page }) => {
   const fx = loadE2EFixture()
   const pageErrors: Error[] = []
   page.on('pageerror', error => pageErrors.push(error))

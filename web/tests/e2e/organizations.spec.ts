@@ -6,7 +6,7 @@ import { loginAs } from './fixtures'
 //
 // 关键路径：登录 → /organizations → 点击「新增组织」打开表单 →
 // 填写唯一名称和初始管理员 → 点「保存」→ 列表里应能看到新组织名。
-test('platform_admin 可创建组织', async ({ page }) => {
+test('platform_admin 可创建组织', { tag: '@quick' }, async ({ page }) => {
   await loginAs(page, 'platform_admin')
   await page.goto('/organizations')
   await page.getByRole('button', { name: '新增组织' }).click()

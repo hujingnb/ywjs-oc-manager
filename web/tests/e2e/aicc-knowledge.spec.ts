@@ -8,6 +8,9 @@ import { loadE2EFixture, loginAs } from './fixtures'
 // RAGFlow 解析和 Hermes 知识检索均为异步链路，单条完整验证允许最多八分钟。
 test.setTimeout(480_000)
 
+// 知识库问答同时依赖真实模型与 RAGFlow，只允许通过 slow suite 显式执行。
+const slowModel = { tag: ['@slow', '@model', '@rag'] }
+
 type AICCAgent = {
   id: string
   app_id: string
@@ -122,7 +125,7 @@ async function askPublicKnowledgeQuestion(page: Page, publicToken: string, quest
 }
 
 // 验证当前客服库和企业库的上传、解析、范围切换及真实 oc-kb 问答闭环。
-test('当前客服和企业知识库可解析并控制真实问答范围', async ({ page }) => {
+test('当前客服和企业知识库可解析并控制真实问答范围', slowModel, async ({ page }) => {
   const agent = await prepareKnowledgeAgent(page)
   const suffix = Date.now().toString(36).toUpperCase()
   const agentCode = `AICC-AGENT-KB-${suffix}`
@@ -204,7 +207,7 @@ test('当前客服和企业知识库可解析并控制真实问答范围', async
 })
 
 // 公开端安全边界：访客输入中的伪造系统指令不能改变客服身份、泄露系统提示词或声称执行后台操作。
-test('公开客服拒绝提示词注入且不泄露系统指令', async ({ page }) => {
+test('公开客服拒绝提示词注入且不泄露系统指令', slowModel, async ({ page }) => {
   const agent = await prepareKnowledgeAgent(page)
   await startKnowledgeAgent(page)
   const publicPage = await page.context().newPage()
@@ -224,7 +227,7 @@ test('公开客服拒绝提示词注入且不泄露系统指令', async ({ page 
 })
 
 // 平台行业库必须先授权给企业，企业管理员才可为当前客服选择；撤销授权后旧关联和候选项均应消失。
-test('行业知识库授权后可选择，撤销授权后自动清理', async ({ page }) => {
+test('行业知识库授权后可选择，撤销授权后自动清理', slowModel, async ({ page }) => {
   const fx = loadE2EFixture()
   const baseName = `E2E 行业库 ${Date.now()}`
 
