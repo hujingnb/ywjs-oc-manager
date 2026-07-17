@@ -311,9 +311,10 @@ func TestCleanupStatementsAreParameterizedAndFKOrdered(t *testing.T) {
 	assert.Contains(t, all, "aicc_lead_fields")
 	assert.Contains(t, all, "aicc_agent_knowledge")
 	assert.Contains(t, all, "aicc_agents")
-	// 组织、版本、app 及扩展能力表必须都由 scoped 条件删除。
+	// 组织、app 及扩展能力表必须都由 scoped 条件删除。
 	assert.Contains(t, all, "organization_industry_knowledge_bases")
-	assert.Contains(t, all, "assistant_version_industry_knowledge_bases")
+	// 版本行业绑定是跨组织全局资源，只能由 run 精确版本事务统一删除。
+	assert.NotContains(t, all, "assistant_version_industry_knowledge_bases")
 	assert.Contains(t, all, "published_sites")
 	assert.Contains(t, all, "conversation_files")
 	assert.Contains(t, all, "app_skills")
@@ -337,10 +338,15 @@ func TestCleanupStatementsAreParameterizedAndFKOrdered(t *testing.T) {
 	assert.Less(t, strings.Index(all, "DELETE FROM aicc_lead_values"), strings.Index(all, "DELETE FROM aicc_leads"))
 	assert.Less(t, strings.Index(all, "DELETE FROM aicc_sessions"), strings.Index(all, "DELETE FROM aicc_agents"))
 	assert.Less(t, strings.Index(all, "DELETE FROM apps WHERE"), strings.Index(all, "DELETE FROM organizations WHERE"))
+	// 当前 run 组织产生的平台管理员用户引用必须在平台管理员事务开始前按组织边界清掉。
+	assert.Less(t, strings.Index(all, "DELETE FROM recharge_records"), strings.Index(all, "DELETE FROM users WHERE"))
+	assert.Less(t, strings.Index(all, "DELETE FROM skill_ticket_messages"), strings.Index(all, "DELETE FROM users WHERE"))
+	assert.Less(t, strings.Index(all, "DELETE FROM skill_tickets"), strings.Index(all, "DELETE FROM users WHERE"))
+	assert.Less(t, strings.Index(all, "DELETE FROM apps WHERE"), strings.Index(all, "DELETE FROM users WHERE"))
 }
 
-// 验证平台管理员清理只删除该 run actor 亲自创建的 FK 子资源，再删除隔离用户。
-func TestPlatformAdminCleanupStatementsHandleAllUserFKs(t *testing.T) {
+// 验证平台管理员清理只处理 actor 专属依赖，版本资源仍由精确 run 事务负责。
+func TestPlatformAdminCleanupStatementsStayActorScoped(t *testing.T) {
 	statements, err := platformAdminCleanupStatements("a")
 	require.NoError(t, err)
 
@@ -357,30 +363,29 @@ func TestPlatformAdminCleanupStatementsHandleAllUserFKs(t *testing.T) {
 
 	all := queries.String()
 	assert.Contains(t, all, "DELETE FROM platform_skills")
-	assert.Contains(t, all, "DELETE FROM assistant_version_industry_knowledge_bases")
-	assert.Contains(t, all, "DELETE FROM assistant_versions")
+	// 版本及其行业绑定只能由 cleanupAssistantVersions 的精确命名事务处理。
+	assert.NotContains(t, all, "assistant_version_industry_knowledge_bases")
+	assert.NotContains(t, all, "assistant_versions")
 	assert.Less(t, strings.Index(all, "DELETE FROM platform_skills"), strings.Index(all, "DELETE FROM users"))
-	assert.Less(t, strings.Index(all, "DELETE FROM assistant_version_industry_knowledge_bases"), strings.Index(all, "DELETE FROM assistant_versions"))
-	assert.Less(t, strings.Index(all, "DELETE FROM assistant_versions"), strings.Index(all, "DELETE FROM users"))
 }
 
-// 验证平台管理员子资源删除中途遇到 FK 失败时回滚全部前序变更。
-func TestCleanupPlatformAdminsRollsBackOnDependencyFailure(t *testing.T) {
+// 验证隔离管理员仍被其他 run 数据引用时，父用户删除失败会回滚本 run actor 子资源清理。
+func TestCleanupPlatformAdminsRollsBackOnCrossRunUserReference(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	statements, err := platformAdminCleanupStatements("a")
 	require.NoError(t, err)
-	require.Len(t, statements, 6)
+	require.Len(t, statements, 4)
 
 	mock.ExpectBegin()
-	for _, statement := range statements[:4] {
-		// 前四条 child 删除成功，模拟错误发生前已执行但尚未提交的事务状态。
+	for _, statement := range statements[:3] {
+		// 所有明确属于当前 run actor 的 child 清理先成功，但仍保持在同一未提交事务中。
 		mock.ExpectExec(regexp.QuoteMeta(statement.query)).
 			WithArgs("e2e-a-w%-platform", "^e2e-a-w[0-3]-platform$").
 			WillReturnResult(sqlmock.NewResult(0, 1))
 	}
-	// 版本仍被其他 app 引用时，父版本删除由真实 FK 拒绝。
-	mock.ExpectExec(regexp.QuoteMeta(statements[4].query)).
+	// 任何未被当前 run 组织清理覆盖的跨 run FK 都必须阻止父用户删除。
+	mock.ExpectExec(regexp.QuoteMeta(statements[3].query)).
 		WithArgs("e2e-a-w%-platform", "^e2e-a-w[0-3]-platform$").
 		WillReturnError(errors.New("foreign key constraint fails"))
 	mock.ExpectRollback()
@@ -460,7 +465,8 @@ func TestRetryE2EAccessTokenRejectsOtherErrors(t *testing.T) {
 		attempts++
 		return "", expected
 	}, func(context.Context, time.Duration) error {
-		t.Fatal("非限流错误不应进入等待")
+		// 非限流错误进入等待代表重试分类错误，立即停止当前测试。
+		require.FailNow(t, "非限流错误不应进入等待")
 		return nil
 	})
 

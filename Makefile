@@ -659,8 +659,13 @@ migrate-down: ## 回滚本地 k3d 最近一次迁移（= local-migrate DOWN=1）
 seed-e2e: ## 注入 Playwright e2e fixture（= local-seed-e2e）
 	$(MAKE) local-seed-e2e
 
-cleanup-e2e: ## 清理 RUN_ID 指定 run 的 new-api 用户与 manager 隔离 E2E 数据
-	OCM_E2E_ACTION=cleanup $(MAKE) local-seed-e2e
+cleanup-e2e: ## 清理显式 RUN_ID 指定 run 的 new-api 用户与 manager 隔离 E2E 数据
+	@run_id="$${OCM_E2E_RUN_ID:-$(strip $(RUN_ID))}"; \
+		if [ -z "$$run_id" ]; then \
+			echo "cleanup-e2e 必须显式提供 OCM_E2E_RUN_ID 或 RUN_ID，拒绝默认清理 manual" >&2; \
+			exit 1; \
+		fi; \
+		OCM_E2E_ACTION=cleanup OCM_E2E_RUN_ID="$$run_id" $(MAKE) local-seed-e2e
 
 cleanup-e2e-expired: ## 清理创建超过 24 小时的 fixture owning run 及其 new-api 用户
 	OCM_E2E_ACTION=cleanup-expired $(MAKE) local-seed-e2e

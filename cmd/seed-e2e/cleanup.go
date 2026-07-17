@@ -247,7 +247,7 @@ func cleanupStatements(orgID string) []cleanupStatement {
 		{query: `DELETE FROM aicc_agent_knowledge WHERE agent_org_id = ?`, args: []any{orgID}},
 		{query: `DELETE FROM aicc_agents WHERE org_id = ?`, args: []any{orgID}},
 		{query: `DELETE FROM organization_industry_knowledge_bases WHERE org_id = ?`, args: []any{orgID}},
-		{query: `DELETE FROM assistant_version_industry_knowledge_bases WHERE version_id IN (SELECT version_id FROM apps WHERE org_id = ?)`, args: []any{orgID}},
+		// assistant_version_industry_knowledge_bases 是版本级全局绑定，只能由 run 精确版本事务统一处理。
 		{query: `DELETE FROM published_sites WHERE org_id = ?`, args: []any{orgID}},
 		{query: `DELETE FROM conversation_files WHERE app_id IN (` + appSubquery + `)`, args: []any{orgID}},
 		{query: `DELETE FROM app_skills WHERE app_id IN (` + appSubquery + `)`, args: []any{orgID}},
@@ -338,13 +338,14 @@ func platformAdminCleanupStatements(runID string) ([]cleanupStatement, error) {
 	}
 	adminSubquery := `SELECT id FROM users WHERE org_id IS NULL AND username LIKE ? AND username REGEXP ?`
 	args := func() []any { return []any{pattern, boundary} }
+	// cleanupRun 会先逐组织清掉 apps、recharge_records、skill_tickets/messages 等当前 run 用户引用。
+	// 这里不再按 actor 扩大删除这些业务表；若仍有其他 run 的 FK 引用，最终用户删除会失败并回滚本事务。
 	return []cleanupStatement{
 		{query: `DELETE FROM audit_logs WHERE actor_id IN (` + adminSubquery + `)`, args: args()},
 		{query: `DELETE FROM refresh_tokens WHERE user_id IN (` + adminSubquery + `)`, args: args()},
-		// 隔离管理员是 run 专属 actor，其亲自创建的资源也归属该 run；只按 actor ID 删除，绝不匹配其他共享资源。
+		// 隔离管理员是 run 专属 actor，其上传的平台技能也归属该 run；只按 actor ID 删除，绝不匹配其他共享资源。
 		{query: `DELETE FROM platform_skills WHERE uploaded_by IN (` + adminSubquery + `)`, args: args()},
-		{query: `DELETE FROM assistant_version_industry_knowledge_bases WHERE version_id IN (SELECT id FROM assistant_versions WHERE created_by IN (` + adminSubquery + `))`, args: args()},
-		{query: `DELETE FROM assistant_versions WHERE created_by IN (` + adminSubquery + `)`, args: args()},
+		// 助手版本只由 cleanupAssistantVersions 按 run 精确名称处理；任何残留 created_by FK 会安全阻止用户删除。
 		{query: `DELETE FROM users WHERE org_id IS NULL AND username LIKE ? AND username REGEXP ?`, args: args()},
 	}, nil
 }
