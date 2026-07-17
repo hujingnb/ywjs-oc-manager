@@ -65,10 +65,6 @@ export default {
   header: {
     // console：顶栏主标题
     console: '控制台',
-    // envLabel：未登录或无用户时的环境标签
-    envLabel: '本地调试环境',
-    // envLabelWithRole：已登录时拼接角色的环境标签（{role} 为插值占位符）
-    envLabelWithRole: '本地调试环境 · {role}',
     // apiStatus：右上角 API 状态绿标
     apiStatus: 'API 正常',
     // helpManual：使用手册按钮文案与 title

@@ -251,6 +251,20 @@ describe('DashboardLayout', () => {
     })
   })
 
+  // 覆盖后台顶栏产品文案：任何角色都不再展示调试环境提示或内部角色代码。
+  it('does not render the environment or internal role label', () => {
+    authState.user = { id: 'member-1', username: 'member', display_name: '成员', role: 'org_member', org_id: 'org-1' }
+    authState.isPlatformAdmin = false
+    authState.isOrgMember = true
+
+    const wrapper = mountLayout()
+
+    expect(wrapper.find('.eyebrow').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('本地调试环境')
+    expect(wrapper.text()).not.toContain('org_member')
+    expect(wrapper.text()).toContain('控制台')
+  })
+
   // 覆盖后台整体骨架：内容区必须给子页面提供可撑满的剩余高度。
   it('wraps routed pages in a fill-height content frame', () => {
     const wrapper = mountLayout()

@@ -68,7 +68,6 @@
         style="padding: 0 24px; display: flex; align-items: center; justify-content: space-between; min-height: 64px"
       >
         <div>
-          <p class="eyebrow">{{ environmentLabel }}</p>
           <h1 style="margin: 0; font-size: 20px">{{ t('layout.header.console') }}</h1>
         </div>
         <!-- 视角切换器:仅 org_admin 可见,在「企业管理」与「我的实例」两视角间切换并导航。 -->
@@ -188,7 +187,7 @@ import { useAdminPerspective, type AdminPerspective } from '@/composables/useAdm
 import { useSkillTicketBadgeQuery } from '@/api/hooks/useSkillTickets'
 import { useWebPublishConfigQuery } from '@/api/hooks/useWebPublish'
 
-// DashboardLayout 负责已登录后台的导航外壳、环境标识和退出入口。
+// DashboardLayout 负责已登录后台的导航外壳和退出入口。
 // 具体页面权限仍由路由和页面级查询控制，这里只隐藏不适合当前角色的导航项。
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -202,12 +201,6 @@ const passwordModalOpen = ref(false)
 const passwordChanging = ref(false)
 const passwordError = ref('')
 const passwordForm = ref({ oldPassword: '', newPassword: '', confirmPassword: '' })
-
-// environmentLabel 根据是否登录以及当前语言返回环境标识文案，响应语言切换。
-const environmentLabel = computed(() => {
-  if (!auth.user) return t('layout.header.envLabel')
-  return t('layout.header.envLabelWithRole', { role: auth.user.role })
-})
 
 // 根据当前路由计算激活的菜单项 key（前缀匹配）
 const activeKey = computed(() => {
