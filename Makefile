@@ -699,10 +699,19 @@ cleanup-e2e: ## 清理显式 RUN_ID 指定 run 的 new-api 用户与 manager 隔
 		if [ "$${#run_id}" -gt 16 ]; then \
 			echo "cleanup-e2e 的 run ID 不得超过 16 个字符" >&2; exit 1; \
 		fi; \
-		E2E_INPUT_ACTION=cleanup E2E_INPUT_RUN_ID="$$run_id" $(MAKE) local-seed-e2e
+		suite="$${E2E_INPUT_SUITE:-regression}"; \
+		workers="$${E2E_INPUT_WORKERS:-1}"; \
+		$(KUBECTL) -n $(K8S_NS) exec deploy/manager-api -- env \
+			OCM_E2E=1 OCM_E2E_ACTION=cleanup OCM_E2E_RUN_ID="$$run_id" \
+			OCM_E2E_SUITE="$$suite" OCM_E2E_WORKERS="$$workers" seed-e2e
 
 cleanup-e2e-expired: ## 清理创建超过 24 小时的 fixture owning run 及其 new-api 用户
-	E2E_INPUT_ACTION=cleanup-expired $(MAKE) local-seed-e2e
+	@run_id="$${E2E_INPUT_RUN_ID:-manual}"; \
+		suite="$${E2E_INPUT_SUITE:-regression}"; \
+		workers="$${E2E_INPUT_WORKERS:-1}"; \
+		$(KUBECTL) -n $(K8S_NS) exec deploy/manager-api -- env \
+			OCM_E2E=1 OCM_E2E_ACTION=cleanup-expired OCM_E2E_RUN_ID="$$run_id" \
+			OCM_E2E_SUITE="$$suite" OCM_E2E_WORKERS="$$workers" seed-e2e
 
 ##@ OpenAPI / 前端类型 (与代码生成段相互引用)
 
