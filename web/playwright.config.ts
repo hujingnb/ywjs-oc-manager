@@ -12,6 +12,8 @@ import { defineConfig, devices } from '@playwright/test'
 // 预置数据（组织 / 节点 / 成员），先标 test.skip 留作 hot-fix CI 接入时启用。
 export default defineConfig({
   testDir: './tests/e2e',
+  // Playwright 只收集 .spec.ts；同目录的 .test.ts 属于 Vitest，避免两个运行器同时加载 matcher。
+  testMatch: '**/*.spec.ts',
   fullyParallel: false,
   retries: 0,
   workers: 1,
