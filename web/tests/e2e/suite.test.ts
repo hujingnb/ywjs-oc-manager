@@ -3,7 +3,14 @@ import { resolve } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { authStatePath, parseE2ESuite, resolveWorkerCount, suiteGrep } from './suite'
+import {
+  authStatePath,
+  fixtureForWorker,
+  parseE2ESuite,
+  parseFixturePool,
+  resolveWorkerCount,
+  suiteGrep,
+} from './suite'
 
 describe('E2E suite 配置契约', () => {
   // 缺少显式配置时使用 regression，保证默认执行覆盖常规回归场景。
@@ -93,5 +100,57 @@ describe('E2E suite 配置契约', () => {
     const expected = resolve('test-results', '.auth', 'run-a', 'worker-1-org_admin.json')
 
     expect(authStatePath('run-a', 1, 'org_admin')).toBe(expected)
+  })
+
+  // 合法 pool 应保留运行元数据，并按 worker_index 精确选择对应组织。
+  it('解析合法 fixture pool 并选择 worker 1', () => {
+    const pool = parseFixturePool<{ worker_index: number; org_name: string }>(JSON.stringify({
+      run_id: 'run-a',
+      suite: 'quick',
+      fixtures: [
+        { worker_index: 0, org_name: 'org-0' },
+        { worker_index: 1, org_name: 'org-1' },
+      ],
+    }))
+
+    expect(pool.run_id).toBe('run-a')
+    expect(pool.suite).toBe('quick')
+    expect(fixtureForWorker(pool, 1).org_name).toBe('org-1')
+  })
+
+  // worker 2 不存在时必须显式失败，禁止回退到 worker 0 并共享数据。
+  it('拒绝选择越界 worker', () => {
+    const pool = parseFixturePool<{ worker_index: number }>(JSON.stringify({
+      run_id: 'run-a',
+      suite: 'regression',
+      fixtures: [{ worker_index: 0 }],
+    }))
+
+    expect(() => fixtureForWorker(pool, 2)).toThrow('fixture pool 不包含 worker 2')
+  })
+
+  // pool 顶层结构非法时统一使用合法 pool 语义报错，避免暴露不一致的 JSON 细节。
+  it.each([
+    // 非法 JSON 覆盖 JSON.parse 抛错路径。
+    { raw: '{invalid', scene: '非法 JSON' },
+    // 缺少 run_id 覆盖运行边界缺失场景。
+    { raw: JSON.stringify({ suite: 'quick', fixtures: [{}] }), scene: '缺少 run_id' },
+    // 非法 suite 覆盖未知测试层级场景。
+    { raw: JSON.stringify({ run_id: 'run-a', suite: 'all', fixtures: [{}] }), scene: '非法 suite' },
+    // 空 fixtures 覆盖没有 worker 隔离数据的场景。
+    { raw: JSON.stringify({ run_id: 'run-a', suite: 'quick', fixtures: [] }), scene: '空 fixtures' },
+  ])('拒绝 $scene', ({ raw }) => {
+    expect(() => parseFixturePool(raw)).toThrow('seed-e2e 未返回合法 fixture pool')
+  })
+
+  // 同一 worker 出现两份 fixture 时必须失败，避免并发任务静默共享或随机选中数据。
+  it('拒绝重复 worker_index', () => {
+    const pool = parseFixturePool<{ worker_index: number }>(JSON.stringify({
+      run_id: 'run-a',
+      suite: 'quick',
+      fixtures: [{ worker_index: 0 }, { worker_index: 0 }],
+    }))
+
+    expect(() => fixtureForWorker(pool, 0)).toThrow('fixture pool 包含重复的 worker 0')
   })
 })

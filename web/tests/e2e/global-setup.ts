@@ -1,60 +1,87 @@
-import { execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-// Playwright globalSetup：在所有 spec 跑之前先执行：
-// 1. 在仓库根跑 `make seed-e2e`（k3d 下委托 kubectl exec manager-api -- seed-e2e），
-//    把 truncate 业务表 + 重新构造 fixture 一并完成；
-// 2. 从 stdout 解析 fixture JSON，写到 process.env.OCM_E2E_FIXTURE，
-//    供单条 spec 通过 fixtures.ts 的 loadE2EFixture() 读取；
-// 3. 找不到合法 JSON 直接抛错，避免 spec 拿到半截脏数据。
+import { fixtureForWorker, parseE2ESuite, parseFixturePool, resolveWorkerCount } from './suite'
+
+// globalSetup 为每次 Playwright 运行创建按 worker 隔离的 fixture pool，并在失败时回收当前 run。
 async function globalSetup() {
   // 本地 *.localhost 必须绕过宿主代理，否则代理可能把 k3d Ingress 误报为 Bad Gateway。
   const localBypass = 'ocm.localhost,.localhost,localhost,127.0.0.1'
   process.env.NO_PROXY = [process.env.NO_PROXY, localBypass].filter(Boolean).join(',')
   process.env.no_proxy = [process.env.no_proxy, localBypass].filter(Boolean).join(',')
-  // OCM_E2E_NO_SEED=1 时跳过 seed-e2e（不 truncate 业务表）：用于对现有数据跑一次性运维型 spec，
-  // 避免清掉手工准备的实例。依赖 fixture 的常规用例此时拿不到 OCM_E2E_FIXTURE 会自行 test.skip。
-  if (process.env.OCM_E2E_NO_SEED === '1') {
-    return
-  }
+
+  // suite 和 worker 数必须与 Playwright 配置复用同一解析规则，避免 seed 与执行范围分叉。
+  const suite = parseE2ESuite(process.env.OCM_E2E_SUITE)
+  const workers = resolveWorkerCount(suite, process.env.OCM_E2E_WORKERS)
+  // 时间戳的 base36 形式让 run ID 在 Go 的 16 字符限制内保持本轮唯一且只含安全字符。
+  const runID = `run-${Date.now().toString(36)}`
   // 在 ESM 下没有 __dirname；用 import.meta.url 反推当前文件目录，再回到仓库根。
   const here = dirname(fileURLToPath(import.meta.url))
   const repoRoot = resolve(here, '../../..')
-  // seed-e2e 会清空 apps 表，控制器随后无法再识别旧应用对应的 Kubernetes 对象。
-  // 在数据库清理前按项目标签删除本地应用资源，保证重复执行不会累积孤儿 Pod、Service 和 Secret。
-  execSync(
-    'kubectl -n oc-apps delete deployment,service,secret -l app.kubernetes.io/part-of=oc-manager --ignore-not-found=true --wait=true',
-    { cwd: repoRoot, stdio: 'inherit' },
-  )
-  execSync(
-    'kubectl -n oc-aicc delete deployment,service,secret,networkpolicy,horizontalpodautoscaler -l app.kubernetes.io/part-of=oc-manager --ignore-not-found=true --wait=true',
-    { cwd: repoRoot, stdio: 'inherit' },
-  )
-  // 删除 Deployment 完成只代表控制器对象已消失，级联删除的 Hermes Pod 仍可能处于
-  // Terminating。必须等它们全部退出后再 seed 并创建下一轮客服，避免旧运行时占用
-  // 本地 k3d 容量，导致新应用初始化任务超过 E2E 的就绪窗口。
-  execSync(
-    'kubectl -n oc-aicc wait --for=delete pod -l app.kubernetes.io/part-of=oc-manager --timeout=180s',
-    { cwd: repoRoot, stdio: 'inherit' },
-  )
-  const stdout = execSync('make seed-e2e', { cwd: repoRoot }).toString('utf8')
-  const lines = stdout.trim().split(/\r?\n/).filter(Boolean)
-  // 递归 make 会在业务输出后追加「make[1]: 离开目录…」等噪声行，fixture JSON 未必是末行。
-  // 从后向前找第一条能解析为 JSON 对象的行，鲁棒应对任意 make/工具尾部噪声。
-  const fixtureLine = [...lines].reverse().find((line) => {
-    if (!line.startsWith('{')) return false
-    try {
-      JSON.parse(line)
-      return true
-    } catch {
-      return false
-    }
-  })
-  if (!fixtureLine) {
-    throw new Error(`seed-e2e 输出未找到 fixture JSON 行；完整输出：\n${stdout}`)
+  // make 只读取 E2E_INPUT_*，显式透传本轮参数，避免继承旧 shell 值污染隔离边界。
+  const runEnv = {
+    ...process.env,
+    E2E_INPUT_ACTION: 'seed',
+    E2E_INPUT_RUN_ID: runID,
+    E2E_INPUT_SUITE: suite,
+    E2E_INPUT_WORKERS: String(workers),
   }
-  process.env.OCM_E2E_FIXTURE = fixtureLine
+
+  try {
+    const stdout = execFileSync('make', ['seed-e2e'], {
+      cwd: repoRoot,
+      env: runEnv,
+      encoding: 'utf8',
+    })
+    const lines = stdout.trim().split(/\r?\n/).filter(Boolean)
+    // 递归 make 可能在 JSON 后输出离开目录等噪声，因此从末尾选择最近的 JSON 对象候选行。
+    const fixtureLine = [...lines].reverse().find((line) => line.startsWith('{'))
+    if (!fixtureLine) {
+      throw new Error(`seed-e2e 输出未找到 fixture pool JSON 行；完整输出：\n${stdout}`)
+    }
+
+    const pool = parseFixturePool<{ worker_index: number }>(fixtureLine)
+    if (pool.run_id !== runID) {
+      throw new Error(`fixture pool run_id 不匹配：期望 ${runID}，实际 ${pool.run_id}`)
+    }
+    if (pool.suite !== suite) {
+      throw new Error(`fixture pool suite 不匹配：期望 ${suite}，实际 ${pool.suite}`)
+    }
+    if (pool.fixtures.length !== workers) {
+      throw new Error(`fixture pool 数量不匹配：期望 ${workers}，实际 ${pool.fixtures.length}`)
+    }
+    // 数量相等仍可能包含重复或缺号，逐个选择才能证明每个 worker 都恰好独占一份数据。
+    for (let workerIndex = 0; workerIndex < workers; workerIndex += 1) {
+      fixtureForWorker(pool, workerIndex)
+    }
+
+    process.env.OCM_E2E_RUN_ID = runID
+    process.env.OCM_E2E_FIXTURE_POOL = fixtureLine
+  } catch (setupCause) {
+    // cleanup 也使用参数数组和精确 run ID；失败诊断只能补充原错，不得掩盖 setup 根因。
+    const setupError = setupCause instanceof Error
+      ? setupCause
+      : new Error('Playwright global setup 失败', { cause: setupCause })
+    try {
+      execFileSync('make', ['cleanup-e2e'], {
+        cwd: repoRoot,
+        env: { ...runEnv, E2E_INPUT_ACTION: 'cleanup' },
+        encoding: 'utf8',
+      })
+    } catch (cleanupCause) {
+      const cleanupMessage = cleanupCause instanceof Error ? cleanupCause.message : String(cleanupCause)
+      const diagnostic = `fixture cleanup 失败（run_id=${runID}）：${cleanupMessage}`
+      console.error(diagnostic)
+      setupError.message = `${setupError.message}\n${diagnostic}`
+      // cause 同时保留 setup 原始 cause 与 cleanup cause，便于调用方追踪两条失败链。
+      Object.defineProperty(setupError, 'cause', {
+        value: { setupCause: setupError.cause, cleanupCause },
+        configurable: true,
+      })
+    }
+    throw setupError
+  }
 }
 
 export default globalSetup

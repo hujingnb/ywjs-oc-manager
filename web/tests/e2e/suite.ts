@@ -4,6 +4,59 @@ import { resolve } from 'node:path'
 // E2ESuite 限定 CI 和本地允许选择的测试层级，未知值不得静默回退。
 export type E2ESuite = 'quick' | 'regression' | 'slow'
 
+// FixturePool 是 seed-e2e 单次运行的完整输出；泛型 T 保留各业务 fixture 的字段契约。
+export type FixturePool<T> = {
+  // run_id 标识本轮隔离数据，后续清理必须使用同一值。
+  run_id: string
+  // suite 标识 fixture 对应的测试层级，禁止跨层级误用。
+  suite: E2ESuite
+  // fixtures 保存每个 Playwright worker 独占的数据。
+  fixtures: T[]
+}
+
+// parseFixturePool 解析 seed-e2e stdout 中的候选 JSON，并统一收敛语法和顶层结构错误。
+export function parseFixturePool<T>(raw: string): FixturePool<T> {
+  try {
+    const parsed: unknown = JSON.parse(raw)
+
+    // 只校验通用 pool 契约；业务 fixture 字段由具体消费者和 Go seed 保持同步。
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new TypeError('fixture pool 顶层必须是对象')
+    }
+    const candidate = parsed as Partial<FixturePool<T>>
+    if (typeof candidate.run_id !== 'string' || candidate.run_id.trim() === '') {
+      throw new TypeError('fixture pool 缺少 run_id')
+    }
+    if (candidate.suite !== 'quick' && candidate.suite !== 'regression' && candidate.suite !== 'slow') {
+      throw new TypeError('fixture pool suite 非法')
+    }
+    if (!Array.isArray(candidate.fixtures) || candidate.fixtures.length === 0) {
+      throw new TypeError('fixture pool fixtures 必须是非空数组')
+    }
+
+    return candidate as FixturePool<T>
+  } catch (cause) {
+    // 对外固定错误语义，cause 仅供 setup 诊断原始 JSON 或字段问题。
+    throw new Error('seed-e2e 未返回合法 fixture pool', { cause })
+  }
+}
+
+// fixtureForWorker 按 worker_index 唯一选择 fixture；缺失或重复都禁止回退和共享。
+export function fixtureForWorker<T extends { worker_index: number }>(
+  pool: FixturePool<T>,
+  workerIndex: number,
+): T {
+  const matches = pool.fixtures.filter((fixture) => fixture.worker_index === workerIndex)
+  if (matches.length === 0) {
+    throw new Error(`fixture pool 不包含 worker ${workerIndex}`)
+  }
+  if (matches.length > 1) {
+    throw new Error(`fixture pool 包含重复的 worker ${workerIndex}`)
+  }
+
+  return matches[0]
+}
+
 // parseE2ESuite 解析外部 suite 配置；缺省执行常规回归，显式错误配置立即终止启动。
 export function parseE2ESuite(value: string | undefined): E2ESuite {
   if (value === undefined) {
