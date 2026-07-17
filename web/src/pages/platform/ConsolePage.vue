@@ -20,14 +20,14 @@
     <n-card :bordered="true" style="flex: 1">
       <n-tabs v-model:value="activeTab" type="line" animated @update:value="onTabChange">
         <!-- Tab 1：Token 趋势 -->
-        <n-tab-pane name="token" :tab="t('platform.console.tabs.tokenTrend')">
+        <n-tab-pane name="token" :tab="t('platform.console.tabs.tokenTrend')" display-directive="show:lazy">
           <div v-if="platformUsageLoading" class="chart-state">{{ t('platform.console.chart.loading') }}</div>
           <div v-else-if="platformUsageError" class="chart-state danger">{{ t('platform.console.chart.usageUnavail') }}</div>
           <div v-else ref="tokenChartEl" class="chart-container" />
         </n-tab-pane>
 
         <!-- Tab 2：各组织用量 -->
-        <n-tab-pane name="orgs" :tab="t('platform.console.tabs.orgUsage')">
+        <n-tab-pane name="orgs" :tab="t('platform.console.tabs.orgUsage')" display-directive="show:lazy">
           <div v-if="orgBreakdownLoading" class="chart-state">{{ t('platform.console.chart.loading') }}</div>
           <div v-else-if="orgBreakdownError" class="chart-state danger">{{ t('platform.console.chart.usageUnavail') }}</div>
           <div v-else-if="!orgBreakdownData?.length" class="chart-state">{{ t('platform.console.chart.empty') }}</div>
@@ -35,7 +35,7 @@
         </n-tab-pane>
 
         <!-- Tab 3：实例状态 -->
-        <n-tab-pane name="status" :tab="t('platform.console.tabs.instanceStatus')">
+        <n-tab-pane name="status" :tab="t('platform.console.tabs.instanceStatus')" display-directive="show:lazy">
           <div v-if="overviewLoading" class="chart-state">{{ t('platform.console.chart.loading') }}</div>
           <div v-else-if="overviewError" class="chart-state danger">{{ t('platform.console.chart.platformUnavail') }}</div>
           <div v-else ref="statusChartEl" class="chart-container" />
