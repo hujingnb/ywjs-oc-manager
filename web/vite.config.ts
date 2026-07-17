@@ -28,10 +28,10 @@ export default defineConfig({
     },
   },
   // vitest 与 playwright 共存：playwright 用 .spec.ts 文件名也会被 vitest 默认匹配，
-  // 这里显式排除 tests/e2e 目录，避免 vitest 误把 playwright API 当 vitest 跑。
+  // 这里仅排除 Playwright 的 .spec.ts，保留同目录的配置单元测试由 vitest 执行。
   // 组件类用例（ConfirmActionModal 等）依赖 DOM API，统一启用 jsdom 环境。
   test: {
     environment: 'jsdom',
-    exclude: ['node_modules/**', 'dist/**', 'tests/e2e/**'],
+    exclude: ['node_modules/**', 'dist/**', 'tests/e2e/**/*.spec.ts'],
   },
 })
