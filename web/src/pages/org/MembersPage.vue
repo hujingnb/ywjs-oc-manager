@@ -129,16 +129,12 @@
       @confirm="onConfirmDelete"
       @cancel="memberToDelete = null"
     />
-    <ConfirmActionModal
+    <ResetMemberPasswordModal
       :visible="!!resetTarget"
-      :title="t('org.members.modal.resetTitle')"
-      :message="resetTarget ? t('org.members.modal.resetMessage', { username: resetTarget.username }) : ''"
-      :confirm-label="t('org.members.modal.resetConfirm')"
+      :username="resetTarget?.username ?? ''"
       :busy="resetMutation.isPending.value"
-      :verify-value="resetTarget?.username"
-      :verify-hint='resetTarget ? t("org.members.modal.resetPasswordPrompt", { username: resetTarget.username }) : ""'
       @confirm="onConfirmReset"
-      @cancel="resetTarget = null"
+      @cancel="onCancelReset"
     />
   </div>
 </template>
@@ -160,6 +156,7 @@ import {
 import { useAssistantVersionsQuery } from '@/api/hooks/useAssistantVersions'
 import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import DataTableList from '@/components/DataTableList.vue'
+import ResetMemberPasswordModal from '@/components/ResetMemberPasswordModal.vue'
 import { statusColumn, actionColumn } from '@/components/columns'
 import { usePlatformOrgSelection } from '@/composables/usePlatformOrgSelection'
 import { useFormModal } from '@/composables/useFormModal'
@@ -215,9 +212,10 @@ const statusMutation = useSetMemberStatus(effectiveOrgId)
 const deleteMutation = useDeleteMember(effectiveOrgId)
 // memberToDelete 保存二次确认中的目标成员，确认后才调用删除接口。
 const memberToDelete = ref<Member | null>(null)
-// resetTarget/resetNewPassword 暂存重置密码确认流程中的成员和新密码。
+// resetTarget 仅保存当前重置目标；敏感密码值由专用弹窗在确认前自行管理。
 const resetTarget = ref<Member | null>(null)
-const resetNewPassword = ref('')
+// resetSession 区分同一成员先后打开的弹窗会话，避免旧请求结果污染重开的新会话。
+let resetSession = 0
 const resetMutation = useResetMemberPassword()
 const resetFeedback = ref('')
 const resetError = ref(false)
@@ -301,12 +299,18 @@ async function onConfirmDelete() {
   finally { memberToDelete.value = null }
 }
 
-// openResetForm 通过 prompt 获取新密码，长度不满足时不进入确认流程。
+// openResetForm 打开成员专用密码弹窗，并清理上一次请求留下的反馈状态。
 function openResetForm(member: Member) {
-  const pwd = window.prompt(t('org.members.modal.resetPasswordPrompt', { username: member.username }))
-  if (!pwd || pwd.length < 8) return
-  resetTarget.value = member; resetNewPassword.value = pwd
-  resetFeedback.value = ''; resetError.value = false
+  resetSession += 1
+  resetTarget.value = member
+  resetFeedback.value = ''
+  resetError.value = false
+}
+
+// onCancelReset 立即结束当前会话，使取消前仍在途的请求结果失效。
+function onCancelReset() {
+  resetSession += 1
+  resetTarget.value = null
 }
 
 // openCreateAppForm 打开补建实例表单，默认 app_name 取「{显示名} 的实例」。
@@ -343,14 +347,22 @@ async function onSubmitCreateApp() {
   }
 }
 
-// onConfirmReset 提交重置密码，并把结果反馈到页面内状态文本。
-async function onConfirmReset() {
-  if (!resetTarget.value) return
+// onConfirmReset 只接收专用弹窗校验通过的密码；失败时保留目标供用户直接重试。
+async function onConfirmReset(newPassword: string) {
+  const target = resetTarget.value
+  if (!target) return
+  const session = resetSession
   resetFeedback.value = ''; resetError.value = false
   try {
-    await resetMutation.mutateAsync({ userId: resetTarget.value.id, password: resetNewPassword.value })
-    resetFeedback.value = t('org.members.modal.resetSuccess'); resetTarget.value = null
+    await resetMutation.mutateAsync({ userId: target.id, password: newPassword })
+    // 目标和会话必须同时匹配，才能区分同一成员取消后重开的新弹窗。
+    if (resetSession !== session || resetTarget.value?.id !== target.id) return
+    resetFeedback.value = t('org.members.modal.resetSuccess')
+    resetSession += 1
+    resetTarget.value = null
   } catch (err) {
+    // 失败保留当前会话供重试，但迟到错误不能污染已取消、切换或重开的会话。
+    if (resetSession !== session || resetTarget.value?.id !== target.id) return
     resetError.value = true
     resetFeedback.value = err instanceof Error ? err.message : t('org.members.modal.resetFailed')
   }

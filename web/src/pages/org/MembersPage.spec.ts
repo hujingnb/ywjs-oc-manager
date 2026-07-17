@@ -1,6 +1,6 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { computed, defineComponent, h, nextTick, ref, type PropType } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DataTableColumn } from 'naive-ui'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 
@@ -18,6 +18,22 @@ const createMemberAppMock = vi.hoisted(() => ({
     job_id: 'job-1',
   })),
 }))
+
+// 暴露密码重置 mutation，供页面集成测试精确断言成员 ID 与新密码。
+const resetMemberPasswordMock = vi.hoisted(() => ({
+  mutateAsync: vi.fn(),
+}))
+
+// deferredPromise 允许测试精确控制异步请求完成时机，以覆盖切换重置目标后的迟到响应。
+function deferredPromise() {
+  let resolve!: () => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
@@ -102,7 +118,7 @@ vi.mock('@/api/hooks/useMembers', () => ({
   useCreateMember: () => ({ mutateAsync: vi.fn(), isPending: ref(false) }),
   useCreateMemberApp: () => ({ mutateAsync: createMemberAppMock.mutateAsync, isPending: ref(false) }),
   useDeleteMember: () => ({ mutateAsync: vi.fn(), isPending: ref(false) }),
-  useResetMemberPassword: () => ({ mutateAsync: vi.fn(), isPending: ref(false) }),
+  useResetMemberPassword: () => ({ mutateAsync: resetMemberPasswordMock.mutateAsync, isPending: ref(false) }),
   useSetMemberStatus: () => ({ mutate: vi.fn(), isPending: ref(false) }),
 }))
 
@@ -110,6 +126,13 @@ describe('MembersPage', () => {
   // 每次用例前将 i18n 语言设为中文，确保断言中文文案的测试与翻译文件对齐。
   beforeEach(() => {
     i18n.global.locale.value = 'zh'
+    resetMemberPasswordMock.mutateAsync.mockReset()
+    resetMemberPasswordMock.mutateAsync.mockResolvedValue(undefined)
+  })
+
+  // 恢复 window.prompt 等全局 spy，避免断言失败时污染后续用例。
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   const mountPage = () => mount(MembersPage, {
@@ -118,6 +141,23 @@ describe('MembersPage', () => {
       plugins: [[VueQueryPlugin, { queryClient: new QueryClient() }], i18n],
       stubs: {
         ConfirmActionModal: true,
+        ResetMemberPasswordModal: defineComponent({
+          props: {
+            visible: { type: Boolean, required: true },
+            username: { type: String, required: true },
+            busy: { type: Boolean, default: false },
+          },
+          emits: ['confirm', 'cancel'],
+          setup(props, { emit }) {
+            return () => props.visible
+              ? h('section', { 'data-testid': 'reset-password-modal' }, [
+                h('span', props.username),
+                h('button', { 'data-testid': 'confirm-reset', onClick: () => emit('confirm', 'Zs12345612') }, '确认重置'),
+                h('button', { 'data-testid': 'cancel-reset', onClick: () => emit('cancel') }, '取消'),
+              ])
+              : null
+          },
+        }),
         DataTableList: defineComponent({
           props: {
             columns: { type: Array as PropType<DataTableColumn<Member>[]>, required: true },
@@ -320,5 +360,111 @@ describe('MembersPage', () => {
     const wrapper = mountPage()
 
     expect(wrapper.text()).toContain('无实例')
+  })
+
+  // 组织管理员从成员行打开专用弹窗，不再调用原生 prompt；确认后提交目标成员与新密码并关闭弹窗。
+  it('企业管理员通过专用弹窗成功重置成员密码', async () => {
+    authUser.current = { id: 'admin-1', role: 'org_admin', org_id: 'org-1' }
+    const promptSpy = vi.spyOn(window, 'prompt')
+    const wrapper = mountPage()
+    const memberRow = wrapper.findAll('tr').find(row => row.text().includes('企业成员'))!
+
+    await memberRow.findAll('button').find(button => button.text() === '重置密码')!.trigger('click')
+
+    expect(promptSpy).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="reset-password-modal"]').text()).toContain('member')
+
+    await wrapper.get('[data-testid="confirm-reset"]').trigger('click')
+    await flushPromises()
+
+    expect(resetMemberPasswordMock.mutateAsync).toHaveBeenCalledWith({
+      userId: 'member-1',
+      password: 'Zs12345612',
+    })
+    expect(wrapper.find('[data-testid="reset-password-modal"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('已重置密码')
+  })
+
+  // 密码重置首次失败时保留目标供重试；再次成功后清除错误并关闭弹窗。
+  it('重置成员密码失败后可在原弹窗重试成功', async () => {
+    authUser.current = { id: 'admin-1', role: 'org_admin', org_id: 'org-1' }
+    resetMemberPasswordMock.mutateAsync.mockRejectedValueOnce(new Error('重置请求失败'))
+    const wrapper = mountPage()
+    const memberRow = wrapper.findAll('tr').find(row => row.text().includes('企业成员'))!
+
+    await memberRow.findAll('button').find(button => button.text() === '重置密码')!.trigger('click')
+    await wrapper.get('[data-testid="confirm-reset"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="reset-password-modal"]').text()).toContain('member')
+    expect(wrapper.text()).toContain('重置请求失败')
+
+    await wrapper.get('[data-testid="confirm-reset"]').trigger('click')
+    await flushPromises()
+
+    expect(resetMemberPasswordMock.mutateAsync).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-testid="reset-password-modal"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('重置请求失败')
+  })
+
+  // 成员 A 的请求未完成时切换到成员 B，A 的迟到成功不得关闭 B 弹窗或写入成功反馈。
+  it('忽略已切换重置目标的迟到成功结果', async () => {
+    authUser.current = { id: 'admin-1', role: 'org_admin', org_id: 'org-1' }
+    const deferred = deferredPromise()
+    resetMemberPasswordMock.mutateAsync.mockReturnValueOnce(deferred.promise)
+    const wrapper = mountPage()
+    const memberRow = wrapper.findAll('tr').find(row => row.text().includes('企业成员'))!
+    const adminRow = wrapper.findAll('tr').find(row => row.text().includes('org-admin'))!
+
+    await memberRow.findAll('button').find(button => button.text() === '重置密码')!.trigger('click')
+    await wrapper.get('[data-testid="confirm-reset"]').trigger('click')
+    await wrapper.get('[data-testid="cancel-reset"]').trigger('click')
+    await adminRow.findAll('button').find(button => button.text() === '重置密码')!.trigger('click')
+
+    deferred.resolve()
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="reset-password-modal"]').text()).toContain('org-admin')
+    expect(wrapper.text()).not.toContain('已重置密码')
+  })
+
+  // 成员 A 提交后取消并重新打开 A 时，旧会话的迟到成功不得关闭新会话或写入成功反馈。
+  it('忽略同一成员旧会话的迟到成功结果', async () => {
+    authUser.current = { id: 'admin-1', role: 'org_admin', org_id: 'org-1' }
+    const deferred = deferredPromise()
+    resetMemberPasswordMock.mutateAsync.mockReturnValueOnce(deferred.promise)
+    const wrapper = mountPage()
+    const memberRow = wrapper.findAll('tr').find(row => row.text().includes('企业成员'))!
+
+    await memberRow.findAll('button').find(button => button.text() === '重置密码')!.trigger('click')
+    await wrapper.get('[data-testid="confirm-reset"]').trigger('click')
+    await wrapper.get('[data-testid="cancel-reset"]').trigger('click')
+    await memberRow.findAll('button').find(button => button.text() === '重置密码')!.trigger('click')
+
+    deferred.resolve()
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="reset-password-modal"]').text()).toContain('member')
+    expect(wrapper.text()).not.toContain('已重置密码')
+  })
+
+  // 成员 A 提交后取消并重新打开 A 时，旧会话的迟到失败不得污染新会话的错误反馈。
+  it('忽略同一成员旧会话的迟到失败结果', async () => {
+    authUser.current = { id: 'admin-1', role: 'org_admin', org_id: 'org-1' }
+    const deferred = deferredPromise()
+    resetMemberPasswordMock.mutateAsync.mockReturnValueOnce(deferred.promise)
+    const wrapper = mountPage()
+    const memberRow = wrapper.findAll('tr').find(row => row.text().includes('企业成员'))!
+
+    await memberRow.findAll('button').find(button => button.text() === '重置密码')!.trigger('click')
+    await wrapper.get('[data-testid="confirm-reset"]').trigger('click')
+    await wrapper.get('[data-testid="cancel-reset"]').trigger('click')
+    await memberRow.findAll('button').find(button => button.text() === '重置密码')!.trigger('click')
+
+    deferred.reject(new Error('旧会话重置失败'))
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="reset-password-modal"]').text()).toContain('member')
+    expect(wrapper.text()).not.toContain('旧会话重置失败')
   })
 })
