@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   authStatePath,
+  createE2ERunID,
   e2eCommandEnv,
   fixtureForWorker,
   parseE2ESuite,
@@ -105,12 +106,12 @@ describe('E2E suite 配置契约', () => {
 
   // 合法 pool 应保留运行元数据，并按 worker_index 精确选择对应组织。
   it('解析合法 fixture pool 并选择 worker 1', () => {
-    const pool = parseFixturePool<{ worker_index: number; org_name: string }>(JSON.stringify({
+    const pool = parseFixturePool<{ run_id: string; worker_index: number; org_name: string }>(JSON.stringify({
       run_id: 'run-a',
       suite: 'quick',
       fixtures: [
-        { worker_index: 0, org_name: 'org-0' },
-        { worker_index: 1, org_name: 'org-1' },
+        { run_id: 'run-a', worker_index: 0, org_name: 'org-0' },
+        { run_id: 'run-a', worker_index: 1, org_name: 'org-1' },
       ],
     }))
 
@@ -121,10 +122,10 @@ describe('E2E suite 配置契约', () => {
 
   // worker 2 不存在时必须显式失败，禁止回退到 worker 0 并共享数据。
   it('拒绝选择越界 worker', () => {
-    const pool = parseFixturePool<{ worker_index: number }>(JSON.stringify({
+    const pool = parseFixturePool(JSON.stringify({
       run_id: 'run-a',
       suite: 'regression',
-      fixtures: [{ worker_index: 0 }],
+      fixtures: [{ run_id: 'run-a', worker_index: 0 }],
     }))
 
     expect(() => fixtureForWorker(pool, 2)).toThrow('fixture pool 不包含 worker 2')
@@ -135,9 +136,9 @@ describe('E2E suite 配置契约', () => {
     // 非法 JSON 覆盖 JSON.parse 抛错路径。
     { raw: '{invalid', scene: '非法 JSON' },
     // 缺少 run_id 覆盖运行边界缺失场景。
-    { raw: JSON.stringify({ suite: 'quick', fixtures: [{}] }), scene: '缺少 run_id' },
+    { raw: JSON.stringify({ suite: 'quick', fixtures: [{ run_id: 'run-a', worker_index: 0 }] }), scene: '缺少 run_id' },
     // 非法 suite 覆盖未知测试层级场景。
-    { raw: JSON.stringify({ run_id: 'run-a', suite: 'all', fixtures: [{}] }), scene: '非法 suite' },
+    { raw: JSON.stringify({ run_id: 'run-a', suite: 'all', fixtures: [{ run_id: 'run-a', worker_index: 0 }] }), scene: '非法 suite' },
     // 空 fixtures 覆盖没有 worker 隔离数据的场景。
     { raw: JSON.stringify({ run_id: 'run-a', suite: 'quick', fixtures: [] }), scene: '空 fixtures' },
   ])('拒绝 $scene', ({ raw }) => {
@@ -146,30 +147,34 @@ describe('E2E suite 配置契约', () => {
 
   // 同一 worker 出现两份 fixture 时必须失败，避免并发任务静默共享或随机选中数据。
   it('拒绝重复 worker_index', () => {
-    const pool = parseFixturePool<{ worker_index: number }>(JSON.stringify({
+    const pool = parseFixturePool(JSON.stringify({
       run_id: 'run-a',
       suite: 'quick',
-      fixtures: [{ worker_index: 0 }, { worker_index: 0 }],
+      fixtures: [
+        { run_id: 'run-a', worker_index: 0 },
+        { run_id: 'run-a', worker_index: 0 },
+      ],
     }))
 
     expect(() => fixtureForWorker(pool, 0)).toThrow('fixture pool 包含重复的 worker 0')
   })
 
-  // 旧加载入口即使看到遗留环境变量也不得猜测 worker，调用方必须改用 Playwright 注入值。
-  it('旧加载入口拒绝绕过 worker fixture', async () => {
-    const previous = process.env.OCM_E2E_FIXTURE
-    process.env.OCM_E2E_FIXTURE = JSON.stringify({ worker_index: 0, org_name: 'legacy-org' })
+  // fixture 基础边界拒绝非对象、非法索引和跨 run 数据，防止后续 schema 在错误前提上运行。
+  it.each([
+    // null 覆盖 fixture 不是对象的场景。
+    { fixture: null, scene: 'null fixture' },
+    // 负数覆盖 worker_index 小于零的场景。
+    { fixture: { run_id: 'run-a', worker_index: -1 }, scene: '负 worker_index' },
+    // 小数覆盖 worker_index 不是整数的场景。
+    { fixture: { run_id: 'run-a', worker_index: 1.5 }, scene: '小数 worker_index' },
+    // 字符串覆盖 worker_index 类型错误的场景。
+    { fixture: { run_id: 'run-a', worker_index: '0' }, scene: '字符串 worker_index' },
+    // 不同 run_id 覆盖 fixture 逃逸当前 pool 的场景。
+    { fixture: { run_id: 'run-b', worker_index: 0 }, scene: '跨 run fixture' },
+  ])('拒绝 $scene', ({ fixture }) => {
+    const raw = JSON.stringify({ run_id: 'run-a', suite: 'quick', fixtures: [fixture] })
 
-    try {
-      const { loadE2EFixture } = await import('./fixtures')
-      expect(() => loadE2EFixture()).toThrow('请使用 Playwright 注入的 e2eFixture')
-    } finally {
-      if (previous === undefined) {
-        delete process.env.OCM_E2E_FIXTURE
-      } else {
-        process.env.OCM_E2E_FIXTURE = previous
-      }
-    }
+    expect(() => parseFixturePool(raw)).toThrow('seed-e2e 未返回合法 fixture pool')
   })
 
   // 命令环境必须清除所有历史别名，只让本轮 OCM_E2E_* 精确参数进入 make。
@@ -188,6 +193,11 @@ describe('E2E suite 配置契约', () => {
       E2E_INPUT_RUN_ID: 'stale-input',
       E2E_INPUT_SUITE: 'slow',
       E2E_INPUT_WORKERS: '4',
+      MAKEFLAGS: 'RUN_ID=stale-make',
+      MAKEOVERRIDES: 'RUN_ID',
+      GNUMAKEFLAGS: '--warn-undefined-variables',
+      MFLAGS: '--no-print-directory',
+      MAKELEVEL: '9',
     }, 'run-current', 'quick', 2, 'seed')
 
     expect(env).toMatchObject({
@@ -205,5 +215,19 @@ describe('E2E suite 配置契约', () => {
     expect(env.E2E_INPUT_RUN_ID).toBeUndefined()
     expect(env.E2E_INPUT_SUITE).toBeUndefined()
     expect(env.E2E_INPUT_WORKERS).toBeUndefined()
+    expect(env.MAKEFLAGS).toBeUndefined()
+    expect(env.MAKEOVERRIDES).toBeUndefined()
+    expect(env.GNUMAKEFLAGS).toBeUndefined()
+    expect(env.MFLAGS).toBeUndefined()
+    expect(env.MAKELEVEL).toBeUndefined()
+  })
+
+  // 固定六字节输入应生成 16 字符安全 run ID，避免依赖概率循环测试随机性。
+  it('由固定随机字节生成安全 run ID', () => {
+    const runID = createE2ERunID(Buffer.from('001122334455', 'hex'))
+
+    expect(runID).toBe('run-001122334455')
+    expect(runID).toHaveLength(16)
+    expect(runID).toMatch(/^[a-z0-9-]+$/)
   })
 })

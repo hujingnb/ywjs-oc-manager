@@ -1,12 +1,13 @@
 import { execFileSync } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { parseE2EFixturePoolFromOutput } from './fixture-schema'
 import {
+  createE2ERunID,
   e2eCommandEnv,
-  fixtureForWorker,
   parseE2ESuite,
-  parseFixturePool,
   resolveWorkerCount,
 } from './suite'
 
@@ -20,8 +21,8 @@ async function globalSetup() {
   // suite 和 worker 数必须与 Playwright 配置复用同一解析规则，避免 seed 与执行范围分叉。
   const suite = parseE2ESuite(process.env.OCM_E2E_SUITE)
   const workers = resolveWorkerCount(suite, process.env.OCM_E2E_WORKERS)
-  // 时间戳的 base36 形式让 run ID 在 Go 的 16 字符限制内保持本轮唯一且只含安全字符。
-  const runID = `run-${Date.now().toString(36)}`
+  // 六字节密码学随机源提供 48-bit 隔离空间，编码后恰好满足 Go 的 16 字符限制。
+  const runID = createE2ERunID(randomBytes(6))
   // 在 ESM 下没有 __dirname；用 import.meta.url 反推当前文件目录，再回到仓库根。
   const here = dirname(fileURLToPath(import.meta.url))
   const repoRoot = resolve(here, '../../..')
@@ -34,30 +35,11 @@ async function globalSetup() {
       env: runEnv,
       encoding: 'utf8',
     })
-    const lines = stdout.trim().split(/\r?\n/).filter(Boolean)
-    // 递归 make 可能在 JSON 后输出离开目录等噪声，因此从末尾选择最近的 JSON 对象候选行。
-    const fixtureLine = [...lines].reverse().find((line) => line.startsWith('{'))
-    if (!fixtureLine) {
-      throw new Error(`seed-e2e 输出未找到 fixture pool JSON 行；完整输出：\n${stdout}`)
-    }
-
-    const pool = parseFixturePool<{ worker_index: number }>(fixtureLine)
-    if (pool.run_id !== runID) {
-      throw new Error(`fixture pool run_id 不匹配：期望 ${runID}，实际 ${pool.run_id}`)
-    }
-    if (pool.suite !== suite) {
-      throw new Error(`fixture pool suite 不匹配：期望 ${suite}，实际 ${pool.suite}`)
-    }
-    if (pool.fixtures.length !== workers) {
-      throw new Error(`fixture pool 数量不匹配：期望 ${workers}，实际 ${pool.fixtures.length}`)
-    }
-    // 数量相等仍可能包含重复或缺号，逐个选择才能证明每个 worker 都恰好独占一份数据。
-    for (let workerIndex = 0; workerIndex < workers; workerIndex += 1) {
-      fixtureForWorker(pool, workerIndex)
-    }
+    // 从尾部逐候选执行 JSON、完整 schema 和本轮边界校验，伪 JSON 或旧 run 不得截断查找。
+    const pool = parseE2EFixturePoolFromOutput(stdout, runID, suite, workers)
 
     process.env.OCM_E2E_RUN_ID = runID
-    process.env.OCM_E2E_FIXTURE_POOL = fixtureLine
+    process.env.OCM_E2E_FIXTURE_POOL = JSON.stringify(pool)
   } catch (setupCause) {
     // cleanup 也使用参数数组和精确 run ID；失败诊断只能补充原错，不得掩盖 setup 根因。
     const setupError = setupCause instanceof Error

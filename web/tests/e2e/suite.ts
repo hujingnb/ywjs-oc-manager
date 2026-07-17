@@ -9,7 +9,20 @@ const e2eConflictEnvKeys = [
   'OCM_E2E_ACTION', 'OCM_E2E_RUN_ID', 'OCM_E2E_SUITE', 'OCM_E2E_WORKERS',
   'ACTION', 'RUN_ID', 'SUITE', 'WORKERS',
   'E2E_INPUT_ACTION', 'E2E_INPUT_RUN_ID', 'E2E_INPUT_SUITE', 'E2E_INPUT_WORKERS',
+  'MAKEFLAGS', 'MAKEOVERRIDES', 'GNUMAKEFLAGS', 'MFLAGS', 'MAKELEVEL',
 ] as const
+
+// createE2ERunID 把六字节随机源编码为 Go 允许的 16 字符安全 run ID。
+export function createE2ERunID(
+  // randomBytes 必须由调用方提供恰好六字节，测试可注入固定值而无需概率循环。
+  randomBytes: Uint8Array,
+): string {
+  if (randomBytes.byteLength !== 6) {
+    throw new Error('E2E run ID 随机源必须恰好为 6 字节')
+  }
+
+  return `run-${Buffer.from(randomBytes).toString('hex')}`
+}
 
 // e2eCommandEnv 从宿主环境构造无冲突的 make 子进程环境，并只注入当前运行的精确参数。
 export function e2eCommandEnv(
@@ -38,7 +51,7 @@ export function e2eCommandEnv(
 }
 
 // FixturePool 是 seed-e2e 单次运行的完整输出；泛型 T 保留各业务 fixture 的字段契约。
-export type FixturePool<T> = {
+export type FixturePool<T extends FixtureIdentity = FixtureIdentity> = {
   // run_id 标识本轮隔离数据，后续清理必须使用同一值。
   run_id: string
   // suite 标识 fixture 对应的测试层级，禁止跨层级误用。
@@ -47,8 +60,16 @@ export type FixturePool<T> = {
   fixtures: T[]
 }
 
+// FixtureIdentity 是所有 worker fixture 必须具备的基础运行时隔离字段。
+export type FixtureIdentity = {
+  // run_id 必须与 pool 顶层一致，防止跨运行数据混入。
+  run_id: string
+  // worker_index 必须是有限非负整数，供 Playwright parallelIndex 精确选择。
+  worker_index: number
+}
+
 // parseFixturePool 解析 seed-e2e stdout 中的候选 JSON，并统一收敛语法和顶层结构错误。
-export function parseFixturePool<T>(raw: string): FixturePool<T> {
+export function parseFixturePool<T extends FixtureIdentity = FixtureIdentity>(raw: string): FixturePool<T> {
   try {
     const parsed: unknown = JSON.parse(raw)
 
@@ -66,8 +87,24 @@ export function parseFixturePool<T>(raw: string): FixturePool<T> {
     if (!Array.isArray(candidate.fixtures) || candidate.fixtures.length === 0) {
       throw new TypeError('fixture pool fixtures 必须是非空数组')
     }
+    // 每项先验证跨业务通用的隔离字段，完整业务 schema 再由 fixture-schema.ts 收紧。
+    for (const fixture of candidate.fixtures) {
+      if (typeof fixture !== 'object' || fixture === null || Array.isArray(fixture)) {
+        throw new TypeError('fixture 必须是对象')
+      }
+      const identity = fixture as Partial<FixtureIdentity>
+      if (typeof identity.run_id !== 'string' || identity.run_id.trim() === '' || identity.run_id !== candidate.run_id) {
+        throw new TypeError('fixture run_id 必须非空且与 pool 一致')
+      }
+      if (typeof identity.worker_index !== 'number'
+        || !Number.isFinite(identity.worker_index)
+        || !Number.isInteger(identity.worker_index)
+        || identity.worker_index < 0) {
+        throw new TypeError('fixture worker_index 必须是有限非负整数')
+      }
+    }
 
-    return candidate as FixturePool<T>
+    return candidate as unknown as FixturePool<T>
   } catch (cause) {
     // 对外固定错误语义，cause 仅供 setup 诊断原始 JSON 或字段问题。
     throw new Error('seed-e2e 未返回合法 fixture pool', { cause })
@@ -75,7 +112,7 @@ export function parseFixturePool<T>(raw: string): FixturePool<T> {
 }
 
 // fixtureForWorker 按 worker_index 唯一选择 fixture；缺失或重复都禁止回退和共享。
-export function fixtureForWorker<T extends { worker_index: number }>(
+export function fixtureForWorker<T extends FixtureIdentity>(
   pool: FixturePool<T>,
   workerIndex: number,
 ): T {

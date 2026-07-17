@@ -1,38 +1,11 @@
 import { expect, test as base } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
-import { fixtureForWorker, parseFixturePool } from './suite'
+import { parseE2EFixturePool, type E2EFixture } from './fixture-schema'
+import { fixtureForWorker } from './suite'
 
-// E2EFixture 与 cmd/seed-e2e 输出 JSON 字段保持一致。
-// 注意：org_id / app_id 均为数据库 UUID，schema 决定不能用 number。
-export type E2EFixture = {
-  // run_id 标识 fixture 所属的隔离运行批次。
-  run_id: string
-  // worker_index 对应 Playwright parallelIndex，禁止跨 worker 共享。
-  worker_index: number
-  // platform_admin_login 是当前 worker 独占的平台管理员账号。
-  platform_admin_login: string
-  // platform_admin_password 是当前 worker 平台管理员的登录密码。
-  platform_admin_password: string
-  // org_id 是当前 worker 独占组织的数据库 UUID。
-  org_id: string
-  // org_name 是当前 worker 独占组织的展示名称。
-  org_name: string
-  // org_code 是组织管理员和普通成员登录时使用的企业标识。
-  org_code: string
-  // org_admin_login 是当前 worker 独占的组织管理员账号。
-  org_admin_login: string
-  // org_admin_password 是当前 worker 组织管理员的登录密码。
-  org_admin_password: string
-  // org_member_login 是当前 worker 独占的普通成员账号。
-  org_member_login: string
-  // org_member_password 是当前 worker 普通成员的登录密码。
-  org_member_password: string
-  // app_id 是当前 worker 预置应用的数据库 UUID。
-  app_id: string
-  // app_name 是当前 worker 预置应用的展示名称。
-  app_name: string
-}
+// E2EFixture 从无 Playwright 依赖的 schema 模块转出，保持现有 spec 的类型导入兼容。
+export type { E2EFixture } from './fixture-schema'
 
 // E2EWorkerFixtures 声明 worker 级 fixture，确保同一 worker 内复用且不同 worker 间隔离。
 type E2EWorkerFixtures = {
@@ -48,7 +21,7 @@ export const test = base.extend<{}, E2EWorkerFixtures>({
       throw new Error('OCM_E2E_FIXTURE_POOL 未注入；确保 globalSetup 已生成 fixture pool')
     }
 
-    const pool = parseFixturePool<E2EFixture>(raw)
+    const pool = parseE2EFixturePool(raw)
     const fixture = fixtureForWorker(pool, workerInfo.parallelIndex)
     await use(fixture)
   }, { scope: 'worker' }],
