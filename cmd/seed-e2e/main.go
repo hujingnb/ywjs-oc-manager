@@ -104,7 +104,11 @@ func main() {
 		return
 	}
 
-	// 同名 run seed 前只清理自身 manager 数据；new-api 用户名按 run/worker 固定，slow provision 会幂等替换。
+	// 所有 suite 都先按 manager 保存的精确上游 ID 清理旧用户；无 ID 时不会要求 new-api 配置或网络。
+	if err := cleanupNewAPIUsers(ctx, db, cfg, opts.RunID); err != nil {
+		log.Fatalf("清理同名 run 的旧 new-api 用户失败: %v", err)
+	}
+	// 上游清理成功后再删除同名 run 的 manager 数据，失败时保留本地所有权记录供重试。
 	if err := cleanupRun(ctx, db, opts.RunID); err != nil {
 		log.Fatalf("清理同名 run 的旧 E2E 数据失败: %v", err)
 	}
@@ -176,13 +180,8 @@ func provisionE2ENewAPIUser(ctx context.Context, db *sql.DB, cfg config.Config, 
 	username := e2eNewAPIUsername(runID, workerIndex)
 	password := "E2e-" + strings.ReplaceAll(uuid.NewString()[:16], "-", "")
 	client := newapi.NewClient(cfg.NewAPI.BaseURL, cfg.NewAPI.AdminToken, cfg.NewAPI.AdminUserID)
-	oldUser, err := client.FindUserByUsername(ctx, username)
-	if err == nil {
-		if err := client.DeleteUser(ctx, oldUser.ID); err != nil && !errors.Is(err, newapi.ErrNotFound) {
-			return fmt.Errorf("删除旧 new-api E2E 用户失败: %w", err)
-		}
-	} else if !errors.Is(err, newapi.ErrNotFound) {
-		return fmt.Errorf("查询旧 new-api E2E 用户失败: %w", err)
+	if err := requireE2ENewAPIUsernameAvailable(ctx, client, username); err != nil {
+		return err
 	}
 	user, err := client.CreateUser(ctx, newapi.CreateUserInput{
 		Username:    username,
@@ -266,7 +265,25 @@ func waitE2ERetry(ctx context.Context, delay time.Duration) error {
 func e2eNewAPIUsername(runID string, workerIndex int) string {
 	hash := fnv.New32a()
 	_, _ = hash.Write([]byte(runID))
-	return fmt.Sprintf("e%07x%02d", hash.Sum32()&0x0fffffff, workerIndex)
+	return fmt.Sprintf("e%08x%02d", hash.Sum32(), workerIndex)
+}
+
+// e2eNewAPIUsernameLookup 只允许查询用户名占用状态，接口刻意不暴露 DeleteUser 删除能力。
+type e2eNewAPIUsernameLookup interface {
+	// FindUserByUsername 精确查询上游用户名是否已存在。
+	FindUserByUsername(context.Context, string) (newapi.User, error)
+}
+
+// requireE2ENewAPIUsernameAvailable 将任何已存在用户名视为未知所有者并安全失败。
+func requireE2ENewAPIUsernameAvailable(ctx context.Context, lookup e2eNewAPIUsernameLookup, username string) error {
+	user, err := lookup.FindUserByUsername(ctx, username)
+	if err == nil {
+		return fmt.Errorf("new-api E2E 用户名 %s 已被占用（用户 ID %d），拒绝按用户名删除", username, user.ID)
+	}
+	if errors.Is(err, newapi.ErrNotFound) {
+		return nil
+	}
+	return fmt.Errorf("查询 new-api E2E 用户名占用状态失败: %w", err)
 }
 
 // ensurePlatformAdmin 保证 fixture 声明的隔离 platform_admin 行存在。

@@ -117,7 +117,7 @@ func cleanupNewAPIUsers(ctx context.Context, db *sql.DB, cfg config.Config, runI
 	rows, err := db.QueryContext(ctx, `
 		SELECT DISTINCT COALESCE(newapi_user_id, '')
 		FROM organizations
-		WHERE code LIKE ? AND code REGEXP ?`, pattern, boundary)
+		WHERE code LIKE ? AND REGEXP_LIKE(code, ?, 'c')`, pattern, boundary)
 	if err != nil {
 		return fmt.Errorf("查询 run %s 的 new-api 用户: %w", runID, err)
 	}
@@ -177,7 +177,7 @@ func cleanupRun(ctx context.Context, db *sql.DB, runID string) error {
 	}
 	rows, err := db.QueryContext(ctx, `
 		SELECT id FROM organizations
-		WHERE code LIKE ? AND code REGEXP ?
+		WHERE code LIKE ? AND REGEXP_LIKE(code, ?, 'c')
 		ORDER BY id`, pattern, boundary)
 	if err != nil {
 		return fmt.Errorf("查询 run %s 的组织: %w", runID, err)
@@ -254,6 +254,18 @@ func cleanupStatements(orgID string) []cleanupStatement {
 		{query: `DELETE FROM channel_bindings WHERE app_id IN (` + appSubquery + `)`, args: []any{orgID}},
 		{query: `DELETE FROM ragflow_documents WHERE org_id = ?`, args: []any{orgID}},
 		{query: `DELETE FROM ragflow_datasets WHERE org_id = ?`, args: []any{orgID}},
+		// target 只按 skill name 建模；仅当同名技能全部来自当前 run ticket 时删除跨组织授权，避免误删其他 ticket 同名技能的可见范围。
+		{query: `DELETE FROM custom_skill_targets
+			WHERE EXISTS (
+				SELECT 1 FROM custom_skills current_skill
+				WHERE current_skill.name = custom_skill_targets.custom_skill_name
+					AND current_skill.ticket_id IN (` + ticketSubquery + `)
+			)
+			AND NOT EXISTS (
+				SELECT 1 FROM custom_skills other
+				WHERE other.name = custom_skill_targets.custom_skill_name
+					AND other.ticket_id NOT IN (` + ticketSubquery + `)
+			)`, args: []any{orgID, orgID}},
 		{query: `DELETE FROM custom_skill_targets WHERE org_id = ?`, args: []any{orgID}},
 		{query: `DELETE FROM custom_skills WHERE ticket_id IN (` + ticketSubquery + `)`, args: []any{orgID}},
 		{query: `DELETE FROM skill_ticket_messages WHERE ticket_id IN (` + ticketSubquery + `)`, args: []any{orgID}},
@@ -287,14 +299,14 @@ func cleanupAssistantVersions(ctx context.Context, db *sql.DB, runID string) err
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM assistant_version_industry_knowledge_bases
 		WHERE version_id IN (
-			SELECT id FROM assistant_versions WHERE name LIKE ? AND name REGEXP ?
+			SELECT id FROM assistant_versions WHERE name LIKE ? AND REGEXP_LIKE(name, ?, 'c')
 		)`, pattern, boundary); err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("清理 run %s 的助手版本知识库绑定: %w", runID, err)
 	}
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM assistant_versions
-		WHERE name LIKE ? AND name REGEXP ?`, pattern, boundary); err != nil {
+		WHERE name LIKE ? AND REGEXP_LIKE(name, ?, 'c')`, pattern, boundary); err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("清理 run %s 的助手版本: %w", runID, err)
 	}
@@ -336,7 +348,7 @@ func platformAdminCleanupStatements(runID string) ([]cleanupStatement, error) {
 	if err != nil {
 		return nil, err
 	}
-	adminSubquery := `SELECT id FROM users WHERE org_id IS NULL AND username LIKE ? AND username REGEXP ?`
+	adminSubquery := `SELECT id FROM users WHERE org_id IS NULL AND username LIKE ? AND REGEXP_LIKE(username, ?, 'c')`
 	args := func() []any { return []any{pattern, boundary} }
 	// cleanupRun 会先逐组织清掉 apps、recharge_records、skill_tickets/messages 等当前 run 用户引用。
 	// 这里不再按 actor 扩大删除这些业务表；若仍有其他 run 的 FK 引用，最终用户删除会失败并回滚本事务。
@@ -346,7 +358,7 @@ func platformAdminCleanupStatements(runID string) ([]cleanupStatement, error) {
 		// 隔离管理员是 run 专属 actor，其上传的平台技能也归属该 run；只按 actor ID 删除，绝不匹配其他共享资源。
 		{query: `DELETE FROM platform_skills WHERE uploaded_by IN (` + adminSubquery + `)`, args: args()},
 		// 助手版本只由 cleanupAssistantVersions 按 run 精确名称处理；任何残留 created_by FK 会安全阻止用户删除。
-		{query: `DELETE FROM users WHERE org_id IS NULL AND username LIKE ? AND username REGEXP ?`, args: args()},
+		{query: `DELETE FROM users WHERE org_id IS NULL AND username LIKE ? AND REGEXP_LIKE(username, ?, 'c')`, args: args()},
 	}, nil
 }
 

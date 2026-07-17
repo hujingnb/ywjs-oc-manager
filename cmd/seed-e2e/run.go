@@ -20,15 +20,15 @@ const (
 	suiteSlow e2eSuite = "slow"
 )
 
-// e2eAction 表示 seed 命令的运行意图；清理枚举先作为 Task 4 的输入契约保留。
+// e2eAction 表示 seed 命令的创建或清理运行意图。
 type e2eAction string
 
 const (
 	// actionSeed 创建当前 run 的 fixture 池。
 	actionSeed e2eAction = "seed"
-	// actionCleanup 清理指定 run 的 fixture，执行逻辑由 Task 4 接入。
+	// actionCleanup 清理指定 run 的 fixture。
 	actionCleanup e2eAction = "cleanup"
-	// actionCleanupExpired 清理过期 fixture，执行逻辑由 Task 4 接入。
+	// actionCleanupExpired 清理过期 fixture。
 	actionCleanupExpired e2eAction = "cleanup-expired"
 )
 
@@ -40,7 +40,7 @@ type runOptions struct {
 	Suite e2eSuite
 	// Workers 是本轮需要生成的隔离 fixture 数量。
 	Workers int
-	// Action 决定创建或清理 fixture；当前主流程只允许 seed。
+	// Action 决定创建或清理 fixture。
 	Action e2eAction
 }
 
@@ -79,10 +79,12 @@ var unsafeRunID = regexp.MustCompile(`[^a-z0-9-]+`)
 
 // loadRunOptions 从环境变量加载并校验运行参数，保证数据库写入前参数已收敛。
 func loadRunOptions() (runOptions, error) {
-	runID := strings.ToLower(strings.TrimSpace(os.Getenv("OCM_E2E_RUN_ID")))
-	if runID == "" {
-		runID = "manual"
+	rawRunID := strings.TrimSpace(os.Getenv("OCM_E2E_RUN_ID"))
+	runIDProvided := rawRunID != ""
+	if rawRunID == "" {
+		rawRunID = "manual"
 	}
+	runID := strings.ToLower(rawRunID)
 	// 连续不安全字符统一折叠为连字符，并移除两端连字符，保持名称适合前缀匹配。
 	runID = strings.Trim(unsafeRunID.ReplaceAllString(runID, "-"), "-")
 	if runID == "" || len(runID) > 16 {
@@ -104,6 +106,10 @@ func loadRunOptions() (runOptions, error) {
 	if action != actionSeed && action != actionCleanup && action != actionCleanupExpired {
 		return runOptions{}, fmt.Errorf("未知 OCM_E2E_ACTION: %s", action)
 	}
+	// 精确 cleanup 不允许把原始输入清洗成另一个合法 run；调用方必须显式提供规范 ID。
+	if action == actionCleanup && (!runIDProvided || rawRunID != runID) {
+		return runOptions{}, fmt.Errorf("cleanup 必须显式提供规范的 OCM_E2E_RUN_ID")
+	}
 
 	workers := 1
 	if raw := strings.TrimSpace(os.Getenv("OCM_E2E_WORKERS")); raw != "" {
@@ -119,14 +125,6 @@ func loadRunOptions() (runOptions, error) {
 	}
 
 	return runOptions{RunID: runID, Suite: suite, Workers: workers, Action: action}, nil
-}
-
-// requireSeedAction 在 Task 4 接入 cleanup 前阻止清理请求误入 truncate 后重新 seed 的流程。
-func requireSeedAction(opts runOptions) error {
-	if opts.Action != actionSeed {
-		return fmt.Errorf("OCM_E2E_ACTION=%s 尚未实现", opts.Action)
-	}
-	return nil
 }
 
 // fixtureIdentities 为每个 worker 生成互不重叠的组织、账号和应用命名空间。

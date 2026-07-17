@@ -1,5 +1,37 @@
 .PHONY: test test-hermes-version-guard vet build sqlc-generate migrate-up migrate-down web-test web-typecheck web-build e2e-quick e2e-regression e2e-slow build-hermes-runtime hermes-inject-contract seed-e2e cleanup-e2e cleanup-e2e-expired openapi-gen web-types-gen openapi-check local-up local-down local-reset local-stop local-start local-build local-preload local-migrate local-seed local-seed-e2e local-mc-init local-status local-logs local-shell cluster-create .guard-k3d-hosts build-ops-runtime local-build-ops local-init-models
 
+# E2E 输入先用 value 冻结为简单变量，再取消原变量导出；禁止 GNU make 对命令行中的 $(shell ...) 二次展开。
+ifneq ($(origin OCM_E2E_ACTION),undefined)
+override E2E_INPUT_ACTION := $(value OCM_E2E_ACTION)
+else ifneq ($(origin ACTION),undefined)
+override E2E_INPUT_ACTION := $(value ACTION)
+else ifneq ($(origin E2E_INPUT_ACTION),undefined)
+override E2E_INPUT_ACTION := $(value E2E_INPUT_ACTION)
+endif
+ifneq ($(origin OCM_E2E_RUN_ID),undefined)
+override E2E_INPUT_RUN_ID := $(value OCM_E2E_RUN_ID)
+else ifneq ($(origin RUN_ID),undefined)
+override E2E_INPUT_RUN_ID := $(value RUN_ID)
+else ifneq ($(origin E2E_INPUT_RUN_ID),undefined)
+override E2E_INPUT_RUN_ID := $(value E2E_INPUT_RUN_ID)
+endif
+ifneq ($(origin OCM_E2E_SUITE),undefined)
+override E2E_INPUT_SUITE := $(value OCM_E2E_SUITE)
+else ifneq ($(origin SUITE),undefined)
+override E2E_INPUT_SUITE := $(value SUITE)
+else ifneq ($(origin E2E_INPUT_SUITE),undefined)
+override E2E_INPUT_SUITE := $(value E2E_INPUT_SUITE)
+endif
+ifneq ($(origin OCM_E2E_WORKERS),undefined)
+override E2E_INPUT_WORKERS := $(value OCM_E2E_WORKERS)
+else ifneq ($(origin WORKERS),undefined)
+override E2E_INPUT_WORKERS := $(value WORKERS)
+else ifneq ($(origin E2E_INPUT_WORKERS),undefined)
+override E2E_INPUT_WORKERS := $(value E2E_INPUT_WORKERS)
+endif
+unexport OCM_E2E_ACTION OCM_E2E_RUN_ID OCM_E2E_SUITE OCM_E2E_WORKERS ACTION RUN_ID SUITE WORKERS
+export E2E_INPUT_ACTION E2E_INPUT_RUN_ID E2E_INPUT_SUITE E2E_INPUT_WORKERS
+
 SWAG_VERSION := v2.0.0-rc5
 OPENAPI_TS_VERSION := 7.13.0
 
@@ -360,13 +392,13 @@ local-init-models:
 	fi
 
 local-seed-e2e: ## kubectl exec manager-api 按 ACTION/RUN_ID/SUITE/WORKERS 创建或清理隔离 E2E 数据
-	@$(KUBECTL) -n $(K8S_NS) exec deploy/manager-api -- env \
-		OCM_E2E=1 \
-		OCM_E2E_ACTION=$${OCM_E2E_ACTION:-$(or $(ACTION),seed)} \
-		OCM_E2E_RUN_ID=$${OCM_E2E_RUN_ID:-$(or $(RUN_ID),manual)} \
-		OCM_E2E_SUITE=$${OCM_E2E_SUITE:-$(or $(SUITE),regression)} \
-		OCM_E2E_WORKERS=$${OCM_E2E_WORKERS:-$(or $(WORKERS),1)} \
-		seed-e2e
+	@action="$${E2E_INPUT_ACTION:-seed}"; \
+		run_id="$${E2E_INPUT_RUN_ID:-manual}"; \
+		suite="$${E2E_INPUT_SUITE:-regression}"; \
+		workers="$${E2E_INPUT_WORKERS:-1}"; \
+		$(KUBECTL) -n $(K8S_NS) exec deploy/manager-api -- env \
+			OCM_E2E=1 OCM_E2E_ACTION="$$action" OCM_E2E_RUN_ID="$$run_id" \
+			OCM_E2E_SUITE="$$suite" OCM_E2E_WORKERS="$$workers" seed-e2e
 
 local-status: ## 查看本地集群 pod / ingress 状态
 	$(KUBECTL) -n $(K8S_NS) get pods,svc,ingress
@@ -660,15 +692,17 @@ seed-e2e: ## 注入 Playwright e2e fixture（= local-seed-e2e）
 	$(MAKE) local-seed-e2e
 
 cleanup-e2e: ## 清理显式 RUN_ID 指定 run 的 new-api 用户与 manager 隔离 E2E 数据
-	@run_id="$${OCM_E2E_RUN_ID:-$(strip $(RUN_ID))}"; \
-		if [ -z "$$run_id" ]; then \
-			echo "cleanup-e2e 必须显式提供 OCM_E2E_RUN_ID 或 RUN_ID，拒绝默认清理 manual" >&2; \
-			exit 1; \
+	@run_id="$${E2E_INPUT_RUN_ID:-}"; \
+		case "$$run_id" in ''|*[!a-z0-9-]*) \
+			echo "cleanup-e2e 的 run ID 必须显式提供且仅含 1 到 16 个小写字母、数字或连字符" >&2; exit 1;; \
+		esac; \
+		if [ "$${#run_id}" -gt 16 ]; then \
+			echo "cleanup-e2e 的 run ID 不得超过 16 个字符" >&2; exit 1; \
 		fi; \
-		OCM_E2E_ACTION=cleanup OCM_E2E_RUN_ID="$$run_id" $(MAKE) local-seed-e2e
+		E2E_INPUT_ACTION=cleanup E2E_INPUT_RUN_ID="$$run_id" $(MAKE) local-seed-e2e
 
 cleanup-e2e-expired: ## 清理创建超过 24 小时的 fixture owning run 及其 new-api 用户
-	OCM_E2E_ACTION=cleanup-expired $(MAKE) local-seed-e2e
+	E2E_INPUT_ACTION=cleanup-expired $(MAKE) local-seed-e2e
 
 ##@ OpenAPI / 前端类型 (与代码生成段相互引用)
 

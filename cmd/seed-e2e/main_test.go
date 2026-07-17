@@ -15,7 +15,29 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"oc-manager/internal/config"
+	"oc-manager/internal/integrations/newapi"
 )
+
+// newAPIUsernameLookupStub 记录用户名占用检查，DeleteUser 仅用于证明安全路径不会调用删除。
+type newAPIUsernameLookupStub struct {
+	// user 是模拟查询命中的未知上游用户。
+	user newapi.User
+	// err 是模拟查询结果错误。
+	err error
+	// deleteCalls 记录是否错误地按用户名授权删除。
+	deleteCalls int
+}
+
+// FindUserByUsername 返回预置用户或错误，模拟真实 new-api 精确用户名查询。
+func (stub *newAPIUsernameLookupStub) FindUserByUsername(context.Context, string) (newapi.User, error) {
+	return stub.user, stub.err
+}
+
+// DeleteUser 记录危险删除调用；被测占用检查绝不应调用本方法。
+func (stub *newAPIUsernameLookupStub) DeleteUser(context.Context, int64) error {
+	stub.deleteCalls++
+	return nil
+}
 
 // 验证默认参数兼容人工直接 seed，并保持 regression 单 worker 行为。
 func TestLoadRunOptionsUsesSafeDefaults(t *testing.T) {
@@ -41,6 +63,19 @@ func TestLoadRunOptionsSanitizesRunID(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, runOptions{RunID: "run-ab-c", Suite: suiteQuick, Workers: 2, Action: actionSeed}, opts)
+}
+
+// 验证 destructive cleanup 不接受需要归一化的原始 run ID，避免直接调用 binary 时删除另一个合法 run。
+func TestLoadRunOptionsRejectsCleanupRunIDNormalization(t *testing.T) {
+	t.Setenv("OCM_E2E_RUN_ID", "Run_A")
+	t.Setenv("OCM_E2E_SUITE", "regression")
+	t.Setenv("OCM_E2E_WORKERS", "1")
+	t.Setenv("OCM_E2E_ACTION", "cleanup")
+
+	_, err := loadRunOptions()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cleanup")
 }
 
 // 验证三个 worker 的组织、账号与实例命名空间互不相同。
@@ -158,10 +193,61 @@ func TestE2ENewAPIUsernameIsRunAndWorkerScoped(t *testing.T) {
 	otherWorker := e2eNewAPIUsername("run-a", 1)
 	otherRun := e2eNewAPIUsername("run-b", 0)
 
-	assert.Equal(t, "ec9da38c00", first)
+	assert.Equal(t, "e6c9da38c00", first)
 	assert.NotEqual(t, first, otherWorker)
 	assert.NotEqual(t, first, otherRun)
 	assert.LessOrEqual(t, len(first), 12)
+}
+
+// 验证确定性用户名发生碰撞或遗留占用时安全失败，绝不删除未知上游用户。
+func TestRequireE2ENewAPIUsernameAvailableRejectsExistingUser(t *testing.T) {
+	stub := &newAPIUsernameLookupStub{user: newapi.User{ID: 99, Username: "e6c9da38c00"}}
+
+	err := requireE2ENewAPIUsernameAvailable(context.Background(), stub, "e6c9da38c00")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "已被占用")
+	assert.Zero(t, stub.deleteCalls)
+}
+
+// 验证真实 FNV-1a 32-bit 碰撞只会触发占用失败，绝不把另一 run 的用户当作自身资源删除。
+func TestRequireE2ENewAPIUsernameAvailableRejectsRealHashCollision(t *testing.T) {
+	first := e2eNewAPIUsername("6pcfutoze5", 0)
+	collision := e2eNewAPIUsername("43epkzyhsv", 0)
+	require.Equal(t, first, collision)
+	stub := &newAPIUsernameLookupStub{user: newapi.User{ID: 101, Username: first}}
+
+	err := requireE2ENewAPIUsernameAvailable(context.Background(), stub, collision)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "已被占用")
+	assert.Zero(t, stub.deleteCalls)
+}
+
+// 验证用户名确实不存在时允许创建流程继续，且不产生任何删除调用。
+func TestRequireE2ENewAPIUsernameAvailableAcceptsNotFound(t *testing.T) {
+	stub := &newAPIUsernameLookupStub{err: newapi.ErrNotFound}
+
+	err := requireE2ENewAPIUsernameAvailable(context.Background(), stub, "e6c9da38c00")
+
+	require.NoError(t, err)
+	assert.Zero(t, stub.deleteCalls)
+}
+
+// 验证没有本地 new-api ID 时清理无需管理配置或网络调用即可安全返回。
+func TestCleanupNewAPIUsersWithoutIDsDoesNotRequireConfig(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	mock.ExpectQuery(`REGEXP_LIKE\(code, \?, 'c'\)`).
+		WithArgs("e2e-a-w%", "^e2e-a-w[0-3](-c-[a-z0-9-]+)?$").
+		WillReturnRows(sqlmock.NewRows([]string{"newapi_user_id"}))
+	mock.ExpectClose()
+
+	err = cleanupNewAPIUsers(context.Background(), db, config.Config{}, "a")
+
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 // 验证 run 组织选择器包含 worker 边界，短 run 不会覆盖带相同前缀的长 run。
@@ -333,6 +419,12 @@ func TestCleanupStatementsAreParameterizedAndFKOrdered(t *testing.T) {
 	assert.Contains(t, all, "users")
 	assert.Contains(t, all, "org_web_publish_config")
 	assert.Contains(t, all, "organizations")
+	// current-run 工单派生技能的跨组织 target 必须在技能父记录前精确删除。
+	assert.Equal(t, 2, strings.Count(all, "DELETE FROM custom_skill_targets"))
+	assert.Contains(t, all, "current_skill.name = custom_skill_targets.custom_skill_name")
+	assert.Contains(t, all, "NOT EXISTS")
+	assert.Contains(t, all, "other.ticket_id NOT IN")
+	assert.Less(t, strings.Index(all, "current_skill.name ="), strings.Index(all, "DELETE FROM custom_skills"))
 	// 关键父表删除必须严格晚于所有直接子表删除。
 	assert.Less(t, strings.Index(all, "DELETE FROM aicc_message_sources"), strings.Index(all, "DELETE FROM aicc_messages"))
 	assert.Less(t, strings.Index(all, "DELETE FROM aicc_lead_values"), strings.Index(all, "DELETE FROM aicc_leads"))
@@ -343,6 +435,27 @@ func TestCleanupStatementsAreParameterizedAndFKOrdered(t *testing.T) {
 	assert.Less(t, strings.Index(all, "DELETE FROM skill_ticket_messages"), strings.Index(all, "DELETE FROM users WHERE"))
 	assert.Less(t, strings.Index(all, "DELETE FROM skill_tickets"), strings.Index(all, "DELETE FROM users WHERE"))
 	assert.Less(t, strings.Index(all, "DELETE FROM apps WHERE"), strings.Index(all, "DELETE FROM users WHERE"))
+}
+
+// 验证跨组织 custom skill target 仅在技能名完全归属当前 run ticket 时删除。
+func TestCustomSkillTargetCleanupRequiresExclusiveTicketOwnership(t *testing.T) {
+	statements := cleanupStatements("org-id")
+	var targetCleanup cleanupStatement
+	for _, statement := range statements {
+		// 精确选择包含同名所有权判定的跨组织 target 清理语句。
+		if strings.Contains(statement.query, "current_skill.name = custom_skill_targets.custom_skill_name") {
+			targetCleanup = statement
+			break
+		}
+	}
+	require.NotEmpty(t, targetCleanup.query)
+
+	// EXISTS 当前 ticket 技能证明唯一名称时会进入删除候选。
+	assert.Contains(t, targetCleanup.query, "current_skill.ticket_id IN")
+	// NOT EXISTS 非当前 ticket 同名技能证明同名多来源时会保留全部 name 级 target。
+	assert.Contains(t, targetCleanup.query, "NOT EXISTS")
+	assert.Contains(t, targetCleanup.query, "other.ticket_id NOT IN")
+	assert.Equal(t, []any{"org-id", "org-id"}, targetCleanup.args)
 }
 
 // 验证平台管理员清理只处理 actor 专属依赖，版本资源仍由精确 run 事务负责。
@@ -362,6 +475,8 @@ func TestPlatformAdminCleanupStatementsStayActorScoped(t *testing.T) {
 	}
 
 	all := queries.String()
+	assert.NotContains(t, all, " REGEXP ?")
+	assert.Contains(t, all, "REGEXP_LIKE(username, ?, 'c')")
 	assert.Contains(t, all, "DELETE FROM platform_skills")
 	// 版本及其行业绑定只能由 cleanupAssistantVersions 的精确命名事务处理。
 	assert.NotContains(t, all, "assistant_version_industry_knowledge_bases")
@@ -408,11 +523,11 @@ func TestCleanupAssistantVersionsRollsBackOnDependencyFailure(t *testing.T) {
 
 	mock.ExpectBegin()
 	// 行业绑定 child 删除先成功，但必须保持在未提交事务中。
-	mock.ExpectExec(`DELETE FROM assistant_version_industry_knowledge_bases`).
+	mock.ExpectExec(`(?s)DELETE FROM assistant_version_industry_knowledge_bases.*REGEXP_LIKE\(name, \?, 'c'\)`).
 		WithArgs(pattern, boundary).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	// 版本仍被其他 app 引用时由真实 FK 拒绝父表删除。
-	mock.ExpectExec(`DELETE FROM assistant_versions`).
+	mock.ExpectExec(`(?s)DELETE FROM assistant_versions.*REGEXP_LIKE\(name, \?, 'c'\)`).
 		WithArgs(pattern, boundary).
 		WillReturnError(errors.New("foreign key constraint fails"))
 	mock.ExpectRollback()
