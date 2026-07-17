@@ -1,6 +1,6 @@
-import { expect, test, type Page } from '@playwright/test'
+import type { Page } from '@playwright/test'
 
-import { loadE2EFixture, loginAs } from './fixtures'
+import { expect, test } from './fixtures'
 
 // mockConsoleQueries 固定平台控制台三类查询结果，隔离本地业务数据波动对图表生命周期回归的干扰。
 async function mockConsoleQueries(page: Page): Promise<void> {
@@ -72,14 +72,12 @@ async function expectChartVisible(page: Page, tabName: string): Promise<void> {
 }
 
 // 验证平台管理员连续切换三类图表三轮后，首次访问并保留的图表在反复显隐时仍保持 canvas。
-test('平台控制台图表连续切换三轮后仍保持显示', { tag: '@quick' }, async ({ page }) => {
-  const fx = loadE2EFixture()
+test('平台控制台图表连续切换三轮后仍保持显示', { tag: '@quick' }, async ({ platformAdminPage: page }) => {
   const pageErrors: Error[] = []
   page.on('pageerror', error => pageErrors.push(error))
 
-  // 登录前注册查询拦截，保证进入控制台后的首批并发请求也获得确定响应。
+  // 进入控制台前注册查询拦截，保证页面首批并发请求也获得确定响应。
   await mockConsoleQueries(page)
-  await loginAs(page, 'platform_admin', fx, 'zh')
   await page.goto('/console')
 
   // 第一轮覆盖三个 pane 的首次访问，建立图表初始化并保留 DOM 的前置状态。

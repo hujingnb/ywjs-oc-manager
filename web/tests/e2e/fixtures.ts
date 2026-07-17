@@ -1,7 +1,8 @@
 import { expect, test as base } from '@playwright/test'
-import type { Page } from '@playwright/test'
+import type { Browser, Page } from '@playwright/test'
 
-import { fixtureForWorker, parseE2EFixturePool, type E2EFixture } from './suite'
+import { type AuthRole } from './auth-state'
+import { authStatePath, fixtureForWorker, parseE2EFixturePool, type E2EFixture } from './suite'
 
 // E2EFixture 从无 Playwright 依赖的 suite 契约转出，保持现有 spec 的类型导入兼容。
 export type { E2EFixture } from './suite'
@@ -12,8 +13,37 @@ type E2EWorkerFixtures = {
   e2eFixture: E2EFixture
 }
 
-// test 扩展 Playwright 基础 fixture，在 worker 启动时解析 globalSetup 注入的完整 pool。
-export const test = base.extend<{}, E2EWorkerFixtures>({
+// RolePages 为每个测试提供加载对应 worker 认证状态的独立页面。
+type RolePages = {
+  // platformAdminPage 使用当前 worker 的平台管理员状态。
+  platformAdminPage: Page
+  // orgAdminPage 使用当前 worker 的组织管理员状态。
+  orgAdminPage: Page
+  // orgMemberPage 使用当前 worker 的普通成员状态。
+  orgMemberPage: Page
+}
+
+// useRolePage 为单个测试创建隔离 context；storageState 同时恢复 token 与 CSRF cookie。
+async function useRolePage(
+  browser: Browser,
+  fixture: E2EFixture,
+  role: AuthRole,
+  use: (page: Page) => Promise<void>,
+): Promise<void> {
+  const context = await browser.newContext({
+    storageState: authStatePath(fixture.run_id, fixture.worker_index, role),
+  })
+  try {
+    const page = await context.newPage()
+    await use(page)
+  } finally {
+    // 每条测试关闭自己的 context，避免页面 localStorage、cookie 或路由拦截泄漏到下一场景。
+    await context.close()
+  }
+}
+
+// test 扩展 worker 数据与三类 test-scope 页面，worker 内复用状态文件但不共享浏览器上下文。
+export const test = base.extend<RolePages, E2EWorkerFixtures>({
   e2eFixture: [async ({}, use, workerInfo) => {
     const raw = process.env.OCM_E2E_FIXTURE_POOL
     if (!raw) {
@@ -24,6 +54,15 @@ export const test = base.extend<{}, E2EWorkerFixtures>({
     const fixture = fixtureForWorker(pool, workerInfo.parallelIndex)
     await use(fixture)
   }, { scope: 'worker' }],
+  platformAdminPage: async ({ browser, e2eFixture }, use) => {
+    await useRolePage(browser, e2eFixture, 'platform_admin', use)
+  },
+  orgAdminPage: async ({ browser, e2eFixture }, use) => {
+    await useRolePage(browser, e2eFixture, 'org_admin', use)
+  },
+  orgMemberPage: async ({ browser, e2eFixture }, use) => {
+    await useRolePage(browser, e2eFixture, 'org_member', use)
+  },
 })
 
 export { expect }
@@ -34,7 +73,8 @@ export function loadE2EFixture(): E2EFixture {
   throw new Error('loadE2EFixture 已停用；请使用 Playwright 注入的 e2eFixture')
 }
 
-// loginAs 按角色完成登录，等到不再停留在 /login 即认为登录成功。
+// loginAs 仅服务必须验证真实登录表单的场景，普通业务 spec 应使用预生成角色页面。
+// 按角色完成登录，等到不再停留在 /login 即认为登录成功。
 // 不强制断言到具体首页路径，因为不同角色 RoleAwareHome 落点一致（"/"）。
 export async function loginAs(
   page: Page,

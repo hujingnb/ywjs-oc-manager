@@ -1,6 +1,4 @@
-import { expect, test } from '@playwright/test'
-
-import { loadE2EFixture, loginAs } from './fixtures'
+import { expect, test } from './fixtures'
 
 // Scenario 6：删除实例强校验。覆盖 spec §5.4 Task 15 第六条 + T1 ConfirmActionModal。
 //
@@ -18,9 +16,7 @@ import { loadE2EFixture, loginAs } from './fixtures'
 //     127.0.0.1:9999 的 dummy endpoint；ArchiveApp / DeleteAppPath 必然失败。
 //
 // 因此把「实例最终软删」断言交给 worker / service 单元测试，UI 端仅确认强校验和触发链路。
-test('删除实例：输错名拒绝，输对名后触发删除请求', { tag: '@quick' }, async ({ page }) => {
-  const fx = loadE2EFixture()
-  await loginAs(page, 'org_admin', fx)
+test('删除实例：输错名拒绝，输对名后触发删除请求', { tag: '@quick' }, async ({ orgAdminPage: page, e2eFixture: fx }) => {
   await page.goto('/apps')
 
   const row = page.getByRole('row', { name: new RegExp(fx.app_name) })

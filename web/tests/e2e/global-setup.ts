@@ -3,6 +3,9 @@ import { randomBytes } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import type { FullConfig } from '@playwright/test'
+
+import { writeWorkerAuthStates } from './auth-state'
 import {
   createE2ERunID,
   e2eCommandEnv,
@@ -12,7 +15,7 @@ import {
 } from './suite'
 
 // globalSetup 为每次 Playwright 运行创建按 worker 隔离的 fixture pool，并在失败时回收当前 run。
-async function globalSetup() {
+async function globalSetup(config: FullConfig) {
   // 本地 *.localhost 必须绕过宿主代理，否则代理可能把 k3d Ingress 误报为 Bad Gateway。
   const localBypass = 'ocm.localhost,.localhost,localhost,127.0.0.1'
   process.env.NO_PROXY = [process.env.NO_PROXY, localBypass].filter(Boolean).join(',')
@@ -38,6 +41,12 @@ async function globalSetup() {
     // 从尾部逐候选执行 JSON、完整 schema 和本轮边界校验，伪 JSON 或旧 run 不得截断查找。
     const pool = parseE2EFixturePoolFromOutput(stdout, runID, suite, workers)
 
+    // fixture 已完整验证后逐 worker 生成三类角色状态；任一登录或写文件失败都进入同一 cleanup 链。
+    for (const fixture of pool.fixtures) {
+      await writeWorkerAuthStates(config, fixture)
+    }
+
+    // 只有全部角色状态就绪后才向 worker 暴露本轮 pool，避免部分 setup 被业务 spec 消费。
     process.env.OCM_E2E_RUN_ID = runID
     process.env.OCM_E2E_FIXTURE_POOL = JSON.stringify(pool)
   } catch (setupCause) {
