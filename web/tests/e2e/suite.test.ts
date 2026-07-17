@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   authStatePath,
+  e2eCommandEnv,
   fixtureForWorker,
   parseE2ESuite,
   parseFixturePool,
@@ -169,5 +170,40 @@ describe('E2E suite 配置契约', () => {
         process.env.OCM_E2E_FIXTURE = previous
       }
     }
+  })
+
+  // 命令环境必须清除所有历史别名，只让本轮 OCM_E2E_* 精确参数进入 make。
+  it('清理冲突环境并注入本轮 E2E 命令参数', () => {
+    const env = e2eCommandEnv({
+      PATH: '/usr/bin',
+      OCM_E2E_ACTION: 'cleanup-expired',
+      OCM_E2E_RUN_ID: 'stale-ocm',
+      OCM_E2E_SUITE: 'slow',
+      OCM_E2E_WORKERS: '4',
+      ACTION: 'cleanup-expired',
+      RUN_ID: 'stale-short',
+      SUITE: 'slow',
+      WORKERS: '4',
+      E2E_INPUT_ACTION: 'cleanup-expired',
+      E2E_INPUT_RUN_ID: 'stale-input',
+      E2E_INPUT_SUITE: 'slow',
+      E2E_INPUT_WORKERS: '4',
+    }, 'run-current', 'quick', 2, 'seed')
+
+    expect(env).toMatchObject({
+      PATH: '/usr/bin',
+      OCM_E2E_ACTION: 'seed',
+      OCM_E2E_RUN_ID: 'run-current',
+      OCM_E2E_SUITE: 'quick',
+      OCM_E2E_WORKERS: '2',
+    })
+    expect(env.ACTION).toBeUndefined()
+    expect(env.RUN_ID).toBeUndefined()
+    expect(env.SUITE).toBeUndefined()
+    expect(env.WORKERS).toBeUndefined()
+    expect(env.E2E_INPUT_ACTION).toBeUndefined()
+    expect(env.E2E_INPUT_RUN_ID).toBeUndefined()
+    expect(env.E2E_INPUT_SUITE).toBeUndefined()
+    expect(env.E2E_INPUT_WORKERS).toBeUndefined()
   })
 })

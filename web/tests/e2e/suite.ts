@@ -4,6 +4,39 @@ import { resolve } from 'node:path'
 // E2ESuite 限定 CI 和本地允许选择的测试层级，未知值不得静默回退。
 export type E2ESuite = 'quick' | 'regression' | 'slow'
 
+// e2eConflictEnvKeys 汇总 Makefile 会识别的全部参数别名，子进程环境必须先移除它们。
+const e2eConflictEnvKeys = [
+  'OCM_E2E_ACTION', 'OCM_E2E_RUN_ID', 'OCM_E2E_SUITE', 'OCM_E2E_WORKERS',
+  'ACTION', 'RUN_ID', 'SUITE', 'WORKERS',
+  'E2E_INPUT_ACTION', 'E2E_INPUT_RUN_ID', 'E2E_INPUT_SUITE', 'E2E_INPUT_WORKERS',
+] as const
+
+// e2eCommandEnv 从宿主环境构造无冲突的 make 子进程环境，并只注入当前运行的精确参数。
+export function e2eCommandEnv(
+  // source 是宿主进程环境，除 E2E 冲突参数外均需原样传播给 make。
+  source: NodeJS.ProcessEnv,
+  // runID 是当前测试批次的唯一清理边界。
+  runID: string,
+  // suite 是本轮 Playwright 与 seed 共用的测试层级。
+  suite: E2ESuite,
+  // workers 是 seed 必须创建的隔离 fixture 数量。
+  workers: number,
+  // action 限定当前命令只执行 seed 或精确 cleanup。
+  action: 'seed' | 'cleanup',
+): NodeJS.ProcessEnv {
+  const env = { ...source }
+  // Makefile 对 OCM、短别名和 E2E_INPUT 有优先级；必须全删后再设置，不能依赖覆盖顺序猜测。
+  for (const key of e2eConflictEnvKeys) {
+    delete env[key]
+  }
+
+  env.OCM_E2E_ACTION = action
+  env.OCM_E2E_RUN_ID = runID
+  env.OCM_E2E_SUITE = suite
+  env.OCM_E2E_WORKERS = String(workers)
+  return env
+}
+
 // FixturePool 是 seed-e2e 单次运行的完整输出；泛型 T 保留各业务 fixture 的字段契约。
 export type FixturePool<T> = {
   // run_id 标识本轮隔离数据，后续清理必须使用同一值。

@@ -2,7 +2,13 @@ import { execFileSync } from 'node:child_process'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { fixtureForWorker, parseE2ESuite, parseFixturePool, resolveWorkerCount } from './suite'
+import {
+  e2eCommandEnv,
+  fixtureForWorker,
+  parseE2ESuite,
+  parseFixturePool,
+  resolveWorkerCount,
+} from './suite'
 
 // globalSetup 为每次 Playwright 运行创建按 worker 隔离的 fixture pool，并在失败时回收当前 run。
 async function globalSetup() {
@@ -19,14 +25,8 @@ async function globalSetup() {
   // 在 ESM 下没有 __dirname；用 import.meta.url 反推当前文件目录，再回到仓库根。
   const here = dirname(fileURLToPath(import.meta.url))
   const repoRoot = resolve(here, '../../..')
-  // make 只读取 E2E_INPUT_*，显式透传本轮参数，避免继承旧 shell 值污染隔离边界。
-  const runEnv = {
-    ...process.env,
-    E2E_INPUT_ACTION: 'seed',
-    E2E_INPUT_RUN_ID: runID,
-    E2E_INPUT_SUITE: suite,
-    E2E_INPUT_WORKERS: String(workers),
-  }
+  // Makefile 会按优先级识别多组别名，统一清理后仅用本轮 OCM_E2E_* 参数驱动 seed。
+  const runEnv = e2eCommandEnv(process.env, runID, suite, workers, 'seed')
 
   try {
     const stdout = execFileSync('make', ['seed-e2e'], {
@@ -66,7 +66,7 @@ async function globalSetup() {
     try {
       execFileSync('make', ['cleanup-e2e'], {
         cwd: repoRoot,
-        env: { ...runEnv, E2E_INPUT_ACTION: 'cleanup' },
+        env: { ...runEnv, OCM_E2E_ACTION: 'cleanup' },
         encoding: 'utf8',
       })
     } catch (cleanupCause) {
