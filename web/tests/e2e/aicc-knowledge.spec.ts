@@ -106,8 +106,8 @@ async function waitForRuntimeKnowledgeSearch(appID: string, question: string, ex
 async function askPublicKnowledgeQuestion(page: Page, publicToken: string, question: string): Promise<string> {
   await forceZh(page)
   await page.goto(`/aicc/${publicToken}`)
-  // 公开消息接口只表示已入队；以助手正文数量增长作为真实 Hermes 回答完成的可见信号，
-  // 避免把“消息已提交，正在排队处理”误当作知识问答结果。
+  // 公开消息接口只表示异步受理；以助手正文数量增长作为真实 Hermes 回答完成的可见信号，
+  // 避免把“消息已发送，客服正在响应”状态提示误当作知识问答结果。
   const assistantMessages = page.locator('.message-row.assistant .bubble p:not(.message-status)')
   const previousAssistantCount = await assistantMessages.count()
   const replied = page.waitForResponse(response =>

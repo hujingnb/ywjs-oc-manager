@@ -160,7 +160,7 @@ describe('PublicAICCChatPage', () => {
     expect(wrapper.text()).toContain('收到')
   })
 
-  // 场景：异步任务刚受理时，访客消息与排队中的助手占位必须立即显示，不能伪造一条默认回复。
+  // 场景：异步任务刚受理时只表示消息已发送，不能在没有拥堵依据时误导访客正在排队。
   it('shows a queued placeholder after the visitor message is accepted asynchronously', async () => {
     apiState.sendMessage.mockResolvedValue({ message_id: 'message-1', status: 'queued' })
     const wrapper = mountPublicChat()
@@ -171,8 +171,24 @@ describe('PublicAICCChatPage', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('异步问题')
-    expect(wrapper.text()).toContain('消息已提交，正在排队处理。')
+    expect(wrapper.text()).toContain('消息已发送，客服正在响应…')
+    expect(wrapper.text()).not.toContain('正在排队处理')
     expect(wrapper.text()).not.toContain('我已收到，请继续补充您的问题。')
+    wrapper.unmount()
+  })
+
+  // 场景：任务被后台领取后应明确告知访客正在查询整理，区别于刚完成异步受理的 queued 状态。
+  it('shows a processing placeholder while the assistant is preparing the answer', async () => {
+    apiState.sendMessage.mockResolvedValue({ message_id: 'message-1', status: 'processing' })
+    const wrapper = mountPublicChat()
+    await flushPromises()
+
+    await wrapper.find('textarea').setValue('查询产品能力')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('正在为您查询和整理答案…')
+    expect(wrapper.text()).not.toContain('正在排队处理')
     wrapper.unmount()
   })
 
@@ -274,7 +290,8 @@ describe('PublicAICCChatPage', () => {
       await flushPromises()
 
       expect(wrapper.text()).toContain('刷新中的问题')
-      expect(wrapper.text()).toContain('消息已提交，正在排队处理。')
+      expect(wrapper.text()).toContain('消息已发送，客服正在响应…')
+      expect(wrapper.text()).not.toContain('正在排队处理')
       expect(apiState.sendMessage).not.toHaveBeenCalled()
       await vi.advanceTimersByTimeAsync(2_000)
       await flushPromises()
