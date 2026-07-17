@@ -175,7 +175,7 @@ func (d *AICCDispatcher) Dispatch(ctx context.Context, task sqlc.AiccMessageTask
 	if channel == "" {
 		channel = "web_link"
 	}
-	turn := AICCInboundTurn{TurnID: task.MessageID, SessionID: task.SessionID, Channel: channel, Text: visitor.TextContent.String, OccurredAt: d.now(), Context: conversationContext, Instruction: buildAICCRuntimePrompt(agent, ""), AppID: task.AppID}
+	turn := AICCInboundTurn{TurnID: task.MessageID, SessionID: task.SessionID, Channel: channel, Text: visitor.TextContent.String, OccurredAt: d.now(), Context: conversationContext, Instruction: buildAICCRuntimePrompt(agent), AppID: task.AppID}
 	if intentReady && intentDecision.AllowOffer {
 		turn.Instruction += "\n本轮 manager 已允许且仅允许 next_action 使用 offer_lead；其它场景不得使用 offer_lead。"
 	} else {

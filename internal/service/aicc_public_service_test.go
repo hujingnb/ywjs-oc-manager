@@ -21,28 +21,22 @@ import (
 
 var aiccPublicTestNow = time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
 
-// TestBuildAICCRuntimePromptRestrictsToolsAndFinalSchema 覆盖客服运行时指令：
-// 提示词只能引导只读白名单工具，并强制最终答复使用可由 manager 校验的 JSON 信封。
-func TestBuildAICCRuntimePromptRestrictsToolsAndFinalSchema(t *testing.T) {
-	prompt := buildAICCRuntimePrompt(sqlc.AiccAgent{}, "企业版价格是多少？")
+// TestBuildAICCRuntimePromptContainsOnlyAgentDynamicConstraints 覆盖客服逐轮指令：
+// 只携带当前智能体可动态修改的业务场景和回答边界，固定安全契约由 SOUL.md 承担。
+func TestBuildAICCRuntimePromptContainsOnlyAgentDynamicConstraints(t *testing.T) {
+	prompt := buildAICCRuntimePrompt(sqlc.AiccAgent{
+		Scenario:       null.StringFrom("官网售前咨询"),
+		AnswerBoundary: null.StringFrom("不承诺最终成交价格"),
+	})
 
-	assert.Contains(t, prompt, "aicc_knowledge_search")
-	assert.Contains(t, prompt, "web_search")
-	assert.Contains(t, prompt, "web_extract")
-	assert.Contains(t, prompt, "skills_list")
-	assert.Contains(t, prompt, "skill_view")
-	assert.Contains(t, prompt, "审批的客服 Skill")
-	assert.Contains(t, prompt, "vision_analyze")
-	assert.Contains(t, prompt, "manager 已验证且仅属于当前轮的图片")
-	assert.Contains(t, prompt, "clarify")
-	assert.Contains(t, prompt, "aicc_response_sources")
-	assert.Contains(t, prompt, `{"text":"","sources":[],"next_action":"none","flags":{}}`)
-	assert.Contains(t, prompt, "在输出任何最终答复或追问前，必须先调用 aicc_knowledge_search")
-	assert.Contains(t, prompt, "不得以澄清问题替代首次检索")
-	assert.NotContains(t, prompt, "oc-kb")
-	assert.NotContains(t, prompt, "执行 oc-kb")
-	assert.Contains(t, prompt, "不得调用或建议调用命令、终端、代码、文件、进程")
-	assert.Contains(t, prompt, "Skill 管理")
+	// 动态业务配置必须在下一轮对话中立即进入运行时指令。
+	assert.Contains(t, prompt, "业务场景：官网售前咨询")
+	assert.Contains(t, prompt, "回答边界：不承诺最终成交价格")
+	// 固定工具、安全与响应契约已迁入 SOUL.md，逐轮指令不得重复消耗对应 token。
+	assert.NotContains(t, prompt, "aicc_knowledge_search")
+	assert.NotContains(t, prompt, "web_search")
+	assert.NotContains(t, prompt, "aicc_response_sources")
+	assert.NotContains(t, prompt, "不得调用或建议调用命令")
 }
 
 // TestAICCPublicSendMessageRejectsFullGlobalQueue 验证全局队列已满时事务回滚，不能留下访客消息或任务孤儿。

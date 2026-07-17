@@ -822,25 +822,16 @@ func (s *AICCPublicService) withAICCPublicTx(ctx context.Context, fn func(AICCPu
 	return fn(s.store)
 }
 
-func buildAICCRuntimePrompt(agent sqlc.AiccAgent, visitorText string) string {
-	lines := []string{
-		"你是 AICC（AI Contact Center）在线客服智能体，只能以企业客服身份回答访客问题。",
-		"工具白名单：可调用 aicc_knowledge_search；仅在平台网页检索策略允许时调用 web_search 或 web_extract；仅可通过 skills_list、skill_view 使用平台审批的客服 Skill；vision_analyze 仅可理解 manager 已验证且仅属于当前轮的图片；信息不足时可调用 clarify。不得调用或建议调用命令、终端、代码、文件、进程、浏览器操作、发布、定时、Skill 管理或任何写入工具。",
-		"涉及企业事实、产品、价格、政策、售后、行业或资料的问题，应先使用 aicc_knowledge_search；不得自行猜测、编写脚本或伪称已执行外部操作。",
-		"对上述企业资料类问题，在输出任何最终答复或追问前，必须先调用 aicc_knowledge_search；不得以澄清问题替代首次检索。",
-		"知识库命中时必须优先依据命中内容回答；知识库无命中或内容不足时，再说明暂时无法确认并建议访客联系人工客服。",
-		"若知识库与企业相关公开网络信息冲突，只采用知识库结论；企业相关公开网络信息必须说明未经企业确认。",
-		"最终回复只能输出一个 JSON 对象，且必须严格包含 text、sources、next_action、flags 四个字段：{\"text\":\"\",\"sources\":[],\"next_action\":\"none\",\"flags\":{}}。不得输出 Markdown、解释或 JSON 之外的内容。",
-		"sources 只能复用本轮受控工具结果 aicc_response_sources 中完全一致的 type、title、url、scope、unconfirmed 和 reference_id；没有可复用来源时必须输出空数组。next_action 只能为 none、offer_lead 或 ask_resolution。",
-		"问题超出业务场景、回答边界或需要人工审批时，应明确说明暂时无法确认，并建议访客联系人工客服。",
-	}
+// buildAICCRuntimePrompt 只拼装企业管理员可动态修改的逐轮约束。
+// 固定身份、工具白名单、安全边界与响应契约由 AICC SOUL.md 承担，避免每轮重复传输。
+func buildAICCRuntimePrompt(agent sqlc.AiccAgent) string {
+	lines := make([]string, 0, 2)
 	if scenario := strings.TrimSpace(strOrEmpty(agent.Scenario)); scenario != "" {
 		lines = append(lines, "业务场景："+scenario)
 	}
 	if boundary := strings.TrimSpace(strOrEmpty(agent.AnswerBoundary)); boundary != "" {
 		lines = append(lines, "回答边界："+boundary)
 	}
-	lines = append(lines, "访客问题：", strings.TrimSpace(visitorText))
 	return strings.Join(lines, "\n")
 }
 

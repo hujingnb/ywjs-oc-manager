@@ -61,6 +61,13 @@ func TestPlatformPrompts_Invariants(t *testing.T) {
 				// AICC 只能使用平台审核且处于当前白名单的客服 Skill，不得回退至通用能力。
 				assert.Contains(t, testCase.prompt, "仅可使用平台审核并在当前 AICC 白名单中的客服 Skill")
 				assert.Contains(t, testCase.prompt, "不得调用未审核、通用或未在白名单中的 Skill")
+				// AICC 的固定工具、安全和响应契约必须固化在 SOUL.md 平台层，避免每轮重复传输。
+				assert.Contains(t, testCase.prompt, "aicc_knowledge_search")
+				assert.Contains(t, testCase.prompt, "web_search")
+				assert.Contains(t, testCase.prompt, "web_extract")
+				assert.Contains(t, testCase.prompt, "不得调用或建议调用命令、终端、代码、文件、进程")
+				assert.Contains(t, testCase.prompt, "text、sources、next_action、flags")
+				assert.Contains(t, testCase.prompt, "aicc_response_sources")
 				// AICC 不得被平台提示词强制枚举全部 Skill，也不得在无匹配时自行回退通用能力。
 				assert.NotContains(t, testCase.prompt, "处理任何用户任务前，必须先调用 skills_list")
 				assert.NotContains(t, testCase.prompt, "只有在没有适用的技能时，才使用通用能力")
