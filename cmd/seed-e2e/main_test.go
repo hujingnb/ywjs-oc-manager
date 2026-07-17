@@ -4,9 +4,13 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -118,37 +122,7 @@ func TestLoadRunOptionsForcesSlowToOneWorker(t *testing.T) {
 	assert.Equal(t, runOptions{RunID: "run-a", Suite: suiteSlow, Workers: 1, Action: actionCleanupExpired}, opts)
 }
 
-// 验证 seed action 可进入现有构建流程。
-func TestRequireSeedActionAcceptsSeed(t *testing.T) {
-	err := requireSeedAction(runOptions{Action: actionSeed})
-
-	require.NoError(t, err)
-}
-
-// 验证 Task 4 接入前清理 action 会安全退出，不能误入 truncate 后重新 seed 的流程。
-func TestRequireSeedActionRejectsCleanup(t *testing.T) {
-	tests := []struct {
-		name   string
-		action e2eAction
-	}{
-		// 普通 scoped cleanup 当前只完成解析契约，尚未实现执行逻辑。
-		{name: "cleanup", action: actionCleanup},
-		// 过期资源清理当前只完成解析契约，尚未实现执行逻辑。
-		{name: "cleanup-expired", action: actionCleanupExpired},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// 每个子测试都验证清理 action 在数据库操作之前被统一拒绝。
-			err := requireSeedAction(runOptions{Action: tt.action})
-
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "尚未实现")
-		})
-	}
-}
-
-// 验证 OCM_E2E 守门：缺这个环境变量时命令必须非零退出，避免误在生产 truncate。
+// 验证 OCM_E2E 守门：缺这个环境变量时命令必须非零退出，避免误操作隔离 E2E 数据。
 func TestSeedE2E_RejectsMissingOCME2EFlag(t *testing.T) {
 	t.Setenv("OCM_E2E", "")
 
@@ -178,12 +152,273 @@ func TestE2ERuntimeImageIDRejectsEmptyConfig(t *testing.T) {
 	assert.Contains(t, err.Error(), "runtime image")
 }
 
-// 验证 E2E new-api 用户使用可精确清理的固定名称，并满足上游 12 字符长度限制。
-func TestE2ENewAPIUsernameIsStableAndValid(t *testing.T) {
-	username := e2eNewAPIUsername()
+// 验证 E2E new-api 用户名同时隔离 run 与 worker，并满足上游 12 字符长度限制。
+func TestE2ENewAPIUsernameIsRunAndWorkerScoped(t *testing.T) {
+	first := e2eNewAPIUsername("run-a", 0)
+	otherWorker := e2eNewAPIUsername("run-a", 1)
+	otherRun := e2eNewAPIUsername("run-b", 0)
 
-	assert.Equal(t, "e2eaicc", username)
-	assert.LessOrEqual(t, len(username), 12)
+	assert.Equal(t, "ec9da38c00", first)
+	assert.NotEqual(t, first, otherWorker)
+	assert.NotEqual(t, first, otherRun)
+	assert.LessOrEqual(t, len(first), 12)
+}
+
+// 验证 run 组织选择器包含 worker 边界，短 run 不会覆盖带相同前缀的长 run。
+func TestRunOrgPatternUsesWorkerBoundary(t *testing.T) {
+	shortPattern, err := runOrgPattern("a")
+	require.NoError(t, err)
+	longPattern, err := runOrgPattern("a-b")
+	require.NoError(t, err)
+
+	assert.Equal(t, "e2e-a-w%", shortPattern)
+	assert.Equal(t, "e2e-a-b-w%", longPattern)
+	assert.False(t, strings.HasPrefix("e2e-a-b-w0", strings.TrimSuffix(shortPattern, "%")))
+}
+
+// 验证 LIKE 预筛之后的正则边界会拒绝名称中继续携带 worker 片段的另一合法 run。
+func TestRunOwnedRegexRejectsWorkerLikeRunSuffix(t *testing.T) {
+	orgBoundary, err := runOrgRegexp("a")
+	require.NoError(t, err)
+	adminBoundary, err := runPlatformAdminRegexp("a")
+	require.NoError(t, err)
+	versionBoundary, err := runAssistantVersionRegexp("a")
+	require.NoError(t, err)
+
+	assert.Regexp(t, orgBoundary, "e2e-a-w0")
+	assert.Regexp(t, orgBoundary, "e2e-a-w0-c-123456")
+	assert.NotRegexp(t, orgBoundary, "e2e-a-w1-w0")
+	assert.NotRegexp(t, adminBoundary, "e2e-a-w1-w0-platform")
+	assert.NotRegexp(t, versionBoundary, "e2e-a-w1-w0-version")
+}
+
+// 验证清理选择器拒绝未经过运行参数清洗的不安全 run ID，避免 LIKE 通配符扩大删除范围。
+func TestRunOrgPatternRejectsUnsafeRunID(t *testing.T) {
+	tests := []struct {
+		name  string
+		runID string
+	}{
+		// 空 run ID 没有可证明的租户边界，必须拒绝。
+		{name: "空值", runID: ""},
+		// 百分号是 LIKE 多字符通配符，必须拒绝。
+		{name: "百分号", runID: "run%"},
+		// 下划线是 LIKE 单字符通配符，必须拒绝。
+		{name: "下划线", runID: "run_a"},
+		// 大写字符不是 loadRunOptions 清洗后的安全形式，必须拒绝。
+		{name: "大写字符", runID: "Run-a"},
+		// 超过 16 字符不符合 fixture 命名契约，必须拒绝。
+		{name: "超长", runID: "12345678901234567"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// 每个子测试验证一种可能扩大或模糊清理边界的输入。
+			_, err := runOrgPattern(tt.runID)
+
+			require.Error(t, err)
+		})
+	}
+}
+
+// 验证平台管理员与助手版本选择器都绑定 worker 边界，且永久本地 admin 永不匹配。
+func TestRunOwnedNamePatternsAreScoped(t *testing.T) {
+	adminPattern, err := runPlatformAdminPattern("a")
+	require.NoError(t, err)
+	versionPattern, err := runAssistantVersionPattern("a")
+	require.NoError(t, err)
+
+	assert.Equal(t, "e2e-a-w%-platform", adminPattern)
+	assert.Equal(t, "e2e-a-w%-version", versionPattern)
+	assert.NotEqual(t, "admin", adminPattern)
+	assert.False(t, strings.HasPrefix("e2e-a-b-w0-platform", "e2e-a-w"))
+}
+
+// 验证组织 new-api 用户 ID 解析会忽略空值、保留合法数字并拒绝格式错误。
+func TestParseE2ENewAPIUserIDs(t *testing.T) {
+	ids, err := parseE2ENewAPIUserIDs([]string{"", "  ", "17", " 23 "})
+	require.NoError(t, err)
+	assert.Equal(t, []int64{17, 23}, ids)
+
+	_, err = parseE2ENewAPIUserIDs([]string{"12x"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "12x")
+}
+
+// 验证派生 fixture 组织能还原包含连字符的 owning run，非 fixture code 必须安全拒绝。
+func TestParseFixtureOrgRunID(t *testing.T) {
+	runID, ok := parseFixtureOrgRunID("e2e-run-abc-w0-c-123456")
+	assert.True(t, ok)
+	assert.Equal(t, "run-abc", runID)
+	// run 本身含 worker 风格片段时，必须选择最后一个真实 worker 边界。
+	workerLikeRunID, ok := parseFixtureOrgRunID("e2e-a-w1-w0")
+	assert.True(t, ok)
+	assert.Equal(t, "a-w1", workerLikeRunID)
+
+	tests := []struct {
+		name string
+		code string
+	}{
+		// 永久本地组织不属于任何 E2E run。
+		{name: "非 fixture", code: "local-org"},
+		// 缺少 worker 数字的伪前缀不能被解释为 fixture。
+		{name: "worker 缺失", code: "e2e-run-abc-w-c-123456"},
+		// worker 后缀不符合 fixture 或派生组织契约时必须拒绝。
+		{name: "未知后缀", code: "e2e-run-abc-w0-other"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// 每个子测试覆盖一种不得进入过期清理集合的非 fixture code。
+			_, ok := parseFixtureOrgRunID(tt.code)
+
+			assert.False(t, ok)
+		})
+	}
+}
+
+// 验证组织清理 SQL 全部参数化，并锁定关键 child-before-parent 外键顺序。
+func TestCleanupStatementsAreParameterizedAndFKOrdered(t *testing.T) {
+	statements := cleanupStatements("org-id")
+	require.NotEmpty(t, statements)
+
+	var queries strings.Builder
+	for index, statement := range statements {
+		// 每条清理语句都必须含占位符，禁止把组织 ID 拼接进 SQL。
+		t.Run(fmt.Sprintf("语句-%02d", index), func(t *testing.T) {
+			assert.Contains(t, statement.query, "?")
+			assert.Equal(t, strings.Count(statement.query, "?"), len(statement.args))
+		})
+		queries.WriteString(statement.query)
+		queries.WriteByte('\n')
+	}
+
+	all := queries.String()
+	// 会话智能处理的子表必须完整覆盖。
+	assert.Contains(t, all, "aicc_message_sources")
+	assert.Contains(t, all, "aicc_session_contexts")
+	assert.Contains(t, all, "aicc_session_intents")
+	assert.Contains(t, all, "aicc_intent_analysis_retries")
+	// AICC 业务数据必须完整覆盖，不能依赖关闭外键后清空父表。
+	assert.Contains(t, all, "aicc_feedback")
+	assert.Contains(t, all, "aicc_message_tasks")
+	assert.Contains(t, all, "aicc_lead_values")
+	assert.Contains(t, all, "aicc_leads")
+	assert.Contains(t, all, "aicc_images")
+	assert.Contains(t, all, "aicc_messages")
+	assert.Contains(t, all, "aicc_sessions")
+	assert.Contains(t, all, "aicc_blocked_visitors")
+	assert.Contains(t, all, "aicc_agent_settings")
+	assert.Contains(t, all, "aicc_lead_fields")
+	assert.Contains(t, all, "aicc_agent_knowledge")
+	assert.Contains(t, all, "aicc_agents")
+	// 组织、版本、app 及扩展能力表必须都由 scoped 条件删除。
+	assert.Contains(t, all, "organization_industry_knowledge_bases")
+	assert.Contains(t, all, "assistant_version_industry_knowledge_bases")
+	assert.Contains(t, all, "published_sites")
+	assert.Contains(t, all, "conversation_files")
+	assert.Contains(t, all, "app_skills")
+	assert.Contains(t, all, "channel_bindings")
+	assert.Contains(t, all, "ragflow_documents")
+	assert.Contains(t, all, "ragflow_datasets")
+	assert.Contains(t, all, "custom_skill_targets")
+	assert.Contains(t, all, "custom_skills")
+	assert.Contains(t, all, "skill_ticket_messages")
+	assert.Contains(t, all, "skill_tickets")
+	assert.Contains(t, all, "refresh_tokens")
+	assert.Contains(t, all, "recharge_records")
+	assert.Contains(t, all, "audit_logs")
+	assert.Contains(t, all, "jobs")
+	assert.Contains(t, all, "apps")
+	assert.Contains(t, all, "users")
+	assert.Contains(t, all, "org_web_publish_config")
+	assert.Contains(t, all, "organizations")
+	// 关键父表删除必须严格晚于所有直接子表删除。
+	assert.Less(t, strings.Index(all, "DELETE FROM aicc_message_sources"), strings.Index(all, "DELETE FROM aicc_messages"))
+	assert.Less(t, strings.Index(all, "DELETE FROM aicc_lead_values"), strings.Index(all, "DELETE FROM aicc_leads"))
+	assert.Less(t, strings.Index(all, "DELETE FROM aicc_sessions"), strings.Index(all, "DELETE FROM aicc_agents"))
+	assert.Less(t, strings.Index(all, "DELETE FROM apps WHERE"), strings.Index(all, "DELETE FROM organizations WHERE"))
+}
+
+// 验证平台管理员清理只删除该 run actor 亲自创建的 FK 子资源，再删除隔离用户。
+func TestPlatformAdminCleanupStatementsHandleAllUserFKs(t *testing.T) {
+	statements, err := platformAdminCleanupStatements("a")
+	require.NoError(t, err)
+
+	var queries strings.Builder
+	for index, statement := range statements {
+		// 每个子测试验证平台管理员依赖语句仍完全参数化。
+		t.Run(fmt.Sprintf("平台管理员语句-%02d", index), func(t *testing.T) {
+			assert.Contains(t, statement.query, "?")
+			assert.Equal(t, strings.Count(statement.query, "?"), len(statement.args))
+		})
+		queries.WriteString(statement.query)
+		queries.WriteByte('\n')
+	}
+
+	all := queries.String()
+	assert.Contains(t, all, "DELETE FROM platform_skills")
+	assert.Contains(t, all, "DELETE FROM assistant_version_industry_knowledge_bases")
+	assert.Contains(t, all, "DELETE FROM assistant_versions")
+	assert.Less(t, strings.Index(all, "DELETE FROM platform_skills"), strings.Index(all, "DELETE FROM users"))
+	assert.Less(t, strings.Index(all, "DELETE FROM assistant_version_industry_knowledge_bases"), strings.Index(all, "DELETE FROM assistant_versions"))
+	assert.Less(t, strings.Index(all, "DELETE FROM assistant_versions"), strings.Index(all, "DELETE FROM users"))
+}
+
+// 验证平台管理员子资源删除中途遇到 FK 失败时回滚全部前序变更。
+func TestCleanupPlatformAdminsRollsBackOnDependencyFailure(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	statements, err := platformAdminCleanupStatements("a")
+	require.NoError(t, err)
+	require.Len(t, statements, 6)
+
+	mock.ExpectBegin()
+	for _, statement := range statements[:4] {
+		// 前四条 child 删除成功，模拟错误发生前已执行但尚未提交的事务状态。
+		mock.ExpectExec(regexp.QuoteMeta(statement.query)).
+			WithArgs("e2e-a-w%-platform", "^e2e-a-w[0-3]-platform$").
+			WillReturnResult(sqlmock.NewResult(0, 1))
+	}
+	// 版本仍被其他 app 引用时，父版本删除由真实 FK 拒绝。
+	mock.ExpectExec(regexp.QuoteMeta(statements[4].query)).
+		WithArgs("e2e-a-w%-platform", "^e2e-a-w[0-3]-platform$").
+		WillReturnError(errors.New("foreign key constraint fails"))
+	mock.ExpectRollback()
+	mock.ExpectClose()
+
+	err = cleanupPlatformAdmins(context.Background(), db, "a")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "foreign key")
+	require.NoError(t, db.Close())
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// 验证 run 命名版本仍被其他 app 引用时，行业绑定删除与父版本删除会整体回滚。
+func TestCleanupAssistantVersionsRollsBackOnDependencyFailure(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	pattern := "e2e-a-w%-version"
+	boundary := "^e2e-a-w[0-3]-version$"
+
+	mock.ExpectBegin()
+	// 行业绑定 child 删除先成功，但必须保持在未提交事务中。
+	mock.ExpectExec(`DELETE FROM assistant_version_industry_knowledge_bases`).
+		WithArgs(pattern, boundary).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	// 版本仍被其他 app 引用时由真实 FK 拒绝父表删除。
+	mock.ExpectExec(`DELETE FROM assistant_versions`).
+		WithArgs(pattern, boundary).
+		WillReturnError(errors.New("foreign key constraint fails"))
+	mock.ExpectRollback()
+	mock.ExpectClose()
+
+	err = cleanupAssistantVersions(context.Background(), db, "a")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "foreign key")
+	require.NoError(t, db.Close())
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 // 验证 E2E 助手版本使用 local-init-models 已配置的 DeepSeek 渠道模型，避免公开问答落到不存在的 gpt-4。

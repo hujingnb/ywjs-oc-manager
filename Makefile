@@ -1,4 +1,4 @@
-.PHONY: test test-hermes-version-guard vet build sqlc-generate migrate-up migrate-down web-test web-typecheck web-build e2e-quick e2e-regression e2e-slow build-hermes-runtime hermes-inject-contract seed-e2e openapi-gen web-types-gen openapi-check local-up local-down local-reset local-stop local-start local-build local-preload local-migrate local-seed local-seed-e2e local-mc-init local-status local-logs local-shell cluster-create .guard-k3d-hosts build-ops-runtime local-build-ops local-init-models
+.PHONY: test test-hermes-version-guard vet build sqlc-generate migrate-up migrate-down web-test web-typecheck web-build e2e-quick e2e-regression e2e-slow build-hermes-runtime hermes-inject-contract seed-e2e cleanup-e2e cleanup-e2e-expired openapi-gen web-types-gen openapi-check local-up local-down local-reset local-stop local-start local-build local-preload local-migrate local-seed local-seed-e2e local-mc-init local-status local-logs local-shell cluster-create .guard-k3d-hosts build-ops-runtime local-build-ops local-init-models
 
 SWAG_VERSION := v2.0.0-rc5
 OPENAPI_TS_VERSION := 7.13.0
@@ -359,8 +359,14 @@ local-init-models:
 		echo "ℹ️  secret.yaml 无变更，跳过自动提交"; \
 	fi
 
-local-seed-e2e: ## kubectl exec manager-api 注入 Playwright e2e fixture（OCM_E2E=1 守门），打印 fixture JSON
-	@$(KUBECTL) -n $(K8S_NS) exec deploy/manager-api -- env OCM_E2E=1 seed-e2e
+local-seed-e2e: ## kubectl exec manager-api 按 ACTION/RUN_ID/SUITE/WORKERS 创建或清理隔离 E2E 数据
+	@$(KUBECTL) -n $(K8S_NS) exec deploy/manager-api -- env \
+		OCM_E2E=1 \
+		OCM_E2E_ACTION=$${OCM_E2E_ACTION:-$(or $(ACTION),seed)} \
+		OCM_E2E_RUN_ID=$${OCM_E2E_RUN_ID:-$(or $(RUN_ID),manual)} \
+		OCM_E2E_SUITE=$${OCM_E2E_SUITE:-$(or $(SUITE),regression)} \
+		OCM_E2E_WORKERS=$${OCM_E2E_WORKERS:-$(or $(WORKERS),1)} \
+		seed-e2e
 
 local-status: ## 查看本地集群 pod / ingress 状态
 	$(KUBECTL) -n $(K8S_NS) get pods,svc,ingress
@@ -649,9 +655,15 @@ migrate-down: ## 回滚本地 k3d 最近一次迁移（= local-migrate DOWN=1）
 ##@ 部署 / 运维
 
 # seed-e2e：在 manager-api 容器里跑 cmd/seed-e2e，OCM_E2E=1 守门。
-# 会 TRUNCATE e2e 业务表后重建 fixture，stdout 末行是 fixture JSON 供 Playwright 解析。
+# seed action 会先清理同名 run 再重建 fixture，stdout 末行是 fixture JSON 供 Playwright 解析。
 seed-e2e: ## 注入 Playwright e2e fixture（= local-seed-e2e）
 	$(MAKE) local-seed-e2e
+
+cleanup-e2e: ## 清理 RUN_ID 指定 run 的 new-api 用户与 manager 隔离 E2E 数据
+	OCM_E2E_ACTION=cleanup $(MAKE) local-seed-e2e
+
+cleanup-e2e-expired: ## 清理创建超过 24 小时的 fixture owning run 及其 new-api 用户
+	OCM_E2E_ACTION=cleanup-expired $(MAKE) local-seed-e2e
 
 ##@ OpenAPI / 前端类型 (与代码生成段相互引用)
 

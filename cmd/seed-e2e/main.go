@@ -1,12 +1,8 @@
 // Package main 是 Playwright e2e 用的固定 fixture 种子命令。
 //
-// 与 cmd/seed-admin 区别：
-//   - seed-admin 创建一个 platform_admin 行，幂等且只追加；
-//   - seed-e2e 会 TRUNCATE 大量业务表，然后从裸 SQL 重建组织 / 成员 / 应用 fixture。
+// 与 cmd/seed-admin 区别：seed-e2e 按 run 边界创建或清理组织 / 成员 / 应用 fixture。
 //
-// 安全守门：
-//   - 必须设置 OCM_E2E=1 才会执行 truncate；否则直接退出非零，避免误在生产环境跑。
-//   - 命令仅打算通过 docker compose run 在容器内对开发库执行（make seed-e2e）。
+// 安全守门：必须设置 OCM_E2E=1 才会创建或清理隔离 E2E 数据。
 //
 // 输出：
 //   - stdout 只打印单个 fixture pool JSON；Playwright globalSetup 解析该对象。
@@ -19,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"os"
 	"strings"
@@ -69,15 +66,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("加载 E2E 运行参数失败: %v", err)
 	}
-	// Task 4 接入 scoped cleanup 前显式拒绝清理 action，避免清理请求误执行 truncate 后重新 seed。
-	if err := requireSeedAction(opts); err != nil {
-		log.Fatal(err)
-	}
-	identities, err := fixtureIdentities(opts)
-	if err != nil {
-		log.Fatalf("生成 fixture identity 失败: %v", err)
-	}
-
 	configPath := os.Getenv("OCM_CONFIG")
 	if configPath == "" {
 		configPath = "config/manager.yaml"
@@ -98,12 +86,31 @@ func main() {
 		log.Fatalf("连接数据库失败: %v", err)
 	}
 	defer db.Close()
-	// 单连接执行：truncate 期间的 SET FOREIGN_KEY_CHECKS 是会话级变量，限制连接池为 1
-	// 可保证所有语句落在同一连接上，避免连接池切换导致 FK 检查状态丢失。
-	db.SetMaxOpenConns(1)
 
-	if err := truncate(ctx, db); err != nil {
-		log.Fatalf("truncate 失败: %v", err)
+	// 清理 action 不构建 fixture，也不向 stdout 输出 JSON；上游删除成功后才触碰 manager 数据。
+	switch opts.Action {
+	case actionCleanup:
+		if err := cleanupNewAPIUsers(ctx, db, cfg, opts.RunID); err != nil {
+			log.Fatalf("清理 new-api E2E 用户失败: %v", err)
+		}
+		if err := cleanupRun(ctx, db, opts.RunID); err != nil {
+			log.Fatalf("清理 manager E2E 数据失败: %v", err)
+		}
+		return
+	case actionCleanupExpired:
+		if err := cleanupExpiredRuns(ctx, db, cfg, time.Now().Add(-24*time.Hour)); err != nil {
+			log.Fatalf("清理过期 E2E 数据失败: %v", err)
+		}
+		return
+	}
+
+	// 同名 run seed 前只清理自身 manager 数据；new-api 用户名按 run/worker 固定，slow provision 会幂等替换。
+	if err := cleanupRun(ctx, db, opts.RunID); err != nil {
+		log.Fatalf("清理同名 run 的旧 E2E 数据失败: %v", err)
+	}
+	identities, err := fixtureIdentities(opts)
+	if err != nil {
+		log.Fatalf("生成 fixture identity 失败: %v", err)
 	}
 
 	runtimeImageID, err := e2eRuntimeImageID(cfg)
@@ -116,6 +123,12 @@ func main() {
 		if err != nil {
 			log.Fatalf("构造 worker %d fixture 失败: %v", identity.WorkerIndex, err)
 		}
+		// 只有 slow suite 会调用真实 new-api；quick/regression 保持完全确定性的本地 fixture。
+		if opts.Suite == suiteSlow {
+			if err := provisionE2ENewAPIUser(ctx, db, cfg, fx, opts.RunID, identity.WorkerIndex); err != nil {
+				log.Fatalf("为 worker %d 准备 new-api 用户失败: %v", identity.WorkerIndex, err)
+			}
+		}
 		pool.Fixtures = append(pool.Fixtures, fx)
 	}
 
@@ -127,10 +140,10 @@ func main() {
 	}
 }
 
-// requireE2EGuard 强制要求调用方显式声明 e2e 场景，防止误执行清库型 fixture 初始化。
+// requireE2EGuard 强制调用方显式声明 e2e 场景，防止误创建或清理隔离 fixture 数据。
 func requireE2EGuard() error {
 	if os.Getenv("OCM_E2E") != "1" {
-		return errors.New("seed-e2e 需要 OCM_E2E=1 环境变量；本命令会 TRUNCATE 业务表，禁止误在生产执行")
+		return errors.New("seed-e2e 需要 OCM_E2E=1 环境变量；本命令会创建或清理隔离 E2E 数据")
 	}
 	return nil
 }
@@ -146,7 +159,7 @@ func e2eRuntimeImageID(cfg config.Config) (string, error) {
 
 // provisionE2ENewAPIUser 为 raw SQL 创建的 fixture 企业补齐正式运行链路需要的
 // new-api 用户三件套。密文格式与 OrganizationService 完全一致，明文不写日志或 stdout。
-func provisionE2ENewAPIUser(ctx context.Context, db *sql.DB, cfg config.Config, fx fixture) error {
+func provisionE2ENewAPIUser(ctx context.Context, db *sql.DB, cfg config.Config, fx fixture, runID string, workerIndex int) error {
 	if strings.TrimSpace(cfg.NewAPI.BaseURL) == "" || strings.TrimSpace(cfg.NewAPI.AdminToken) == "" || cfg.NewAPI.AdminUserID == 0 {
 		return errors.New("new-api 管理配置不完整")
 	}
@@ -159,9 +172,8 @@ func provisionE2ENewAPIUser(ctx context.Context, db *sql.DB, cfg config.Config, 
 		return fmt.Errorf("初始化 cipher 失败: %w", err)
 	}
 
-	// 固定测试用户名并先删除旧账号，使破坏性 E2E seed 可重复执行且不会在 new-api 累积孤儿用户。
-	// 该名称保持在 new-api 的 12 字符上限内，并与任何正式组织命名空间区分。
-	username := e2eNewAPIUsername()
+	// run 哈希与 worker 后缀形成稳定隔离用户名，重复 slow seed 可精确替换自身账号。
+	username := e2eNewAPIUsername(runID, workerIndex)
 	password := "E2e-" + strings.ReplaceAll(uuid.NewString()[:16], "-", "")
 	client := newapi.NewClient(cfg.NewAPI.BaseURL, cfg.NewAPI.AdminToken, cfg.NewAPI.AdminUserID)
 	oldUser, err := client.FindUserByUsername(ctx, username)
@@ -250,60 +262,14 @@ func waitE2ERetry(ctx context.Context, delay time.Duration) error {
 	}
 }
 
-// e2eNewAPIUsername 返回 seed-e2e 独占的固定 new-api 用户名。
-// 固定值允许初始化前精确删除上一次测试账号，避免随机用户名持续占用本地测试资源。
-func e2eNewAPIUsername() string {
-	return "e2eaicc"
+// e2eNewAPIUsername 返回 run/worker 隔离且符合上游 12 字符限制的稳定用户名。
+func e2eNewAPIUsername(runID string, workerIndex int) string {
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(runID))
+	return fmt.Sprintf("e%07x%02d", hash.Sum32()&0x0fffffff, workerIndex)
 }
 
-// truncate 清掉 e2e 相关表；users 表只保留 platform_admin 行（保留 cmd/seed-admin
-// 已建好的 admin 账号，e2e 直接复用）。
-//
-// MySQL 适配：
-//   - 无 PG 的 TRUNCATE … RESTART IDENTITY CASCADE；用 SET FOREIGN_KEY_CHECKS=0 包裹整批，
-//     绕过外键约束后逐表 TRUNCATE/DELETE，结束再恢复 FK 检查。
-//   - users 需保留 platform_admin，故用 DELETE WHERE role<>'platform_admin' 而非整表 TRUNCATE。
-//   - migration 000003 已删除 runtime_nodes / instance_resource_samples / node_resource_samples 三张表，
-//     此处不再 TRUNCATE 它们；apps.runtime_node_id / container_id / container_name 列同样已删。
-func truncate(ctx context.Context, db *sql.DB) error {
-	stmts := []string{
-		`SET FOREIGN_KEY_CHECKS = 0`,
-		// AICC 由后续 migration 引入，必须在 apps/organizations 前清理；否则历史智能体会引用已清掉的隐藏 app，
-		// 造成下一轮工作台默认选中脏数据，破坏角色、知识库和会话回归的可重复性。
-		`TRUNCATE TABLE aicc_feedback`,
-		`TRUNCATE TABLE aicc_lead_values`,
-		`TRUNCATE TABLE aicc_leads`,
-		`TRUNCATE TABLE aicc_lead_fields`,
-		`TRUNCATE TABLE aicc_images`,
-		`TRUNCATE TABLE aicc_messages`,
-		`TRUNCATE TABLE aicc_sessions`,
-		`TRUNCATE TABLE aicc_blocked_visitors`,
-		`TRUNCATE TABLE aicc_agent_settings`,
-		`TRUNCATE TABLE aicc_agent_knowledge`,
-		`TRUNCATE TABLE aicc_agents`,
-		`TRUNCATE TABLE channel_bindings`,
-		`TRUNCATE TABLE ragflow_documents`,
-		`TRUNCATE TABLE ragflow_datasets`,
-		`TRUNCATE TABLE apps`,
-		`TRUNCATE TABLE recharge_records`,
-		`TRUNCATE TABLE jobs`,
-		`TRUNCATE TABLE audit_logs`,
-		`TRUNCATE TABLE refresh_tokens`,
-		`TRUNCATE TABLE assistant_versions`,
-		`DELETE FROM users WHERE role <> 'platform_admin'`,
-		`TRUNCATE TABLE organizations`,
-		`SET FOREIGN_KEY_CHECKS = 1`,
-	}
-	for _, s := range stmts {
-		if _, err := db.ExecContext(ctx, s); err != nil {
-			return fmt.Errorf("%s: %w", s, err)
-		}
-	}
-	return nil
-}
-
-// ensurePlatformAdmin 保证 fixture 声明的 platform_admin 行存在；如果 cmd/seed-admin 没跑过，
-// 或 truncate 把它带走了，就用 fixture 里的账密重新创建一份。
+// ensurePlatformAdmin 保证 fixture 声明的隔离 platform_admin 行存在。
 //
 // 用 ON DUPLICATE KEY UPDATE（UPSERT）而非 INSERT IGNORE：环境里如果已有同名 admin 但密码不同，
 // e2e 必须能用 fixture 里写死的密码登录，因此每次都把 hash 与 status 重置回 fixture 状态。
@@ -338,7 +304,7 @@ func buildFixture(ctx context.Context, db *sql.DB, runtimeImageID string, identi
 	fx.PlatformAdminLogin = identity.PlatformAdminLogin
 	fx.PlatformAdminPassword = "admin123"
 
-	// 0) 保证 platform_admin 行存在（truncate 之后行可能空）。
+	// 0) 保证当前 run/worker 的隔离 platform_admin 行存在。
 	if err := ensurePlatformAdmin(ctx, db, fx.PlatformAdminLogin, fx.PlatformAdminPassword); err != nil {
 		return fx, err
 	}
