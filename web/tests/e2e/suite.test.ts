@@ -1,4 +1,6 @@
 // suite 配置测试用于锁定 E2E 分层执行边界，防止标签或并发策略被静默放宽。
+import { resolve } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import { authStatePath, parseE2ESuite, resolveWorkerCount, suiteGrep } from './suite'
@@ -7,6 +9,18 @@ describe('E2E suite 配置契约', () => {
   // 缺少显式配置时使用 regression，保证默认执行覆盖常规回归场景。
   it('默认解析为 regression', () => {
     expect(parseE2ESuite(undefined)).toBe('regression')
+  })
+
+  // 三个公开 suite 都应保持原值，确保显式配置不会被默认值覆盖。
+  it.each([
+    // quick 覆盖最小冒烟套件的显式解析场景。
+    { value: 'quick', expected: 'quick' as const },
+    // regression 覆盖常规回归套件的显式解析场景。
+    { value: 'regression', expected: 'regression' as const },
+    // slow 覆盖高成本串行套件的显式解析场景。
+    { value: 'slow', expected: 'slow' as const },
+  ])('解析显式合法 suite $value', ({ value, expected }) => {
+    expect(parseE2ESuite(value)).toBe(expected)
   })
 
   // 未知 suite 必须立即失败，避免拼写错误导致错误范围的测试被执行。
@@ -30,6 +44,11 @@ describe('E2E suite 配置契约', () => {
     expect(resolveWorkerCount('regression', '1')).toBe(1)
   })
 
+  // quick 接受并发上限 4，锁定合法边界不会被误判为资源超限。
+  it('quick 接受合法的四 worker 上界覆盖', () => {
+    expect(resolveWorkerCount('quick', '4')).toBe(4)
+  })
+
   // 非法 worker 覆盖应携带约束范围，便于 CI 配置错误快速定位。
   it.each([
     // 0 覆盖下界越界场景。
@@ -40,6 +59,18 @@ describe('E2E suite 配置契约', () => {
     'abc',
   ])('拒绝非法 worker 覆盖 %s', (value) => {
     expect(() => resolveWorkerCount('quick', value)).toThrow('1 到 4')
+  })
+
+  // slow 的串行规则不得绕过非法值校验，错误配置仍需在启动阶段失败。
+  it.each([
+    // 0 覆盖 slow 下界越界场景。
+    '0',
+    // 5 覆盖 slow 上界越界场景。
+    '5',
+    // abc 覆盖 slow 非数字输入场景。
+    'abc',
+  ])('slow 拒绝非法 worker 覆盖 %s', (value) => {
+    expect(() => resolveWorkerCount('slow', value)).toThrow('1 到 4')
   })
 
   // quick 只选择明确标记的快速用例，作为最小冒烟范围。
@@ -59,6 +90,8 @@ describe('E2E suite 配置契约', () => {
 
   // 认证状态按 run、worker 与角色隔离，避免并发任务复用登录态文件。
   it('生成隔离到 run 和 worker 的认证状态路径', () => {
-    expect(authStatePath('run-a', 1, 'org_admin')).toContain('run-a/worker-1-org_admin.json')
+    const expected = resolve('test-results', '.auth', 'run-a', 'worker-1-org_admin.json')
+
+    expect(authStatePath('run-a', 1, 'org_admin')).toBe(expected)
   })
 })
