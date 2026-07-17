@@ -1,11 +1,10 @@
 import { expect, test as base } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
-import { parseE2EFixturePool, type E2EFixture } from './fixture-schema'
-import { fixtureForWorker } from './suite'
+import { fixtureForWorker, parseE2EFixturePool, type E2EFixture } from './suite'
 
-// E2EFixture 从无 Playwright 依赖的 schema 模块转出，保持现有 spec 的类型导入兼容。
-export type { E2EFixture } from './fixture-schema'
+// E2EFixture 从无 Playwright 依赖的 suite 契约转出，保持现有 spec 的类型导入兼容。
+export type { E2EFixture } from './suite'
 
 // E2EWorkerFixtures 声明 worker 级 fixture，确保同一 worker 内复用且不同 worker 间隔离。
 type E2EWorkerFixtures = {

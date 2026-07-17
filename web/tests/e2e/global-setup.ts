@@ -3,10 +3,10 @@ import { randomBytes } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { parseE2EFixturePoolFromOutput } from './fixture-schema'
 import {
   createE2ERunID,
   e2eCommandEnv,
+  parseE2EFixturePoolFromOutput,
   parseE2ESuite,
   resolveWorkerCount,
 } from './suite'
