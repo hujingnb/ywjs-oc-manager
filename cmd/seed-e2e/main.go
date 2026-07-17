@@ -9,7 +9,7 @@
 //   - 命令仅打算通过 docker compose run 在容器内对开发库执行（make seed-e2e）。
 //
 // 输出：
-//   - stdout 最后一行打印 fixture JSON；Playwright globalSetup 解析这一行。
+//   - stdout 只打印单个 fixture pool JSON；Playwright globalSetup 解析该对象。
 package main
 
 import (
@@ -33,24 +33,27 @@ import (
 	"oc-manager/internal/service"
 )
 
-// fixture 是 stdout 末行写出的 JSON 结构；字段名与 web/tests/e2e/fixtures.ts 一致。
+// fixture 是 fixture pool 中的单 worker JSON 结构；字段名与 web/tests/e2e/fixtures.ts 一致。
 //
 // 注意：
 //   - OrgID / AppID 在数据库 schema 中是 CHAR(36) UUID（应用层生成），故用 string。
 //   - migration 000003 已删除 runtime_nodes 表及 apps.runtime_node_id 列，
 //     fixture 不再携带 NodeID / NodeName，k8s 调度器负责 pod 落点，应用层无节点绑定。
 type fixture struct {
-	// PlatformAdminLogin/Password 是 Playwright 全局登录用的固定平台管理员账密。
+	// RunID/WorkerIndex 标识该 fixture 所属测试批次和 worker 隔离边界。
+	RunID       string `json:"run_id"`
+	WorkerIndex int    `json:"worker_index"`
+	// PlatformAdminLogin/Password 是当前 worker 登录用的隔离平台管理员账密。
 	PlatformAdminLogin    string `json:"platform_admin_login"`
 	PlatformAdminPassword string `json:"platform_admin_password"`
 	// OrgID/OrgName/OrgCode 标识本次 e2e 组织边界，成员、应用和知识库用例都依赖它。
 	OrgID   string `json:"org_id"`
 	OrgName string `json:"org_name"`
 	OrgCode string `json:"org_code"`
-	// OrgAdminLogin/Password 是组织管理员固定账密，用于覆盖组织级管理能力。
+	// OrgAdminLogin/Password 是当前 worker 的组织管理员账密，用于覆盖组织级管理能力。
 	OrgAdminLogin    string `json:"org_admin_login"`
 	OrgAdminPassword string `json:"org_admin_password"`
-	// OrgMemberLogin/Password 是普通成员固定账密，用于覆盖成员权限边界。
+	// OrgMemberLogin/Password 是当前 worker 的普通成员账密，用于覆盖成员权限边界。
 	OrgMemberLogin    string `json:"org_member_login"`
 	OrgMemberPassword string `json:"org_member_password"`
 	// AppID/AppName 标识预置 running 应用，用于渠道、运行态和权限用例。
@@ -61,6 +64,18 @@ type fixture struct {
 func main() {
 	if err := requireE2EGuard(); err != nil {
 		log.Fatal(err)
+	}
+	opts, err := loadRunOptions()
+	if err != nil {
+		log.Fatalf("加载 E2E 运行参数失败: %v", err)
+	}
+	// Task 4 接入 scoped cleanup 前显式拒绝清理 action，避免清理请求误执行 truncate 后重新 seed。
+	if err := requireSeedAction(opts); err != nil {
+		log.Fatal(err)
+	}
+	identities, err := fixtureIdentities(opts)
+	if err != nil {
+		log.Fatalf("生成 fixture identity 失败: %v", err)
 	}
 
 	configPath := os.Getenv("OCM_CONFIG")
@@ -95,19 +110,20 @@ func main() {
 	if err != nil {
 		log.Fatalf("选择 E2E runtime image 失败: %v", err)
 	}
-	fx, err := buildFixture(ctx, db, runtimeImageID)
-	if err != nil {
-		log.Fatalf("构造 fixture 失败: %v", err)
-	}
-	if err := provisionE2ENewAPIUser(ctx, db, cfg, fx); err != nil {
-		log.Fatalf("构造 fixture new-api 凭据失败: %v", err)
+	pool := fixturePool{RunID: opts.RunID, Suite: opts.Suite, Fixtures: make([]fixture, 0, len(identities))}
+	for _, identity := range identities {
+		fx, err := buildFixture(ctx, db, runtimeImageID, identity)
+		if err != nil {
+			log.Fatalf("构造 worker %d fixture 失败: %v", identity.WorkerIndex, err)
+		}
+		pool.Fixtures = append(pool.Fixtures, fx)
 	}
 
-	// 标准输出最后一行写 fixture JSON；前面的 log 走 stderr。
+	// 标准输出只写单个 fixture pool JSON 对象；所有诊断日志都走 stderr。
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetEscapeHTML(false)
-	if err := enc.Encode(fx); err != nil {
-		log.Fatalf("打印 fixture 失败: %v", err)
+	if err := enc.Encode(pool); err != nil {
+		log.Fatalf("打印 fixture pool 失败: %v", err)
 	}
 }
 
@@ -311,13 +327,15 @@ func ensurePlatformAdmin(ctx context.Context, db *sql.DB, username, password str
 	return nil
 }
 
-// buildFixture 以裸 SQL 写入组织 / 两个普通账号 / 一个应用 / 一个未绑定渠道。
+// buildFixture 按 identity 以裸 SQL 写入单个 worker 的组织 / 两个普通账号 / 一个应用 / 一个未绑定渠道。
 // 所有主键由应用层 uuid.NewString() 生成（CHAR(36)）；MySQL :exec 无 RETURNING，直接复用生成的 id。
 // migration 000003 已删除 runtime_nodes 表及 apps.runtime_node_id / container_id / container_name 列，
 // 因此不再插入节点行，apps INSERT 也不含上述列。
-func buildFixture(ctx context.Context, db *sql.DB, runtimeImageID string) (fixture, error) {
+func buildFixture(ctx context.Context, db *sql.DB, runtimeImageID string, identity fixtureIdentity) (fixture, error) {
 	var fx fixture
-	fx.PlatformAdminLogin = "admin"
+	fx.RunID = identity.RunID
+	fx.WorkerIndex = identity.WorkerIndex
+	fx.PlatformAdminLogin = identity.PlatformAdminLogin
 	fx.PlatformAdminPassword = "admin123"
 
 	// 0) 保证 platform_admin 行存在（truncate 之后行可能空）。
@@ -326,8 +344,8 @@ func buildFixture(ctx context.Context, db *sql.DB, runtimeImageID string) (fixtu
 	}
 
 	// 1) 创建组织。
-	fx.OrgName = "e2e-org"
-	fx.OrgCode = "test-org"
+	fx.OrgName = identity.OrgName
+	fx.OrgCode = identity.OrgCode
 	fx.OrgID = uuid.NewString()
 	if _, err := db.ExecContext(ctx,
 		`INSERT INTO organizations (id, name, code, status) VALUES (?, ?, ?, 'active')`,
@@ -339,9 +357,9 @@ func buildFixture(ctx context.Context, db *sql.DB, runtimeImageID string) (fixtu
 	// 2) 创建 org_admin / org_member 两个账号；后续 app.owner_user_id 用 admin id。
 	// 注：migration 000003 已删除 runtime_nodes 表，不再插入节点行；
 	// k8s 场景下 pod 落点由调度器决定，应用层无需节点绑定。
-	fx.OrgAdminLogin = "e2e-org-admin"
+	fx.OrgAdminLogin = identity.OrgAdminLogin
 	fx.OrgAdminPassword = "e2e-pass-123"
-	fx.OrgMemberLogin = "e2e-org-member"
+	fx.OrgMemberLogin = identity.OrgMemberLogin
 	fx.OrgMemberPassword = "e2e-pass-123"
 
 	var orgAdminID string
@@ -371,11 +389,12 @@ func buildFixture(ctx context.Context, db *sql.DB, runtimeImageID string) (fixtu
 	// ListAppsByOrgWithVersion）经 INNER JOIN assistant_versions，未绑定版本的 app 既不出现在
 	// 实例列表，也会让 app locale 等按实例查询的端点查不到（404），故 fixture app 必须绑定版本。
 	versionID := uuid.NewString()
+	versionName := fmt.Sprintf("e2e-%s-w%d-version", identity.RunID, identity.WorkerIndex)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO assistant_versions
 			(id, name, system_prompt, image_id, main_model)
-		VALUES (?, 'e2e-version', 'You are a test assistant.', ?, ?)`,
-		versionID, runtimeImageID, e2eMainModel(),
+		VALUES (?, ?, 'You are a test assistant.', ?, ?)`,
+		versionID, versionName, runtimeImageID, e2eMainModel(),
 	); err != nil {
 		return fx, fmt.Errorf("create assistant_version: %w", err)
 	}
@@ -393,7 +412,7 @@ func buildFixture(ctx context.Context, db *sql.DB, runtimeImageID string) (fixtu
 	// 4) 创建 fixture app（status=running，绑定上面的版本）。owner_user_id 用 org_admin。
 	// migration 000003 已删除 apps.runtime_node_id / container_id / container_name 列，
 	// INSERT 不含上述列；k8s 下应用无节点绑定，pod 落点由调度器决定。
-	fx.AppName = "e2e-app"
+	fx.AppName = identity.AppName
 	fx.AppID = uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO apps
