@@ -153,4 +153,21 @@ describe('E2E suite 配置契约', () => {
 
     expect(() => fixtureForWorker(pool, 0)).toThrow('fixture pool 包含重复的 worker 0')
   })
+
+  // 旧加载入口即使看到遗留环境变量也不得猜测 worker，调用方必须改用 Playwright 注入值。
+  it('旧加载入口拒绝绕过 worker fixture', async () => {
+    const previous = process.env.OCM_E2E_FIXTURE
+    process.env.OCM_E2E_FIXTURE = JSON.stringify({ worker_index: 0, org_name: 'legacy-org' })
+
+    try {
+      const { loadE2EFixture } = await import('./fixtures')
+      expect(() => loadE2EFixture()).toThrow('请使用 Playwright 注入的 e2eFixture')
+    } finally {
+      if (previous === undefined) {
+        delete process.env.OCM_E2E_FIXTURE
+      } else {
+        process.env.OCM_E2E_FIXTURE = previous
+      }
+    }
+  })
 })

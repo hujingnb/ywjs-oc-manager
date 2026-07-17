@@ -56,14 +56,10 @@ export const test = base.extend<{}, E2EWorkerFixtures>({
 
 export { expect }
 
-// loadE2EFixture 读取 globalSetup 注入的 OCM_E2E_FIXTURE 环境变量。
-// 该兼容入口仅供尚未在 Task 6 迁移的旧 spec 通过类型检查；缺失时仍立即失败。
+// loadE2EFixture 仅暂时保留导出，让尚未在 Task 6/7 迁移的旧 spec 继续通过类型检查。
+// 函数没有 workerInfo，无法安全确定 parallelIndex，因此禁止读取环境或猜测当前 worker。
 export function loadE2EFixture(): E2EFixture {
-  const raw = process.env.OCM_E2E_FIXTURE
-  if (!raw) {
-    throw new Error('OCM_E2E_FIXTURE 未注入；确保 globalSetup 跑过 make seed-e2e')
-  }
-  return JSON.parse(raw) as E2EFixture
+  throw new Error('loadE2EFixture 已停用；请使用 Playwright 注入的 e2eFixture')
 }
 
 // loginAs 按角色完成登录，等到不再停留在 /login 即认为登录成功。
