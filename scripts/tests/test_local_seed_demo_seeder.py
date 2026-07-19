@@ -56,9 +56,21 @@ class FakeManagerAPI:
         safe_body = copy.deepcopy(body)
         self.calls.append(("POST", path, safe_body))
 
-        # 版本创建分支生成稳定 ID，响应与正式 handler 一致。
+        # 版本创建分支只返回 AssistantVersionResult 字段，不回显请求专用的行业库 ID 数组。
         if path == "/api/v1/assistant-versions":
-            created = {"id": f"version-{self._next_version}", **safe_body}
+            created = {
+                "id": f"version-{self._next_version}",
+                "name": safe_body["name"],
+                "description": safe_body["description"],
+                "system_prompt": safe_body["system_prompt"],
+                "image_id": safe_body["image_id"],
+                "main_model": safe_body["main_model"],
+                # service 会丢弃空模型槽位，因此正式响应中的 routing 是空对象。
+                "routing": {},
+                "skills": [],
+                "revision": 1,
+                "industry_knowledge_bases": [],
+            }
             self._next_version += 1
             return self._finish_write("POST", path, created, self.versions, "version")
 
@@ -226,6 +238,23 @@ class DemoSeederTest(unittest.TestCase):
         self.assertTrue(
             all(body["admin_password"] == _ADMIN_PASSWORD for body in organization_posts)
         )
+
+    # 覆盖新建版本进入 SeedState 时的正式响应形状，禁止把创建请求专用字段误作响应字段。
+    def test_created_version_state_matches_assistant_version_result(self):
+        state = self._seeder(FakeManagerAPI()).ensure_platform_data()
+
+        expected_fields = {
+            "id", "name", "description", "system_prompt", "image_id", "main_model",
+            "routing", "skills", "revision", "industry_knowledge_bases",
+        }
+        # 两个固定版本都由同一正式 handler 返回，必须具备完全一致的响应结构。
+        for version in state.versions.values():
+            self.assertEqual(expected_fields, set(version))
+            self.assertEqual({}, version["routing"])
+            self.assertEqual([], version["skills"])
+            self.assertEqual(1, version["revision"])
+            self.assertEqual([], version["industry_knowledge_bases"])
+            self.assertNotIn("industry_knowledge_base_ids", version)
 
     # 覆盖完整环境重复执行：既有内容和额外 allowlist 原样保留，且不发送任何写请求。
     def test_complete_platform_second_run_does_not_overwrite_or_write(self):
@@ -492,8 +521,38 @@ class DemoSeederTest(unittest.TestCase):
         }
         seeder = self._seeder(FakeManagerAPI())
 
-        with self.assertRaisesRegex(SeedConflict, "demo-full.*allowlist 首项"):
+        with self.assertRaises(SeedConflict) as raised:
             seeder.validate_aicc_version_order(versions, organizations, agents={})
+
+        message = str(raised.exception)
+        self.assertIn("demo-full", message)
+        self.assertIn("allowlist 首项", message)
+        self.assertIn("general", message)
+        self.assertIn("customer", message)
+        self.assertIn("本地智能客服版", message)
+
+    # 覆盖空 allowlist 的冲突详情：实际首项必须使用固定安全文本而非空字符串。
+    def test_validate_aicc_version_order_reports_empty_allowlist(self):
+        versions = {
+            "本地通用助手版": {"id": "general", "name": "本地通用助手版"},
+            "本地智能客服版": {"id": "customer", "name": "本地智能客服版"},
+        }
+        organizations = {
+            "demo-full": FakeManagerAPI.organization(
+                "full", "demo-full", "完整", []
+            )
+        }
+        seeder = self._seeder(FakeManagerAPI())
+
+        with self.assertRaises(SeedConflict) as raised:
+            seeder.validate_aicc_version_order(versions, organizations, agents={})
+
+        message = str(raised.exception)
+        self.assertIn("demo-full", message)
+        self.assertIn("allowlist 首项", message)
+        self.assertIn("<empty>", message)
+        self.assertIn("customer", message)
+        self.assertIn("本地智能客服版", message)
 
 
 if __name__ == "__main__":

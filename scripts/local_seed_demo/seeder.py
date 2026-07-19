@@ -295,8 +295,11 @@ class DemoSeeder:
                 continue
             allowlist = organizations[spec.code].get("assistant_version_ids") or []
             if not allowlist or allowlist[0] != customer_id:
+                # 实际首项只来自服务端版本 ID；空列表使用固定安全文本，便于定位配置而不泄露请求体。
+                actual_first = allowlist[0] if allowlist else "<empty>"
                 raise SeedConflict(
-                    f"企业 {spec.code} 缺少客服智能体时，allowlist 首项必须是本地智能客服版"
+                    f"企业 {spec.code} 缺少客服智能体时，allowlist 首项实际为 "
+                    f"{actual_first}，期望为本地智能客服版（{customer_id}）"
                 )
 
     def _list_versions(self):
