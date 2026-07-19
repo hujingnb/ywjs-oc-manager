@@ -7,7 +7,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from local_seed_demo.client import ManagerAPI, UncertainWrite
+from local_seed_demo.client import APIError, ManagerAPI, UncertainWrite
 
 
 # 拆分测试凭据，避免异常 traceback 直接打印完整登录密码。
@@ -49,7 +49,7 @@ class _ScenarioHandler(BaseHTTPRequestHandler):
 
         # 登录场景只允许读取助手版本，用于验证 Bearer token 会自动附加。
         if self.server.scenario == "login" and self.path == "/api/v1/assistant-versions":
-            self._send_json(200, {"data": {"versions": [{"id": "v1"}]}})
+            self._send_json(200, {"versions": [{"id": "v1"}]})
             return
 
         # 退避场景的第一次读取返回瞬时错误，验证客户端只进行一次有限重试。
@@ -59,7 +59,34 @@ class _ScenarioHandler(BaseHTTPRequestHandler):
 
         # 退避场景的第二次读取恢复，响应内容用于确认重试结果来自真实 HTTP 请求。
         if self.server.scenario == "retry" and len(self.server.requests) == 2:
-            self._send_json(200, {"data": {"versions": [{"id": "v1"}]}})
+            self._send_json(200, {"versions": [{"id": "v1"}]})
+            return
+
+        # 瞬时错误耗尽场景始终返回 503，用于锁定完整五档退避及最终安全错误。
+        if self.server.scenario == "retry_exhausted":
+            self._send_json(503, {"code": "temporarily_unavailable", "message": "稍后重试"})
+            return
+
+        # 连接错误场景在收到每次 GET 后立即断开，验证套接字异常也受有限退避约束。
+        if self.server.scenario == "disconnect_get":
+            self.close_connection = True
+            self.connection.shutdown(socket.SHUT_RDWR)
+            self.connection.close()
+            return
+
+        # 非瞬时客户端错误必须直接返回，不得因统一错误处理而误触发 GET 重试。
+        if self.server.scenario == "bad_request":
+            self._send_json(400, {"code": "bad_request", "message": "请求错误"})
+            return
+
+        # 合法 JSON null 不是错误对象，客户端应使用脱敏默认字段构造 APIError。
+        if self.server.scenario == "error_null":
+            self._send_json(500, None)
+            return
+
+        # 合法 JSON 数组同样不提供 code/message，不能因调用 dict 方法泄露内部异常。
+        if self.server.scenario == "error_list":
+            self._send_json(500, ["unexpected"])
             return
 
         # 非测试契约内的路径统一返回 404，使意外请求立即暴露为测试失败。
@@ -74,10 +101,8 @@ class _ScenarioHandler(BaseHTTPRequestHandler):
             self._send_json(
                 200,
                 {
-                    "data": {
-                        "tokens": {"access_token": "token-1"},
-                        "user": {"id": "admin-1"},
-                    }
+                    "tokens": {"access_token": "token-1"},
+                    "user": {"id": "admin-1"},
                 },
             )
             return
@@ -160,6 +185,80 @@ class ManagerAPITest(unittest.TestCase):
         self.assertEqual([{"id": "v1"}], result["versions"])
         self.assertEqual([1], sleeps)
         self.assertEqual(2, len(server.requests))
+
+    # 覆盖 GET 持续收到瞬时状态直至耗尽，锁定五档退避、六次请求和最终 APIError。
+    def test_get_transient_status_exhausts_finite_backoff(self):
+        server = self._start_server("retry_exhausted")
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        sleeps = []
+        client = ManagerAPI(base_url, sleep=sleeps.append)
+
+        with self.assertRaises(APIError) as raised:
+            client.get("/api/v1/assistant-versions")
+
+        self.assertEqual([1, 2, 4, 8, 16], sleeps)
+        self.assertEqual(6, len(server.requests))
+        self.assertEqual(503, raised.exception.status)
+        self.assertEqual("temporarily_unavailable", raised.exception.code)
+
+    # 覆盖 GET 每次均遇到连接中断，要求有限退避耗尽后返回脱敏连接错误。
+    def test_get_connection_error_exhausts_finite_backoff(self):
+        server = self._start_server("disconnect_get")
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        sleeps = []
+        client = ManagerAPI(base_url, sleep=sleeps.append)
+
+        with self.assertRaises(APIError) as raised:
+            client.get("/api/v1/assistant-versions")
+
+        self.assertEqual([1, 2, 4, 8, 16], sleeps)
+        self.assertEqual(6, len(server.requests))
+        self.assertIsNone(raised.exception.status)
+        self.assertEqual("connection_error", raised.exception.code)
+
+    # 覆盖 GET 的普通 4xx 错误，确认非瞬时状态只请求一次且不执行任何退避。
+    def test_get_non_transient_4xx_does_not_retry(self):
+        server = self._start_server("bad_request")
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        sleeps = []
+        client = ManagerAPI(base_url, sleep=sleeps.append)
+
+        with self.assertRaises(APIError) as raised:
+            client.get("/api/v1/assistant-versions")
+
+        self.assertEqual([], sleeps)
+        self.assertEqual(1, len(server.requests))
+        self.assertEqual(400, raised.exception.status)
+        self.assertEqual("bad_request", raised.exception.code)
+
+    # 覆盖错误响应为 JSON null 的合法编码，要求降级为安全默认 APIError。
+    def test_http_error_with_json_null_uses_safe_defaults(self):
+        server = self._start_server("error_null")
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        client = ManagerAPI(base_url)
+
+        with self.assertRaises(APIError) as raised:
+            client.get("/api/v1/assistant-versions")
+
+        self.assertEqual("http_error", raised.exception.code)
+        self.assertEqual("manager 请求失败", raised.exception.safe_message)
+
+    # 覆盖错误响应为 JSON 数组的合法编码，要求忽略数组内容并使用安全默认字段。
+    def test_http_error_with_json_list_uses_safe_defaults(self):
+        server = self._start_server("error_list")
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        client = ManagerAPI(base_url)
+
+        with self.assertRaises(APIError) as raised:
+            client.get("/api/v1/assistant-versions")
+
+        self.assertEqual("http_error", raised.exception.code)
+        self.assertEqual("manager 请求失败", raised.exception.safe_message)
+
+    # 覆盖调用方可将 API 与不确定写错误统一视作运行时失败进行捕获的继承契约。
+    def test_client_errors_inherit_runtime_error(self):
+        self.assertTrue(issubclass(APIError, RuntimeError))
+        self.assertTrue(issubclass(UncertainWrite, RuntimeError))
 
     # 覆盖写请求已送达却无响应的歧义状态，要求抛错且绝不盲目重放 POST。
     def test_post_disconnect_after_arrival_raises_uncertain_write_without_retry(self):

@@ -14,7 +14,7 @@ TRANSIENT_STATUSES = {429, 502, 503, 504}
 _GET_RETRY_DELAYS = (1, 2, 4, 8, 16)
 
 
-class APIError(Exception):
+class APIError(RuntimeError):
     """表示 manager 返回的安全 API 错误，不保存请求凭据或原始响应体。"""
 
     def __init__(self, operation, status, code, message):
@@ -28,7 +28,7 @@ class APIError(Exception):
         )
 
 
-class UncertainWrite(Exception):
+class UncertainWrite(RuntimeError):
     """表示写请求可能已生效但没有响应，调用方必须先按稳定身份重新查询。"""
 
     def __init__(self, operation):
@@ -96,7 +96,8 @@ class ManagerAPI:
             try:
                 with urllib.request.urlopen(request, timeout=self.timeout) as response:
                     payload = json.load(response)
-                    return payload["data"]
+                    # manager handler 直接返回顶层业务对象，不额外包装 data envelope。
+                    return payload
             except urllib.error.HTTPError as error:
                 # 仅 GET 的指定瞬时状态可重试，避免 POST/PATCH 被服务端重复执行。
                 if method == "GET" and error.code in TRANSIENT_STATUSES and attempt < len(retry_delays):
@@ -121,6 +122,9 @@ class ManagerAPI:
         try:
             payload = json.load(error)
         except (json.JSONDecodeError, UnicodeDecodeError):
+            payload = {}
+        # JSON null、数组或标量虽语法合法，却不具备错误对象字段，统一安全降级。
+        if not isinstance(payload, dict):
             payload = {}
         code = payload.get("code", "http_error")
         message = payload.get("message", "manager 请求失败")
