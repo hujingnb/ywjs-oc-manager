@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 import time
 
-from local_seed_demo.client import APIError, UncertainWrite
+from local_seed_demo.client import APIError, RequestDeadlineExceeded, UncertainWrite
 
 
 # manager 的助手版本 DTO 要求完整提交八个辅助路由槽位；空值表示回落到主模型。
@@ -234,9 +234,13 @@ class DemoSeeder:
 
     def wait_job(self, job_id, target, deadline=None):
         """等待 Job 成功；失败终态立即携带安全 ID 与 last_error 停止。"""
+        deadline = deadline if deadline is not None else self.monotonic() + 900
+        wait_target = f"{target} 的 Job {job_id}"
 
         def check():
-            response = self.platform.get(f"/api/v1/jobs/{job_id}")
+            response = self._platform_get(
+                f"/api/v1/jobs/{job_id}", deadline, wait_target
+            )
             job = self._required_object(response, "job", f"Job {job_id}")
             status = job.get("status")
             valid_statuses = {"pending", "running", "succeeded", "failed", "canceled"}
@@ -258,7 +262,7 @@ class DemoSeeder:
             return job if status == "succeeded" else None
 
         return self._wait(
-            f"{target} 的 Job {job_id}", check, timeout=900, deadline=deadline
+            wait_target, check, timeout=900, deadline=deadline
         )
 
     def wait_app_ready(
@@ -270,9 +274,12 @@ class DemoSeeder:
         deadline=None,
     ):
         """以 runtime_phase=ready 和允许业务状态共同确认 app 可用。"""
+        deadline = deadline if deadline is not None else self.monotonic() + 900
 
         def check():
-            response = self.platform.get(f"/api/v1/apps/{app_id}")
+            response = self._platform_get(
+                f"/api/v1/apps/{app_id}", deadline, target
+            )
             app = self._required_object(response, "app", f"{target} app")
             self._validate_runtime_app(
                 app,
@@ -303,9 +310,12 @@ class DemoSeeder:
         deadline=None,
     ):
         """等待 agent 的接待意图与隐藏运行时共同收敛为 receiving。"""
+        deadline = deadline if deadline is not None else self.monotonic() + 900
 
         def check():
-            response = self.platform.get(f"/api/v1/aicc/agents/{agent_id}")
+            response = self._platform_get(
+                f"/api/v1/aicc/agents/{agent_id}", deadline, target
+            )
             agent = self._required_object(response, "agent", target)
             self._validate_agent(agent, expected_org_id, target, expected_app_id)
             if agent["id"] != agent_id:
@@ -321,6 +331,13 @@ class DemoSeeder:
             return agent if ready else None
 
         return self._wait(target, check, timeout=900, deadline=deadline)
+
+    def _platform_get(self, path, deadline, target):
+        """下传共享 deadline，并把客户端预算耗尽统一映射为目标运行时超时。"""
+        try:
+            return self.platform.get(path, deadline=deadline)
+        except RequestDeadlineExceeded as error:
+            raise SeedRuntimeError(f"等待 {target} 超时（900s）") from error
 
     def _wait(self, target, check, timeout, deadline=None):
         """按五秒轮询并服从调用链共享 deadline，检查耗时也计入总预算。"""
@@ -363,7 +380,7 @@ class DemoSeeder:
                 agent["app_id"], target, org_id, deadline=deadline
             )
             if agent.get("status") != "active":
-                agent = self._start_agent(agent, spec.code)
+                agent = self._start_agent(agent, spec.code, deadline=deadline)
             ready_agent = self.wait_agent_receiving(
                 agent["id"],
                 target,
@@ -439,12 +456,16 @@ class DemoSeeder:
             raise SeedConflict(f"企业 {code} 的演示智能客服存在重复记录")
         return exact[0] if exact else None
 
-    def _start_agent(self, agent, code):
+    def _start_agent(self, agent, code, deadline=None):
         """启动非 active 客服；响应中断后只在详情仍非 active 时补发一次。"""
         path = f"/api/v1/aicc/agents/{agent['id']}/start"
 
         def lookup_started():
-            response = self.platform.get(f"/api/v1/aicc/agents/{agent['id']}")
+            response = self._platform_get(
+                f"/api/v1/aicc/agents/{agent['id']}",
+                deadline,
+                f"企业 {code} 的演示智能客服",
+            )
             current = self._required_object(
                 response, "agent", f"企业 {code} 的演示智能客服"
             )

@@ -3,6 +3,7 @@
 import copy
 import unittest
 
+from local_seed_demo import client as client_module
 from local_seed_demo.client import APIError, UncertainWrite
 from local_seed_demo.seeder import DemoSeeder, SeedConflict, SeedRuntimeError, SeedState
 
@@ -47,6 +48,8 @@ class FakeManagerAPI:
         self.agent_start_response_overrides = {}
         self.app_state_queues = {}
         self.agent_state_queues = {}
+        self.deadline_clock = None
+        self.get_duration_queues = {}
         self._next_version = 1
         self._next_organization = 1
         self._next_member = 1
@@ -129,9 +132,20 @@ class FakeManagerAPI:
         """为指定写操作依次注入连接中断；True 表示服务端已完成该次写入。"""
         self.uncertain[(method, path)] = list(applied_before_disconnect)
 
-    def get(self, path):
+    def get(self, path, deadline=None):
         """返回深拷贝，避免播种器意外直接修改 fake 的服务端状态。"""
         self.calls.append(("GET", path, None))
+        durations = self.get_duration_queues.get(path)
+        if durations:
+            if self.deadline_clock is None:
+                raise AssertionError("模拟 GET 耗时前必须配置虚拟时钟")
+            duration = durations.pop(0)
+            remaining = deadline - self.deadline_clock.monotonic()
+            if remaining <= 0:
+                raise client_module.RequestDeadlineExceeded(f"GET {path}")
+            self.deadline_clock.sleep(min(duration, remaining))
+            if duration >= remaining:
+                raise client_module.RequestDeadlineExceeded(f"GET {path}")
 
         # 镜像列表分支锁定正式 handler 的 images envelope。
         if path == "/api/v1/runtime-images":
@@ -1556,6 +1570,31 @@ class DemoSeederRuntimeTest(unittest.TestCase):
             )
 
         self.assertEqual(900, clock.now)
+
+    # 覆盖临近共享 deadline 的最后一次 GET：客户端只能使用剩余预算且超期映射为目标超时。
+    def test_last_app_get_cannot_cross_shared_deadline(self):
+        clock = FakeClock()
+        api = FakeManagerAPI.complete_runtime_fixture()
+        api.deadline_clock = clock
+        api.get_duration_queues["/api/v1/apps/app-full"] = [2]
+        deadline = clock.monotonic() + 1
+
+        with self.assertRaisesRegex(SeedRuntimeError, "demo-full.*演示助手.*900"):
+            self._seeder(api, clock).wait_app_ready(
+                "app-full",
+                "企业 demo-full 的演示助手",
+                "org-full",
+                deadline=deadline,
+            )
+
+        self.assertEqual(1, clock.now)
+        self.assertEqual(
+            1,
+            len([
+                call for call in api.calls
+                if call[:2] == ("GET", "/api/v1/apps/app-full")
+            ]),
+        )
 
     # 覆盖完整数据第二次执行：只读确认两个普通实例和两个客服，不产生任何写请求。
     def test_second_run_is_read_only(self):

@@ -1,12 +1,16 @@
 """验证本地演示数据脚本访问 manager API 时的认证与重试安全边界。"""
 
 import json
+import io
 import os
 import socket
 import threading
 import unittest
+import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest import mock
 
+from local_seed_demo import client as client_module
 from local_seed_demo.client import APIError, ManagerAPI, UncertainWrite
 
 
@@ -15,6 +19,24 @@ _LOGIN_PASSWORD = "admin" + "123"
 
 # 拆分截断响应标记，避免 RED traceback 或断言源码直接暴露完整测试敏感值。
 _PARTIAL_BODY_MARKER = "partial" + "-secret"
+
+
+class _DeadlineClock:
+    """为 HTTP deadline 测试提供可精确推进的单调时钟。"""
+
+    def __init__(self):
+        """从零开始记录退避实际消耗的虚拟秒数。"""
+        self.now = 0.0
+        self.sleeps = []
+
+    def monotonic(self):
+        """返回当前虚拟单调时间。"""
+        return self.now
+
+    def sleep(self, seconds):
+        """记录并推进退避，不阻塞真实测试进程。"""
+        self.sleeps.append(seconds)
+        self.now += seconds
 
 
 class _ScenarioHandler(BaseHTTPRequestHandler):
@@ -294,6 +316,9 @@ class ManagerAPITest(unittest.TestCase):
     def test_client_errors_inherit_runtime_error(self):
         self.assertTrue(issubclass(APIError, RuntimeError))
         self.assertTrue(issubclass(UncertainWrite, RuntimeError))
+        self.assertTrue(
+            issubclass(client_module.RequestDeadlineExceeded, RuntimeError)
+        )
 
     # 覆盖写请求已送达却无响应的歧义状态，要求抛错且绝不盲目重放 POST。
     def test_post_disconnect_after_arrival_raises_uncertain_write_without_retry(self):
@@ -306,6 +331,64 @@ class ManagerAPITest(unittest.TestCase):
 
         self.assertEqual(1, len(server.requests))
         self.assertNotIn("demo", str(raised.exception))
+
+    # 覆盖亚秒剩余预算：urlopen timeout 取客户端上限与 remaining 的较小正值。
+    def test_get_deadline_limits_urlopen_timeout(self):
+        clock = _DeadlineClock()
+        response = io.BytesIO(b'{"ok": true}')
+        client = ManagerAPI(
+            "http://manager.test",
+            sleep=clock.sleep,
+            timeout=60,
+            monotonic=clock.monotonic,
+        )
+
+        with mock.patch("urllib.request.urlopen", return_value=response) as urlopen:
+            self.assertEqual({"ok": True}, client.get("/healthz", deadline=0.25))
+
+        self.assertEqual(1, urlopen.call_count)
+        self.assertGreater(urlopen.call_args.kwargs["timeout"], 0)
+        self.assertAlmostEqual(0.25, urlopen.call_args.kwargs["timeout"])
+
+    # 覆盖瞬时错误后的退避超过剩余预算：sleep 截断，耗尽后不得发送第二次 GET。
+    def test_get_deadline_truncates_backoff_and_forbids_retry(self):
+        clock = _DeadlineClock()
+        error = urllib.error.HTTPError(
+            "http://manager.test/healthz",
+            503,
+            "unavailable",
+            None,
+            io.BytesIO(b'{"code":"temporary"}'),
+        )
+        client = ManagerAPI(
+            "http://manager.test",
+            sleep=clock.sleep,
+            monotonic=clock.monotonic,
+        )
+
+        with mock.patch("urllib.request.urlopen", side_effect=error) as urlopen:
+            with self.assertRaises(client_module.RequestDeadlineExceeded):
+                client.get("/healthz", deadline=0.25)
+
+        self.assertEqual([0.25], clock.sleeps)
+        self.assertEqual(1, urlopen.call_count)
+
+    # 覆盖调用前预算已经耗尽：不得构造网络副作用，也不得进入退避 busy loop。
+    def test_get_exhausted_deadline_sends_no_request(self):
+        clock = _DeadlineClock()
+        clock.now = 10.0
+        client = ManagerAPI(
+            "http://manager.test",
+            sleep=clock.sleep,
+            monotonic=clock.monotonic,
+        )
+
+        with mock.patch("urllib.request.urlopen") as urlopen:
+            with self.assertRaises(client_module.RequestDeadlineExceeded):
+                client.get("/healthz", deadline=10.0)
+
+        urlopen.assert_not_called()
+        self.assertEqual([], clock.sleeps)
 
 
 if __name__ == "__main__":

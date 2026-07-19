@@ -37,14 +37,30 @@ class UncertainWrite(RuntimeError):
         super().__init__(f"{operation} 写入结果不确定，请先重新查询稳定身份")
 
 
+class RequestDeadlineExceeded(RuntimeError):
+    """表示只读请求的调用方绝对 deadline 已耗尽，不包含 URL 参数或凭据。"""
+
+    def __init__(self, operation):
+        """异常仅保留由调用方提供的安全操作名，且不得进入瞬时错误重试。"""
+        self.operation = operation
+        super().__init__(f"{operation} 请求预算已耗尽")
+
+
 class ManagerAPI:
     """封装演示数据脚本需要的认证、读取和写入 HTTP 操作。"""
 
-    def __init__(self, base_url, sleep=time.sleep, timeout=60):
-        """注入休眠函数便于测试退避，同时将访问令牌限制在客户端内存中。"""
+    def __init__(
+        self,
+        base_url,
+        sleep=time.sleep,
+        timeout=60,
+        monotonic=time.monotonic,
+    ):
+        """注入休眠和单调时钟便于测试，并将访问令牌限制在客户端内存中。"""
         self.base_url = base_url.rstrip("/")
         self.sleep = sleep
         self.timeout = timeout
+        self.monotonic = monotonic
         self.access_token = None
 
     def login(self, org_code, username, password):
@@ -57,19 +73,25 @@ class ManagerAPI:
         self.access_token = data["tokens"]["access_token"]
         return data["user"]
 
-    def get(self, path):
-        """执行可安全重放的认证读取；瞬时故障由底层按有限退避处理。"""
-        return self._request("GET", path, None, authenticated=True)
+    def get(self, path, deadline=None):
+        """执行认证读取；可选绝对 deadline 同时限制请求、退避和后续重试。"""
+        return self._request(
+            "GET", path, None, authenticated=True, deadline=deadline
+        )
 
     def post(self, path, body, authenticated=True):
         """执行不可盲目重放的写入，连接中断时向调用方暴露不确定结果。"""
-        return self._request("POST", path, body, authenticated=authenticated)
+        return self._request(
+            "POST", path, body, authenticated=authenticated, deadline=None
+        )
 
     def patch(self, path, body):
         """执行认证更新，并与 POST 一样禁止在连接中断后自动重放。"""
-        return self._request("PATCH", path, body, authenticated=True)
+        return self._request(
+            "PATCH", path, body, authenticated=True, deadline=None
+        )
 
-    def _request(self, method, path, body, authenticated):
+    def _request(self, method, path, body, authenticated, deadline=None):
         """发送 JSON 请求，并严格区分可重试读取与可能已生效的写入。"""
         operation = f"{method} {path}"
         headers = {"Accept": "application/json"}
@@ -94,8 +116,10 @@ class ManagerAPI:
                 method=method,
             )
             try:
-                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                request_timeout = self._request_timeout(deadline, operation)
+                with urllib.request.urlopen(request, timeout=request_timeout) as response:
                     payload = json.load(response)
+                    self._raise_if_deadline_exhausted(deadline, operation)
                     # manager handler 直接返回顶层业务对象，不额外包装 data envelope。
                     return payload
             except urllib.error.HTTPError as error:
@@ -103,13 +127,17 @@ class ManagerAPI:
                 if method == "GET" and error.code in TRANSIENT_STATUSES and attempt < len(retry_delays):
                     # 重试前主动释放错误响应及底层连接，不依赖解释器引用计数时机。
                     error.close()
-                    self.sleep(retry_delays[attempt])
+                    self._sleep_before_retry(
+                        retry_delays[attempt], deadline, operation
+                    )
                     continue
                 raise self._api_error(operation, error) from None
             except (urllib.error.URLError, OSError, http.client.HTTPException):
                 # 连接异常同样只允许 GET 退避；写入无法判断服务端是否已经提交。
                 if method == "GET" and attempt < len(retry_delays):
-                    self.sleep(retry_delays[attempt])
+                    self._sleep_before_retry(
+                        retry_delays[attempt], deadline, operation
+                    )
                     continue
                 if method in {"POST", "PATCH"}:
                     raise UncertainWrite(operation) from None
@@ -117,6 +145,37 @@ class ManagerAPI:
 
         # 循环边界保证所有路径均已返回或抛错，此处仅用于静态表达不可达状态。
         raise RuntimeError("不可达的请求状态")
+
+    def _request_timeout(self, deadline, operation):
+        """计算本次 urlopen 的正 timeout，deadline 耗尽时禁止发出网络请求。"""
+        if deadline is None:
+            return self.timeout
+        remaining = deadline - self.monotonic()
+        if remaining <= 0:
+            raise RequestDeadlineExceeded(operation)
+        timeout = min(self.timeout, remaining)
+        if timeout <= 0:
+            raise RequestDeadlineExceeded(operation)
+        return timeout
+
+    def _sleep_before_retry(self, delay, deadline, operation):
+        """将 GET 退避截断到剩余预算，并在睡后阻止 deadline 外的新请求。"""
+        if deadline is None:
+            self.sleep(delay)
+            return
+        remaining = deadline - self.monotonic()
+        if remaining <= 0:
+            raise RequestDeadlineExceeded(operation)
+        sleep_seconds = min(delay, remaining)
+        if sleep_seconds <= 0:
+            raise RequestDeadlineExceeded(operation)
+        self.sleep(sleep_seconds)
+        self._raise_if_deadline_exhausted(deadline, operation)
+
+    def _raise_if_deadline_exhausted(self, deadline, operation):
+        """在响应读取或退避完成后复查绝对预算，避免接受 deadline 外的结果。"""
+        if deadline is not None and self.monotonic() >= deadline:
+            raise RequestDeadlineExceeded(operation)
 
     @staticmethod
     def _api_error(operation, error):
