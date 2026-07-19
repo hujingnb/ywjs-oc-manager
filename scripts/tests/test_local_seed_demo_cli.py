@@ -2,6 +2,9 @@
 
 import io
 import os
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -174,6 +177,136 @@ class LocalSeedDemoCLITest(unittest.TestCase):
                 self.assertTrue(output.getvalue().startswith("❌ "))
                 self.assertNotIn("Traceback", output.getvalue())
                 self.assertNotIn("admin123", output.getvalue())
+
+    # 覆盖服务端消息和运行时下游错误即使夹带多种凭据也只输出脱敏后的稳定诊断。
+    def test_runtime_errors_redact_untrusted_secret_text(self):
+        self.write_env("DEEPSEEK_API_KEY=x\nSILICONFLOW_API_KEY=y\n")
+        errors = (
+            # APIError 的服务端 message 完全不可信，只保留结构化操作、状态和错误码。
+            APIError(
+                "POST /api/v1/apps?token=query-secret",
+                500,
+                "internal_error",
+                "Bearer bearer-secret sk-api-message password=message-pass",
+            ),
+            # Job/runtime 的自由文本需保留稳定目标，但必须清理常见 token、密码和 URL 凭据。
+            SeedRuntimeError(
+                "企业 demo-full 的 Job job-1 failed: Bearer bearer-runtime "
+                "sk-runtime-key password=runtime-pass "
+                "https://url-user:url-pass@example.local/run?token=url-query"
+            ),
+            # SeedConflict 同样经过统一清理，同时保持普通业务冲突原文可定位。
+            SeedConflict("demo-full 资源冲突 access_token=access-secret"),
+        )
+        secrets = (
+            "query-secret",
+            "bearer-secret",
+            "sk-api-message",
+            "message-pass",
+            "bearer-runtime",
+            "sk-runtime-key",
+            "runtime-pass",
+            "url-user",
+            "url-pass",
+            "url-query",
+            "access-secret",
+        )
+        for error in errors:
+            with self.subTest(error_type=type(error).__name__):
+                output = io.StringIO()
+                with mock.patch("local_seed_demo.cli.DemoSeeder") as seeder:
+                    seeder.return_value.run.side_effect = error
+                    self.assertEqual(
+                        1,
+                        main(
+                            root=self.root,
+                            stdout=output,
+                            api_factory=RecordingFactory(),
+                        ),
+                    )
+                self.assertEqual(1, len(output.getvalue().splitlines()))
+                for secret in secrets:
+                    self.assertNotIn(secret, output.getvalue())
+                if isinstance(error, SeedRuntimeError):
+                    self.assertIn("企业 demo-full 的 Job job-1 failed", output.getvalue())
+
+    # 覆盖无法识别结构的下游自由文本不进入日志，按异常类型降级为通用说明。
+    def test_unstructured_runtime_error_hides_entire_downstream_message(self):
+        self.write_env("DEEPSEEK_API_KEY=x\nSILICONFLOW_API_KEY=y\n")
+        output = io.StringIO()
+        with mock.patch("local_seed_demo.cli.DemoSeeder") as seeder:
+            seeder.return_value.run.side_effect = SeedRuntimeError(
+                "opaque downstream credential unexpected-private-value"
+            )
+            self.assertEqual(
+                1,
+                main(root=self.root, stdout=output, api_factory=RecordingFactory()),
+            )
+        self.assertEqual("❌ 演示资源运行失败（下游详情已隐藏）\n", output.getvalue())
+        self.assertNotIn("unexpected-private-value", output.getvalue())
+
+    # 覆盖普通安全冲突文案无需变化即可保留企业定位信息。
+    def test_safe_seed_conflict_message_is_preserved(self):
+        self.write_env("DEEPSEEK_API_KEY=x\nSILICONFLOW_API_KEY=y\n")
+        output = io.StringIO()
+        with mock.patch("local_seed_demo.cli.DemoSeeder") as seeder:
+            seeder.return_value.run.side_effect = SeedConflict("demo-full 资源冲突")
+            self.assertEqual(
+                1,
+                main(root=self.root, stdout=output, api_factory=RecordingFactory()),
+            )
+        self.assertEqual("❌ demo-full 资源冲突\n", output.getvalue())
+
+    # 覆盖权限和编码读取失败都转换为固定单行配置错误，且不泄露路径或原始字节内容。
+    def test_env_read_errors_return_safe_configuration_failure(self):
+        errors = (
+            # .env 权限不足不得把宿主机绝对路径带到日志。
+            PermissionError("/private/project/.env permission-secret"),
+            # 非 UTF-8 内容不得打印解码异常中的原始字节和原因。
+            UnicodeDecodeError("utf-8", b"\xff", 0, 1, "decode-secret"),
+        )
+        for error in errors:
+            with self.subTest(error_type=type(error).__name__):
+                output = io.StringIO()
+                with mock.patch("builtins.open", side_effect=error):
+                    self.assertEqual(
+                        1,
+                        main(
+                            root=self.root,
+                            stdout=output,
+                            api_factory=RecordingFactory(),
+                        ),
+                    )
+                self.assertEqual("❌ 无法读取本地 .env 配置\n", output.getvalue())
+                self.assertNotIn("secret", output.getvalue())
+
+    # 覆盖真实 Python 子进程能够导入薄入口，并在隔离根目录缺 Key 时安全退出而不访问网络。
+    def test_executable_entrypoint_smoke_with_missing_keys(self):
+        isolated_root = os.path.join(self.root, "isolated")
+        isolated_scripts = os.path.join(isolated_root, "scripts")
+        os.makedirs(isolated_scripts)
+        repository_scripts = os.path.dirname(os.path.dirname(__file__))
+        shutil.copy2(
+            os.path.join(repository_scripts, "local-seed-demo.py"),
+            isolated_scripts,
+        )
+        shutil.copytree(
+            os.path.join(repository_scripts, "local_seed_demo"),
+            os.path.join(isolated_scripts, "local_seed_demo"),
+        )
+
+        result = subprocess.run(
+            [sys.executable, "scripts/local-seed-demo.py"],
+            cwd=isolated_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(1, result.returncode)
+        self.assertIn("DEEPSEEK_API_KEY", result.stdout)
+        self.assertIn("SILICONFLOW_API_KEY", result.stdout)
+        self.assertNotIn("Traceback", result.stderr)
 
     # 覆盖 KeyboardInterrupt 不被普通失败处理吞掉，允许终端按约定中断进程。
     def test_keyboard_interrupt_propagates(self):
