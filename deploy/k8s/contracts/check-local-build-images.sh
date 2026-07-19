@@ -17,3 +17,10 @@ for image in oc-manager-api oc-manager-web; do
     exit 1
   fi
 done
+
+# 基础镜像也必须限定为节点运行平台后直导 containerd；k3d image import 可能在 ctr
+# 报 content digest 缺失时仍返回成功，导致 local-reset 直到部署阶段才回退远端慢拉。
+if ! rg -Fq 'docker save --platform linux/amd64 $$img | docker exec -i k3d-$(K3D_CLUSTER)-server-0 ctr images import - || exit 1' "$root/Makefile"; then
+  echo "Makefile 的 local-preload 未将 linux/amd64 基础镜像直接导入 k3d 节点" >&2
+  exit 1
+fi

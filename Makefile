@@ -280,8 +280,10 @@ local-build-aicc-runtime: aicc-runtime-inject-contract ## 构建客服专用 run
 
 # LOCAL_PRELOAD_IMAGES：local-up 需要的 docker.io 重镜像。节点 containerd 经镜像源拉这些镜像
 # 时快时卡（mysql/es 曾致 rollout 超时，ragflow 几 GB 更易卡），故改为宿主 docker 拉取（走宿主
-# daemon 镜像源，必要时换更快的源）后用 k3d 原生 `k3d image import` 灌入集群，pod 调度即命中本地
-# 镜像、不再走节点慢拉。local-up 含配置初始化，需 new-api 与 ragflow Running，故二者一并预载。
+# daemon 镜像源，必要时换更快的源）后以 linux/amd64 归档直接灌入节点 containerd，pod 调度
+# 即命中本地镜像、不再走节点慢拉。k3d image import 可能在节点 ctr 报 content digest 缺失时
+# 仍返回成功，不能用于此处。local-up 含配置初始化，需 new-api 与 ragflow Running，故二者
+# 一并预载。
 # redis 走 ACR、minio 走 pgsty，节点直拉无瓶颈，不入此列。宿主 docker 镜像缓存跨 local-reset
 # （删集群）保留，首拉成功后续仅做秒级导入。
 LOCAL_PRELOAD_IMAGES := busybox:1.36 mysql:8.0 elasticsearch:8.11.3 calciumion/new-api:latest infiniflow/ragflow:v0.25.6
@@ -290,7 +292,7 @@ local-preload: # 内部：local-up 调用——宿主拉取重镜像并 k3d imag
 	@for img in $(LOCAL_PRELOAD_IMAGES); do \
 		echo "==> 预载 $$img"; \
 		docker image inspect $$img >/dev/null 2>&1 || docker pull $$img || exit 1; \
-		k3d image import $$img -c $(K3D_CLUSTER) || exit 1; \
+		docker save --platform linux/amd64 $$img | docker exec -i k3d-$(K3D_CLUSTER)-server-0 ctr images import - || exit 1; \
 	done
 	@echo "✅ 基础镜像已 import 到集群"
 
