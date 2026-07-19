@@ -70,9 +70,9 @@ func TestEnsureAppAICCCreatesHPA(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestEnsureAppAICCUsesStableHPAAPI 验证真实集群只提供 autoscaling/v2 时，
-// AICC reconcile 不会继续请求已从当前 k3d 移除的 v2beta2 端点。
-func TestEnsureAppAICCUsesStableHPAAPI(t *testing.T) {
+// TestEnsureAppAICCRequestsStableHPAGVR 通过 fake client 的 action 记录验证，
+// AICC reconcile 的 HPA 查询与创建都请求 autoscaling/v2 GVR。
+func TestEnsureAppAICCRequestsStableHPAGVR(t *testing.T) {
 	cs := fake.NewSimpleClientset()
 	versions := []string{}
 	cs.PrependReactor("*", "horizontalpodautoscalers", func(action k8stesting.Action) (bool, runtime.Object, error) {
