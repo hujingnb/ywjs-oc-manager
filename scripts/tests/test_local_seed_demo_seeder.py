@@ -41,6 +41,7 @@ class FakeManagerAPI:
         self.login_error = None
         self.member_response_overrides = {}
         self.agent_list_response_overrides = {}
+        self.agent_list_response_queues = {}
         self.agent_detail_response_overrides = {}
         self.agent_create_response_overrides = []
         self.agent_start_response_overrides = {}
@@ -173,6 +174,11 @@ class FakeManagerAPI:
         # AICC 列表严格按企业隔离，支持注入异常 200 envelope 验证禁止误写。
         if path.startswith("/api/v1/aicc/agents?org_id="):
             org_id = path.split("org_id=", 1)[1].split("&", 1)[0]
+            queued = self.agent_list_response_queues.get(org_id)
+            if queued:
+                response = copy.deepcopy(queued[0])
+                queued.pop(0)
+                return response
             if org_id in self.agent_list_response_overrides:
                 return copy.deepcopy(self.agent_list_response_overrides[org_id])
             return {"agents": copy.deepcopy(self.agents.get(org_id, []))}
@@ -1427,6 +1433,36 @@ class DemoSeederRuntimeTest(unittest.TestCase):
                 "企业 demo-full 的演示助手",
             )
 
+    # 覆盖 Job canceled 终态：立即携带 Job ID、状态和安全错误终止，不进入超时轮询。
+    def test_canceled_job_stops_immediately(self):
+        clock = FakeClock()
+        api = FakeManagerAPI.complete_runtime_fixture()
+        job_id = "00000000-0000-0000-0000-000000000003"
+        api.jobs[job_id] = {
+            "id": job_id,
+            "status": "canceled",
+            "last_error": "operator canceled",
+        }
+
+        with self.assertRaisesRegex(
+            SeedRuntimeError, f"{job_id}.*canceled.*operator canceled"
+        ):
+            self._seeder(api, clock).wait_job(job_id, "企业 demo-full 的演示助手")
+
+        self.assertEqual(0, clock.now)
+
+    # 覆盖 Job 返回未知状态：契约异常必须立即失败，不能把拼写错误当作处理中。
+    def test_unknown_job_status_is_rejected_immediately(self):
+        clock = FakeClock()
+        api = FakeManagerAPI.complete_runtime_fixture()
+        job_id = "00000000-0000-0000-0000-000000000004"
+        api.jobs[job_id] = {"id": job_id, "status": "mystery"}
+
+        with self.assertRaisesRegex(SeedConflict, f"{job_id}.*状态.*mystery"):
+            self._seeder(api, clock).wait_job(job_id, "企业 demo-full 的演示助手")
+
+        self.assertEqual(0, clock.now)
+
     # 覆盖 Job succeeded 只代表任务终态：随后仍须读取 app 并确认双轴 ready 事实。
     def test_succeeded_job_is_followed_by_app_readiness_check(self):
         api = FakeManagerAPI.complete_runtime_fixture()
@@ -1450,6 +1486,28 @@ class DemoSeederRuntimeTest(unittest.TestCase):
         app_index = api.calls.index(("GET", "/api/v1/apps/app-full", None))
         self.assertLess(job_index, app_index)
         self.assertEqual("ready", state.apps["demo-full"]["runtime_phase"])
+
+    # 覆盖普通实例共享 900 秒预算：Job 消耗约 500 秒后 app 只能使用剩余时间。
+    def test_job_and_app_share_one_900_second_deadline(self):
+        clock = FakeClock()
+        api = FakeManagerAPI.complete_runtime_fixture()
+        job_id = "00000000-0000-0000-0000-000000000005"
+        api.jobs[job_id] = [
+            *({"id": job_id, "status": "pending"} for _ in range(101)),
+            {"id": job_id, "status": "succeeded"},
+        ]
+        api.apps["app-full"].update({"status": "starting", "runtime_phase": "starting"})
+        state = SeedState(
+            versions={},
+            organizations={},
+            apps={"demo-full": copy.deepcopy(api.apps["app-full"])},
+            jobs={"demo-full": job_id},
+        )
+
+        with self.assertRaisesRegex(SeedRuntimeError, "demo-full.*900"):
+            self._seeder(api, clock).wait_apps_ready(state)
+
+        self.assertEqual(900, clock.now)
 
     # 覆盖 app 进入 error：输出稳定企业、资源名和服务端安全错误字段。
     def test_app_error_stops_with_initialization_details(self):
@@ -1571,6 +1629,19 @@ class DemoSeederRuntimeTest(unittest.TestCase):
         with self.assertRaisesRegex(SeedConflict, "demo-full.*应用企业归属冲突"):
             self._seeder(api).wait_apps_ready(state)
 
+    # 覆盖普通 app owner 在详情轮询中漂移：即使企业未变也不得复用到其他成员。
+    def test_normal_app_owner_drift_is_rejected(self):
+        api = FakeManagerAPI.complete_runtime_fixture()
+        state = SeedState(
+            versions={},
+            organizations={},
+            apps={"demo-full": copy.deepcopy(api.apps["app-full"])},
+        )
+        api.apps["app-full"]["owner_user_id"] = "member-other"
+
+        with self.assertRaisesRegex(SeedConflict, "demo-full.*应用成员归属冲突"):
+            self._seeder(api).wait_apps_ready(state)
+
     # 覆盖 agent 详情缺 runtime_status：异常 200 必须立即失败而非轮询到 900 秒。
     def test_agent_detail_missing_runtime_status_fails_immediately(self):
         clock = FakeClock()
@@ -1623,6 +1694,82 @@ class DemoSeederRuntimeTest(unittest.TestCase):
             if call[:2] == ("GET", f"/api/v1/aicc/agents/{agent['id']}")
         ]
         self.assertEqual([], detail_calls)
+
+    # 覆盖 active+starting 的启动响应不是完成条件：继续轮询详情直到 receiving。
+    def test_start_response_active_starting_waits_for_receiving_detail(self):
+        api = FakeManagerAPI.complete_runtime_fixture()
+        agent = api.agents["org-full"][0]
+        agent.update({"status": "draft", "runtime_status": "ready"})
+        path = f"/api/v1/aicc/agents/{agent['id']}/start"
+        api.agent_start_response_overrides[path] = {
+            "agent": {**copy.deepcopy(agent), "status": "active", "runtime_status": "starting"}
+        }
+        api.queue_agent_states(agent["id"], [
+            {"status": "active", "runtime_status": "starting"},
+            {"status": "active", "runtime_status": "receiving"},
+        ])
+
+        state = self._seeder(api).run()
+
+        detail_calls = [
+            call for call in api.calls
+            if call[:2] == ("GET", f"/api/v1/aicc/agents/{agent['id']}")
+        ]
+        self.assertEqual(2, len(detail_calls))
+        self.assertEqual("receiving", state.agents["demo-full"]["runtime_status"])
+
+    # 覆盖单个 AICC 共享 900 秒预算：hidden app 消耗后 agent 只能使用剩余时间。
+    def test_hidden_app_and_agent_share_one_900_second_deadline(self):
+        clock = FakeClock()
+        api = FakeManagerAPI.complete_runtime_fixture()
+        agent = api.agents["org-full"][0]
+        agent.update({"status": "active", "runtime_status": "starting"})
+        api.queue_app_states(agent["app_id"], [
+            *(
+                {"status": "starting", "runtime_phase": "starting"}
+                for _ in range(101)
+            ),
+            {"status": "binding_waiting", "runtime_phase": "ready"},
+        ])
+
+        with self.assertRaisesRegex(SeedRuntimeError, "demo-full.*900"):
+            self._seeder(api, clock).run()
+
+        self.assertEqual(900, clock.now)
+
+    # 覆盖创建响应中断时并发出现唯一改名客服：回查不能把无关资源当作本次创建结果。
+    def test_uncertain_create_ignores_concurrent_single_renamed_agent(self):
+        api = FakeManagerAPI.complete_runtime_fixture(agent_names=[])
+        unrelated = FakeManagerAPI.agent(
+            "agent-unrelated",
+            "org-full",
+            "aicc-app-unrelated",
+            "并发售前客服",
+            status="active",
+            runtime_status="receiving",
+        )
+        api.agents["org-full"].append(copy.deepcopy(unrelated))
+        api.apps["aicc-app-unrelated"] = FakeManagerAPI.app(
+            "aicc-app-unrelated",
+            "org-full",
+            "platform-admin",
+            "并发售前客服",
+            status="binding_waiting",
+            runtime_phase="ready",
+        )
+        # 首次识别模拟并发资源尚不可见；创建中断后的回查才看到该改名资源。
+        api.agent_list_response_queues["org-full"] = [{"agents": []}]
+        api.interrupt("POST", "/api/v1/aicc/agents", False)
+
+        state = self._seeder(api).run()
+
+        full_creates = [
+            call for call in api.calls
+            if call[:2] == ("POST", "/api/v1/aicc/agents")
+            and call[2]["org_id"] == "org-full"
+        ]
+        self.assertEqual(2, len(full_creates))
+        self.assertEqual("演示智能客服", state.agents["demo-full"]["name"])
 
 
 if __name__ == "__main__":

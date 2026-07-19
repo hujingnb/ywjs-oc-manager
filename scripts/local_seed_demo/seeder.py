@@ -208,44 +208,78 @@ class DemoSeeder:
             target = f"企业 {code} 的演示助手"
             expected_app_id = app.get("id")
             expected_org_id = app.get("org_id")
+            expected_owner_user_id = app.get("owner_user_id")
             if (
                 not isinstance(expected_app_id, str)
                 or not expected_app_id
                 or not isinstance(expected_org_id, str)
                 or not expected_org_id
+                or not isinstance(expected_owner_user_id, str)
+                or not expected_owner_user_id
             ):
                 raise SeedConflict(f"{target} 应用响应格式异常")
+            # Job 与 app 属于同一普通实例初始化链路，只允许共享一份 15 分钟预算。
+            deadline = self.monotonic() + 900
             job_id = state.jobs.get(code)
             if job_id:
-                self.wait_job(job_id, target)
+                self.wait_job(job_id, target, deadline=deadline)
             state.apps[code] = self.wait_app_ready(
-                expected_app_id, target, expected_org_id
+                expected_app_id,
+                target,
+                expected_org_id,
+                expected_owner_user_id=expected_owner_user_id,
+                deadline=deadline,
             )
         return state
 
-    def wait_job(self, job_id, target):
+    def wait_job(self, job_id, target, deadline=None):
         """等待 Job 成功；失败终态立即携带安全 ID 与 last_error 停止。"""
 
         def check():
             response = self.platform.get(f"/api/v1/jobs/{job_id}")
             job = self._required_object(response, "job", f"Job {job_id}")
             status = job.get("status")
-            if status == "failed":
+            valid_statuses = {"pending", "running", "succeeded", "failed", "canceled"}
+            if job.get("id") != job_id:
+                raise SeedConflict(f"Job {job_id} 响应标识契约异常")
+            if not isinstance(status, str) or status not in valid_statuses:
+                safe_status = status if isinstance(status, str) else "<invalid>"
+                raise SeedConflict(
+                    f"Job {job_id} 状态契约异常: {safe_status}"
+                )
+            last_error = job.get("last_error", "")
+            if not isinstance(last_error, str):
+                raise SeedConflict(f"Job {job_id} 错误信息契约异常")
+            if status in {"failed", "canceled"}:
+                detail = last_error or status
                 raise SeedRuntimeError(
-                    f"{target} 的 Job {job_id} 失败: {job.get('last_error', '')}"
+                    f"{target} 的 Job {job_id} {status}: {detail}"
                 )
             return job if status == "succeeded" else None
 
-        return self._wait(f"{target} 的 Job {job_id}", check, timeout=900)
+        return self._wait(
+            f"{target} 的 Job {job_id}", check, timeout=900, deadline=deadline
+        )
 
-    def wait_app_ready(self, app_id, target, expected_org_id):
+    def wait_app_ready(
+        self,
+        app_id,
+        target,
+        expected_org_id,
+        expected_owner_user_id=None,
+        deadline=None,
+    ):
         """以 runtime_phase=ready 和允许业务状态共同确认 app 可用。"""
 
         def check():
             response = self.platform.get(f"/api/v1/apps/{app_id}")
             app = self._required_object(response, "app", f"{target} app")
             self._validate_runtime_app(
-                app, app_id, expected_org_id, target
+                app,
+                app_id,
+                expected_org_id,
+                target,
+                expected_owner_user_id,
             )
             if app.get("status") == "error":
                 raise SeedRuntimeError(
@@ -258,10 +292,15 @@ class DemoSeeder:
             )
             return app if ready else None
 
-        return self._wait(target, check, timeout=900)
+        return self._wait(target, check, timeout=900, deadline=deadline)
 
     def wait_agent_receiving(
-        self, agent_id, target, expected_org_id, expected_app_id
+        self,
+        agent_id,
+        target,
+        expected_org_id,
+        expected_app_id,
+        deadline=None,
     ):
         """等待 agent 的接待意图与隐藏运行时共同收敛为 receiving。"""
 
@@ -281,18 +320,21 @@ class DemoSeeder:
             )
             return agent if ready else None
 
-        return self._wait(target, check, timeout=900)
+        return self._wait(target, check, timeout=900, deadline=deadline)
 
-    def _wait(self, target, check, timeout):
-        """按五秒间隔轮询单目标，超时时不暴露服务端原始响应。"""
-        deadline = self.monotonic() + timeout
+    def _wait(self, target, check, timeout, deadline=None):
+        """按五秒轮询并服从调用链共享 deadline，检查耗时也计入总预算。"""
+        deadline = deadline if deadline is not None else self.monotonic() + timeout
         while True:
-            result = check()
-            if result is not None:
-                return result
             if self.monotonic() >= deadline:
                 raise SeedRuntimeError(f"等待 {target} 超时（{timeout}s）")
-            self.sleep(5)
+            result = check()
+            # 单次 HTTP 检查本身消耗的时间也属于 900 秒预算，超期结果不可视为成功。
+            if self.monotonic() >= deadline:
+                raise SeedRuntimeError(f"等待 {target} 超时（{timeout}s）")
+            if result is not None:
+                return result
+            self.sleep(min(5, deadline - self.monotonic()))
 
     def ensure_agents(self, state):
         """按稳定企业和安全名称规则补齐、启动两家企业的演示智能客服。"""
@@ -315,11 +357,19 @@ class DemoSeeder:
 
             target = f"企业 {spec.code} 的演示智能客服"
             self._validate_agent(agent, org_id, target)
-            self.wait_app_ready(agent["app_id"], target, org_id)
+            # hidden app 初始化与 agent 接待收敛属于同一客服资源，共享一份 15 分钟预算。
+            deadline = self.monotonic() + 900
+            self.wait_app_ready(
+                agent["app_id"], target, org_id, deadline=deadline
+            )
             if agent.get("status") != "active":
                 agent = self._start_agent(agent, spec.code)
             ready_agent = self.wait_agent_receiving(
-                agent["id"], target, org_id, agent["app_id"]
+                agent["id"],
+                target,
+                org_id,
+                agent["app_id"],
+                deadline=deadline,
             )
             self._validate_agent(ready_agent, org_id, target, agent["app_id"])
             state.agents[spec.code] = ready_agent
@@ -370,7 +420,8 @@ class DemoSeeder:
         }
 
         def lookup_agent():
-            found = self._find_demo_agent(org_id, code)
+            # 创建中断后的因果确认只能使用固定精确名称，唯一改名客服可能是并发无关资源。
+            found = self._find_exact_demo_agent(org_id, code)
             return None if found is None else {"agent": found}
 
         response = self.ensure_uncertain_write(
@@ -379,6 +430,14 @@ class DemoSeeder:
             f"创建智能客服 code={code} name=演示智能客服",
         )
         return self._required_object(response, "agent", f"企业 {code} 创建智能客服")
+
+    def _find_exact_demo_agent(self, org_id, code):
+        """仅按固定名称确认本次创建结果，不启用既有资源的单条改名复用规则。"""
+        agents = self._list_agents(org_id, code)
+        exact = [agent for agent in agents if agent["name"] == "演示智能客服"]
+        if len(exact) > 1:
+            raise SeedConflict(f"企业 {code} 的演示智能客服存在重复记录")
+        return exact[0] if exact else None
 
     def _start_agent(self, agent, code):
         """启动非 active 客服；响应中断后只在详情仍非 active 时补发一次。"""
@@ -438,9 +497,17 @@ class DemoSeeder:
             raise SeedConflict(f"{target}隐藏应用归属冲突")
 
     @staticmethod
-    def _validate_runtime_app(app, app_id, expected_org_id, target):
+    def _validate_runtime_app(
+        app, app_id, expected_org_id, target, expected_owner_user_id=None
+    ):
         """校验详情仍是目标企业的同一 app，并具备轮询所需双轴字段。"""
-        required_string_fields = ("id", "org_id", "status", "runtime_phase")
+        required_string_fields = (
+            "id",
+            "org_id",
+            "owner_user_id",
+            "status",
+            "runtime_phase",
+        )
         if any(
             not isinstance(app.get(field_name), str)
             or not app[field_name]
@@ -449,6 +516,11 @@ class DemoSeeder:
             raise SeedConflict(f"{target} 应用响应格式异常")
         if app["org_id"] != expected_org_id:
             raise SeedConflict(f"{target} 应用企业归属冲突")
+        if (
+            expected_owner_user_id is not None
+            and app["owner_user_id"] != expected_owner_user_id
+        ):
+            raise SeedConflict(f"{target} 应用成员归属冲突")
 
     @staticmethod
     def _required_object(response, field_name, target):
