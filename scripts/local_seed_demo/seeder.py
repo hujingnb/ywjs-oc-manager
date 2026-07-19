@@ -159,6 +159,7 @@ class DemoSeeder:
                         "/api/v1/assistant-versions", body
                     ),
                     lookup_version,
+                    f"创建助手版本 {spec.name}",
                 )
                 existing = response["version"]
                 listed.append(existing)
@@ -192,6 +193,7 @@ class DemoSeeder:
                         "/api/v1/organizations", body
                     ),
                     lookup_organization,
+                    f"创建企业 {spec.code}",
                 )
                 existing = response["organization"]
                 listed.append(existing)
@@ -223,7 +225,9 @@ class DemoSeeder:
             return {"organization": found}
 
         response = self.ensure_uncertain_write(
-            lambda: self.platform.patch(path, body), lookup_profile
+            lambda: self.platform.patch(path, body),
+            lookup_profile,
+            f"补齐企业版本 {code}",
         )
         return response["organization"]
 
@@ -259,20 +263,26 @@ class DemoSeeder:
             return {"organization": found} if reached else None
 
         response = self.ensure_uncertain_write(
-            lambda: self.platform.patch(path, body), lookup_aicc
+            lambda: self.platform.patch(path, body),
+            lookup_aicc,
+            f"补齐企业 AICC {code}",
         )
         return response["organization"]
 
     @staticmethod
-    def ensure_uncertain_write(create, lookup):
-        """写入中断后先回查；确认目标不存在时仅再写一次，二次中断直接上抛。"""
+    def ensure_uncertain_write(create, lookup, target_context):
+        """写入中断后先回查；二次中断用安全目标上下文转换为可定位的冲突。"""
         try:
             return create()
         except UncertainWrite:
             existing = lookup()
             if existing is not None:
                 return existing
-            return create()
+            try:
+                return create()
+            except UncertainWrite as error:
+                # 上下文由固定操作和稳定 name/code 组成，异常链仅保留脱敏的网络操作名。
+                raise SeedConflict(f"{target_context} 第二次写入结果仍不确定") from error
 
     def validate_aicc_version_order(
         self, versions, organizations=None, agents=None

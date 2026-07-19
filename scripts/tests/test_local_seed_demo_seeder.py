@@ -151,7 +151,7 @@ class FakeManagerAPI:
             "default_app_knowledge_quota_bytes": 1_000,
             "assistant_version_ids": list(version_ids),
             "aicc_enabled": False,
-            "aicc_agent_limit": 0,
+            # 新企业数据库上限为 NULL，真实 JSON 因 omitempty 不返回 aicc_agent_limit。
             "industry_knowledge_base_ids": [],
         }
         result.update(copy.deepcopy(overrides))
@@ -238,6 +238,21 @@ class DemoSeederTest(unittest.TestCase):
         self.assertTrue(
             all(body["admin_password"] == _ADMIN_PASSWORD for body in organization_posts)
         )
+
+        # 新企业的 AICC 上限来自真实 NULL/omitempty，首次单向开通必须继续提交不限。
+        for code in ("demo-full", "demo-aicc"):
+            organization = state.organizations[code]
+            aicc_path = (
+                f"/api/v1/organizations/{organization['id']}/aicc-config"
+            )
+            aicc_body = next(
+                body
+                for method, path, body in api.calls
+                if method == "PATCH" and path == aicc_path
+            )
+            self.assertIsNone(aicc_body["agent_limit"])
+            self.assertTrue(organization["aicc_enabled"])
+            self.assertIsNone(organization["aicc_agent_limit"])
 
     # 覆盖新建版本进入 SeedState 时的正式响应形状，禁止把创建请求专用字段误作响应字段。
     def test_created_version_state_matches_assistant_version_result(self):
@@ -439,20 +454,81 @@ class DemoSeederTest(unittest.TestCase):
         ]
         self.assertEqual(3, len(version_posts))
 
-    # 覆盖两次创建均中断且均未落库：第二次 UncertainWrite 必须原样上抛，不得第三次写入。
-    def test_second_uncertain_create_is_raised(self):
+    # 覆盖版本两次创建均中断：冲突需包含安全版本名并保留底层异常，不得第三次写入。
+    def test_second_uncertain_version_create_reports_safe_target(self):
         api = FakeManagerAPI()
         api.interrupt("POST", "/api/v1/assistant-versions", False, False)
 
-        with self.assertRaises(UncertainWrite):
+        with self.assertRaises(SeedConflict) as raised:
             self._seeder(api).ensure_platform_data()
 
+        message = str(raised.exception)
+        self.assertIn("本地通用助手版", message)
+        self.assertIn("创建助手版本", message)
+        self.assertIn("不确定", message)
+        self.assertIsInstance(raised.exception.__cause__, UncertainWrite)
         version_posts = [
             call
             for call in api.calls
             if call[:2] == ("POST", "/api/v1/assistant-versions")
         ]
         self.assertEqual(2, len(version_posts))
+
+    # 覆盖企业两次创建均中断：冲突需包含安全企业 code 并保留异常链，不得第三次写入。
+    def test_second_uncertain_organization_create_reports_safe_target(self):
+        versions = [
+            {"id": "general", "name": "本地通用助手版"},
+            {"id": "customer", "name": "本地智能客服版"},
+        ]
+        api = FakeManagerAPI(versions=versions)
+        api.interrupt("POST", "/api/v1/organizations", False, False)
+
+        with self.assertRaises(SeedConflict) as raised:
+            self._seeder(api).ensure_platform_data()
+
+        message = str(raised.exception)
+        self.assertIn("demo-full", message)
+        self.assertIn("创建企业", message)
+        self.assertIn("不确定", message)
+        self.assertIsInstance(raised.exception.__cause__, UncertainWrite)
+        organization_posts = [
+            call
+            for call in api.calls
+            if call[:2] == ("POST", "/api/v1/organizations")
+        ]
+        self.assertEqual(2, len(organization_posts))
+
+    # 覆盖 AICC PATCH 两次均中断：冲突需包含企业 code 与操作类型并保留异常链。
+    def test_second_uncertain_aicc_patch_reports_safe_target(self):
+        versions = [
+            {"id": "general", "name": "本地通用助手版"},
+            {"id": "customer", "name": "本地智能客服版"},
+        ]
+        organizations = [
+            FakeManagerAPI.organization(
+                "full", "demo-full", "完整", ["customer", "general"],
+                aicc_enabled=False, aicc_agent_limit=0,
+            ),
+            FakeManagerAPI.organization("app", "demo-app", "普通", ["general"]),
+            FakeManagerAPI.organization(
+                "aicc", "demo-aicc", "客服", ["customer"],
+                aicc_enabled=True, aicc_agent_limit=1,
+            ),
+        ]
+        api = FakeManagerAPI(versions=versions, organizations=organizations)
+        path = "/api/v1/organizations/full/aicc-config"
+        api.interrupt("PATCH", path, False, False)
+
+        with self.assertRaises(SeedConflict) as raised:
+            self._seeder(api).ensure_platform_data()
+
+        message = str(raised.exception)
+        self.assertIn("demo-full", message)
+        self.assertIn("AICC", message)
+        self.assertIn("不确定", message)
+        self.assertIsInstance(raised.exception.__cause__, UncertainWrite)
+        patch_calls = [call for call in api.calls if call[:2] == ("PATCH", path)]
+        self.assertEqual(2, len(patch_calls))
 
     # 覆盖企业 PATCH 响应中断但目标状态已落库：回查确认后不重复 PATCH。
     def test_uncertain_patch_uses_target_state_found_by_lookup(self):
