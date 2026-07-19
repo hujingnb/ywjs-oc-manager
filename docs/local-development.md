@@ -17,13 +17,19 @@
 ## 一键起停
 
 ```bash
-make local-up      # 建集群→构建镜像→部署全栈→建桶→种子管理员
+make local-up      # 建集群→构建镜像→部署全栈→配置模型→初始化演示数据
 make local-status  # 查看 pod / ingress
 make local-stop    # 停止集群但不删除（保数据/镜像，重启不丢）
 make local-start   # 启动已停止的集群（数据与已部署对象原样恢复）
 make local-down    # 删除集群（数据在 .k3d-data 固定目录保留，下次 local-up 复用；清空用 local-reset）
-make local-reset   # 删集群并清空 .k3d-data，干净重建（随后再 make local-up）
+make local-reset   # 删集群并清空 .k3d-data，自动重跑 local-up 完成干净重建
 ```
+
+`local-up` 与间接调用它的 `local-reset` 会通过 manager 正式 API 幂等补齐 2 个助手版本、
+3 个企业、2 个普通实例和 2 个智能客服，并等待实例与客服运行时真实就绪。初始化要求根
+目录 `.env` 同时配置非空的 `DEEPSEEK_API_KEY` 与 `SILICONFLOW_API_KEY`；缺少厂商 Key、
+既有资源发生冲突、异步 Job 失败或运行时未就绪都会严格返回失败。修复配置或冲突后可运行
+`make local-seed-demo` 从当前状态继续补齐，无需重建集群。
 
 ## 访问入口（traefik Ingress, *.localhost → 127.0.0.1:80）
 
@@ -33,6 +39,18 @@ make local-reset   # 删集群并清空 .k3d-data，干净重建（随后再 mak
 | new-api 后台 | http://newapi.localhost | `admin` | `admin123` |
 | ragflow 控制台 | http://ragflow.localhost | `admin@ragflow.io` | `admin` |
 | MinIO 控制台 | http://minio.localhost | `ocm` | `ocmsecret123` |
+
+演示企业统一提供管理员和普通成员账号：
+
+| 企业标识 | 企业管理员 | 普通成员 |
+|---|---|---|
+| `demo-full` | `admin` / `admin123` | `member` / `member123` |
+| `demo-app` | `admin` / `admin123` | `member` / `member123` |
+| `demo-aicc` | `admin` / `admin123` | `member` / `member123` |
+
+以上密码仅是 clean `make local-reset` 首次创建时的默认值。复用已有 `.k3d-data` 运行
+`make local-up` 或 `make local-seed-demo` 时只补齐缺失对象，不覆盖已修改的密码，也不会因
+实例或智能客服改名而重复创建资源。
 
 > 若本机设置了 `http_proxy` / `https_proxy`（如 Clash），访问 `*.localhost` 需让代理直连：
 > 命令行用 `curl --noproxy '*' http://ocm.localhost/...` 或 `export NO_PROXY=.localhost,127.0.0.1`；

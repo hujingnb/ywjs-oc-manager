@@ -18,10 +18,18 @@
 | 服务 | 本地地址 | 账号 | 密码 |
 |---|---|---|---|
 | manager 后台 | http://ocm.localhost | `admin`（组织标识留空，即平台管理员）| `admin123` |
+| manager 后台 | http://ocm.localhost | 企业标识 `demo-full` / 账号 `admin` | `admin123` |
+| manager 后台 | http://ocm.localhost | 企业标识 `demo-full` / 账号 `member` | `member123` |
+| manager 后台 | http://ocm.localhost | 企业标识 `demo-app` / 账号 `admin` | `admin123` |
+| manager 后台 | http://ocm.localhost | 企业标识 `demo-app` / 账号 `member` | `member123` |
+| manager 后台 | http://ocm.localhost | 企业标识 `demo-aicc` / 账号 `admin` | `admin123` |
+| manager 后台 | http://ocm.localhost | 企业标识 `demo-aicc` / 账号 `member` | `member123` |
 | new-api 后台 | http://newapi.localhost | `admin` | `admin123` |
 | RAGFlow 控制台 | http://ragflow.localhost | `admin@ragflow.io`（超级管理员）| `admin` |
 | MinIO 控制台 | http://minio.localhost | `ocm` | `ocmsecret123` |
 
+- 演示企业密码是 clean `make local-reset` 首次创建时的默认值；复用已有 `.k3d-data`
+  执行 `make local-up` 只补缺，不会重置已修改的密码。
 - RAGFlow HTTP API 端口 9380、Admin API 端口 9381；控制台默认禁用注册（`RAGFLOW_REGISTER_ENABLED=0`），需新建账号时临时打开再关闭。
 - MinIO 控制台端口 9001、S3 API 端口 9000；root 凭证即上表账号/密码，本地 bucket 为 `oc-apps`、`ragflow`（由 `make local-mc-init` 创建）。
 - 以上地址经 k3d traefik Ingress 暴露（*.localhost → 127.0.0.1:80），见 docs/local-development.md。
