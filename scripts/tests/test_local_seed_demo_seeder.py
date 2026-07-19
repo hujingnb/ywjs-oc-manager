@@ -4,7 +4,7 @@ import copy
 import unittest
 
 from local_seed_demo.client import APIError, UncertainWrite
-from local_seed_demo.seeder import DemoSeeder, SeedConflict
+from local_seed_demo.seeder import DemoSeeder, SeedConflict, SeedRuntimeError, SeedState
 
 
 # 测试密码仅用于校验本地初始化 DTO，不把完整字面值写入失败消息。
@@ -21,6 +21,8 @@ class FakeManagerAPI:
         organizations=None,
         members=None,
         apps=None,
+        agents=None,
+        jobs=None,
     ):
         """复制输入以隔离用例，并允许逐次配置写入中断是否已在服务端生效。"""
         self.images = copy.deepcopy(
@@ -32,15 +34,84 @@ class FakeManagerAPI:
         self.organizations = copy.deepcopy(organizations or [])
         self.members = copy.deepcopy(members or {})
         self.apps = copy.deepcopy(apps or {})
+        self.agents = copy.deepcopy(agents or {})
+        self.jobs = copy.deepcopy(jobs or {})
         self.calls = []
         self.uncertain = {}
         self.login_error = None
         self.member_response_overrides = {}
+        self.agent_list_response_overrides = {}
+        self.app_state_queues = {}
+        self.agent_state_queues = {}
         self._next_version = 1
         self._next_organization = 1
         self._next_member = 1
         self._next_app = 1
         self._next_job = 1
+        self._next_agent = 1
+
+    @classmethod
+    def complete_runtime_fixture(cls, *, agent_names=None):
+        """构造成员、普通实例和 AICC 都已存在的完整运行时事实。"""
+        versions = [
+            {"id": "general", "name": "本地通用助手版"},
+            {"id": "customer", "name": "本地智能客服版"},
+        ]
+        organizations = [
+            cls.organization(
+                "org-full", "demo-full", "完整", ["customer", "general"],
+                aicc_enabled=True,
+            ),
+            cls.organization("org-app", "demo-app", "普通", ["general"]),
+            cls.organization(
+                "org-aicc", "demo-aicc", "客服", ["customer"],
+                aicc_enabled=True,
+            ),
+        ]
+        members = {
+            "org-full": [cls.member("member-full", "org-full", "member", active_app_id="app-full")],
+            "org-app": [cls.member("member-app", "org-app", "member", active_app_id="app-app")],
+            "org-aicc": [cls.member("member-aicc", "org-aicc", "member")],
+        }
+        apps = {
+            "app-full": cls.app(
+                "app-full", "org-full", "member-full", status="binding_waiting", runtime_phase="ready"
+            ),
+            "app-app": cls.app(
+                "app-app", "org-app", "member-app", status="binding_waiting", runtime_phase="ready"
+            ),
+        }
+        names = agent_names if agent_names is not None else ["演示智能客服"]
+        agents = {"org-full": [], "org-aicc": []}
+        for org_id in agents:
+            for index, name in enumerate(names, start=1):
+                app_id = f"aicc-app-{org_id}-{index}"
+                agent_id = f"agent-{org_id}-{index}"
+                apps[app_id] = cls.app(
+                    app_id, org_id, "platform-admin", name,
+                    status="binding_waiting", runtime_phase="ready",
+                )
+                agents[org_id].append(
+                    cls.agent(
+                        agent_id, org_id, app_id, name,
+                        status="active", runtime_status="receiving",
+                    )
+                )
+        return cls(
+            versions=versions,
+            organizations=organizations,
+            members=members,
+            apps=apps,
+            agents=agents,
+        )
+
+    def queue_app_states(self, app_id, states):
+        """为 app 详情轮询按顺序返回状态，最后一个状态持续保留。"""
+        self.app_state_queues[app_id] = copy.deepcopy(states)
+
+    def queue_agent_states(self, agent_id, states):
+        """为 agent 详情轮询按顺序返回状态，最后一个状态持续保留。"""
+        self.agent_state_queues[agent_id] = copy.deepcopy(states)
 
     def login(self, org_code, username, password):
         """模拟企业管理员登录；认证失败时保留 APIError 的正式安全字段。"""
@@ -82,7 +153,37 @@ class FakeManagerAPI:
         # 应用详情用于确认 active_app_id 的真实归属，名称和密码都不参与复用判断。
         if path.startswith("/api/v1/apps/"):
             app_id = path.rsplit("/", 1)[1]
+            self._advance_state(self.apps, self.app_state_queues, app_id)
             return {"app": copy.deepcopy(self.apps[app_id])}
+
+        # Job 详情返回真实 job envelope，并允许队列模拟异步终态推进。
+        if path.startswith("/api/v1/jobs/"):
+            job_id = path.rsplit("/", 1)[1]
+            job = self.jobs[job_id]
+            if isinstance(job, list):
+                current = copy.deepcopy(job[0])
+                if len(job) > 1:
+                    job.pop(0)
+                return {"job": current}
+            return {"job": copy.deepcopy(job)}
+
+        # AICC 列表严格按企业隔离，支持注入异常 200 envelope 验证禁止误写。
+        if path.startswith("/api/v1/aicc/agents?org_id="):
+            org_id = path.split("org_id=", 1)[1].split("&", 1)[0]
+            if org_id in self.agent_list_response_overrides:
+                return copy.deepcopy(self.agent_list_response_overrides[org_id])
+            return {"agents": copy.deepcopy(self.agents.get(org_id, []))}
+
+        # AICC 详情用于确认启动不确定结果以及等待 receiving 事实。
+        if path.startswith("/api/v1/aicc/agents/"):
+            agent_id = path.rsplit("/", 1)[1]
+            org_id = next(
+                key for key, items in self.agents.items()
+                if any(item["id"] == agent_id for item in items)
+            )
+            self._advance_agent_state(org_id, agent_id)
+            agent = next(item for item in self.agents[org_id] if item["id"] == agent_id)
+            return {"agent": copy.deepcopy(agent)}
 
         raise AssertionError(f"出现未声明的 GET 路径: {path}")
 
@@ -184,6 +285,45 @@ class FakeManagerAPI:
                 {"member_app": {"app": app, "job_id": job_id}},
             )
 
+        # AICC 创建会同步返回主记录和隐藏 app id；隐藏 app 初始化状态由测试队列推进。
+        if path == "/api/v1/aicc/agents":
+            org_id = safe_body["org_id"]
+            app_id = f"aicc-app-{self._next_agent}"
+            created = self.agent(
+                f"agent-{self._next_agent}", org_id, app_id, safe_body["name"],
+                status="draft", runtime_status="starting",
+            )
+            self._next_agent += 1
+            hidden_app = self.app(
+                app_id, org_id, "platform-admin", safe_body["name"],
+                status="starting", runtime_phase="starting",
+            )
+            collection = self.agents.setdefault(org_id, [])
+
+            def apply_agent_create():
+                collection.append(copy.deepcopy(created))
+                self.apps[app_id] = copy.deepcopy(hidden_app)
+                # 新建隐藏 app 首次 GET 仍在 starting，第二次开始稳定为 ready。
+                self.queue_app_states(app_id, [
+                    {"status": "starting", "runtime_phase": "starting"},
+                    {"status": "binding_waiting", "runtime_phase": "ready"},
+                ])
+
+            return self._finish_composite(
+                "POST", path, apply_agent_create, {"agent": created}
+            )
+
+        # 启动只改变接待意图；不确定中断可发生在服务端状态落库前或后。
+        if path.startswith("/api/v1/aicc/agents/") and path.endswith("/start"):
+            agent_id = path.split("/")[5]
+            org_id, agent = self._find_agent(agent_id)
+
+            def apply_start():
+                agent["status"] = "active"
+                agent["runtime_status"] = "receiving"
+
+            return self._finish_agent_start(path, org_id, agent, apply_start)
+
         raise AssertionError(f"出现未声明的 POST 路径: {path}")
 
     def patch(self, path, body):
@@ -246,6 +386,45 @@ class FakeManagerAPI:
         apply()
         return copy.deepcopy(response)
 
+    def _finish_agent_start(self, path, org_id, agent, apply):
+        """模拟启动响应中断，并保留真实 agent envelope。"""
+        outcomes = self.uncertain.get(("POST", path), [])
+        if outcomes:
+            if outcomes.pop(0):
+                apply()
+            raise UncertainWrite(f"POST {path}")
+        apply()
+        current = next(item for item in self.agents[org_id] if item["id"] == agent["id"])
+        return {"agent": copy.deepcopy(current)}
+
+    @staticmethod
+    def _advance_state(collection, queues, item_id):
+        """把轮询队列当前状态合并进对象，并只消费非末尾状态。"""
+        states = queues.get(item_id)
+        if not states:
+            return
+        collection[item_id].update(copy.deepcopy(states[0]))
+        if len(states) > 1:
+            states.pop(0)
+
+    def _advance_agent_state(self, org_id, agent_id):
+        """推进指定 agent 的详情状态，不影响同企业其它 agent。"""
+        states = self.agent_state_queues.get(agent_id)
+        if not states:
+            return
+        agent = next(item for item in self.agents[org_id] if item["id"] == agent_id)
+        agent.update(copy.deepcopy(states[0]))
+        if len(states) > 1:
+            states.pop(0)
+
+    def _find_agent(self, agent_id):
+        """按 id 返回 agent 所属企业和可变服务端对象。"""
+        for org_id, agents in self.agents.items():
+            for agent in agents:
+                if agent["id"] == agent_id:
+                    return org_id, agent
+        raise AssertionError(f"不存在测试 agent: {agent_id}")
+
     @staticmethod
     def organization(org_id, code, name, version_ids, **overrides):
         """构造具备全部可编辑字段的企业响应，默认值贴近正式 service 结果。"""
@@ -297,6 +476,39 @@ class FakeManagerAPI:
         }
         result.update(copy.deepcopy(overrides))
         return result
+
+    @staticmethod
+    def agent(agent_id, org_id, app_id, name="演示智能客服", **overrides):
+        """构造不含 public/widget token 的安全 AICC 管理响应。"""
+        result = {
+            "id": agent_id,
+            "org_id": org_id,
+            "app_id": app_id,
+            "name": name,
+            "status": "draft",
+            "runtime_status": "starting",
+            "privacy_mode": "notice",
+            "retention_days": 180,
+            "allowed_domains": [],
+        }
+        result.update(copy.deepcopy(overrides))
+        return result
+
+
+class FakeClock:
+    """用虚拟单调时钟使 900 秒超时测试瞬时完成。"""
+
+    def __init__(self):
+        """时钟从零开始，每次 sleep 精确推进请求秒数。"""
+        self.now = 0
+
+    def sleep(self, seconds):
+        """记录轮询等待而不阻塞测试进程。"""
+        self.now += seconds
+
+    def monotonic(self):
+        """返回当前虚拟单调时间。"""
+        return self.now
 
 
 class FakeOrgAdminAPI:
@@ -1113,6 +1325,207 @@ class DemoSeederTest(unittest.TestCase):
         self.assertIn("member", message)
         self.assertNotIn("member123", message)
         self.assertEqual(2, len([call for call in api.calls if call[:2] == ("POST", path)]))
+
+
+class DemoSeederRuntimeTest(unittest.TestCase):
+    """覆盖普通实例和 AICC 从异步创建到真实可用的统一状态门禁。"""
+
+    def _seeder(self, api, clock=None):
+        """构造禁止企业客户端回退的完整 fixture 播种器。"""
+        clock = clock or FakeClock()
+
+        def forbidden_factory():
+            """完整 fixture 不应因运行时等待再次创建企业客户端。"""
+            raise AssertionError("运行时阶段不应创建企业客户端")
+
+        return DemoSeeder(
+            api,
+            client_factory=forbidden_factory,
+            sleep=clock.sleep,
+            monotonic=clock.monotonic,
+        )
+
+    # 覆盖缺少客服时按固定 DTO 创建、等待隐藏 app ready、启动并等到 receiving 的完整路径。
+    def test_missing_agents_are_created_after_hidden_apps_become_ready(self):
+        api = FakeManagerAPI.complete_runtime_fixture(agent_names=[])
+
+        state = self._seeder(api).run()
+
+        self.assertEqual({"demo-full", "demo-aicc"}, set(state.agents))
+        self.assertTrue(all(agent["status"] == "active" for agent in state.agents.values()))
+        create_calls = [call for call in api.calls if call[:2] == ("POST", "/api/v1/aicc/agents")]
+        self.assertEqual(2, len(create_calls))
+        self.assertEqual(
+            {
+                "org_id": "org-full",
+                "name": "演示智能客服",
+                "scenario": "本地企业智能客服演示",
+                "greeting": "您好，我是演示智能客服，请问有什么可以帮您？",
+                "answer_boundary": "仅回答企业服务相关问题；不确定时明确告知用户。",
+                "privacy_mode": "notice",
+                "privacy_text": "",
+                "retention_days": 180,
+                "allowed_domains": [],
+            },
+            create_calls[0][2],
+        )
+        first_start_index = next(
+            index for index, call in enumerate(api.calls)
+            if call[0] == "POST" and call[1].endswith("/start")
+        )
+        self.assertTrue(
+            any(
+                call[:2] == ("GET", "/api/v1/apps/aicc-app-1")
+                for call in api.calls[:first_start_index]
+            )
+        )
+
+    # 覆盖唯一客服被人工改名：按单条资源安全复用，不覆盖名称也不重复创建。
+    def test_single_renamed_agent_is_reused_without_create(self):
+        api = FakeManagerAPI.complete_runtime_fixture(agent_names=["售前机器人"])
+
+        state = self._seeder(api).run()
+
+        self.assertEqual("售前机器人", state.agents["demo-full"]["name"])
+        self.assertEqual([], [call for call in api.calls if call[:2] == ("POST", "/api/v1/aicc/agents")])
+
+    # 覆盖多个非固定名客服：无法确定哪个是演示资源时必须停止且不写入。
+    def test_multiple_renamed_agents_are_ambiguous_without_writes(self):
+        api = FakeManagerAPI.complete_runtime_fixture(agent_names=["客服甲", "客服乙"])
+
+        with self.assertRaisesRegex(SeedConflict, "demo-full.*无法识别演示智能客服"):
+            self._seeder(api).run()
+
+        self.assertEqual([], [call for call in api.calls if call[0] == "POST"])
+
+    # 覆盖普通实例 Job 失败：立即抛出安全 Job ID 和 last_error，不再等待 app。
+    def test_failed_job_stops_immediately_with_safe_error(self):
+        api = FakeManagerAPI.complete_runtime_fixture()
+        api.jobs["00000000-0000-0000-0000-000000000001"] = {
+            "id": "00000000-0000-0000-0000-000000000001",
+            "status": "failed",
+            "last_error": "pull image failed",
+        }
+
+        with self.assertRaisesRegex(
+            SeedRuntimeError,
+            "00000000-0000-0000-0000-000000000001.*pull image failed",
+        ):
+            self._seeder(api).wait_job(
+                "00000000-0000-0000-0000-000000000001",
+                "企业 demo-full 的演示助手",
+            )
+
+    # 覆盖 Job succeeded 只代表任务终态：随后仍须读取 app 并确认双轴 ready 事实。
+    def test_succeeded_job_is_followed_by_app_readiness_check(self):
+        api = FakeManagerAPI.complete_runtime_fixture()
+        job_id = "00000000-0000-0000-0000-000000000002"
+        api.jobs[job_id] = {"id": job_id, "status": "succeeded"}
+        api.apps["app-full"].update({"status": "starting", "runtime_phase": "starting"})
+        api.queue_app_states("app-full", [
+            {"status": "starting", "runtime_phase": "starting"},
+            {"status": "binding_waiting", "runtime_phase": "ready"},
+        ])
+        state = SeedState(
+            versions={},
+            organizations={},
+            apps={"demo-full": copy.deepcopy(api.apps["app-full"])},
+            jobs={"demo-full": job_id},
+        )
+
+        self._seeder(api).wait_apps_ready(state)
+
+        job_index = api.calls.index(("GET", f"/api/v1/jobs/{job_id}", None))
+        app_index = api.calls.index(("GET", "/api/v1/apps/app-full", None))
+        self.assertLess(job_index, app_index)
+        self.assertEqual("ready", state.apps["demo-full"]["runtime_phase"])
+
+    # 覆盖 app 进入 error：输出稳定企业、资源名和服务端安全错误字段。
+    def test_app_error_stops_with_initialization_details(self):
+        api = FakeManagerAPI.complete_runtime_fixture()
+        api.apps["app-full"].update({
+            "status": "error",
+            "runtime_phase": "unknown",
+            "last_error_status": "pulling_runtime_image",
+            "last_error_message": "image unavailable",
+        })
+
+        with self.assertRaisesRegex(
+            SeedRuntimeError,
+            "demo-full.*演示助手.*pulling_runtime_image.*image unavailable",
+        ):
+            self._seeder(api).wait_app_ready("app-full", "企业 demo-full 的演示助手")
+
+    # 覆盖 agent runtime error：立即输出 runtime_message，且不包含管理 token 字段。
+    def test_agent_runtime_error_stops_with_safe_message(self):
+        api = FakeManagerAPI.complete_runtime_fixture()
+        agent = api.agents["org-full"][0]
+        agent.update({"runtime_status": "error", "runtime_message": "hidden app unavailable"})
+
+        with self.assertRaisesRegex(
+            SeedRuntimeError,
+            "demo-full.*演示智能客服.*hidden app unavailable",
+        ):
+            self._seeder(api).wait_agent_receiving(
+                agent["id"], "企业 demo-full 的演示智能客服"
+            )
+
+    # 覆盖单目标等待 900 秒：错误必须包含企业、资源名和固定超时秒数。
+    def test_runtime_timeout_names_target_and_900_seconds(self):
+        clock = FakeClock()
+        api = FakeManagerAPI.complete_runtime_fixture()
+        api.apps["app-full"].update({"status": "starting", "runtime_phase": "starting"})
+
+        with self.assertRaisesRegex(SeedRuntimeError, "demo-full.*演示助手.*900"):
+            self._seeder(api, clock).wait_app_ready(
+                "app-full", "企业 demo-full 的演示助手"
+            )
+
+        self.assertEqual(900, clock.now)
+
+    # 覆盖完整数据第二次执行：只读确认两个普通实例和两个客服，不产生任何写请求。
+    def test_second_run_is_read_only(self):
+        api = FakeManagerAPI.complete_runtime_fixture()
+
+        state = self._seeder(api).run()
+
+        self.assertEqual(2, len(state.apps))
+        self.assertEqual(2, len(state.agents))
+        self.assertEqual([], [call for call in api.calls if call[0] in {"POST", "PATCH"}])
+
+    # 覆盖 AICC 列表异常 200：缺字段不能被当作空列表触发客服创建。
+    def test_malformed_agent_envelope_fails_without_writes(self):
+        api = FakeManagerAPI.complete_runtime_fixture()
+        api.agent_list_response_overrides["org-full"] = {"unexpected": []}
+
+        with self.assertRaisesRegex(SeedConflict, "demo-full.*智能客服列表响应格式异常"):
+            self._seeder(api).run()
+
+        self.assertEqual([], [call for call in api.calls if call[0] == "POST"])
+
+    # 覆盖客服创建响应中断但服务端已落库：回查复用且只发送一次创建请求。
+    def test_uncertain_agent_create_requeries_before_retry(self):
+        api = FakeManagerAPI.complete_runtime_fixture(agent_names=[])
+        api.interrupt("POST", "/api/v1/aicc/agents", True)
+
+        state = self._seeder(api).run()
+
+        self.assertEqual(2, len(state.agents))
+        create_calls = [call for call in api.calls if call[:2] == ("POST", "/api/v1/aicc/agents")]
+        self.assertEqual(2, len(create_calls))
+
+    # 覆盖客服启动响应中断但 active 已落库：回查确认后不重复启动。
+    def test_uncertain_agent_start_requeries_active_status(self):
+        api = FakeManagerAPI.complete_runtime_fixture()
+        agent = api.agents["org-full"][0]
+        agent.update({"status": "draft", "runtime_status": "ready"})
+        path = f"/api/v1/aicc/agents/{agent['id']}/start"
+        api.interrupt("POST", path, True)
+
+        state = self._seeder(api).run()
+
+        self.assertEqual("active", state.agents["demo-full"]["status"])
+        self.assertEqual(1, len([call for call in api.calls if call[:2] == ("POST", path)]))
 
 
 if __name__ == "__main__":

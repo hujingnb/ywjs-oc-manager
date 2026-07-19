@@ -1,6 +1,7 @@
-"""以 manager 正式 API 幂等补齐本地演示所需的助手版本与企业配置。"""
+"""以 manager 正式 API 幂等补齐本地演示数据并等待运行时真实就绪。"""
 
 from dataclasses import dataclass, field
+import time
 
 from local_seed_demo.client import APIError, UncertainWrite
 
@@ -33,6 +34,10 @@ _ORGANIZATION_PROFILE_FIELDS = (
 
 class SeedConflict(RuntimeError):
     """表示演示数据无法通过唯一稳定身份安全识别或补齐。"""
+
+
+class SeedRuntimeError(RuntimeError):
+    """表示异步 Job、应用或智能客服未能达到真实可用状态。"""
 
 
 @dataclass(frozen=True)
@@ -107,12 +112,27 @@ ORGANIZATION_SPECS = (
 
 
 class DemoSeeder:
-    """编排平台级演示数据；企业客户端工厂留给后续资源阶段使用。"""
+    """编排平台、企业成员、普通实例和 AICC 的本地演示数据。"""
 
-    def __init__(self, platform, client_factory):
-        """注入已认证平台客户端，避免播种逻辑接触 token 或登录密码。"""
+    def __init__(
+        self,
+        platform,
+        client_factory,
+        sleep=time.sleep,
+        monotonic=time.monotonic,
+    ):
+        """注入已认证客户端与时钟，使轮询可测试且不接触任何 token。"""
         self.platform = platform
         self.client_factory = client_factory
+        self.sleep = sleep
+        self.monotonic = monotonic
+
+    def run(self):
+        """依次补齐平台、成员、普通实例和 AICC，并等待所有运行时真实就绪。"""
+        state = self.ensure_platform_data()
+        state = self.ensure_members_and_apps(state)
+        self.wait_apps_ready(state)
+        return self.ensure_agents(state)
 
     def ensure_platform_data(self):
         """按版本名和企业 code 唯一识别对象，并只执行缺失项或单向补齐。"""
@@ -181,6 +201,208 @@ class DemoSeeder:
             if job_id:
                 state.jobs[spec.code] = job_id
         return state
+
+    def wait_apps_ready(self, state):
+        """先等待可回查的初始化 Job，再以 app 双轴状态作为最终成功事实。"""
+        for code, app in state.apps.items():
+            target = f"企业 {code} 的演示助手"
+            job_id = state.jobs.get(code)
+            if job_id:
+                self.wait_job(job_id, target)
+            state.apps[code] = self.wait_app_ready(app["id"], target)
+        return state
+
+    def wait_job(self, job_id, target):
+        """等待 Job 成功；失败终态立即携带安全 ID 与 last_error 停止。"""
+
+        def check():
+            response = self.platform.get(f"/api/v1/jobs/{job_id}")
+            job = self._required_object(response, "job", f"Job {job_id}")
+            status = job.get("status")
+            if status == "failed":
+                raise SeedRuntimeError(
+                    f"{target} 的 Job {job_id} 失败: {job.get('last_error', '')}"
+                )
+            return job if status == "succeeded" else None
+
+        return self._wait(f"{target} 的 Job {job_id}", check, timeout=900)
+
+    def wait_app_ready(self, app_id, target):
+        """以 runtime_phase=ready 和允许业务状态共同确认 app 可用。"""
+
+        def check():
+            response = self.platform.get(f"/api/v1/apps/{app_id}")
+            app = self._required_object(response, "app", f"{target} app")
+            if app.get("status") == "error":
+                raise SeedRuntimeError(
+                    f"{target} 初始化失败: {app.get('last_error_status', '')}: "
+                    f"{app.get('last_error_message', '')}"
+                )
+            ready = (
+                app.get("runtime_phase") == "ready"
+                and app.get("status") in {"binding_waiting", "running"}
+            )
+            return app if ready else None
+
+        return self._wait(target, check, timeout=900)
+
+    def wait_agent_receiving(self, agent_id, target):
+        """等待 agent 的接待意图与隐藏运行时共同收敛为 receiving。"""
+
+        def check():
+            response = self.platform.get(f"/api/v1/aicc/agents/{agent_id}")
+            agent = self._required_object(response, "agent", f"{target} agent")
+            if agent.get("runtime_status") == "error":
+                raise SeedRuntimeError(
+                    f"{target} 运行时失败: {agent.get('runtime_message', '')}"
+                )
+            ready = (
+                agent.get("status") == "active"
+                and agent.get("runtime_status") == "receiving"
+            )
+            return agent if ready else None
+
+        return self._wait(target, check, timeout=900)
+
+    def _wait(self, target, check, timeout):
+        """按五秒间隔轮询单目标，超时时不暴露服务端原始响应。"""
+        deadline = self.monotonic() + timeout
+        while True:
+            result = check()
+            if result is not None:
+                return result
+            if self.monotonic() >= deadline:
+                raise SeedRuntimeError(f"等待 {target} 超时（{timeout}s）")
+            self.sleep(5)
+
+    def ensure_agents(self, state):
+        """按稳定企业和安全名称规则补齐、启动两家企业的演示智能客服。"""
+        customer_version_id = state.versions["本地智能客服版"]["id"]
+        for spec in ORGANIZATION_SPECS:
+            if not spec.needs_aicc:
+                continue
+            organization = state.organizations[spec.code]
+            org_id = organization["id"]
+            agent = self._find_demo_agent(org_id, spec.code)
+            if agent is None:
+                allowlist = organization.get("assistant_version_ids") or []
+                if not allowlist or allowlist[0] != customer_version_id:
+                    actual_first = allowlist[0] if allowlist else "<empty>"
+                    raise SeedConflict(
+                        f"企业 {spec.code} 缺少客服智能体时，allowlist 首项实际为 "
+                        f"{actual_first}，期望为本地智能客服版（{customer_version_id}）"
+                    )
+                agent = self._create_agent(org_id, spec.code)
+
+            self._validate_agent(agent, org_id, spec.code)
+            target = f"企业 {spec.code} 的演示智能客服"
+            self.wait_app_ready(agent["app_id"], target)
+            if agent.get("status") != "active":
+                agent = self._start_agent(agent, spec.code)
+            ready_agent = self.wait_agent_receiving(agent["id"], target)
+            self._validate_agent(ready_agent, org_id, spec.code)
+            state.agents[spec.code] = ready_agent
+        return state
+
+    def _list_agents(self, org_id, code):
+        """严格读取 AICC 列表契约，异常 200 不得降级成空列表后触发写入。"""
+        path = f"/api/v1/aicc/agents?org_id={org_id}&limit=100&offset=0"
+        response = self.platform.get(path)
+        if (
+            not isinstance(response, dict)
+            or "agents" not in response
+            or not isinstance(response["agents"], list)
+            or any(not isinstance(item, dict) for item in response["agents"])
+        ):
+            raise SeedConflict(f"企业 {code} 的智能客服列表响应格式异常")
+        agents = response["agents"]
+        required_fields = {"id", "org_id", "app_id", "name", "status", "runtime_status"}
+        if any(not required_fields.issubset(agent) for agent in agents):
+            raise SeedConflict(f"企业 {code} 的智能客服列表响应格式异常")
+        if any(agent.get("org_id") != org_id for agent in agents):
+            raise SeedConflict(f"企业 {code} 的智能客服企业归属冲突")
+        return agents
+
+    def _find_demo_agent(self, org_id, code):
+        """精确名称优先；没有精确名时仅允许复用企业唯一一条客服。"""
+        agents = self._list_agents(org_id, code)
+        exact = [agent for agent in agents if agent.get("name") == "演示智能客服"]
+        if len(exact) > 1:
+            raise SeedConflict(f"企业 {code} 的演示智能客服存在重复记录")
+        if exact:
+            return exact[0]
+        if len(agents) == 1:
+            return agents[0]
+        if len(agents) > 1:
+            raise SeedConflict(f"企业 {code} 无法识别演示智能客服：存在多条改名资源")
+        return None
+
+    def _create_agent(self, org_id, code):
+        """使用正式创建 DTO 写入固定资料；响应不确定时先按企业稳定事实回查。"""
+        body = {
+            "org_id": org_id,
+            "name": "演示智能客服",
+            "scenario": "本地企业智能客服演示",
+            "greeting": "您好，我是演示智能客服，请问有什么可以帮您？",
+            "answer_boundary": "仅回答企业服务相关问题；不确定时明确告知用户。",
+            "privacy_mode": "notice",
+            "privacy_text": "",
+            "retention_days": 180,
+            "allowed_domains": [],
+        }
+
+        def lookup_agent():
+            found = self._find_demo_agent(org_id, code)
+            return None if found is None else {"agent": found}
+
+        response = self.ensure_uncertain_write(
+            lambda: self.platform.post("/api/v1/aicc/agents", body),
+            lookup_agent,
+            f"创建智能客服 code={code} name=演示智能客服",
+        )
+        return self._required_object(response, "agent", f"企业 {code} 创建智能客服")
+
+    def _start_agent(self, agent, code):
+        """启动非 active 客服；响应中断后只在详情仍非 active 时补发一次。"""
+        path = f"/api/v1/aicc/agents/{agent['id']}/start"
+
+        def lookup_started():
+            response = self.platform.get(f"/api/v1/aicc/agents/{agent['id']}")
+            current = self._required_object(
+                response, "agent", f"企业 {code} 的演示智能客服"
+            )
+            self._validate_agent(current, agent["org_id"], code)
+            return {"agent": current} if current.get("status") == "active" else None
+
+        response = self.ensure_uncertain_write(
+            lambda: self.platform.post(path, {}),
+            lookup_started,
+            f"启动智能客服 code={code} agent_id={agent['id']}",
+        )
+        started = self._required_object(response, "agent", f"企业 {code} 启动智能客服")
+        self._validate_agent(started, agent["org_id"], code)
+        return started
+
+    @staticmethod
+    def _validate_agent(agent, org_id, code):
+        """AICC 主记录必须具备稳定 ID、隐藏 app 且严格属于目标企业。"""
+        if not isinstance(agent, dict):
+            raise SeedConflict(f"企业 {code} 的智能客服响应格式异常")
+        if agent.get("org_id") != org_id:
+            raise SeedConflict(f"企业 {code} 的智能客服企业归属冲突")
+        if not agent.get("id") or not agent.get("app_id"):
+            raise SeedConflict(f"企业 {code} 的智能客服响应格式异常")
+
+    @staticmethod
+    def _required_object(response, field_name, target):
+        """严格提取单对象 envelope，避免异常成功响应被后续逻辑误用。"""
+        if (
+            not isinstance(response, dict)
+            or field_name not in response
+            or not isinstance(response[field_name], dict)
+        ):
+            raise SeedConflict(f"{target} 响应格式异常")
+        return response[field_name]
 
     def find_member(self, api, org_id, username):
         """按企业成员列表中的精确 username 唯一查找，拒绝重复稳定身份。"""
