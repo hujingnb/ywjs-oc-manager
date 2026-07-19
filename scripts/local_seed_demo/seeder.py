@@ -206,10 +206,21 @@ class DemoSeeder:
         """先等待可回查的初始化 Job，再以 app 双轴状态作为最终成功事实。"""
         for code, app in state.apps.items():
             target = f"企业 {code} 的演示助手"
+            expected_app_id = app.get("id")
+            expected_org_id = app.get("org_id")
+            if (
+                not isinstance(expected_app_id, str)
+                or not expected_app_id
+                or not isinstance(expected_org_id, str)
+                or not expected_org_id
+            ):
+                raise SeedConflict(f"{target} 应用响应格式异常")
             job_id = state.jobs.get(code)
             if job_id:
                 self.wait_job(job_id, target)
-            state.apps[code] = self.wait_app_ready(app["id"], target)
+            state.apps[code] = self.wait_app_ready(
+                expected_app_id, target, expected_org_id
+            )
         return state
 
     def wait_job(self, job_id, target):
@@ -227,12 +238,15 @@ class DemoSeeder:
 
         return self._wait(f"{target} 的 Job {job_id}", check, timeout=900)
 
-    def wait_app_ready(self, app_id, target):
+    def wait_app_ready(self, app_id, target, expected_org_id):
         """以 runtime_phase=ready 和允许业务状态共同确认 app 可用。"""
 
         def check():
             response = self.platform.get(f"/api/v1/apps/{app_id}")
             app = self._required_object(response, "app", f"{target} app")
+            self._validate_runtime_app(
+                app, app_id, expected_org_id, target
+            )
             if app.get("status") == "error":
                 raise SeedRuntimeError(
                     f"{target} 初始化失败: {app.get('last_error_status', '')}: "
@@ -246,12 +260,17 @@ class DemoSeeder:
 
         return self._wait(target, check, timeout=900)
 
-    def wait_agent_receiving(self, agent_id, target):
+    def wait_agent_receiving(
+        self, agent_id, target, expected_org_id, expected_app_id
+    ):
         """等待 agent 的接待意图与隐藏运行时共同收敛为 receiving。"""
 
         def check():
             response = self.platform.get(f"/api/v1/aicc/agents/{agent_id}")
-            agent = self._required_object(response, "agent", f"{target} agent")
+            agent = self._required_object(response, "agent", target)
+            self._validate_agent(agent, expected_org_id, target, expected_app_id)
+            if agent["id"] != agent_id:
+                raise SeedConflict(f"{target}响应格式异常")
             if agent.get("runtime_status") == "error":
                 raise SeedRuntimeError(
                     f"{target} 运行时失败: {agent.get('runtime_message', '')}"
@@ -294,13 +313,15 @@ class DemoSeeder:
                     )
                 agent = self._create_agent(org_id, spec.code)
 
-            self._validate_agent(agent, org_id, spec.code)
             target = f"企业 {spec.code} 的演示智能客服"
-            self.wait_app_ready(agent["app_id"], target)
+            self._validate_agent(agent, org_id, target)
+            self.wait_app_ready(agent["app_id"], target, org_id)
             if agent.get("status") != "active":
                 agent = self._start_agent(agent, spec.code)
-            ready_agent = self.wait_agent_receiving(agent["id"], target)
-            self._validate_agent(ready_agent, org_id, spec.code)
+            ready_agent = self.wait_agent_receiving(
+                agent["id"], target, org_id, agent["app_id"]
+            )
+            self._validate_agent(ready_agent, org_id, target, agent["app_id"])
             state.agents[spec.code] = ready_agent
         return state
 
@@ -316,11 +337,8 @@ class DemoSeeder:
         ):
             raise SeedConflict(f"企业 {code} 的智能客服列表响应格式异常")
         agents = response["agents"]
-        required_fields = {"id", "org_id", "app_id", "name", "status", "runtime_status"}
-        if any(not required_fields.issubset(agent) for agent in agents):
-            raise SeedConflict(f"企业 {code} 的智能客服列表响应格式异常")
-        if any(agent.get("org_id") != org_id for agent in agents):
-            raise SeedConflict(f"企业 {code} 的智能客服企业归属冲突")
+        for agent in agents:
+            self._validate_agent(agent, org_id, f"企业 {code} 的智能客服")
         return agents
 
     def _find_demo_agent(self, org_id, code):
@@ -371,7 +389,14 @@ class DemoSeeder:
             current = self._required_object(
                 response, "agent", f"企业 {code} 的演示智能客服"
             )
-            self._validate_agent(current, agent["org_id"], code)
+            self._validate_agent(
+                current,
+                agent["org_id"],
+                f"企业 {code} 的演示智能客服",
+                agent["app_id"],
+            )
+            if current["id"] != agent["id"]:
+                raise SeedConflict(f"企业 {code} 的智能客服响应格式异常")
             return {"agent": current} if current.get("status") == "active" else None
 
         response = self.ensure_uncertain_write(
@@ -380,18 +405,50 @@ class DemoSeeder:
             f"启动智能客服 code={code} agent_id={agent['id']}",
         )
         started = self._required_object(response, "agent", f"企业 {code} 启动智能客服")
-        self._validate_agent(started, agent["org_id"], code)
+        self._validate_agent(
+            started,
+            agent["org_id"],
+            f"企业 {code} 的演示智能客服",
+            agent["app_id"],
+        )
+        if started["id"] != agent["id"]:
+            raise SeedConflict(f"企业 {code} 的智能客服响应格式异常")
         return started
 
     @staticmethod
-    def _validate_agent(agent, org_id, code):
-        """AICC 主记录必须具备稳定 ID、隐藏 app 且严格属于目标企业。"""
-        if not isinstance(agent, dict):
-            raise SeedConflict(f"企业 {code} 的智能客服响应格式异常")
+    def _validate_agent(agent, org_id, target, expected_app_id=None):
+        """严格校验 AICC 非 omitempty 关键字段及企业、隐藏 app 归属。"""
+        required_string_fields = (
+            "id",
+            "org_id",
+            "app_id",
+            "name",
+            "status",
+            "runtime_status",
+        )
+        if not isinstance(agent, dict) or any(
+            not isinstance(agent.get(field_name), str)
+            or not agent[field_name]
+            for field_name in required_string_fields
+        ):
+            raise SeedConflict(f"{target}响应格式异常")
         if agent.get("org_id") != org_id:
-            raise SeedConflict(f"企业 {code} 的智能客服企业归属冲突")
-        if not agent.get("id") or not agent.get("app_id"):
-            raise SeedConflict(f"企业 {code} 的智能客服响应格式异常")
+            raise SeedConflict(f"{target}企业归属冲突")
+        if expected_app_id is not None and agent.get("app_id") != expected_app_id:
+            raise SeedConflict(f"{target}隐藏应用归属冲突")
+
+    @staticmethod
+    def _validate_runtime_app(app, app_id, expected_org_id, target):
+        """校验详情仍是目标企业的同一 app，并具备轮询所需双轴字段。"""
+        required_string_fields = ("id", "org_id", "status", "runtime_phase")
+        if any(
+            not isinstance(app.get(field_name), str)
+            or not app[field_name]
+            for field_name in required_string_fields
+        ) or app["id"] != app_id:
+            raise SeedConflict(f"{target} 应用响应格式异常")
+        if app["org_id"] != expected_org_id:
+            raise SeedConflict(f"{target} 应用企业归属冲突")
 
     @staticmethod
     def _required_object(response, field_name, target):

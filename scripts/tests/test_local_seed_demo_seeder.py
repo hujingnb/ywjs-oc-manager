@@ -41,6 +41,9 @@ class FakeManagerAPI:
         self.login_error = None
         self.member_response_overrides = {}
         self.agent_list_response_overrides = {}
+        self.agent_detail_response_overrides = {}
+        self.agent_create_response_overrides = []
+        self.agent_start_response_overrides = {}
         self.app_state_queues = {}
         self.agent_state_queues = {}
         self._next_version = 1
@@ -177,6 +180,8 @@ class FakeManagerAPI:
         # AICC 详情用于确认启动不确定结果以及等待 receiving 事实。
         if path.startswith("/api/v1/aicc/agents/"):
             agent_id = path.rsplit("/", 1)[1]
+            if agent_id in self.agent_detail_response_overrides:
+                return copy.deepcopy(self.agent_detail_response_overrides[agent_id])
             org_id = next(
                 key for key, items in self.agents.items()
                 if any(item["id"] == agent_id for item in items)
@@ -309,9 +314,12 @@ class FakeManagerAPI:
                     {"status": "binding_waiting", "runtime_phase": "ready"},
                 ])
 
-            return self._finish_composite(
+            response = self._finish_composite(
                 "POST", path, apply_agent_create, {"agent": created}
             )
+            if self.agent_create_response_overrides:
+                return copy.deepcopy(self.agent_create_response_overrides.pop(0))
+            return response
 
         # 启动只改变接待意图；不确定中断可发生在服务端状态落库前或后。
         if path.startswith("/api/v1/aicc/agents/") and path.endswith("/start"):
@@ -322,7 +330,10 @@ class FakeManagerAPI:
                 agent["status"] = "active"
                 agent["runtime_status"] = "receiving"
 
-            return self._finish_agent_start(path, org_id, agent, apply_start)
+            response = self._finish_agent_start(path, org_id, agent, apply_start)
+            if path in self.agent_start_response_overrides:
+                return copy.deepcopy(self.agent_start_response_overrides[path])
+            return response
 
         raise AssertionError(f"出现未声明的 POST 路径: {path}")
 
@@ -1454,7 +1465,9 @@ class DemoSeederRuntimeTest(unittest.TestCase):
             SeedRuntimeError,
             "demo-full.*演示助手.*pulling_runtime_image.*image unavailable",
         ):
-            self._seeder(api).wait_app_ready("app-full", "企业 demo-full 的演示助手")
+            self._seeder(api).wait_app_ready(
+                "app-full", "企业 demo-full 的演示助手", "org-full"
+            )
 
     # 覆盖 agent runtime error：立即输出 runtime_message，且不包含管理 token 字段。
     def test_agent_runtime_error_stops_with_safe_message(self):
@@ -1467,7 +1480,10 @@ class DemoSeederRuntimeTest(unittest.TestCase):
             "demo-full.*演示智能客服.*hidden app unavailable",
         ):
             self._seeder(api).wait_agent_receiving(
-                agent["id"], "企业 demo-full 的演示智能客服"
+                agent["id"],
+                "企业 demo-full 的演示智能客服",
+                "org-full",
+                agent["app_id"],
             )
 
     # 覆盖单目标等待 900 秒：错误必须包含企业、资源名和固定超时秒数。
@@ -1478,7 +1494,7 @@ class DemoSeederRuntimeTest(unittest.TestCase):
 
         with self.assertRaisesRegex(SeedRuntimeError, "demo-full.*演示助手.*900"):
             self._seeder(api, clock).wait_app_ready(
-                "app-full", "企业 demo-full 的演示助手"
+                "app-full", "企业 demo-full 的演示助手", "org-full"
             )
 
         self.assertEqual(900, clock.now)
@@ -1526,6 +1542,87 @@ class DemoSeederRuntimeTest(unittest.TestCase):
 
         self.assertEqual("active", state.agents["demo-full"]["status"])
         self.assertEqual(1, len([call for call in api.calls if call[:2] == ("POST", path)]))
+
+    # 覆盖 AICC 隐藏 app 详情漂移到其他企业：租户冲突必须发生在 start 之前。
+    def test_cross_org_hidden_app_fails_before_agent_start(self):
+        api = FakeManagerAPI.complete_runtime_fixture()
+        agent = api.agents["org-full"][0]
+        agent.update({"status": "draft", "runtime_status": "ready"})
+        api.apps[agent["app_id"]]["org_id"] = "org-aicc"
+
+        with self.assertRaisesRegex(SeedConflict, "demo-full.*应用企业归属冲突"):
+            self._seeder(api).run()
+
+        self.assertEqual(
+            [],
+            [call for call in api.calls if call[0] == "POST" and call[1].endswith("/start")],
+        )
+
+    # 覆盖普通 app 初始归属正确但详情漂移：等待阶段必须按 state 中的企业事实再次校验。
+    def test_cross_org_normal_app_detail_is_rejected(self):
+        api = FakeManagerAPI.complete_runtime_fixture()
+        state = SeedState(
+            versions={},
+            organizations={},
+            apps={"demo-full": copy.deepcopy(api.apps["app-full"])},
+        )
+        api.apps["app-full"]["org_id"] = "org-aicc"
+
+        with self.assertRaisesRegex(SeedConflict, "demo-full.*应用企业归属冲突"):
+            self._seeder(api).wait_apps_ready(state)
+
+    # 覆盖 agent 详情缺 runtime_status：异常 200 必须立即失败而非轮询到 900 秒。
+    def test_agent_detail_missing_runtime_status_fails_immediately(self):
+        clock = FakeClock()
+        api = FakeManagerAPI.complete_runtime_fixture()
+        agent = api.agents["org-full"][0]
+        malformed = copy.deepcopy(agent)
+        malformed.pop("runtime_status")
+        api.agent_detail_response_overrides[agent["id"]] = {"agent": malformed}
+
+        with self.assertRaisesRegex(SeedConflict, "demo-full.*智能客服响应格式异常"):
+            self._seeder(api, clock).run()
+
+        self.assertEqual(0, clock.now)
+
+    # 覆盖 create agent envelope 缺 runtime_status：不得继续读取隐藏 app 或发送 start。
+    def test_agent_create_missing_runtime_status_fails_before_runtime_actions(self):
+        api = FakeManagerAPI.complete_runtime_fixture(agent_names=[])
+        api.agent_create_response_overrides.append({
+            "agent": {
+                "id": "agent-bad",
+                "org_id": "org-full",
+                "app_id": "aicc-app-1",
+                "status": "draft",
+            }
+        })
+
+        with self.assertRaisesRegex(SeedConflict, "demo-full.*智能客服响应格式异常"):
+            self._seeder(api).run()
+
+        self.assertEqual(
+            [],
+            [call for call in api.calls if call[0] == "POST" and call[1].endswith("/start")],
+        )
+
+    # 覆盖 start agent envelope 缺 status：写响应异常必须立即失败且不能进入 receiving 轮询。
+    def test_agent_start_missing_status_fails_before_receiving_wait(self):
+        api = FakeManagerAPI.complete_runtime_fixture()
+        agent = api.agents["org-full"][0]
+        agent.update({"status": "draft", "runtime_status": "ready"})
+        path = f"/api/v1/aicc/agents/{agent['id']}/start"
+        malformed = copy.deepcopy(agent)
+        malformed.pop("status")
+        api.agent_start_response_overrides[path] = {"agent": malformed}
+
+        with self.assertRaisesRegex(SeedConflict, "demo-full.*智能客服响应格式异常"):
+            self._seeder(api).run()
+
+        detail_calls = [
+            call for call in api.calls
+            if call[:2] == ("GET", f"/api/v1/aicc/agents/{agent['id']}")
+        ]
+        self.assertEqual([], detail_calls)
 
 
 if __name__ == "__main__":
