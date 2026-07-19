@@ -288,8 +288,10 @@ local-build-aicc-runtime: aicc-runtime-inject-contract ## 构建客服专用 run
 # （删集群）保留，首拉成功后续仅做秒级导入。
 LOCAL_PRELOAD_IMAGES := busybox:1.36 mysql:8.0 elasticsearch:8.11.3 calciumion/new-api:latest infiniflow/ragflow:v0.25.6
 
-local-preload: # 内部：local-up 调用——宿主拉取重镜像并 k3d image import 灌入集群（规避节点慢拉导致 rollout 超时）
-	@for img in $(LOCAL_PRELOAD_IMAGES); do \
+local-preload: SHELL := /bin/bash
+local-preload: # 内部：local-up 调用——宿主拉取重镜像并直导节点 containerd（规避节点慢拉导致 rollout 超时）
+	@set -o pipefail; \
+	for img in $(LOCAL_PRELOAD_IMAGES); do \
 		echo "==> 预载 $$img"; \
 		docker image inspect $$img >/dev/null 2>&1 || docker pull $$img || exit 1; \
 		docker save --platform linux/amd64 $$img | docker exec -i k3d-$(K3D_CLUSTER)-server-0 ctr images import - || exit 1; \
