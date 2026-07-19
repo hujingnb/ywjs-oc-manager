@@ -35,6 +35,7 @@ class FakeManagerAPI:
         self.calls = []
         self.uncertain = {}
         self.login_error = None
+        self.member_response_overrides = {}
         self._next_version = 1
         self._next_organization = 1
         self._next_member = 1
@@ -74,6 +75,8 @@ class FakeManagerAPI:
             "/members?limit=100&offset=0"
         ):
             org_id = path.split("/")[4]
+            if org_id in self.member_response_overrides:
+                return copy.deepcopy(self.member_response_overrides[org_id])
             return {"members": copy.deepcopy(self.members.get(org_id, []))}
 
         # 应用详情用于确认 active_app_id 的真实归属，名称和密码都不参与复用判断。
@@ -294,6 +297,68 @@ class FakeManagerAPI:
         }
         result.update(copy.deepcopy(overrides))
         return result
+
+
+class FakeOrgAdminAPI:
+    """模拟与平台客户端隔离的企业管理员客户端，并共享 manager 服务端数据。"""
+
+    def __init__(self, backend, expected_code):
+        """固定允许登录的企业 code；所有写入必须与该 code 对应的 org_id 一致。"""
+        self.backend = backend
+        self.expected_code = expected_code
+        self.logged_in_code = None
+        self.calls = []
+
+    def login(self, org_code, username, password):
+        """只有目标企业 admin 使用本地默认密码才能取得写权限。"""
+        self.calls.append(("LOGIN", org_code, username))
+        if org_code != self.expected_code:
+            raise AssertionError("企业管理员客户端登录到了错误企业")
+        if username != "admin" or password != _ADMIN_PASSWORD:
+            raise AssertionError("企业管理员客户端登录凭据不符合本地约定")
+        self.logged_in_code = org_code
+        return {"username": username, "role": "org_admin"}
+
+    def post(self, path, body, authenticated=True):
+        """只实现成员相关企业写入，并在落库前校验登录企业与路径企业一致。"""
+        del authenticated
+        safe_body = copy.deepcopy(body)
+        self.calls.append(("POST", path, safe_body))
+        org_id = path.split("/")[4]
+        expected_org = next(
+            item for item in self.backend.organizations if item["code"] == self.expected_code
+        )
+        if self.logged_in_code != self.expected_code or org_id != expected_org["id"]:
+            raise AssertionError("企业管理员写入路径与登录企业不一致")
+
+        # AICC-only 企业只创建普通成员，不产生 app 或 job。
+        if path.endswith("/members"):
+            member = FakeManagerAPI.member(
+                f"member-{org_id}", org_id, safe_body["username"]
+            )
+            self.backend.members.setdefault(org_id, []).append(copy.deepcopy(member))
+            return {"member": member}
+
+        # 普通实例企业通过 onboarding 同事务创建成员、应用和初始化 job。
+        if path.endswith("/members/onboard"):
+            member = FakeManagerAPI.member(
+                f"member-{org_id}", org_id, safe_body["username"]
+            )
+            app = FakeManagerAPI.app(
+                f"app-{org_id}", org_id, member["id"], safe_body["app_name"]
+            )
+            member["active_app_id"] = app["id"]
+            self.backend.members.setdefault(org_id, []).append(copy.deepcopy(member))
+            self.backend.apps[app["id"]] = copy.deepcopy(app)
+            return {
+                "onboarding": {
+                    "member": member,
+                    "app": app,
+                    "job_id": f"job-{org_id}",
+                }
+            }
+
+        raise AssertionError(f"企业管理员 fake 收到未声明路径: {path}")
 
 
 class DemoSeederTest(unittest.TestCase):
@@ -787,25 +852,36 @@ class DemoSeederTest(unittest.TestCase):
 
     # 覆盖三企业均缺成员：两个普通实例企业走企业管理员 onboarding，AICC 企业只建成员。
     def test_missing_members_use_org_admin_and_create_only_required_apps(self):
-        api = FakeManagerAPI()
-        factory_calls = []
+        platform = FakeManagerAPI(
+            organizations=[
+                FakeManagerAPI.organization("org-full", "demo-full", "完整", []),
+                FakeManagerAPI.organization("org-app", "demo-app", "普通", []),
+                FakeManagerAPI.organization("org-aicc", "demo-aicc", "客服", []),
+            ]
+        )
+        expected_codes = iter(("demo-full", "demo-app", "demo-aicc"))
+        org_apis = []
 
         def client_factory():
-            """每个缺成员企业都必须显式取得企业客户端，禁止复用平台写权限。"""
-            factory_calls.append(True)
-            return api
+            """每个缺成员企业都取得独立客户端，且服务端事实与平台只读客户端共享。"""
+            org_api = FakeOrgAdminAPI(platform, next(expected_codes))
+            org_apis.append(org_api)
+            return org_api
 
-        state = DemoSeeder(api, client_factory).ensure_members_and_apps(
+        state = DemoSeeder(platform, client_factory).ensure_members_and_apps(
             self._member_state()
         )
 
-        self.assertEqual(3, len(factory_calls))
+        self.assertEqual(3, len(org_apis))
         self.assertEqual(
             [("LOGIN", code, "admin") for code in ("demo-full", "demo-app", "demo-aicc")],
-            [call for call in api.calls if call[0] == "LOGIN"],
+            [call for org_api in org_apis for call in org_api.calls if call[0] == "LOGIN"],
         )
         onboard_posts = [
-            call for call in api.calls if call[0] == "POST" and call[1].endswith("/onboard")
+            call
+            for org_api in org_apis
+            for call in org_api.calls
+            if call[0] == "POST" and call[1].endswith("/onboard")
         ]
         self.assertEqual(2, len(onboard_posts))
         for _method, _path, body in onboard_posts:
@@ -823,13 +899,39 @@ class DemoSeederTest(unittest.TestCase):
             )
         aicc_posts = [
             call
-            for call in api.calls
+            for org_api in org_apis
+            for call in org_api.calls
             if call[:2] == ("POST", "/api/v1/organizations/org-aicc/members")
         ]
         self.assertEqual(1, len(aicc_posts))
+        self.assertEqual([], [call for call in platform.calls if call[0] == "POST"])
         self.assertEqual({"demo-full", "demo-app"}, set(state.apps))
         self.assertTrue(all(state.jobs[code] for code in state.apps))
-        self.assertEqual(2, len(api.apps))
+        self.assertEqual(2, len(platform.apps))
+
+    # 覆盖成员响应缺失 members 字段：格式异常不得误判为缺成员后执行企业写入。
+    def test_member_list_missing_members_field_raises_without_writes(self):
+        api = FakeManagerAPI()
+        api.member_response_overrides["org-full"] = {}
+
+        with self.assertRaises(SeedConflict) as raised:
+            DemoSeeder(api, lambda: api).ensure_members_and_apps(self._member_state())
+
+        self.assertIn("org-full", str(raised.exception))
+        self.assertNotIn("{}", str(raised.exception))
+        self.assertEqual([], [call for call in api.calls if call[0] == "POST"])
+
+    # 覆盖 members 为 JSON null：非数组响应不得静默降级为空列表或触发成员创建。
+    def test_member_list_null_members_raises_without_writes(self):
+        api = FakeManagerAPI()
+        api.member_response_overrides["org-full"] = {"members": None}
+
+        with self.assertRaises(SeedConflict) as raised:
+            DemoSeeder(api, lambda: api).ensure_members_and_apps(self._member_state())
+
+        self.assertIn("org-full", str(raised.exception))
+        self.assertNotIn("None", str(raised.exception))
+        self.assertEqual([], [call for call in api.calls if call[0] == "POST"])
 
     # 覆盖既有成员无实例：平台管理员直接复建，不创建企业客户端也不依赖默认管理员密码。
     def test_existing_member_without_app_uses_platform_create_app(self):

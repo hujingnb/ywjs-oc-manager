@@ -185,7 +185,17 @@ class DemoSeeder:
     def find_member(self, api, org_id, username):
         """按企业成员列表中的精确 username 唯一查找，拒绝重复稳定身份。"""
         path = f"/api/v1/organizations/{org_id}/members?limit=100&offset=0"
-        members = api.get(path).get("members", [])
+        response = api.get(path)
+        # 缺字段、JSON null、错误类型或非对象列表项都属于契约异常，不能误判成缺成员后写入。
+        if (
+            not isinstance(response, dict)
+            or "members" not in response
+            or not isinstance(response["members"], list)
+            or any(not isinstance(item, dict) for item in response["members"])
+        ):
+            # 仅暴露稳定 org id 便于定位，不拼接可能含敏感成员信息的原始响应。
+            raise SeedConflict(f"企业 {org_id} 的成员列表响应格式异常")
+        members = response["members"]
         return self.unique_by(members, "username", username, "企业成员")
 
     def _create_member(self, org_api, org_id, code):
