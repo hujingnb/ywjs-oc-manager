@@ -100,7 +100,11 @@ class FakeManagerAPI:
         if path.endswith("/aicc-config"):
             updated = copy.deepcopy(organization)
             updated["aicc_enabled"] = safe_body["enabled"]
-            updated["aicc_agent_limit"] = safe_body["agent_limit"]
+            # OrganizationResult 对 NULL 上限使用 omitempty；有限值才会出现在 JSON 响应中。
+            if safe_body["agent_limit"] is None:
+                updated.pop("aicc_agent_limit", None)
+            else:
+                updated["aicc_agent_limit"] = safe_body["agent_limit"]
             updated["industry_knowledge_base_ids"] = copy.deepcopy(
                 safe_body["industry_knowledge_base_ids"]
             )
@@ -252,7 +256,8 @@ class DemoSeederTest(unittest.TestCase):
             )
             self.assertIsNone(aicc_body["agent_limit"])
             self.assertTrue(organization["aicc_enabled"])
-            self.assertIsNone(organization["aicc_agent_limit"])
+            self.assertNotIn("aicc_agent_limit", organization)
+            self.assertIsNone(organization.get("aicc_agent_limit"))
 
     # 覆盖新建版本进入 SeedState 时的正式响应形状，禁止把创建请求专用字段误作响应字段。
     def test_created_version_state_matches_assistant_version_result(self):
