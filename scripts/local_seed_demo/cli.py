@@ -67,7 +67,8 @@ def missing_vendor_keys(env_path):
                     continue
                 key, raw_value = match.groups()
                 if key in configured:
-                    configured[key] = bool(_dotenv_value(raw_value))
+                    # 引号内仅有空白仍不能作为可用凭据；非空值只判断存在，不回写或输出。
+                    configured[key] = bool(_dotenv_value(raw_value).strip())
     except FileNotFoundError:
         # 缺失 .env 与两个必需 Key 都未配置等价，由统一错误提示引导开发者修复。
         pass

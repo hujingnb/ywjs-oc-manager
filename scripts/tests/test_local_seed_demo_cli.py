@@ -89,6 +89,8 @@ class LocalSeedDemoCLITest(unittest.TestCase):
             ("DEEPSEEK_API_KEY= # empty\nSILICONFLOW_API_KEY=x\n", ["DEEPSEEK_API_KEY"]),
             # 空引号仍是空值，不能绕过启动预检。
             ("DEEPSEEK_API_KEY='' # empty\nSILICONFLOW_API_KEY=\"\"\n", ["DEEPSEEK_API_KEY", "SILICONFLOW_API_KEY"]),
+            # 引号中只有空白同样不是可用模型凭据，必须按空值处理。
+            ("export DEEPSEEK_API_KEY='   '\nSILICONFLOW_API_KEY=\"  \"\n", ["DEEPSEEK_API_KEY", "SILICONFLOW_API_KEY"]),
             # export、单双引号以及引号后的注释均应正确提取非空事实。
             ("export DEEPSEEK_API_KEY='deep#value' # note\nexport SILICONFLOW_API_KEY=\"silicon value\" # note\n", []),
             # 未引号值的空白后行尾注释不属于 Key 值。
