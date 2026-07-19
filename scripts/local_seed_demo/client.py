@@ -101,6 +101,8 @@ class ManagerAPI:
             except urllib.error.HTTPError as error:
                 # 仅 GET 的指定瞬时状态可重试，避免 POST/PATCH 被服务端重复执行。
                 if method == "GET" and error.code in TRANSIENT_STATUSES and attempt < len(retry_delays):
+                    # 重试前主动释放错误响应及底层连接，不依赖解释器引用计数时机。
+                    error.close()
                     self.sleep(retry_delays[attempt])
                     continue
                 raise self._api_error(operation, error) from None
@@ -121,7 +123,12 @@ class ManagerAPI:
         """从 HTTP 错误响应中只提取 code/message，丢弃可能含敏感信息的其余字段。"""
         try:
             payload = json.load(error)
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (
+            json.JSONDecodeError,
+            UnicodeDecodeError,
+            http.client.HTTPException,
+            OSError,
+        ):
             payload = {}
         # JSON null、数组或标量虽语法合法，却不具备错误对象字段，统一安全降级。
         if not isinstance(payload, dict):

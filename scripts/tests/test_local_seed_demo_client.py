@@ -13,6 +13,9 @@ from local_seed_demo.client import APIError, ManagerAPI, UncertainWrite
 # 拆分测试凭据，避免异常 traceback 直接打印完整登录密码。
 _LOGIN_PASSWORD = "admin" + "123"
 
+# 拆分截断响应标记，避免 RED traceback 或断言源码直接暴露完整测试敏感值。
+_PARTIAL_BODY_MARKER = "partial" + "-secret"
+
 
 class _ScenarioHandler(BaseHTTPRequestHandler):
     """按测试场景提供最小 HTTP 行为，并只保留协议断言需要的请求信息。"""
@@ -87,6 +90,20 @@ class _ScenarioHandler(BaseHTTPRequestHandler):
         # 合法 JSON 数组同样不提供 code/message，不能因调用 dict 方法泄露内部异常。
         if self.server.scenario == "error_list":
             self._send_json(500, ["unexpected"])
+            return
+
+        # 截断错误场景声明更长响应体后只写部分 JSON，模拟代理或服务端中途断连。
+        if self.server.scenario == "truncated_error":
+            partial_body = f'{{"message":"{_PARTIAL_BODY_MARKER}'.encode("utf-8")
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(partial_body) + 100))
+            self.end_headers()
+            self.wfile.write(partial_body)
+            self.wfile.flush()
+            self.close_connection = True
+            self.connection.shutdown(socket.SHUT_RDWR)
+            self.connection.close()
             return
 
         # 非测试契约内的路径统一返回 404，使意外请求立即暴露为测试失败。
@@ -254,6 +271,24 @@ class ManagerAPITest(unittest.TestCase):
 
         self.assertEqual("http_error", raised.exception.code)
         self.assertEqual("manager 请求失败", raised.exception.safe_message)
+
+    # 覆盖错误响应按 Content-Length 读取时中途截断，要求转为安全默认 APIError。
+    def test_truncated_http_error_body_uses_safe_defaults(self):
+        server = self._start_server("truncated_error")
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        client = ManagerAPI(base_url)
+
+        with self.assertRaises(APIError) as raised:
+            client.get("/api/v1/assistant-versions")
+
+        self.assertEqual(1, len(server.requests))
+        self.assertEqual(500, raised.exception.status)
+        self.assertEqual("http_error", raised.exception.code)
+        self.assertEqual("manager 请求失败", raised.exception.safe_message)
+        self.assertTrue(
+            _PARTIAL_BODY_MARKER not in str(raised.exception),
+            "截断的部分错误响应不得进入异常文本",
+        )
 
     # 覆盖调用方可将 API 与不确定写错误统一视作运行时失败进行捕获的继承契约。
     def test_client_errors_inherit_runtime_error(self):
