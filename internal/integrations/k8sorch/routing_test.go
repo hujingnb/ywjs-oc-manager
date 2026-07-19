@@ -40,9 +40,9 @@ func TestRoutingOrchestratorEnsureAppSeparatesNamespaces(t *testing.T) {
 	_, err = cs.AppsV1().Deployments("oc-apps").Get(context.Background(), "app-aicc", metav1.GetOptions{})
 	require.Error(t, err)
 	// AICC 的 HPA 也必须随路由写入专用 namespace，不能落在普通应用 namespace。
-	_, err = cs.AutoscalingV2beta2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-aicc", metav1.GetOptions{})
+	_, err = cs.AutoscalingV2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-aicc", metav1.GetOptions{})
 	require.NoError(t, err)
-	_, err = cs.AutoscalingV2beta2().HorizontalPodAutoscalers("oc-apps").Get(context.Background(), "app-aicc", metav1.GetOptions{})
+	_, err = cs.AutoscalingV2().HorizontalPodAutoscalers("oc-apps").Get(context.Background(), "app-aicc", metav1.GetOptions{})
 	require.Error(t, err)
 }
 
@@ -72,7 +72,7 @@ func TestRoutingOrchestratorAICCStopStartManagesHPA(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, dep.Spec.Replicas)
 	assert.Equal(t, int32(0), *dep.Spec.Replicas)
-	_, err = cs.AutoscalingV2beta2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-aicc", metav1.GetOptions{})
+	_, err = cs.AutoscalingV2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-aicc", metav1.GetOptions{})
 	require.Error(t, err)
 
 	// 启动时先恢复 HPA，再将 Deployment 拉到最小副本，确保恢复后可继续弹性扩容。
@@ -80,7 +80,7 @@ func TestRoutingOrchestratorAICCStopStartManagesHPA(t *testing.T) {
 	require.NoError(t, r.Start(context.Background(), "aicc"))
 	assert.Equal(t, []string{"update/deployments", "create/horizontalpodautoscalers"}, operations,
 		"启动必须先拉起 Deployment，再恢复 HPA，避免缩放失败时 HPA 提前启动实例")
-	hpa, err := cs.AutoscalingV2beta2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-aicc", metav1.GetOptions{})
+	hpa, err := cs.AutoscalingV2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-aicc", metav1.GetOptions{})
 	require.NoError(t, err)
 	require.NotNil(t, hpa.Spec.MinReplicas)
 	assert.Equal(t, int32(1), *hpa.Spec.MinReplicas)

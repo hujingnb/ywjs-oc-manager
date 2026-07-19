@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	autoscalingv2 "k8s.io/api/autoscaling/v2beta2"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -53,7 +53,7 @@ func TestEnsureAppAICCCreatesHPA(t *testing.T) {
 	// 重复 reconcile 应走 Update 路径并保持幂等，避免 worker 重试时因 HPA 已存在而失败。
 	require.NoError(t, a.EnsureApp(context.Background(), aicc))
 
-	hpa, err := cs.AutoscalingV2beta2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-a1", metav1.GetOptions{})
+	hpa, err := cs.AutoscalingV2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-a1", metav1.GetOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, "app-a1", hpa.Spec.ScaleTargetRef.Name)
 	dep, err := cs.AppsV1().Deployments("oc-aicc").Get(context.Background(), "app-a1", metav1.GetOptions{})
@@ -64,10 +64,27 @@ func TestEnsureAppAICCCreatesHPA(t *testing.T) {
 	standard := testSpec()
 	standard.AppID = "normal"
 	require.NoError(t, normal.EnsureApp(context.Background(), standard))
-	_, err = cs.AutoscalingV2beta2().HorizontalPodAutoscalers("oc-apps").Get(context.Background(), "app-normal", metav1.GetOptions{})
+	_, err = cs.AutoscalingV2().HorizontalPodAutoscalers("oc-apps").Get(context.Background(), "app-normal", metav1.GetOptions{})
 	require.Error(t, err)
-	_, err = cs.AutoscalingV2beta2().HorizontalPodAutoscalers("oc-apps").Get(context.Background(), "app-a1", metav1.GetOptions{})
+	_, err = cs.AutoscalingV2().HorizontalPodAutoscalers("oc-apps").Get(context.Background(), "app-a1", metav1.GetOptions{})
 	require.Error(t, err)
+}
+
+// TestEnsureAppAICCUsesStableHPAAPI 验证真实集群只提供 autoscaling/v2 时，
+// AICC reconcile 不会继续请求已从当前 k3d 移除的 v2beta2 端点。
+func TestEnsureAppAICCUsesStableHPAAPI(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	versions := []string{}
+	cs.PrependReactor("*", "horizontalpodautoscalers", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		versions = append(versions, action.GetResource().Version)
+		return false, nil, nil
+	})
+	a := NewAICCKubernetesAdapter(cs, "oc-aicc")
+	spec := testSpec()
+	spec.AppType = domain.AppTypeAICC
+
+	require.NoError(t, a.EnsureApp(context.Background(), spec))
+	assert.Equal(t, []string{"v2", "v2"}, versions)
 }
 
 // TestDeleteAICCDeletesHPA 验证删除 AICC 应用时 HPA 一并删除，避免遗留控制器继续调节已删除 Deployment。
@@ -76,7 +93,7 @@ func TestDeleteAICCDeletesHPA(t *testing.T) {
 	a := NewAICCKubernetesAdapter(cs, "oc-aicc")
 
 	require.NoError(t, a.Delete(context.Background(), "a1"))
-	_, err := cs.AutoscalingV2beta2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-a1", metav1.GetOptions{})
+	_, err := cs.AutoscalingV2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-a1", metav1.GetOptions{})
 	require.Error(t, err)
 }
 
@@ -170,7 +187,7 @@ func TestStartStopNormalAppKeepsLegacyScaleSemantics(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, dep.Spec.Replicas)
 	assert.Equal(t, int32(0), *dep.Spec.Replicas)
-	_, err = cs.AutoscalingV2beta2().HorizontalPodAutoscalers("oc-apps").Get(context.Background(), "app-a1", metav1.GetOptions{})
+	_, err = cs.AutoscalingV2().HorizontalPodAutoscalers("oc-apps").Get(context.Background(), "app-a1", metav1.GetOptions{})
 	require.Error(t, err)
 
 	require.NoError(t, a.Start(context.Background(), "a1"))
@@ -191,7 +208,7 @@ func TestEnsureAppAICCRestoresHPAAfterStop(t *testing.T) {
 	require.NoError(t, a.Stop(context.Background(), spec.AppID))
 
 	require.NoError(t, a.EnsureApp(context.Background(), spec))
-	hpa, err := cs.AutoscalingV2beta2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-a1", metav1.GetOptions{})
+	hpa, err := cs.AutoscalingV2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-a1", metav1.GetOptions{})
 	require.NoError(t, err)
 	require.NotNil(t, hpa.Spec.MinReplicas)
 	assert.Equal(t, int32(1), *hpa.Spec.MinReplicas)
@@ -204,7 +221,7 @@ func TestStopAICCDeletesHPAWhenDeploymentAlreadyMissing(t *testing.T) {
 	a := NewAICCKubernetesAdapter(cs, "oc-aicc")
 
 	require.NoError(t, a.Stop(context.Background(), "a1"))
-	_, err := cs.AutoscalingV2beta2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-a1", metav1.GetOptions{})
+	_, err := cs.AutoscalingV2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-a1", metav1.GetOptions{})
 	require.Error(t, err)
 }
 

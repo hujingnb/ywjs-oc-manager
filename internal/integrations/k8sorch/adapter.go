@@ -9,7 +9,7 @@ import (
 	"oc-manager/internal/domain"
 
 	appsv1 "k8s.io/api/apps/v1"
-	autoscalingv2 "k8s.io/api/autoscaling/v2beta2"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -89,7 +89,8 @@ func (a *KubernetesAdapter) applyNetworkPolicy(ctx context.Context, policy *netw
 
 // applyHPA 以 Get→Create/Update 方式幂等收敛 HPA，保留 apiserver 分配的 ResourceVersion。
 func (a *KubernetesAdapter) applyHPA(ctx context.Context, h *autoscalingv2.HorizontalPodAutoscaler) error {
-	api := a.client.AutoscalingV2beta2().HorizontalPodAutoscalers(a.namespace)
+	// 当前支持的 Kubernetes 集群只保证稳定版 autoscaling/v2；v2beta2 已在新版本中移除。
+	api := a.client.AutoscalingV2().HorizontalPodAutoscalers(a.namespace)
 	existing, err := api.Get(ctx, h.Name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		_, cerr := api.Create(ctx, h, metav1.CreateOptions{})
@@ -331,7 +332,7 @@ func (a *KubernetesAdapter) deleteAICCNetworkPolicy(ctx context.Context, appID s
 
 // deleteHPA 幂等删除 AICC HPA；NotFound 表示已停止或已删除，按成功处理。
 func (a *KubernetesAdapter) deleteHPA(ctx context.Context, appID string) error {
-	err := a.client.AutoscalingV2beta2().HorizontalPodAutoscalers(a.namespace).Delete(ctx, hpaName(appID), metav1.DeleteOptions{})
+	err := a.client.AutoscalingV2().HorizontalPodAutoscalers(a.namespace).Delete(ctx, hpaName(appID), metav1.DeleteOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return wrapK8s("删除 HPA", err)
 	}
