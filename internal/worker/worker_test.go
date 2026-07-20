@@ -53,6 +53,35 @@ func TestWorkerTickRunsSuccessCallbackBeforeSucceeded(t *testing.T) {
 	assert.True(t, callbackSawRunning)
 }
 
+// TestWorkerTickRetriesBeforeSuccessCallbackFailure 验证成功前后继调度首次失败时旧任务保持 retryable；
+// 下一次重试成功后仅创建一次 successor，且旧任务才进入 succeeded。
+func TestWorkerTickRetriesBeforeSuccessCallbackFailure(t *testing.T) {
+	store := newJobStoreStub(t)
+	registry := handlers.NewRegistry()
+	registry.MustRegister("prompt-rollout", func(context.Context, sqlc.Job) error { return nil })
+	callbackCalls, successors := 0, 0
+	require.NoError(t, registry.RegisterBeforeSuccess("prompt-rollout", func(context.Context, sqlc.Job) error {
+		callbackCalls++
+		if callbackCalls == 1 {
+			return errors.New("后继任务写入失败")
+		}
+		successors++
+		return nil
+	}))
+	store.put("job-1", sqlc.Job{ID: store.id("job-1"), Type: "prompt-rollout", Status: domain.JobStatusPending, MaxAttempts: 3})
+	queue := &queueStub{ids: []string{store.id("job-1")}}
+	worker := New(store, queue, registry, Config{WorkerID: "w1", BackoffBase: time.Millisecond})
+
+	require.NoError(t, worker.Tick(context.Background()))
+	assert.Equal(t, domain.JobStatusPending, store.snapshot("job-1").Status)
+	assert.Zero(t, successors)
+
+	queue.ids = []string{store.id("job-1")}
+	require.NoError(t, worker.Tick(context.Background()))
+	assert.Equal(t, domain.JobStatusSucceeded, store.snapshot("job-1").Status)
+	assert.Equal(t, 1, successors)
+}
+
 // TestWorkerTickRetriesUntilMaxAttempts 验证workerTickRetriesUntil最大Attempts的边界条件场景。
 func TestWorkerTickRetriesUntilMaxAttempts(t *testing.T) {
 	store := newJobStoreStub(t)

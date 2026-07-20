@@ -76,6 +76,17 @@ func TestAICCPlatformPromptRolloutCoordinatorCreatesSuccessorOnlyAfterOldJobSucc
 	assert.Len(t, notifier.jobIDs, 1)
 }
 
+// TestAICCPlatformPromptRolloutCoordinatorExcludingCurrentStillBlocksOtherActiveJob 验证成功前回调仅排除自己；
+// 存在另一份 pending/running 提示词任务时，不能重复创建 successor。
+func TestAICCPlatformPromptRolloutCoordinatorExcludingCurrentStillBlocksOtherActiveJob(t *testing.T) {
+	store := &fakePromptRolloutStore{hasActive: true, hasStale: true}
+	notifier := &fakePromptRolloutNotifier{}
+
+	require.NoError(t, newPromptRolloutCoordinatorForTest(store, notifier).EnqueueIfNeededExcluding(context.Background(), "old-running-job"))
+	assert.Empty(t, store.jobs)
+	assert.Empty(t, notifier.jobIDs)
+}
+
 // TestAICCPlatformPromptRolloutCoordinatorPropagatesStoreErrors 验证检查或创建任务失败会阻止启动，不能静默遗漏提示词下发。
 func TestAICCPlatformPromptRolloutCoordinatorPropagatesStoreErrors(t *testing.T) {
 	for _, testCase := range []struct {
