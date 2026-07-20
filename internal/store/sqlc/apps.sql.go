@@ -190,6 +190,20 @@ func (q *Queries) GetApp(ctx context.Context, id string) (App, error) {
 	return i, err
 }
 
+const getAppAppliedPlatformPromptHash = `-- name: GetAppAppliedPlatformPromptHash :one
+SELECT applied_platform_prompt_hash
+FROM apps
+WHERE id = ? AND deleted_at IS NULL
+`
+
+// rollout 在 Deployment 就绪后必须读取 bootstrap 实际写入的 hash，不能以 Pod Ready 或 agent revision 推断。
+func (q *Queries) GetAppAppliedPlatformPromptHash(ctx context.Context, id string) (string, error) {
+	row := q.db.QueryRowContext(ctx, getAppAppliedPlatformPromptHash, id)
+	var applied_platform_prompt_hash string
+	err := row.Scan(&applied_platform_prompt_hash)
+	return applied_platform_prompt_hash, err
+}
+
 const getAppByRuntimeTokenHash = `-- name: GetAppByRuntimeTokenHash :one
 SELECT id, org_id, owner_user_id, name, description, status, newapi_key_id, newapi_key_ciphertext, api_key_status, runtime_snapshot_json, runtime_snapshot_at, restart_policy_json, health_state_json, progress_current, progress_total, last_error_status, last_error_message, runtime_image_ref, runtime_image_sha256, newapi_key_name, version_id, applied_version_revision, applied_image_ref, runtime_token_hash, runtime_token_ciphertext, created_at, updated_at, deleted_at, runtime_token_active_key, knowledge_quota_bytes, locale, runtime_phase, web_publish_applied, applied_platform_prompt_hash, app_type, owner_active_key
 FROM apps

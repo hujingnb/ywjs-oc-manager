@@ -590,6 +590,18 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if err := registry.Register(domain.JobTypeAICCModelRollout, aiccModelRolloutHandler.Handle); err != nil {
 		return fmt.Errorf("注册 aicc_model_rollout handler 失败: %w", err)
 	}
+	// 平台提示词变化以独立全局任务逐台静默重启，不能复用企业模型 revision 的 rollout。
+	aiccPlatformPromptRolloutHandler := handlers.NewAICCPlatformPromptRolloutHandler(dbStore.Queries, orch, 30*time.Minute)
+	if err := registry.Register(domain.JobTypeAICCPlatformPromptRollout, aiccPlatformPromptRolloutHandler.Handle); err != nil {
+		return fmt.Errorf("注册 aicc_platform_prompt_rollout handler 失败: %w", err)
+	}
+	// handler 注册成功后才创建并唤醒可能已存在的提示词下发任务，避免 worker 先领取未知类型。
+	aiccPlatformPromptRolloutCoordinator := service.NewAICCPlatformPromptRolloutCoordinator(
+		store.NewAICCPlatformPromptRolloutRunner(dbStore), redisQueue,
+	)
+	if err := aiccPlatformPromptRolloutCoordinator.EnqueueIfNeeded(ctx); err != nil {
+		return fmt.Errorf("启动 AICC 平台提示词下发任务失败: %w", err)
+	}
 	// 生命周期 handler 走 k8s 编排（appOrchestrator + ObjectStore）：传入上方构造的真实 orch
 	// （未启用 k8s 时为 nil，handler 内部已做守卫）。
 	// workspaceObjStore 在 S3 启用时已有值（供 workspace + bootstrap），复用给 lifecycle handler。

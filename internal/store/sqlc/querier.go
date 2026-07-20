@@ -167,6 +167,8 @@ type Querier interface {
 	GetActiveAICCBlockedVisitor(ctx context.Context, arg GetActiveAICCBlockedVisitorParams) (AiccBlockedVisitor, error)
 	GetActiveAppByOwner(ctx context.Context, ownerUserID string) (App, error)
 	GetApp(ctx context.Context, id string) (App, error)
+	// rollout 在 Deployment 就绪后必须读取 bootstrap 实际写入的 hash，不能以 Pod Ready 或 agent revision 推断。
+	GetAppAppliedPlatformPromptHash(ctx context.Context, id string) (string, error)
 	// 按 control token（per-app 三用：bootstrap / oc-kb / oc-ops）的 hash 反查当前 app；
 	// 不允许请求方传入目标 app/dataset，鉴权即定位。
 	GetAppByRuntimeTokenHash(ctx context.Context, runtimeTokenHash null.String) (App, error)

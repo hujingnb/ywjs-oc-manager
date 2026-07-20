@@ -23,6 +23,12 @@ SELECT *
 FROM apps
 WHERE id = ?;
 
+-- name: GetAppAppliedPlatformPromptHash :one
+-- rollout 在 Deployment 就绪后必须读取 bootstrap 实际写入的 hash，不能以 Pod Ready 或 agent revision 推断。
+SELECT applied_platform_prompt_hash
+FROM apps
+WHERE id = ? AND deleted_at IS NULL;
+
 -- name: GetActiveAppByOwner :one
 SELECT *
 FROM apps
