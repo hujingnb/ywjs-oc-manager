@@ -125,6 +125,114 @@ export interface AICCConversationFixture {
   widgetToken: string
 }
 
+export interface AICCAgentFixture {
+  id: string
+  app_id: string
+  name: string
+  public_token: string
+  widget_token: string
+}
+
+// openFixtureOrganizationAICCConfig 以平台管理员身份打开 fixture 企业的独立 AICC 配置表单。
+// 模型目录与独立配置会异步加载，调用方只能在该页面的可见控件上继续操作。
+async function openFixtureOrganizationAICCConfig(page: Page): Promise<void> {
+  const fixture = loadE2EFixture()
+  await forceZh(page)
+  await loginAs(page, 'platform_admin', fixture, 'zh')
+  await page.goto('/organizations')
+  const orgRow = page.getByRole('row', { name: new RegExp(fixture.org_code) })
+  await expect(orgRow).toBeVisible()
+  await orgRow.getByRole('button', { name: /^(编辑|Edit)$/ }).click()
+  await expect(page.getByText('客服模型', { exact: true })).toBeVisible()
+}
+
+// setAICCConfigForFixtureOrg 通过真实平台页面保存开关、配额和指定客服模型，并返回成功写入的模型。
+export async function setAICCConfigForFixtureOrg(
+  page: Page,
+  enabled: boolean,
+  agentLimit: number,
+  requestedModel?: string,
+): Promise<string> {
+  await openFixtureOrganizationAICCConfig(page)
+  const aiccSwitch = page.locator('.n-form-item').filter({ hasText: '开通 AICC' }).getByRole('switch')
+  if ((await aiccSwitch.getAttribute('aria-checked') === 'true') !== enabled) await aiccSwitch.click()
+  await page.locator('.n-form-item').filter({ hasText: 'AICC 智能体数量上限' }).locator('input').fill(String(agentLimit))
+
+  const modelField = page.locator('.n-form-item').filter({ hasText: '客服模型' })
+  const modelSelect = modelField.locator('.n-base-selection')
+  await expect(modelSelect).toBeVisible()
+  if (requestedModel) {
+    await modelSelect.click()
+    await page.locator('.n-base-select-option', { hasText: requestedModel }).click()
+  }
+  const selectedModel = (await modelSelect.innerText()).trim()
+  if (!selectedModel) throw new Error('fixture 企业未加载可用客服模型，无法保存 AICC 配置')
+
+  const configSaved = page.waitForResponse(response => response.url().includes('/aicc-config') && response.request().method() === 'PUT')
+  await page.getByRole('button', { name: '保存 AICC 配置' }).click()
+  const response = await configSaved
+  expect(response.ok()).toBeTruthy()
+  const payload = await response.json() as { config?: { model?: string } }
+  const model = payload.config?.model
+  if (!model) throw new Error('AICC 配置保存成功但响应未返回客服模型')
+  return model
+}
+
+// changeAICCModelToAnotherAvailableOption 真实确认换模影响，并返回与原配置不同的已保存模型。
+// 当本地模型目录不足两个时立即给出可诊断错误，避免把环境缺口伪装成静默重启失败。
+export async function changeAICCModelToAnotherAvailableOption(page: Page): Promise<string> {
+  await openFixtureOrganizationAICCConfig(page)
+  const modelField = page.locator('.n-form-item').filter({ hasText: '客服模型' })
+  const modelSelect = modelField.locator('.n-base-selection')
+  const currentModel = (await modelSelect.innerText()).trim()
+  await modelSelect.click()
+  // Naive UI 下拉项没有 ARIA option 角色，必须使用组件公开 class；getByRole('option')
+  // 会得到空集合并把“模型不足”误报为环境问题。
+  const options = page.locator('.n-base-select-option')
+  const availableModels = await options.allTextContents()
+  const nextModel = availableModels.map(model => model.trim()).find(model => model && model !== currentModel)
+  if (!nextModel) throw new Error(`本地 AICC 模型目录至少需要两个可选模型；当前仅检测到 ${currentModel || '0 个'}`)
+  await page.locator('.n-base-select-option', { hasText: nextModel }).click()
+
+  const configSaved = page.waitForResponse(response => response.url().includes('/aicc-config') && response.request().method() === 'PUT')
+  await page.getByRole('button', { name: '保存 AICC 配置' }).click()
+  // Naive UI 的对话框没有把标题关联为 accessible name；保留 dialog 语义并按可见确认文案缩小范围。
+  const confirmDialog = page.getByRole('dialog').filter({ hasText: '确认更换客服模型' })
+  await expect(confirmDialog).toContainText('逐个静默重启')
+  await confirmDialog.getByRole('button', { name: '确认更换' }).click()
+  const response = await configSaved
+  expect(response.ok()).toBeTruthy()
+  const payload = await response.json() as { config?: { model?: string } }
+  const model = payload.config?.model
+  if (!model || model === currentModel) throw new Error('客服模型切换未返回不同的新模型')
+  return model
+}
+
+// createAICCAgentAsOrgAdmin 以企业管理员身份创建客服并保存可选人设，确认界面不暴露普通助手版本或智能路由。
+export async function createAICCAgentAsOrgAdmin(page: Page, persona?: string): Promise<AICCAgentFixture> {
+  const fixture = loadE2EFixture()
+  await forceZh(page)
+  await loginAs(page, 'org_admin', fixture, 'zh')
+  await openAICCConsole(page)
+  await openAICCSettings(page)
+  await page.getByRole('button', { name: '新建智能体' }).click()
+  await expect(page.getByText('助手版本', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('智能路由', { exact: true })).toHaveCount(0)
+  const name = `E2E 接待员 ${Date.now()}`
+  await page.getByPlaceholder('例如：售前咨询接待员').fill(name)
+  if (persona) await page.locator('#aicc-persona').fill(persona)
+  const createdResponse = page.waitForResponse(response => response.url().includes('/api/v1/aicc/agents') && response.request().method() === 'POST')
+  await page.getByRole('button', { name: '保存配置' }).click()
+  const created = await createdResponse
+  expect(created.ok()).toBeTruthy()
+  const payload = await created.json() as { agent: AICCAgentFixture }
+  await waitForAICCRuntime(payload.agent.app_id)
+  await expect(page.getByRole('region', { name: '当前智能体' })).toContainText(name)
+  await page.getByRole('link', { name: '接待台', exact: true }).click()
+  await expect(page.locator('.public-link-box').locator('input')).toHaveValue(/\/aicc\/[A-Za-z0-9_-]+/)
+  return payload.agent
+}
+
 // createStartedAICCConversationFixture 走真实管理页面创建并启动一名客服，供公开页 E2E 使用。
 // 每个 spec 生成独立智能体和公开 token，避免并发或重复三轮运行共享会话、线索与审计数据。
 export async function createStartedAICCConversationFixture(page: Page, prefix: string): Promise<AICCConversationFixture> {
@@ -214,6 +322,20 @@ export async function waitForAICCRuntime(appId: string): Promise<void> {
   // 控制器切主期间，数据库 runtime_phase 可能晚于 Kubernetes Ready 一个轮询周期。
   // 与 Pod 就绪窗口保持一致，避免真实运行时已可用时把 E2E 误报为启动失败。
   ).trim(), { timeout: 180_000 }).toBe('ready')
+}
+
+// waitForAICCModelRollout 等待模型变更产生的最新 rollout Job 成功；app_id 反查企业可避免测试把并行企业的任务当作当前客服完成。
+export async function waitForAICCModelRollout(appId: string): Promise<void> {
+  assertLocalK3DContext()
+  const escapedAppID = appId.replaceAll("'", "''")
+  await expect.poll(() => execFileSync(
+    'kubectl',
+    [
+      '--context', localK3DContext, '-n', 'ocm', 'exec', 'mysql-0', '--', 'sh', '-c',
+      `mysql -uroot -p"$MYSQL_ROOT_PASSWORD" ocm -N -e "SELECT status FROM jobs WHERE type='aicc_model_rollout' AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.org_id'))=(SELECT org_id FROM apps WHERE id='${escapedAppID}') ORDER BY created_at DESC LIMIT 1" 2>/dev/null`,
+    ],
+    { encoding: 'utf8' },
+  ).trim(), { timeout: 240_000 }).toBe('succeeded')
 }
 
 // seedAICCSessionsForPagination 为浏览器分页场景补充带消息的历史会话。

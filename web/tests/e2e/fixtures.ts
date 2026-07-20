@@ -67,10 +67,17 @@ export const test = base.extend<RolePages, E2EWorkerFixtures>({
 
 export { expect }
 
-// loadE2EFixture 仅暂时保留导出，让尚未在 Task 6/7 迁移的旧 spec 继续通过类型检查。
-// 函数没有 workerInfo，无法安全确定 parallelIndex，因此禁止读取环境或猜测当前 worker。
+// loadE2EFixture 为未迁移的 slow spec 兼容读取唯一 fixture。
+// slow suite 强制单 worker，只有 pool 被完整 schema 校验且恰有一份 fixture 时才可安全恢复；
+// 多 worker 场景仍必须使用 Playwright 注入的 e2eFixture，禁止猜测 parallelIndex。
 export function loadE2EFixture(): E2EFixture {
-  throw new Error('loadE2EFixture 已停用；请使用 Playwright 注入的 e2eFixture')
+  const raw = process.env.OCM_E2E_FIXTURE_POOL
+  if (!raw) throw new Error('OCM_E2E_FIXTURE_POOL 未注入；请使用 Playwright 注入的 e2eFixture')
+  const pool = parseE2EFixturePool(raw)
+  if (pool.fixtures.length !== 1) {
+    throw new Error('loadE2EFixture 仅支持单 worker fixture；请使用 Playwright 注入的 e2eFixture')
+  }
+  return pool.fixtures[0]
 }
 
 // loginAs 仅服务必须验证真实登录表单的场景，普通业务 spec 应使用预生成角色页面。

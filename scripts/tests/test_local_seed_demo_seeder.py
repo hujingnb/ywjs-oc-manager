@@ -159,6 +159,12 @@ class FakeManagerAPI:
         if path == "/api/v1/organizations?limit=100&offset=0":
             return {"organizations": copy.deepcopy(self.organizations)}
 
+        # AICC 模型的真值只能由独立配置接口提供，不能退回组织列表兼容字段。
+        if path.startswith("/api/v1/organizations/") and path.endswith("/aicc-config"):
+            org_id = path.split("/")[4]
+            organization = next(item for item in self.organizations if item["id"] == org_id)
+            return {"config": self._aicc_config(organization)}
+
         # 成员列表按企业隔离，响应沿用正式 members envelope。
         if path.startswith("/api/v1/organizations/") and path.endswith(
             "/members?limit=100&offset=0"
@@ -842,6 +848,19 @@ class DemoSeederTest(unittest.TestCase):
             },
             set(profile_body),
         )
+
+    # 场景：企业列表兼容字段缺失或陈旧时，播种器必须以独立 AICC GET 的模型事实决定是否 PUT，不能依赖助手版本顺序。
+    def test_required_aicc_reads_independent_config_before_model_put(self):
+        api = FakeManagerAPI.complete_runtime_fixture()
+        full = next(item for item in api.organizations if item["code"] == "demo-full")
+        full["aicc_model"] = "stale-list-model"
+
+        self._seeder(api).ensure_platform_data()
+
+        path = f"/api/v1/organizations/{full['id']}/aicc-config"
+        self.assertIn(("GET", path, None), api.calls)
+        put_body = next(body for method, called_path, body in api.calls if method == "PUT" and called_path == path)
+        self.assertEqual("deepseek-chat", put_body["model"])
 
     # 覆盖镜像列表为空的冲突：没有可绑定镜像时不得创建任何版本。
     def test_empty_runtime_images_raise_seed_conflict(self):

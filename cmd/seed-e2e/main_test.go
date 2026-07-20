@@ -214,6 +214,14 @@ func TestE2ENewAPIUsernameIsRunAndWorkerScoped(t *testing.T) {
 	assert.LessOrEqual(t, len(first), 12)
 }
 
+// 场景：16 字符 run ID 会让组织显示名超过 new-api 的 20 字符上限，slow fixture 创建上游用户前必须截断。
+func TestE2ENewAPIDisplayNameTruncatesFixtureOrganizationName(t *testing.T) {
+	name := e2eNewAPIDisplayName(fixture{OrgName: "e2e-run-001122334455-w0"})
+
+	assert.Equal(t, "e2e-run-001122334455", name)
+	assert.LessOrEqual(t, len(name), 20)
+}
+
 // 验证确定性用户名发生碰撞或遗留占用时安全失败，绝不删除未知上游用户。
 func TestRequireE2ENewAPIUsernameAvailableRejectsExistingUser(t *testing.T) {
 	stub := &newAPIUsernameLookupStub{user: newapi.User{ID: 99, Username: "e6c9da38c00"}}

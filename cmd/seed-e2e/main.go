@@ -186,7 +186,7 @@ func provisionE2ENewAPIUser(ctx context.Context, db *sql.DB, cfg config.Config, 
 	user, err := client.CreateUser(ctx, newapi.CreateUserInput{
 		Username:    username,
 		Password:    password,
-		DisplayName: fx.OrgName,
+		DisplayName: e2eNewAPIDisplayName(fx),
 	})
 	if err != nil {
 		return fmt.Errorf("创建 new-api E2E 用户失败: %w", err)
@@ -229,6 +229,16 @@ func provisionE2ENewAPIUser(ctx context.Context, db *sql.DB, cfg config.Config, 
 		return fmt.Errorf("写入 new-api E2E 凭据失败: %w", err)
 	}
 	return nil
+}
+
+// e2eNewAPIDisplayName 将 fixture 组织名收敛到 new-api User.DisplayName 的 20 字符上限。
+// 组织名包含完整 run/worker 边界会超过该上限；上游账号仍以独立用户名隔离，展示名截断不影响清理归属。
+func e2eNewAPIDisplayName(fx fixture) string {
+	const maxLen = 20
+	if len(fx.OrgName) <= maxLen {
+		return fx.OrgName
+	}
+	return fx.OrgName[:maxLen]
 }
 
 // retryE2EAccessToken 只处理本地高频回归触发的 new-api 登录 429。

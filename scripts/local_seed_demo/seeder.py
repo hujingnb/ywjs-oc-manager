@@ -776,10 +776,17 @@ class DemoSeeder:
         return response["organization"]
 
     def _enable_required_aicc(self, organization):
-        """用 AICC 独立 PUT 配置开启能力，并显式指定本地客服模型。"""
-        current_enabled = bool(organization.get("aicc_enabled", False))
-        current_model = organization.get("aicc_model", "")
-        current_limit = organization.get("aicc_agent_limit")
+        """先读取独立 AICC 配置，再按模型事实决定是否以完整 PUT 补齐。"""
+        path = f"/api/v1/organizations/{organization['id']}/aicc-config"
+        # 组织列表仅保留兼容字段，模型真值必须来自独立配置接口；普通助手 allowlist 的顺序
+        # 与 AICC 模型无关，不能作为模型选择或幂等判断的依据。
+        current_response = self.platform.get(path)
+        current_config = self._required_object(
+            current_response, "config", f"企业 {organization['code']} 的 AICC 配置"
+        )
+        current_enabled = bool(current_config.get("enabled", False))
+        current_model = current_config.get("model", "")
+        current_limit = current_config.get("agent_limit")
         desired_limit = None if current_limit is None else max(current_limit, 1)
         if (
             current_enabled
@@ -796,22 +803,27 @@ class DemoSeeder:
                 organization.get("industry_knowledge_base_ids") or []
             ),
         }
-        path = f"/api/v1/organizations/{organization['id']}/aicc-config"
         code = organization["code"]
 
         # AICC 回查同时比较开通状态、模型、上限和行业库，防止把部分写入误判为完成。
         def lookup_aicc():
-            found = self._lookup_organization(code)
-            if found is None:
+            try:
+                found = self.platform.get(path)
+            except APIError:
+                return None
+            config = found.get("config") if isinstance(found, dict) else None
+            if not isinstance(config, dict):
                 return None
             reached = (
-                bool(found.get("aicc_enabled", False))
-                and found.get("aicc_model", "") == _AICC_DEMO_MODEL
-                and found.get("aicc_agent_limit") == desired_limit
-                and list(found.get("industry_knowledge_base_ids") or [])
-                == body["industry_knowledge_base_ids"]
+                bool(config.get("enabled", False))
+                and config.get("model", "") == _AICC_DEMO_MODEL
+                and config.get("agent_limit") == desired_limit
+                and [
+                    item.get("id") for item in config.get("industry_knowledge_bases", [])
+                    if isinstance(item, dict) and isinstance(item.get("id"), str)
+                ] == body["industry_knowledge_base_ids"]
             )
-            return {"config": self._aicc_config_from_organization(found)} if reached else None
+            return {"config": config} if reached else None
 
         response = self.ensure_uncertain_write(
             lambda: self.platform.put(path, body),
