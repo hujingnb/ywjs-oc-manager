@@ -26,6 +26,14 @@
 两个任务的 marker 和互斥判断也必须隔离，避免模型切换与提示词更新互相覆盖。暂停中的客服
 不被唤醒，下一次启动时由 bootstrap 自动使用最新提示词。
 
+两类 rollout 共享一张以 `app_id` 为主键的持久 ownership guard 表。任务在写自身 payload marker
+前必须原子领取 guard；同一 job 已持有时允许恢复，另一 job 持有时延迟重试而非重启。只有 owner
+完成自身 hash/revision 核验、runtime ready 和 marker 清理后才释放 guard。运行时 ready 写入还必须
+确认不存在任何活跃 rollout owner，防止另一类任务的旧 Pod 被提前解闸。
+
+若启动时发现已有活跃提示词 rollout 但其 payload hash 落后当前 hash，协调器不创建并行任务；
+旧任务完成时由 handler 重新检查 stale 客服并在同一全局 guard 下续建最新 hash 的后继任务。
+
 平台启动时检查是否存在 platform prompt hash 落后的 active AICC 智能体；只有不存在同类
 活跃任务时才创建一个全局 rollout job。任务失败保留给既有 job 重试机制，避免 manager 重启时
 重复创建并发重启。
