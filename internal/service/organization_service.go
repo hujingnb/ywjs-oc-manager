@@ -121,6 +121,12 @@ type OrganizationService struct {
 	knowledgeDatasets KnowledgeDatasetProvisioner
 	// hashPassword 仅用于创建组织管理员，测试中可替换为快 hash。
 	hashPassword PasswordHasher
+	// aiccModelValidator 实时校验企业启用时选择的 new-api 模型仍在目录中。
+	aiccModelValidator AICCModelValidator
+	// aiccConfigTx 保证配置、行业授权和模型 rollout 任务原子提交。
+	aiccConfigTx OrganizationAICCConfigTxRunner
+	// jobNotifier 在事务提交后即时通知 scheduler；失败由数据库扫描兜底。
+	jobNotifier JobNotifier
 }
 
 // NewOrganizationService 构造组织服务。
@@ -181,16 +187,6 @@ type OrganizationInput struct {
 	AdminPassword string
 }
 
-// AICCConfigInput 是平台管理员维护企业 AICC 开通状态和智能体上限的入参。
-type AICCConfigInput struct {
-	// Enabled 表示该企业是否可使用 AICC 子系统。
-	Enabled bool
-	// AgentLimit 是智能体数量上限；nil 表示不限。
-	AgentLimit *int32
-	// IndustryKnowledgeBaseIDs 是平台为企业授权的行业知识库 ID；空数组表示不授权任何行业库。
-	IndustryKnowledgeBaseIDs []string
-}
-
 // OrganizationResult 是企业对外响应视图，包含必要的 new-api 绑定状态。
 type OrganizationResult struct {
 	// ID 是 manager 企业 UUID。
@@ -225,6 +221,8 @@ type OrganizationResult struct {
 	AICCEnabled bool `json:"aicc_enabled"`
 	// AICCAgentLimit 是企业 AICC 智能体数量上限；nil 表示不限。
 	AICCAgentLimit *int32 `json:"aicc_agent_limit,omitempty"`
+	// AICCModel 是企业当前只读的 AICC 模型，用于列表和详情兼容导航展示。
+	AICCModel string `json:"aicc_model,omitempty"`
 	// IndustryKnowledgeBaseIDs 是平台授予该企业、可供 AICC 智能体选择的行业知识库。
 	IndustryKnowledgeBaseIDs []string `json:"industry_knowledge_base_ids"`
 }
@@ -300,10 +298,18 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 	}
 	// 组织旧 AICC 列已删除，新企业必须在任何后续回读前建立一对一配置行。
 	if err := s.store.CreateOrganizationAICCConfig(ctx, orgID); err != nil {
-		if rollbackErr := s.store.HardDeleteOrganization(ctx, orgID); rollbackErr != nil {
+		if rollbackErr := s.hardDeleteOrganizationForCompensation(orgID); rollbackErr != nil {
 			return OrganizationResult{}, fmt.Errorf("创建企业 AICC 默认配置失败: %w；回滚企业行失败: %v", err, rollbackErr)
 		}
 		return OrganizationResult{}, fmt.Errorf("创建企业 AICC 默认配置失败: %w", err)
+	}
+	// 创建 SQL 会从首个有效助手版本初始化模型；立即回读真实配置，供最终创建响应忠实投影。
+	aiccConfig, err := s.store.GetOrganizationAICCConfig(ctx, orgID)
+	if err != nil {
+		if rollbackErr := s.hardDeleteOrganizationForCompensation(orgID); rollbackErr != nil {
+			return OrganizationResult{}, fmt.Errorf("读取新建企业 AICC 默认配置失败: %w；回滚企业行失败: %v", err, rollbackErr)
+		}
+		return OrganizationResult{}, fmt.Errorf("读取新建企业 AICC 默认配置失败: %w", err)
 	}
 	org, err := s.store.GetOrganization(ctx, orgID)
 	if err != nil {
@@ -402,7 +408,7 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 		return OrganizationResult{}, wrappedErr
 	}
 	result := toOrganizationResult(org)
-	applyOrganizationAICCConfig(&result, sqlc.OrganizationAiccConfig{OrgID: org.ID})
+	applyAICCConfig(&result, aiccConfig)
 	result.AdminUsername = input.AdminUsername
 	if s.knowledgeDatasets != nil {
 		if _, err := s.knowledgeDatasets.EnsureOrgDataset(ctx, org); err != nil {
@@ -410,6 +416,14 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 		}
 	}
 	return result, nil
+}
+
+// hardDeleteOrganizationForCompensation 使用独立短超时上下文回滚创建中的企业行。
+// 请求上下文可能已取消，补偿动作不能继承其取消状态，否则会留下半创建企业。
+func (s *OrganizationService) hardDeleteOrganizationForCompensation(orgID string) error {
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cleanupCancel()
+	return s.store.HardDeleteOrganization(cleanupCtx, orgID)
 }
 
 // normalizeOrganizationCode 统一企业标识格式，避免大小写或空白导致同一标识多种写法。
@@ -668,73 +682,6 @@ func (s *OrganizationService) UpdateOrganization(ctx context.Context, principal 
 	return s.toOrganizationResultWithAdminUsername(ctx, org)
 }
 
-// UpdateAICCConfig 更新企业 AICC 开通状态和智能体数量上限。
-func (s *OrganizationService) UpdateAICCConfig(ctx context.Context, principal auth.Principal, orgID string, input AICCConfigInput) (OrganizationResult, error) {
-	// AICC 开通是平台级租户配置，权限判断统一复用 authorizer，避免 service 内散落角色判断。
-	if !auth.CanManageAICCConfig(principal) {
-		return OrganizationResult{}, ErrForbidden
-	}
-	if input.AgentLimit != nil && *input.AgentLimit < 0 {
-		return OrganizationResult{}, fmt.Errorf("%w: AICC 智能体数量上限不能为负数", ErrInvalidArgument)
-	}
-	industryIDs, err := normalizeAICCKnowledgeIDs(input.IndustryKnowledgeBaseIDs, 20, "行业知识库")
-	if err != nil {
-		return OrganizationResult{}, err
-	}
-	// 先验证所有行业库，避免整组替换过程中因无效 ID 留下部分授权。
-	for _, id := range industryIDs {
-		if _, err := s.store.GetIndustryKnowledgeBase(ctx, id); errors.Is(err, sql.ErrNoRows) {
-			return OrganizationResult{}, fmt.Errorf("%w: 行业知识库不存在", ErrInvalidArgument)
-		} else if err != nil {
-			return OrganizationResult{}, fmt.Errorf("校验行业知识库失败: %w", err)
-		}
-	}
-	// 旧接口暂未提交模型字段，最小适配必须保留迁移回填的模型与 revision，避免写入空值破坏约束。
-	currentConfig, err := s.store.GetOrganizationAICCConfig(ctx, orgID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return OrganizationResult{}, ErrNotFound
-	}
-	if err != nil {
-		return OrganizationResult{}, fmt.Errorf("读取企业 AICC 配置失败: %w", err)
-	}
-	// UpdateOrganizationAICCConfig 为 :exec；写入后回读组织与独立配置，确保响应包含数据库最终状态。
-	if err := s.store.UpdateOrganizationAICCConfig(ctx, sqlc.UpdateOrganizationAICCConfigParams{
-		Enabled:    input.Enabled,
-		Model:      currentConfig.Model,
-		AgentLimit: nullIntFromInt32Ptr(input.AgentLimit),
-		Revision:   currentConfig.Revision,
-		OrgID:      orgID,
-	}); err != nil {
-		return OrganizationResult{}, fmt.Errorf("更新企业 AICC 配置失败: %w", err)
-	}
-	if err := s.store.ReplaceOrganizationIndustryKnowledgeBases(ctx, orgID); err != nil {
-		return OrganizationResult{}, fmt.Errorf("清空企业行业知识库授权失败: %w", err)
-	}
-	for _, id := range industryIDs {
-		affected, err := s.store.AddOrganizationIndustryKnowledgeBase(ctx, sqlc.AddOrganizationIndustryKnowledgeBaseParams{
-			OrgID:                   orgID,
-			IndustryKnowledgeBaseID: id,
-		})
-		if err != nil {
-			return OrganizationResult{}, fmt.Errorf("保存企业行业知识库授权失败: %w", err)
-		}
-		if affected != 1 {
-			return OrganizationResult{}, fmt.Errorf("%w: 行业知识库不存在", ErrInvalidArgument)
-		}
-	}
-	if err := s.store.DeleteAICCAgentIndustryKnowledgeNotAuthorizedByOrg(ctx, orgID); err != nil {
-		return OrganizationResult{}, fmt.Errorf("清理智能体失效行业知识库关联失败: %w", err)
-	}
-	org, err := s.store.GetOrganization(ctx, orgID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return OrganizationResult{}, ErrNotFound
-	}
-	if err != nil {
-		return OrganizationResult{}, fmt.Errorf("读取企业失败: %w", err)
-	}
-	return s.toOrganizationResultWithAdminUsername(ctx, org)
-}
-
 // SetOrganizationStatus 启用或禁用企业；软删除后续由删除流程单独处理。
 func (s *OrganizationService) SetOrganizationStatus(ctx context.Context, principal auth.Principal, orgID, status string) (OrganizationResult, error) {
 	if principal.Role != domain.UserRolePlatformAdmin {
@@ -804,7 +751,7 @@ func (s *OrganizationService) toOrganizationResultWithAdminUsername(ctx context.
 	if err != nil {
 		return OrganizationResult{}, fmt.Errorf("查询企业 AICC 配置失败: %w", err)
 	}
-	applyOrganizationAICCConfig(&result, config)
+	applyAICCConfig(&result, config)
 	result.AdminUsername = s.getOrgAdminUsername(ctx, org.ID)
 	bases, err := s.store.ListOrganizationIndustryKnowledgeBases(ctx, org.ID)
 	if err != nil {
@@ -860,10 +807,11 @@ func toOrganizationResult(org sqlc.Organization) OrganizationResult {
 	}
 }
 
-// applyOrganizationAICCConfig 把独立配置投影到兼容响应字段，避免 API 在调用方迁移期间改变键名。
-func applyOrganizationAICCConfig(result *OrganizationResult, config sqlc.OrganizationAiccConfig) {
+// applyAICCConfig 把独立配置投影到兼容响应字段，避免 API 在调用方迁移期间改变键名。
+func applyAICCConfig(result *OrganizationResult, config sqlc.OrganizationAiccConfig) {
 	result.AICCEnabled = config.Enabled
 	result.AICCAgentLimit = int32PtrFromNullInt(config.AgentLimit)
+	result.AICCModel = strOrEmpty(config.Model)
 }
 
 // nullIntFromInt32Ptr 把可选 int32 指针转换为 null.Int（用于 CreditWarningThreshold）。

@@ -42,19 +42,18 @@ func (s *ModelCatalogService) List(ctx context.Context, principal auth.Principal
 	return s.list(ctx)
 }
 
-// HasModelInCatalog 判断单个模型是否存在于 new-api 实时模型列表。
-// 供助手版本 service 校验主模型与路由模型；查询失败时保守返回 false。
-func (s *ModelCatalogService) HasModelInCatalog(ctx context.Context, id string) bool {
+// HasModelInCatalog 判断单个模型是否存在于 new-api 实时模型列表，并保留目录查询错误供调用方分类。
+func (s *ModelCatalogService) HasModelInCatalog(ctx context.Context, id string) (bool, error) {
 	models, err := s.list(ctx)
 	if err != nil {
-		return false
+		return false, err
 	}
 	for _, m := range models {
 		if m.ID == id {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 func (s *ModelCatalogService) list(ctx context.Context) ([]ModelResult, error) {

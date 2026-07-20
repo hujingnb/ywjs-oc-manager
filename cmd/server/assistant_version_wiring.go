@@ -44,5 +44,7 @@ type modelValidatorAdapter struct {
 // HasModel 判断模型名是否存在于 new-api 实时模型列表。查询失败时保守返回 false，
 // 避免因 new-api 临时不可用而放行非法模型名。
 func (a modelValidatorAdapter) HasModel(id string) bool {
-	return a.catalog.HasModelInCatalog(context.Background(), id)
+	exists, err := a.catalog.HasModelInCatalog(context.Background(), id)
+	// 助手版本旧校验接口无法表达目录故障，保持原 fail-closed 语义。
+	return err == nil && exists
 }

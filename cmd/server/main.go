@@ -388,6 +388,12 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 		usageService = service.NewUsageService(nil, nil, nil)
 		organizationService = service.NewOrganizationService(dbStore.Queries, nil, nil, nil)
 	}
+	// 企业 AICC 配置独立于助手版本：实时模型目录负责启用校验，事务 runner 原子写入配置与 rollout job。
+	if modelCatalogService != nil {
+		organizationService.SetAICCModelValidator(modelCatalogService)
+	}
+	organizationService.SetAICCConfigTxRunner(store.NewOrganizationAICCConfigRunner(dbStore))
+	organizationService.SetJobNotifier(redisQueue)
 	// bootstrap 服务始终装配，保证 AICC 在未启用 S3 的最小模式下仍能获取 manifest、persona
 	// 与平台规则。普通应用的 S3 依赖由 service 在 Build 时明确校验并报错，避免静默下发残缺配置。
 	bootstrapSvc := service.NewBootstrapService(

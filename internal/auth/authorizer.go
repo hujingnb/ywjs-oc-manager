@@ -258,6 +258,12 @@ func CanManageAICCConfig(p Principal) bool {
 	return p.Role == domain.UserRolePlatformAdmin
 }
 
+// CanViewAICCConfig 判断主体能否读取指定企业的独立 AICC 配置。
+// 平台管理员可跨企业读取；企业管理员仅可读取本企业，普通成员不可读取。
+func CanViewAICCConfig(p Principal, orgID string) bool {
+	return p.Role == domain.UserRolePlatformAdmin || (p.Role == domain.UserRoleOrgAdmin && p.OrgID == orgID)
+}
+
 // CanManageAICCAgent 判断主体能否管理指定企业的 AICC 智能体、投放、留资字段和运营数据。
 // 平台管理员可在明确选择企业后跨企业代管；企业管理员仅能管理本企业，普通成员无管理权限。
 func CanManageAICCAgent(p Principal, orgID string) bool {

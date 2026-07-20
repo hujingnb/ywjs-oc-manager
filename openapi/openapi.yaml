@@ -587,6 +587,11 @@ components:
       - username
       - version_id
       type: object
+    handlers.OrganizationAICCConfigEnvelope:
+      properties:
+        config:
+          $ref: '#/components/schemas/service.OrganizationAICCConfigResult'
+      type: object
     handlers.OrganizationRequest:
       properties:
         assistant_version_ids:
@@ -980,6 +985,9 @@ components:
             type: string
           type: array
           uniqueItems: false
+        model:
+          description: Model 是企业 AICC 使用的实时模型目录 ID；启用时由 service 校验必填且可用。
+          type: string
       required:
       - enabled
       type: object
@@ -2637,6 +2645,31 @@ components:
           description: TotalQuota 是 [since, until] 内各日 QuotaDate.Quota 的累加值。
           type: integer
       type: object
+    service.OrganizationAICCConfigResult:
+      description: Config 是目标企业当前完整的独立 AICC 配置。
+      properties:
+        agent_limit:
+          description: AgentLimit 是智能体数量上限；nil 表示不限。
+          type: integer
+        enabled:
+          description: Enabled 表示企业是否已开通 AICC。
+          type: boolean
+        industry_knowledge_bases:
+          description: IndustryKnowledgeBases 是企业获授权的行业知识库引用。
+          items:
+            $ref: '#/components/schemas/service.IndustryKnowledgeBaseRef'
+          type: array
+          uniqueItems: false
+        model:
+          description: Model 是企业 AICC 当前模型；关闭且未选择模型时省略。
+          type: string
+        org_id:
+          description: OrgID 是配置所属企业 ID。
+          type: string
+        revision:
+          description: Revision 仅在模型变化时递增，worker 据此判断智能体是否需要 rollout。
+          type: integer
+      type: object
     service.OrganizationResult:
       properties:
         admin_username:
@@ -2648,6 +2681,9 @@ components:
         aicc_enabled:
           description: AICCEnabled 表示企业是否已开通 AI Contact Center。
           type: boolean
+        aicc_model:
+          description: AICCModel 是企业当前只读的 AICC 模型，用于列表和详情兼容导航展示。
+          type: string
         assistant_version_ids:
           description: AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。
           items:
@@ -10237,7 +10273,52 @@ paths:
       tags:
       - organizations
   /organizations/{orgId}/aicc-config:
-    patch:
+    get:
+      description: 平台管理员可读取任意企业，企业管理员仅可读取本企业配置
+      parameters:
+      - description: 企业 ID
+        in: path
+        name: orgId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.OrganizationAICCConfigEnvelope'
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/handlers.ErrorResponse'
+          description: Internal Server Error
+      security:
+      - BearerAuth: []
+      summary: 读取企业 AICC 配置
+      tags:
+      - organizations
+    put:
       description: 平台管理员开通或关闭企业 AICC，设置智能体数量上限并授权行业知识库
       parameters:
       - description: 企业 ID
@@ -10262,9 +10343,7 @@ paths:
           content:
             application/json:
               schema:
-                additionalProperties:
-                  $ref: '#/components/schemas/service.OrganizationResult'
-                type: object
+                $ref: '#/components/schemas/handlers.OrganizationAICCConfigEnvelope'
           description: OK
         "400":
           content:

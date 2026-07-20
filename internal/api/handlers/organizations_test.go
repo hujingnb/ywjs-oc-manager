@@ -163,16 +163,16 @@ func TestOrganizationsUpdateKeepsModelWhenOmitted(t *testing.T) {
 	assert.Equal(t, "org-1", svc.lastUpdateOrgID)
 }
 
-// TestOrganizationsHandlerUpdateAICCConfig 覆盖正常路径：平台管理员通过 PATCH /organizations/:orgId/aicc-config 开通 AICC。
+// TestOrganizationsHandlerUpdateAICCConfig 覆盖正常路径：平台管理员通过 PUT /organizations/:orgId/aicc-config 保存独立配置。
 func TestOrganizationsHandlerUpdateAICCConfig(t *testing.T) {
 	limit := int32(5)
 	svc := &organizationServiceStub{
-		updateAICCConfigResult: service.OrganizationResult{ID: "org-1", Name: "测试组织", Status: domain.StatusActive, AICCEnabled: true, AICCAgentLimit: &limit},
+		updateAICCConfigResult: service.OrganizationAICCConfigResult{OrgID: "org-1", Enabled: true, Model: "model-a", AgentLimit: &limit, Revision: 8, IndustryKnowledgeBases: []service.IndustryKnowledgeBaseRef{}},
 	}
 	router := newOrganizationsTestRouter(t, svc)
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPatch, "/api/v1/organizations/org-1/aicc-config", bytes.NewBufferString(`{"enabled":true,"agent_limit":5,"industry_knowledge_base_ids":["industry-1"]}`))
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/organizations/org-1/aicc-config", bytes.NewBufferString(`{"enabled":true,"model":"model-a","agent_limit":5,"industry_knowledge_base_ids":["industry-1"]}`))
 	request.Header.Set("Content-Type", "application/json")
 	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(recorder, request)
@@ -180,20 +180,25 @@ func TestOrganizationsHandlerUpdateAICCConfig(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	assert.Equal(t, "org-1", svc.lastAICCConfigOrgID)
 	assert.True(t, svc.lastAICCConfigInput.Enabled)
+	assert.Equal(t, "model-a", svc.lastAICCConfigInput.Model)
 	require.NotNil(t, svc.lastAICCConfigInput.AgentLimit)
 	assert.Equal(t, int32(5), *svc.lastAICCConfigInput.AgentLimit)
 	assert.Equal(t, []string{"industry-1"}, svc.lastAICCConfigInput.IndustryKnowledgeBaseIDs)
+	assert.JSONEq(t, `{"config":{"org_id":"org-1","enabled":true,"model":"model-a","agent_limit":5,"revision":8,"industry_knowledge_bases":[]}}`, recorder.Body.String())
+	var envelope OrganizationAICCConfigEnvelope
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &envelope))
+	assert.Equal(t, "org-1", envelope.Config.OrgID)
 }
 
 // TestOrganizationsHandlerUpdateAICCConfigAllowsDisable 覆盖正常路径：显式 enabled=false 应合法透传，不能被必填校验误拒绝。
 func TestOrganizationsHandlerUpdateAICCConfigAllowsDisable(t *testing.T) {
 	svc := &organizationServiceStub{
-		updateAICCConfigResult: service.OrganizationResult{ID: "org-1", Name: "测试组织", Status: domain.StatusActive, AICCEnabled: false},
+		updateAICCConfigResult: service.OrganizationAICCConfigResult{OrgID: "org-1", Enabled: false, Revision: 1},
 	}
 	router := newOrganizationsTestRouter(t, svc)
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPatch, "/api/v1/organizations/org-1/aicc-config", bytes.NewBufferString(`{"enabled":false,"agent_limit":null}`))
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/organizations/org-1/aicc-config", bytes.NewBufferString(`{"enabled":false,"model":"","agent_limit":null}`))
 	request.Header.Set("Content-Type", "application/json")
 	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(recorder, request)
@@ -208,7 +213,7 @@ func TestOrganizationsHandlerUpdateAICCConfigRequiresEnabled(t *testing.T) {
 	router := newOrganizationsTestRouter(t, &organizationServiceStub{})
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPatch, "/api/v1/organizations/org-1/aicc-config", bytes.NewBufferString(`{"agent_limit":5}`))
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/organizations/org-1/aicc-config", bytes.NewBufferString(`{"agent_limit":5}`))
 	request.Header.Set("Content-Type", "application/json")
 	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(recorder, request)
@@ -222,7 +227,7 @@ func TestOrganizationsHandlerUpdateAICCConfigBadJSON(t *testing.T) {
 	router := newOrganizationsTestRouter(t, &organizationServiceStub{})
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPatch, "/api/v1/organizations/org-1/aicc-config", bytes.NewBufferString(`{"enabled":true`))
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/organizations/org-1/aicc-config", bytes.NewBufferString(`{"enabled":true`))
 	request.Header.Set("Content-Type", "application/json")
 	request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
 	router.ServeHTTP(recorder, request)
@@ -248,7 +253,7 @@ func TestOrganizationsHandlerUpdateAICCConfigMapsServiceErrors(t *testing.T) {
 			router := newOrganizationsTestRouter(t, svc)
 
 			recorder := httptest.NewRecorder()
-			request := httptest.NewRequest(http.MethodPatch, "/api/v1/organizations/org-1/aicc-config", bytes.NewBufferString(`{"enabled":true}`))
+			request := httptest.NewRequest(http.MethodPut, "/api/v1/organizations/org-1/aicc-config", bytes.NewBufferString(`{"enabled":true,"model":"model-a"}`))
 			request.Header.Set("Content-Type", "application/json")
 			request = withPrincipal(request, auth.Principal{UserID: "user-1", Role: domain.UserRolePlatformAdmin})
 			router.ServeHTTP(recorder, request)
@@ -256,6 +261,39 @@ func TestOrganizationsHandlerUpdateAICCConfigMapsServiceErrors(t *testing.T) {
 			require.Equal(t, tc.code, recorder.Code)
 		})
 	}
+}
+
+// TestOrganizationsHandlerGetAICCConfig 覆盖企业管理员通过 GET 读取本企业独立 AICC 配置。
+func TestOrganizationsHandlerGetAICCConfig(t *testing.T) {
+	svc := &organizationServiceStub{
+		getAICCConfigResult: service.OrganizationAICCConfigResult{OrgID: "org-1", Enabled: true, Model: "model-a", Revision: 8, IndustryKnowledgeBases: []service.IndustryKnowledgeBaseRef{}},
+	}
+	router := newOrganizationsTestRouter(t, svc)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/organizations/org-1/aicc-config", nil)
+	request = withPrincipal(request, auth.Principal{UserID: "admin-1", Role: domain.UserRoleOrgAdmin, OrgID: "org-1"})
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, "org-1", svc.lastAICCConfigOrgID)
+	assert.JSONEq(t, `{"config":{"org_id":"org-1","enabled":true,"model":"model-a","revision":8,"industry_knowledge_bases":[]}}`, recorder.Body.String())
+	var envelope OrganizationAICCConfigEnvelope
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &envelope))
+	assert.Equal(t, "model-a", envelope.Config.Model)
+}
+
+// TestOrganizationsHandlerDoesNotRegisterLegacyAICCConfigPatch 覆盖旧 PATCH 写入口已移除，避免双写契约长期并存。
+func TestOrganizationsHandlerDoesNotRegisterLegacyAICCConfigPatch(t *testing.T) {
+	router := newOrganizationsTestRouter(t, &organizationServiceStub{})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/organizations/org-1/aicc-config", bytes.NewBufferString(`{"enabled":true,"model":"model-a"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request = withPrincipal(request, auth.Principal{Role: domain.UserRolePlatformAdmin})
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusNotFound, recorder.Code)
 }
 
 // TestOrganizationsCreateRequiredFields 验证组织创建仅需必填字段即可成功，
@@ -338,8 +376,10 @@ func newOrganizationsTestRouter(t *testing.T, svc *organizationServiceStub) *gin
 type organizationServiceStub struct {
 	createResult           service.OrganizationResult
 	createErr              error
-	updateAICCConfigResult service.OrganizationResult
+	updateAICCConfigResult service.OrganizationAICCConfigResult
 	updateAICCConfigErr    error
+	getAICCConfigResult    service.OrganizationAICCConfigResult
+	getAICCConfigErr       error
 	lastPrincipal          auth.Principal
 	lastCreateInput        service.OrganizationInput
 	lastUpdateOrgID        string
@@ -379,15 +419,25 @@ func (s *organizationServiceStub) SetOrganizationStatus(_ context.Context, princ
 	return s.createResult, nil
 }
 
-func (s *organizationServiceStub) UpdateAICCConfig(_ context.Context, principal auth.Principal, orgID string, input service.AICCConfigInput) (service.OrganizationResult, error) {
+func (s *organizationServiceStub) UpdateAICCConfig(_ context.Context, principal auth.Principal, orgID string, input service.AICCConfigInput) (service.OrganizationAICCConfigResult, error) {
 	s.lastPrincipal = principal
 	s.lastAICCConfigOrgID = orgID
 	s.lastAICCConfigInput = input
 	if s.updateAICCConfigErr != nil {
-		return service.OrganizationResult{}, s.updateAICCConfigErr
+		return service.OrganizationAICCConfigResult{}, s.updateAICCConfigErr
 	}
-	if s.updateAICCConfigResult.ID != "" {
+	if s.updateAICCConfigResult.OrgID != "" {
 		return s.updateAICCConfigResult, nil
 	}
-	return s.createResult, nil
+	return service.OrganizationAICCConfigResult{}, nil
+}
+
+// GetAICCConfig 记录独立配置读取参数并返回预设结果。
+func (s *organizationServiceStub) GetAICCConfig(_ context.Context, principal auth.Principal, orgID string) (service.OrganizationAICCConfigResult, error) {
+	s.lastPrincipal = principal
+	s.lastAICCConfigOrgID = orgID
+	if s.getAICCConfigErr != nil {
+		return service.OrganizationAICCConfigResult{}, s.getAICCConfigErr
+	}
+	return s.getAICCConfigResult, nil
 }

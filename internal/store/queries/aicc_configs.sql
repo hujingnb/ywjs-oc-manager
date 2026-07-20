@@ -12,6 +12,10 @@ WHERE o.id = ?;
 -- 按企业读取独立 AICC 配置，调用方据此校验开通状态和当前模型 revision。
 SELECT * FROM organization_aicc_configs WHERE org_id = ?;
 
+-- name: GetOrganizationAICCConfigForUpdate :one
+-- 配置更新事务先锁定企业配置行，串行化并发模型变更，避免 revision 丢失更新。
+SELECT * FROM organization_aicc_configs WHERE org_id = ? FOR UPDATE;
+
 -- name: ListOrganizationAICCConfigs :many
 -- 平台管理场景按稳定企业主键顺序返回配置，避免分页或批处理顺序漂移。
 SELECT * FROM organization_aicc_configs ORDER BY org_id;

@@ -3,6 +3,8 @@
 // 字段定义、json tag、binding tag 与原非导出版本保持 1:1，业务逻辑不变。
 package handlers
 
+import "oc-manager/internal/service"
+
 // ErrorResponse 统一错误返回体。
 // code 是稳定的接口契约标识（SCREAMING_SNAKE_CASE），前端据此分流处理；
 // message 是面向前端展示的安全文案，不包含底层密钥、SQL 或外部接口细节。
@@ -107,10 +109,19 @@ type OrganizationRequest struct {
 type UpdateOrganizationAICCConfigRequest struct {
 	// Enabled 表示是否开通 AICC。
 	Enabled *bool `json:"enabled" binding:"required"`
+	// Model 是企业 AICC 使用的实时模型目录 ID；启用时由 service 校验必填且可用。
+	Model string `json:"model"`
 	// AgentLimit 是智能体数量上限；nil 表示不限。
 	AgentLimit *int32 `json:"agent_limit"`
 	// IndustryKnowledgeBaseIDs 是平台授予该企业、可供 AICC 智能体选择的行业知识库。
 	IndustryKnowledgeBaseIDs []string `json:"industry_knowledge_base_ids"`
+}
+
+// OrganizationAICCConfigEnvelope 是企业 AICC 配置 GET/PUT 的固定响应外层。
+// 使用显式 Config 字段生成稳定 OpenAPI schema，避免 map 响应被解释为任意键对象。
+type OrganizationAICCConfigEnvelope struct {
+	// Config 是目标企业当前完整的独立 AICC 配置。
+	Config service.OrganizationAICCConfigResult `json:"config"`
 }
 
 // CreateAICCAgentRequest 是管理端创建 AICC 智能体的请求体。

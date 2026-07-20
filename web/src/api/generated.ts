@@ -10512,17 +10512,74 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
+        /**
+         * 读取企业 AICC 配置
+         * @description 平台管理员可读取任意企业，企业管理员仅可读取本企业配置
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description 企业 ID */
+                    orgId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.OrganizationAICCConfigEnvelope"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+                /** @description Internal Server Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["handlers.ErrorResponse"];
+                    };
+                };
+            };
+        };
         /**
          * 更新企业 AICC 配置
          * @description 平台管理员开通或关闭企业 AICC，设置智能体数量上限并授权行业知识库
          */
-        patch: {
+        put: {
             parameters: {
                 query?: never;
                 header?: never;
@@ -10545,9 +10602,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": {
-                            [key: string]: components["schemas"]["service.OrganizationResult"];
-                        };
+                        "application/json": components["schemas"]["handlers.OrganizationAICCConfigEnvelope"];
                     };
                 };
                 /** @description Bad Request */
@@ -10597,6 +10652,11 @@ export interface paths {
                 };
             };
         };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/organizations/{orgId}/apps": {
@@ -15886,6 +15946,9 @@ export interface components {
             /** @description VersionID 是实例绑定的助手版本 id，必须落在企业 allowlist 内。 */
             version_id: string;
         };
+        "handlers.OrganizationAICCConfigEnvelope": {
+            config?: components["schemas"]["service.OrganizationAICCConfigResult"];
+        };
         "handlers.OrganizationRequest": {
             /** @description AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。 */
             assistant_version_ids?: string[];
@@ -16096,6 +16159,8 @@ export interface components {
             enabled: boolean;
             /** @description IndustryKnowledgeBaseIDs 是平台授予该企业、可供 AICC 智能体选择的行业知识库。 */
             industry_knowledge_base_ids?: string[];
+            /** @description Model 是企业 AICC 使用的实时模型目录 ID；启用时由 service 校验必填且可用。 */
+            model?: string;
         };
         "ocops.ConversationChatResult": {
             message?: components["schemas"]["ocops.ConversationMessage"];
@@ -17130,6 +17195,21 @@ export interface components {
             /** @description TotalQuota 是 [since, until] 内各日 QuotaDate.Quota 的累加值。 */
             total_quota?: number;
         };
+        /** @description Config 是目标企业当前完整的独立 AICC 配置。 */
+        "service.OrganizationAICCConfigResult": {
+            /** @description AgentLimit 是智能体数量上限；nil 表示不限。 */
+            agent_limit?: number;
+            /** @description Enabled 表示企业是否已开通 AICC。 */
+            enabled?: boolean;
+            /** @description IndustryKnowledgeBases 是企业获授权的行业知识库引用。 */
+            industry_knowledge_bases?: components["schemas"]["service.IndustryKnowledgeBaseRef"][];
+            /** @description Model 是企业 AICC 当前模型；关闭且未选择模型时省略。 */
+            model?: string;
+            /** @description OrgID 是配置所属企业 ID。 */
+            org_id?: string;
+            /** @description Revision 仅在模型变化时递增，worker 据此判断智能体是否需要 rollout。 */
+            revision?: number;
+        };
         "service.OrganizationResult": {
             /** @description AdminUsername 是企业首个可用管理员账号名，用于平台管理员复制登录信息。 */
             admin_username?: string;
@@ -17137,6 +17217,8 @@ export interface components {
             aicc_agent_limit?: number;
             /** @description AICCEnabled 表示企业是否已开通 AI Contact Center。 */
             aicc_enabled?: boolean;
+            /** @description AICCModel 是企业当前只读的 AICC 模型，用于列表和详情兼容导航展示。 */
+            aicc_model?: string;
             /** @description AssistantVersionIDs 是该企业可用的助手版本 id 列表（allowlist）。 */
             assistant_version_ids?: string[];
             /** @description Code 是企业登录标识，用于企业用户登录时定位企业。 */

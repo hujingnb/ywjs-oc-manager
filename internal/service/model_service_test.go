@@ -46,3 +46,15 @@ func TestModelCatalogServiceListSurfacesUpstreamError(t *testing.T) {
 	_, err := svc.List(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin})
 	require.ErrorContains(t, err, "查询模型列表失败")
 }
+
+// TestModelCatalogServiceHasModelInCatalogSurfacesUpstreamError 验证单模型校验保留 new-api 目录故障供调用方分类。
+func TestModelCatalogServiceHasModelInCatalogSurfacesUpstreamError(t *testing.T) {
+	t.Parallel()
+	upstreamErr := errors.New("upstream down")
+	svc := NewModelCatalogService(fakeModelCatalog{err: upstreamErr})
+
+	exists, err := svc.HasModelInCatalog(context.Background(), "qwen")
+
+	assert.False(t, exists)
+	require.ErrorIs(t, err, upstreamErr)
+}

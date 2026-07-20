@@ -118,6 +118,8 @@ const (
 	JobTypeWorkspaceArchiveCleanup = "workspace_archive_cleanup"
 	// JobTypeWebPublishProvision 一次性开通企业 web-publish：通配解析 + 通配证书 + 通配 Ingress。
 	JobTypeWebPublishProvision = "web_publish_provision"
+	// JobTypeAICCModelRollout 将企业模型 revision 下发到仍未同步的 AICC 智能体。
+	JobTypeAICCModelRollout = "aicc_model_rollout"
 )
 
 var (
@@ -167,6 +169,7 @@ var (
 		JobTypeNewAPIRestoreKey,
 		JobTypeWorkspaceArchiveCleanup,
 		JobTypeWebPublishProvision,
+		JobTypeAICCModelRollout,
 	)
 
 	validProvisioningStatuses = set(ProvisioningDisabled, ProvisioningInProgress, ProvisioningReady, ProvisioningFailed)

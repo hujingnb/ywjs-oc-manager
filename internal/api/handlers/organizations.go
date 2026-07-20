@@ -26,7 +26,8 @@ type organizationService interface {
 	ListOrganizations(ctx context.Context, principal auth.Principal, limit, offset int32) ([]service.OrganizationResult, error)
 	GetOrganization(ctx context.Context, principal auth.Principal, orgID string) (service.OrganizationResult, error)
 	UpdateOrganization(ctx context.Context, principal auth.Principal, orgID string, input service.OrganizationInput) (service.OrganizationResult, error)
-	UpdateAICCConfig(ctx context.Context, principal auth.Principal, orgID string, input service.AICCConfigInput) (service.OrganizationResult, error)
+	GetAICCConfig(ctx context.Context, principal auth.Principal, orgID string) (service.OrganizationAICCConfigResult, error)
+	UpdateAICCConfig(ctx context.Context, principal auth.Principal, orgID string, input service.AICCConfigInput) (service.OrganizationAICCConfigResult, error)
 	SetOrganizationStatus(ctx context.Context, principal auth.Principal, orgID, status string) (service.OrganizationResult, error)
 }
 
@@ -43,7 +44,8 @@ func RegisterOrganizationRoutes(router gin.IRouter, handler *OrganizationsHandle
 	group.POST("", handler.Create)
 	group.GET("/:orgId", handler.Get)
 	group.PATCH("/:orgId", handler.Update)
-	group.PATCH("/:orgId/aicc-config", handler.UpdateAICCConfig)
+	group.GET("/:orgId/aicc-config", handler.GetAICCConfig)
+	group.PUT("/:orgId/aicc-config", handler.UpdateAICCConfig)
 	group.POST("/:orgId/disable", handler.Disable)
 	group.POST("/:orgId/enable", handler.Enable)
 }
@@ -162,7 +164,30 @@ func (h *OrganizationsHandler) Update(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"organization": result})
 }
 
-// UpdateAICCConfig 更新企业 AICC 开通配置。
+// GetAICCConfig 读取企业独立 AICC 配置。
+//
+// @Summary      读取企业 AICC 配置
+// @Description  平台管理员可读取任意企业，企业管理员仅可读取本企业配置
+// @Tags         organizations
+// @Produce      json
+// @Security     BearerAuth
+// @Param        orgId  path      string  true  "企业 ID"
+// @Success      200    {object}  OrganizationAICCConfigEnvelope
+// @Failure      401    {object}  ErrorResponse
+// @Failure      403    {object}  ErrorResponse
+// @Failure      404    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /organizations/{orgId}/aicc-config [get]
+func (h *OrganizationsHandler) GetAICCConfig(c *gin.Context) {
+	result, err := h.service.GetAICCConfig(c.Request.Context(), principalFromCtx(c), c.Param("orgId"))
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, OrganizationAICCConfigEnvelope{Config: result})
+}
+
+// UpdateAICCConfig 更新企业独立 AICC 配置。
 //
 // @Summary      更新企业 AICC 配置
 // @Description  平台管理员开通或关闭企业 AICC，设置智能体数量上限并授权行业知识库
@@ -172,13 +197,13 @@ func (h *OrganizationsHandler) Update(c *gin.Context) {
 // @Security     BearerAuth
 // @Param        orgId  path      string                               true  "企业 ID"
 // @Param        body   body      UpdateOrganizationAICCConfigRequest  true  "AICC 配置"
-// @Success      200    {object}  map[string]service.OrganizationResult
+// @Success      200    {object}  OrganizationAICCConfigEnvelope
 // @Failure      400    {object}  ErrorResponse
 // @Failure      401    {object}  ErrorResponse
 // @Failure      403    {object}  ErrorResponse
 // @Failure      404    {object}  ErrorResponse
 // @Failure      500    {object}  ErrorResponse
-// @Router       /organizations/{orgId}/aicc-config [patch]
+// @Router       /organizations/{orgId}/aicc-config [put]
 func (h *OrganizationsHandler) UpdateAICCConfig(c *gin.Context) {
 	principal := principalFromCtx(c)
 	var req UpdateOrganizationAICCConfigRequest
@@ -188,6 +213,7 @@ func (h *OrganizationsHandler) UpdateAICCConfig(c *gin.Context) {
 	}
 	result, err := h.service.UpdateAICCConfig(c.Request.Context(), principal, c.Param("orgId"), service.AICCConfigInput{
 		Enabled:                  *req.Enabled,
+		Model:                    req.Model,
 		AgentLimit:               req.AgentLimit,
 		IndustryKnowledgeBaseIDs: req.IndustryKnowledgeBaseIDs,
 	})
@@ -195,7 +221,7 @@ func (h *OrganizationsHandler) UpdateAICCConfig(c *gin.Context) {
 		writeServiceError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"organization": result})
+	c.JSON(http.StatusOK, OrganizationAICCConfigEnvelope{Config: result})
 }
 
 // Disable 禁用组织。

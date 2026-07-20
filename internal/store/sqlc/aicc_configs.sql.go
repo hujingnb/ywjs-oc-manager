@@ -47,6 +47,26 @@ func (q *Queries) GetOrganizationAICCConfig(ctx context.Context, orgID string) (
 	return i, err
 }
 
+const getOrganizationAICCConfigForUpdate = `-- name: GetOrganizationAICCConfigForUpdate :one
+SELECT org_id, enabled, model, agent_limit, revision, created_at, updated_at FROM organization_aicc_configs WHERE org_id = ? FOR UPDATE
+`
+
+// 配置更新事务先锁定企业配置行，串行化并发模型变更，避免 revision 丢失更新。
+func (q *Queries) GetOrganizationAICCConfigForUpdate(ctx context.Context, orgID string) (OrganizationAiccConfig, error) {
+	row := q.db.QueryRowContext(ctx, getOrganizationAICCConfigForUpdate, orgID)
+	var i OrganizationAiccConfig
+	err := row.Scan(
+		&i.OrgID,
+		&i.Enabled,
+		&i.Model,
+		&i.AgentLimit,
+		&i.Revision,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listOrganizationAICCConfigs = `-- name: ListOrganizationAICCConfigs :many
 SELECT org_id, enabled, model, agent_limit, revision, created_at, updated_at FROM organization_aicc_configs ORDER BY org_id
 `

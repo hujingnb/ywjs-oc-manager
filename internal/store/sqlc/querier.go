@@ -187,6 +187,8 @@ type Querier interface {
 	GetOrganization(ctx context.Context, id string) (Organization, error)
 	// 按企业读取独立 AICC 配置，调用方据此校验开通状态和当前模型 revision。
 	GetOrganizationAICCConfig(ctx context.Context, orgID string) (OrganizationAiccConfig, error)
+	// 配置更新事务先锁定企业配置行，串行化并发模型变更，避免 revision 丢失更新。
+	GetOrganizationAICCConfigForUpdate(ctx context.Context, orgID string) (OrganizationAiccConfig, error)
 	GetOrganizationByCode(ctx context.Context, code string) (Organization, error)
 	GetOrganizationByName(ctx context.Context, name string) (Organization, error)
 	// OOS-2 access_token 自愈用：以行锁查询组织，避免并发更新密文时出现写丢失。
