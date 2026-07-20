@@ -6,6 +6,7 @@ package sqlc
 
 import (
 	"context"
+	"encoding/json"
 
 	null "github.com/guregu/null/v5"
 )
@@ -120,6 +121,8 @@ type Querier interface {
 	CreateSkillTicketMessage(ctx context.Context, arg CreateSkillTicketMessageParams) error
 	CreateUser(ctx context.Context, arg CreateUserParams) error
 	DeactivateAICCLeadFieldsByAgent(ctx context.Context, agentID string) error
+	// 非 leader 任务释放 worker 槽并短延迟回队列；抵消本次领取增加的 attempts，不消耗业务重试额度。
+	DeferJob(ctx context.Context, arg DeferJobParams) (int64, error)
 	// 平台撤销企业行业库授权时，立即移除该企业全部智能体的失效行业库关联，避免历史配置继续参与检索。
 	DeleteAICCAgentIndustryKnowledgeNotAuthorizedByOrg(ctx context.Context, orgID string) error
 	DeleteAICCAgentKnowledgeByAgent(ctx context.Context, agentID string) error
@@ -153,6 +156,8 @@ type Querier interface {
 	// dispatcher 仅按任务关联的访客消息读取原文，避免重新按客户端幂等键查询。
 	GetAICCMessageByID(ctx context.Context, id string) (AiccMessage, error)
 	GetAICCMessageTaskByMessageID(ctx context.Context, messageID string) (AiccMessageTask, error)
+	// 同企业 pending/running 任务共同参与稳定排序，旧任务失败恢复 pending 后仍不会被新任务抢占。
+	GetAICCModelRolloutLeaderJob(ctx context.Context, orgID json.RawMessage) (Job, error)
 	GetAICCSession(ctx context.Context, id string) (AiccSession, error)
 	GetAICCSessionByToken(ctx context.Context, sessionToken string) (AiccSession, error)
 	GetAICCSessionContext(ctx context.Context, sessionID string) (AiccSessionContext, error)
@@ -426,6 +431,8 @@ type Querier interface {
 	// 裸 UPDATE runtime_phase(运行时就绪维度,与 status 正交,无状态机守卫,守卫不适用):
 	// reconciler 周期写、init worker 首启/就绪写、渠道解绑/升级重启前置 restarting 用。
 	SetAppRuntimePhase(ctx context.Context, arg SetAppRuntimePhaseParams) error
+	// 仅携带当前 app repair marker 的活跃 rollout 拥有 Ready 门禁；普通启动/重启不受影响。
+	SetAppRuntimePhaseReadyUnlessActiveAICCModelRollout(ctx context.Context, appID string) error
 	SetAppRuntimeSnapshot(ctx context.Context, arg SetAppRuntimeSnapshotParams) error
 	// 首次写入 per-app control token（三用：bootstrap / oc-kb / oc-ops）；并发重复初始化拿不到行，由 service 读取既有 token。
 	SetAppRuntimeToken(ctx context.Context, arg SetAppRuntimeTokenParams) error
@@ -495,6 +502,8 @@ type Querier interface {
 	UpdateAssistantVersion(ctx context.Context, arg UpdateAssistantVersionParams) error
 	// skill 上传/删除单独走此查询：只改 skills_json 与 revision，避免覆盖其它字段。
 	UpdateAssistantVersionSkills(ctx context.Context, arg UpdateAssistantVersionSkillsParams) error
+	// rollout 在外部副作用之间持久化专属恢复标记；仅允许当前 running 任务更新自身 payload。
+	UpdateJobPayload(ctx context.Context, arg UpdateJobPayloadParams) (int64, error)
 	// revision 由业务层在配置实际变化时递增，更新时间显式落库便于追踪 rollout 起点。
 	UpdateOrganizationAICCConfig(ctx context.Context, arg UpdateOrganizationAICCConfigParams) error
 	// OOS-2 access_token 自愈用：仅更新 newapi_user_credentials_ciphertext，不动 newapi_user_id。

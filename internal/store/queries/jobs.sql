@@ -17,6 +17,34 @@ SELECT *
 FROM jobs
 WHERE id = ?;
 
+-- name: GetAICCModelRolloutLeaderJob :one
+-- 同企业 pending/running 任务共同参与稳定排序，旧任务失败恢复 pending 后仍不会被新任务抢占。
+SELECT *
+FROM jobs
+WHERE type = 'aicc_model_rollout'
+  AND status IN ('pending', 'running')
+  AND payload_json->>'$.org_id' = sqlc.arg(org_id)
+ORDER BY created_at ASC, id ASC
+LIMIT 1;
+
+-- name: UpdateJobPayload :execrows
+-- rollout 在外部副作用之间持久化专属恢复标记；仅允许当前 running 任务更新自身 payload。
+UPDATE jobs
+SET payload_json = ?, updated_at = now()
+WHERE id = ? AND status = 'running';
+
+-- name: DeferJob :execrows
+-- 非 leader 任务释放 worker 槽并短延迟回队列；抵消本次领取增加的 attempts，不消耗业务重试额度。
+UPDATE jobs
+SET status = 'pending',
+    run_after = ?,
+    attempts = GREATEST(attempts - 1, 0),
+    last_error = NULL,
+    locked_by = NULL,
+    locked_at = NULL,
+    updated_at = now()
+WHERE id = ? AND status = 'running';
+
 -- name: ListReadyJobs :many
 SELECT *
 FROM jobs

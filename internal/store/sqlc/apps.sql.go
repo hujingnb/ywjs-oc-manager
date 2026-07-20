@@ -829,6 +829,25 @@ func (q *Queries) SetAppRuntimePhase(ctx context.Context, arg SetAppRuntimePhase
 	return err
 }
 
+const setAppRuntimePhaseReadyUnlessActiveAICCModelRollout = `-- name: SetAppRuntimePhaseReadyUnlessActiveAICCModelRollout :exec
+UPDATE apps
+SET runtime_phase = 'ready', updated_at = now()
+WHERE apps.id = ?
+  AND NOT EXISTS (
+      SELECT 1
+      FROM jobs
+      WHERE jobs.type = 'aicc_model_rollout'
+        AND jobs.status IN ('pending', 'running')
+        AND CAST(jobs.payload_json->>'$.repair_app_id' AS CHAR) = apps.id
+  )
+`
+
+// 仅携带当前 app repair marker 的活跃 rollout 拥有 Ready 门禁；普通启动/重启不受影响。
+func (q *Queries) SetAppRuntimePhaseReadyUnlessActiveAICCModelRollout(ctx context.Context, appID string) error {
+	_, err := q.db.ExecContext(ctx, setAppRuntimePhaseReadyUnlessActiveAICCModelRollout, appID)
+	return err
+}
+
 const setAppRuntimeSnapshot = `-- name: SetAppRuntimeSnapshot :exec
 UPDATE apps
 SET runtime_snapshot_json = ?,

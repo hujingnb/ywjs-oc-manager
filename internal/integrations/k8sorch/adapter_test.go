@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -16,6 +17,197 @@ import (
 
 	"oc-manager/internal/domain"
 )
+
+// TestWaitRolloutReadyRequiresObservedDeploymentGeneration 验证滚动更新完成不能只看副本数：
+// Deployment controller 尚未观察到本次 generation 时，即使 updated/available 已等于期望副本也必须继续等待。
+func TestWaitRolloutReadyRequiresObservedDeploymentGeneration(t *testing.T) {
+	replicas := int32(1)
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "app-a1", Namespace: "oc-aicc", Generation: 2},
+		Spec:       appsv1.DeploymentSpec{Replicas: &replicas},
+		Status: appsv1.DeploymentStatus{
+			ObservedGeneration: 1,
+			UpdatedReplicas:    1,
+			AvailableReplicas:  1,
+		},
+	}
+	cs := fake.NewSimpleClientset(deployment)
+	adapter := NewAICCKubernetesAdapter(cs, "oc-aicc")
+	polls := 0
+	cs.PrependReactor("get", "deployments", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		polls++
+		current, err := cs.Tracker().Get(appsv1.SchemeGroupVersion.WithResource("deployments"), "oc-aicc", "app-a1")
+		require.NoError(t, err)
+		copy := current.(*appsv1.Deployment).DeepCopy()
+		if polls >= 2 {
+			copy.Status.ObservedGeneration = copy.Generation
+		}
+		return true, copy, nil
+	})
+	originalInterval := waitRolloutReadyPollInterval
+	waitRolloutReadyPollInterval = time.Millisecond
+	t.Cleanup(func() { waitRolloutReadyPollInterval = originalInterval })
+
+	require.NoError(t, adapter.WaitRolloutReady(context.Background(), "a1", 2, time.Second, nil))
+	assert.GreaterOrEqual(t, polls, 2, "旧 observedGeneration 不得提前判定 rollout 完成")
+}
+
+// TestWaitRolloutReadyWaitsForTargetGeneration 验证即使当前 generation 已完整 Ready，
+// 只要仍低于本次 restart 返回的目标 generation 就不能成功。
+func TestWaitRolloutReadyWaitsForTargetGeneration(t *testing.T) {
+	replicas := int32(1)
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "app-a1", Namespace: "oc-aicc", Generation: 2},
+		Spec:       appsv1.DeploymentSpec{Replicas: &replicas},
+		Status: appsv1.DeploymentStatus{
+			ObservedGeneration: 2, UpdatedReplicas: 1, AvailableReplicas: 1,
+		},
+	}
+	adapter := NewAICCKubernetesAdapter(fake.NewSimpleClientset(deployment), "oc-aicc")
+	originalInterval := waitRolloutReadyPollInterval
+	waitRolloutReadyPollInterval = time.Millisecond
+	t.Cleanup(func() { waitRolloutReadyPollInterval = originalInterval })
+
+	err := adapter.WaitRolloutReady(context.Background(), "a1", 3, 5*time.Millisecond, nil)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "target=3")
+}
+
+// TestWaitRolloutReadyFollowsNewerDeploymentGeneration 验证等待期间模板再次更新时，
+// observed 只达到原 target 仍不能成功，必须追到当前 Deployment generation。
+func TestWaitRolloutReadyFollowsNewerDeploymentGeneration(t *testing.T) {
+	replicas := int32(1)
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "app-a1", Namespace: "oc-aicc", Generation: 3},
+		Spec:       appsv1.DeploymentSpec{Replicas: &replicas},
+		Status: appsv1.DeploymentStatus{
+			ObservedGeneration: 2, UpdatedReplicas: 1, AvailableReplicas: 1,
+		},
+	}
+	cs := fake.NewSimpleClientset(deployment)
+	adapter := NewAICCKubernetesAdapter(cs, "oc-aicc")
+	polls := 0
+	cs.PrependReactor("get", "deployments", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		polls++
+		copy := deployment.DeepCopy()
+		if polls >= 2 {
+			copy.Status.ObservedGeneration = copy.Generation
+		}
+		return true, copy, nil
+	})
+	originalInterval := waitRolloutReadyPollInterval
+	waitRolloutReadyPollInterval = time.Millisecond
+	t.Cleanup(func() { waitRolloutReadyPollInterval = originalInterval })
+
+	require.NoError(t, adapter.WaitRolloutReady(context.Background(), "a1", 2, time.Second, nil))
+	assert.GreaterOrEqual(t, polls, 2)
+}
+
+// TestWaitRolloutReadyHandlesNilReplicas 验证未 default 的 replicas=nil 不会 panic 或误判成功，
+// 而是持续等待到调用方给定的硬超时。
+func TestWaitRolloutReadyHandlesNilReplicas(t *testing.T) {
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "app-a1", Namespace: "oc-aicc", Generation: 2},
+		Status:     appsv1.DeploymentStatus{ObservedGeneration: 2},
+	}
+	adapter := NewAICCKubernetesAdapter(fake.NewSimpleClientset(deployment), "oc-aicc")
+	originalInterval := waitRolloutReadyPollInterval
+	waitRolloutReadyPollInterval = time.Millisecond
+	t.Cleanup(func() { waitRolloutReadyPollInterval = originalInterval })
+
+	err := adapter.WaitRolloutReady(context.Background(), "a1", 2, 5*time.Millisecond, nil)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "超时")
+}
+
+// TestWaitRolloutReadyFailsFastOnTerminalDeployment 验证 controller 已宣告进度截止时立即失败，
+// 不继续占用逐台 rollout 的串行窗口。
+func TestWaitRolloutReadyFailsFastOnTerminalDeployment(t *testing.T) {
+	replicas := int32(1)
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "app-a1", Namespace: "oc-aicc", Generation: 2},
+		Spec:       appsv1.DeploymentSpec{Replicas: &replicas},
+		Status: appsv1.DeploymentStatus{
+			ObservedGeneration: 2,
+			Conditions: []appsv1.DeploymentCondition{{
+				Type: appsv1.DeploymentProgressing, Status: corev1.ConditionFalse, Reason: "ProgressDeadlineExceeded",
+			}},
+		},
+	}
+	adapter := NewAICCKubernetesAdapter(fake.NewSimpleClientset(deployment), "oc-aicc")
+
+	err := adapter.WaitRolloutReady(context.Background(), "a1", 2, time.Second, nil)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "ProgressDeadlineExceeded")
+}
+
+// TestWaitRolloutReadyIgnoresStaleProgressDeadlineExceeded 验证旧 generation 遗留的进度超时
+// condition 不得让新 rollout 提前失败；controller 观察新 generation 并清除条件后应成功。
+func TestWaitRolloutReadyIgnoresStaleProgressDeadlineExceeded(t *testing.T) {
+	testWaitRolloutReadyIgnoresStaleTerminalCondition(t, appsv1.DeploymentCondition{
+		Type: appsv1.DeploymentProgressing, Status: corev1.ConditionFalse, Reason: "ProgressDeadlineExceeded",
+	})
+}
+
+// TestWaitRolloutReadyIgnoresStaleReplicaFailure 验证旧 generation 遗留的副本创建失败
+// condition 不得污染新 rollout；新 generation 完整就绪后仍可通过。
+func TestWaitRolloutReadyIgnoresStaleReplicaFailure(t *testing.T) {
+	testWaitRolloutReadyIgnoresStaleTerminalCondition(t, appsv1.DeploymentCondition{
+		Type: appsv1.DeploymentReplicaFailure, Status: corev1.ConditionTrue, Reason: "FailedCreate",
+	})
+}
+
+// testWaitRolloutReadyIgnoresStaleTerminalCondition 模拟 controller 下一轮观察新 generation 并清除旧条件。
+func testWaitRolloutReadyIgnoresStaleTerminalCondition(t *testing.T, stale appsv1.DeploymentCondition) {
+	t.Helper()
+	replicas := int32(1)
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "app-a1", Namespace: "oc-aicc", Generation: 2},
+		Spec:       appsv1.DeploymentSpec{Replicas: &replicas},
+		Status: appsv1.DeploymentStatus{
+			ObservedGeneration: 1, UpdatedReplicas: 1, AvailableReplicas: 1,
+			Conditions: []appsv1.DeploymentCondition{stale},
+		},
+	}
+	cs := fake.NewSimpleClientset(deployment)
+	polls := 0
+	cs.PrependReactor("get", "deployments", func(k8stesting.Action) (bool, runtime.Object, error) {
+		polls++
+		copy := deployment.DeepCopy()
+		if polls >= 2 {
+			copy.Status.ObservedGeneration = copy.Generation
+			copy.Status.Conditions = nil
+		}
+		return true, copy, nil
+	})
+	adapter := NewAICCKubernetesAdapter(cs, "oc-aicc")
+	originalInterval := waitRolloutReadyPollInterval
+	waitRolloutReadyPollInterval = time.Millisecond
+	t.Cleanup(func() { waitRolloutReadyPollInterval = originalInterval })
+
+	require.NoError(t, adapter.WaitRolloutReady(context.Background(), "a1", 2, time.Second, nil))
+	assert.GreaterOrEqual(t, polls, 2)
+}
+
+// TestWaitRolloutReadyRejectsZeroReplicas 验证目标副本为零时不能把空 Deployment 当成 rollout 成功，
+// 防止 paused/stopped 应用被错误写入已应用 revision。
+func TestWaitRolloutReadyRejectsZeroReplicas(t *testing.T) {
+	zero := int32(0)
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "app-a1", Namespace: "oc-aicc", Generation: 2},
+		Spec:       appsv1.DeploymentSpec{Replicas: &zero},
+		Status:     appsv1.DeploymentStatus{ObservedGeneration: 2},
+	}
+	adapter := NewAICCKubernetesAdapter(fake.NewSimpleClientset(deployment), "oc-aicc")
+
+	err := adapter.WaitRolloutReady(context.Background(), "a1", 2, time.Second, nil)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "目标副本数")
+}
 
 // TestEnsureAppCreatesResources 验证 EnsureApp 在空集群创建 Deployment/Service/Secret。
 func TestEnsureAppCreatesResources(t *testing.T) {
@@ -471,4 +663,44 @@ func TestRolloutRestartPatchesAnnotation(t *testing.T) {
 	// 副本数不变（仍为 1），RolloutRestart 不改 replicas
 	require.NotNil(t, d.Spec.Replicas)
 	assert.Equal(t, int32(1), *d.Spec.Replicas)
+}
+
+// TestRolloutRestartAlwaysChangesTemplateAnnotation 验证同一秒内连续重试仍写入不同注解，
+// 确保每次调用都能让 Deployment 产生新的 generation，而不是复用旧 Pod 的就绪事实。
+func TestRolloutRestartAlwaysChangesTemplateAnnotation(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	a := NewKubernetesAdapter(cs, "oc-apps")
+	require.NoError(t, a.EnsureApp(context.Background(), testSpec()))
+
+	require.NoError(t, a.RolloutRestart(context.Background(), "a1"))
+	first, err := cs.AppsV1().Deployments("oc-apps").Get(context.Background(), "app-a1", metav1.GetOptions{})
+	require.NoError(t, err)
+	firstValue := first.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"]
+	require.NoError(t, a.RolloutRestart(context.Background(), "a1"))
+	second, err := cs.AppsV1().Deployments("oc-apps").Get(context.Background(), "app-a1", metav1.GetOptions{})
+	require.NoError(t, err)
+
+	assert.NotEqual(t, firstValue, second.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"])
+}
+
+// TestRolloutRestartAndGetGenerationReturnsUpdatedGeneration 验证 rollout API 返回本次模板更新绑定的 generation，
+// 后续等待只能使用该目标，不能读取任意较旧 rollout 的完成状态。
+func TestRolloutRestartAndGetGenerationReturnsUpdatedGeneration(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	a := NewKubernetesAdapter(cs, "oc-apps")
+	require.NoError(t, a.EnsureApp(context.Background(), testSpec()))
+	cs.PrependReactor("update", "deployments", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		update := action.(k8stesting.UpdateAction).GetObject().(*appsv1.Deployment).DeepCopy()
+		update.Generation++
+		require.NoError(t, cs.Tracker().Update(appsv1.SchemeGroupVersion.WithResource("deployments"), update, "oc-apps"))
+		return true, update, nil
+	})
+
+	first, err := a.RolloutRestartAndGetGeneration(context.Background(), "a1")
+	require.NoError(t, err)
+	second, err := a.RolloutRestartAndGetGeneration(context.Background(), "a1")
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(1), first)
+	assert.Equal(t, int64(2), second)
 }

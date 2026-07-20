@@ -741,6 +741,21 @@ func (f *fakeAppOrchestrator) RolloutRestart(_ context.Context, _ string) error 
 	return f.rolloutRestartErr
 }
 
+// WaitRolloutReady 满足新增编排接口；运行时操作测试不等待 generation 收敛。
+func (f *fakeAppOrchestrator) WaitRolloutReady(context.Context, string, int64, time.Duration, func(k8sorch.AppStatus)) error {
+	return nil
+}
+
+// DeploymentGeneration 满足新增编排接口；运行时操作测试不读取 Deployment generation。
+func (f *fakeAppOrchestrator) DeploymentGeneration(context.Context, string) (int64, error) {
+	return 1, nil
+}
+
+// RolloutRestartAndGetGeneration 复用该 fake 原有的 rollout restart 行为并返回测试 generation。
+func (f *fakeAppOrchestrator) RolloutRestartAndGetGeneration(ctx context.Context, appID string) (int64, error) {
+	return 1, f.RolloutRestart(ctx, appID)
+}
+
 // fakeObjectStore 是 storage.ObjectStore 的最小测试桩，仅实现 MovePrefix / DeletePrefix。
 type fakeObjectStore struct {
 	// MovePrefix 调用记录

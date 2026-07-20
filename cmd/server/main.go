@@ -584,6 +584,12 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	if err := registry.Register("app_initialize", appInitHandler.Handle); err != nil {
 		return fmt.Errorf("注册 app_initialize handler 失败: %w", err)
 	}
+	// 企业模型变更通过持久任务逐台重启 AICC；未启用 k8s 时仍注册 handler，执行时返回
+	// 可诊断错误并由 worker 重试，不能把未发生的 rollout 静默标记成功。
+	aiccModelRolloutHandler := handlers.NewAICCModelRolloutHandler(dbStore.Queries, orch, 30*time.Minute)
+	if err := registry.Register(domain.JobTypeAICCModelRollout, aiccModelRolloutHandler.Handle); err != nil {
+		return fmt.Errorf("注册 aicc_model_rollout handler 失败: %w", err)
+	}
 	// 生命周期 handler 走 k8s 编排（appOrchestrator + ObjectStore）：传入上方构造的真实 orch
 	// （未启用 k8s 时为 nil，handler 内部已做守卫）。
 	// workspaceObjStore 在 S3 启用时已有值（供 workspace + bootstrap），复用给 lifecycle handler。

@@ -36,6 +36,9 @@ func (countingStore) RetryJob(_ context.Context, _ sqlc.RetryJobParams) error {
 	return nil
 }
 
+// DeferJob 满足 JobStore 接口；pool 测试不会领取具体任务。
+func (countingStore) DeferJob(_ context.Context, _ sqlc.DeferJobParams) (int64, error) { return 1, nil }
+
 type countingQueue struct {
 	calls atomic.Int32
 }

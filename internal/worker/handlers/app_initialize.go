@@ -268,6 +268,9 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	if app.Status == domain.AppStatusRunning {
 		return nil
 	}
+	// starting/error(starting) 表示上轮已创建或等待过 Deployment 但未完成 stamp；重入需强制新 generation。
+	aiccStartingReentry := domain.IsAICCAppType(domain.AppType(app.AppType)) &&
+		(app.Status == domain.AppStatusStarting || (app.Status == domain.AppStatusError && app.LastErrorStatus.Valid && app.LastErrorStatus.String == domain.AppStatusStarting))
 
 	resolved, err := h.resolveInitializeConfig(ctx, app)
 	if err != nil {
@@ -284,6 +287,7 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	}
 
 	reporter := newProgressReporter(app.ID, h.store)
+	var aiccTargetGeneration int64
 
 	// k8s 4 阶段定义：每阶段先 transitionTo 推 status，再 run 跑实际工作。
 	// version 与 imageRef 通过闭包注入各阶段，避免在 handler 结构体上存储
@@ -305,11 +309,13 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		}},
 		// 阶段3（creating_container）：EnsureApp 渲染并 apply k8s Deployment + Service + Secret。
 		{domain.AppStatusCreatingContainer, func(ctx context.Context, app *sqlc.App, p appInitializePayload, r *progressReporter) error {
-			return h.phaseCreate(ctx, app, resolved.imageRef)
+			generation, err := h.phaseCreate(ctx, app, resolved.imageRef, resolved.aiccRevision)
+			aiccTargetGeneration = generation
+			return err
 		}},
 		// 阶段4（starting）：WaitReady 等待 pod Ready。
 		{domain.AppStatusStarting, func(ctx context.Context, app *sqlc.App, p appInitializePayload, r *progressReporter) error {
-			return h.phaseStart(ctx, app)
+			return h.phaseStart(ctx, app, aiccTargetGeneration, aiccStartingReentry)
 		}},
 	}
 
@@ -446,27 +452,40 @@ func (h *AppInitializeHandler) phasePrepare(ctx context.Context, app *sqlc.App) 
 
 // phaseCreate：buildAppSpec → EnsureApp（渲染并 apply k8s Deployment + Service + Secret）。
 // orch 未注入时直接跳过（测试装配 / Task14 前）。
-func (h *AppInitializeHandler) phaseCreate(ctx context.Context, app *sqlc.App, imageRef string) error {
+func (h *AppInitializeHandler) phaseCreate(ctx context.Context, app *sqlc.App, imageRef string, aiccRevision int32) (int64, error) {
 	if h.orch == nil {
-		return nil
+		return 0, nil
 	}
 	// 从 app 的 runtime_token_ciphertext 解密取明文 control token，
 	// 用于写入 k8s Secret，供 pod 启动时鉴权 bootstrap API 和 oc-ops 调用。
 	controlToken, err := h.decryptRuntimeToken(app)
 	if err != nil {
-		return fmt.Errorf("解密 runtime token 失败（phaseCreate）: %w", err)
+		return 0, fmt.Errorf("解密 runtime token 失败（phaseCreate）: %w", err)
 	}
 	spec := h.buildAppSpec(ctx, *app, imageRef, controlToken)
-	if err := h.orch.EnsureApp(ctx, spec); err != nil {
-		return fmt.Errorf("k8s EnsureApp 失败: %w", err)
+	if domain.IsAICCAppType(domain.AppType(app.AppType)) {
+		spec.ConfigRevision = aiccRevision
 	}
-	return nil
+	if err := h.orch.EnsureApp(ctx, spec); err != nil {
+		return 0, fmt.Errorf("k8s EnsureApp 失败: %w", err)
+	}
+	if !domain.IsAICCAppType(domain.AppType(app.AppType)) {
+		return 0, nil
+	}
+	generation, err := h.orch.DeploymentGeneration(ctx, app.ID)
+	if err != nil {
+		return 0, fmt.Errorf("读取 AICC EnsureApp generation 失败: %w", err)
+	}
+	return generation, nil
 }
 
-// phaseStart：WaitReady 等待 pod Ready（带 readyTimeout 宽松硬上限）。
-// orch 未注入时直接跳过（测试装配 / Task14 前）。
-func (h *AppInitializeHandler) phaseStart(ctx context.Context, app *sqlc.App) error {
+// phaseStart 等待运行时就绪。AICC 必须先强制重启并等待新 Deployment generation 完整可用，
+// 防止重试窗口把更高 revision 误写到仍运行旧 bootstrap 配置的 Pod；standard 保持通用 Pod Ready 语义。
+func (h *AppInitializeHandler) phaseStart(ctx context.Context, app *sqlc.App, ensureGeneration int64, forceRestart bool) error {
 	if h.orch == nil {
+		if domain.IsAICCAppType(domain.AppType(app.AppType)) {
+			return errors.New("AICC 初始化无法核验配置应用：Kubernetes 编排器未启用")
+		}
 		return nil
 	}
 	// 首次拉起：标 runtime_phase=starting（pod 调度/拉镜像/初始化中，未就绪）。业务态此时是 starting，
@@ -481,6 +500,25 @@ func (h *AppInitializeHandler) phaseStart(ctx context.Context, app *sqlc.App) er
 	heartbeat := func(_ k8sorch.AppStatus) {
 		// 心跳失败不影响等待主流程（下一轮还会再刷），静默忽略。
 		_ = h.store.TouchApp(ctx, app.ID)
+	}
+	if domain.IsAICCAppType(domain.AppType(app.AppType)) {
+		targetGeneration := ensureGeneration
+		if forceRestart {
+			// starting 重入可能面对上一轮已 Ready 的旧 Pod；用新 UUID 模板更新取得专属 generation。
+			_ = h.store.SetAppRuntimePhase(ctx, sqlc.SetAppRuntimePhaseParams{RuntimePhase: domain.RuntimePhaseRestarting, ID: app.ID})
+			generation, err := h.orch.RolloutRestartAndGetGeneration(ctx, app.ID)
+			if err != nil {
+				return fmt.Errorf("触发 AICC Deployment 重启失败: %w", err)
+			}
+			targetGeneration = generation
+		}
+		if targetGeneration <= 0 {
+			return fmt.Errorf("AICC Deployment 目标 generation 无效: %d", targetGeneration)
+		}
+		if err := h.orch.WaitRolloutReady(ctx, app.ID, targetGeneration, readyTimeout, heartbeat); err != nil {
+			return fmt.Errorf("等待 AICC Deployment rollout 就绪失败: %w", err)
+		}
+		return nil
 	}
 	if err := h.orch.WaitReady(ctx, app.ID, readyTimeout, heartbeat); err != nil {
 		return fmt.Errorf("等待 k8s pod Ready 失败: %w", err)

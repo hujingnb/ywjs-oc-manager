@@ -29,6 +29,8 @@ type JobStore interface {
 	MarkJobSucceeded(ctx context.Context, id string) error
 	MarkJobFailed(ctx context.Context, arg sqlc.MarkJobFailedParams) error
 	RetryJob(ctx context.Context, arg sqlc.RetryJobParams) error
+	// DeferJob 无损释放因业务互斥暂不可执行的任务，并抵消本次领取增加的 attempts。
+	DeferJob(ctx context.Context, arg sqlc.DeferJobParams) (int64, error)
 }
 
 // Queue 抽象 worker 信号源。与 internal/redis.Queue 保持一致以便复用实现。
@@ -135,6 +137,21 @@ func (w *Worker) processJobID(ctx context.Context, id string) error {
 		return nil
 	}
 	if err := handler(ctx, job); err != nil {
+		var deferred *handlers.DeferredJobError
+		if errors.As(err, &deferred) {
+			delay := deferred.Delay
+			if delay <= 0 {
+				delay = time.Second
+			}
+			rows, deferErr := w.store.DeferJob(ctx, sqlc.DeferJobParams{ID: job.ID, RunAfter: w.now().Add(delay)})
+			if deferErr != nil {
+				return fmt.Errorf("延后 job 失败: %w", deferErr)
+			}
+			if rows != 1 {
+				return fmt.Errorf("延后 job 影响行数异常: %d", rows)
+			}
+			return nil
+		}
 		return w.handleHandlerError(ctx, job, err)
 	}
 	if err := w.store.MarkJobSucceeded(ctx, job.ID); err != nil {

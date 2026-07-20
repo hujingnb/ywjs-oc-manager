@@ -49,6 +49,65 @@ func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) error {
 	return err
 }
 
+const deferJob = `-- name: DeferJob :execrows
+UPDATE jobs
+SET status = 'pending',
+    run_after = ?,
+    attempts = GREATEST(attempts - 1, 0),
+    last_error = NULL,
+    locked_by = NULL,
+    locked_at = NULL,
+    updated_at = now()
+WHERE id = ? AND status = 'running'
+`
+
+type DeferJobParams struct {
+	RunAfter time.Time `db:"run_after" json:"run_after"`
+	ID       string    `db:"id" json:"id"`
+}
+
+// 非 leader 任务释放 worker 槽并短延迟回队列；抵消本次领取增加的 attempts，不消耗业务重试额度。
+func (q *Queries) DeferJob(ctx context.Context, arg DeferJobParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deferJob, arg.RunAfter, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const getAICCModelRolloutLeaderJob = `-- name: GetAICCModelRolloutLeaderJob :one
+SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
+FROM jobs
+WHERE type = 'aicc_model_rollout'
+  AND status IN ('pending', 'running')
+  AND payload_json->>'$.org_id' = ?
+ORDER BY created_at ASC, id ASC
+LIMIT 1
+`
+
+// 同企业 pending/running 任务共同参与稳定排序，旧任务失败恢复 pending 后仍不会被新任务抢占。
+func (q *Queries) GetAICCModelRolloutLeaderJob(ctx context.Context, orgID json.RawMessage) (Job, error) {
+	row := q.db.QueryRowContext(ctx, getAICCModelRolloutLeaderJob, orgID)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Type,
+		&i.Status,
+		&i.Priority,
+		&i.RunAfter,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.PayloadJson,
+		&i.LockedBy,
+		&i.LockedAt,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
 const getJob = `-- name: GetJob :one
 SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
 FROM jobs
@@ -286,4 +345,24 @@ type RetryJobParams struct {
 func (q *Queries) RetryJob(ctx context.Context, arg RetryJobParams) error {
 	_, err := q.db.ExecContext(ctx, retryJob, arg.RunAfter, arg.LastError, arg.ID)
 	return err
+}
+
+const updateJobPayload = `-- name: UpdateJobPayload :execrows
+UPDATE jobs
+SET payload_json = ?, updated_at = now()
+WHERE id = ? AND status = 'running'
+`
+
+type UpdateJobPayloadParams struct {
+	PayloadJson json.RawMessage `db:"payload_json" json:"payload_json"`
+	ID          string          `db:"id" json:"id"`
+}
+
+// rollout 在外部副作用之间持久化专属恢复标记；仅允许当前 running 任务更新自身 payload。
+func (q *Queries) UpdateJobPayload(ctx context.Context, arg UpdateJobPayloadParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateJobPayload, arg.PayloadJson, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }

@@ -20,6 +20,11 @@ type Orchestrator interface {
 	// 确定性坏态（见 IsTerminalBad）才快速失败返回 error。onPoll 非 nil 时每轮轮询回调当前
 	// 状态，供调用方做心跳（如刷新 app.updated_at，让 reaper 区分"在等"与"孤儿"）；可为 nil。
 	WaitReady(ctx context.Context, appID string, timeout time.Duration, onPoll func(AppStatus)) error
+	// WaitRolloutReady 等待 Deployment controller 观察到当前 generation，且目标副本全部更新并可用。
+	// 与 WaitReady 的通用 Pod 检查不同，它用于证明 RolloutRestart 触发的新一代 Pod 已真正接管流量。
+	WaitRolloutReady(ctx context.Context, appID string, targetGeneration int64, timeout time.Duration, onPoll func(AppStatus)) error
+	// DeploymentGeneration 返回当前 Deployment generation，供 EnsureApp 后绑定本次配置模板更新。
+	DeploymentGeneration(ctx context.Context, appID string) (int64, error)
 	// Scale 伸缩 replicas（0=停，1=起）。
 	Scale(ctx context.Context, appID string, replicas int32) error
 	// Start 启动应用。AICC 先成功将 Deployment 缩放到 1，再恢复 HPA；普通应用等价 Scale(1)。
@@ -37,6 +42,8 @@ type Orchestrator interface {
 	// 不改镜像/副本数；普通应用按 Recreate 重建，AICC 按 RollingUpdate 滚动更新。
 	// 渠道绑定后重载 hermes platform 用。
 	RolloutRestart(ctx context.Context, appID string) error
+	// RolloutRestartAndGetGeneration 用唯一模板 token 触发重启，并返回 Update 响应中的目标 generation。
+	RolloutRestartAndGetGeneration(ctx context.Context, appID string) (int64, error)
 }
 
 // AppSpec 是渲染 app pod 资源所需的全部输入（k8s 形状，非 docker ContainerSpec）。
@@ -59,6 +66,8 @@ type AppSpec struct {
 	Resources ResourceLimits
 	// Labels 是附加 label。
 	Labels map[string]string
+	// ConfigRevision 绑定 AICC pod template 消费的企业配置 revision；standard 保持 0。
+	ConfigRevision int32
 	// Proxy 为需直连外网的容器（hermes 微信平台 / oc-ops 渠道登录）注入代理 env；
 	// 各字段留空则不注入对应项（生产 pod 有外网出口时全空）。
 	Proxy ProxyEnv

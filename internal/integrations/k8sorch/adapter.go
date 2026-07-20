@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"oc-manager/internal/domain"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -218,7 +219,15 @@ func (a *KubernetesAdapter) UpdateImage(ctx context.Context, appID, hermesImage 
 // 使用 retry.RetryOnConflict 处理 Get→Update 之间控制器并发修改导致的乐观锁冲突（409 Conflict），
 // 每次重试重新 Get 最新版本再写入注解，避免 EnsureApp 后立即调用时 resourceVersion 不一致。
 func (a *KubernetesAdapter) RolloutRestart(ctx context.Context, appID string) error {
+	_, err := a.RolloutRestartAndGetGeneration(ctx, appID)
+	return err
+}
+
+// RolloutRestartAndGetGeneration 用不可碰撞的 UUID 更新 pod template，并返回 API Server
+// 持久化后的 generation，使调用方能把后续就绪等待绝对绑定到本次 restart。
+func (a *KubernetesAdapter) RolloutRestartAndGetGeneration(ctx context.Context, appID string) (int64, error) {
 	api := a.client.AppsV1().Deployments(a.namespace)
+	var generation int64
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		d, err := api.Get(ctx, deploymentName(appID), metav1.GetOptions{})
 		if err != nil {
@@ -227,12 +236,30 @@ func (a *KubernetesAdapter) RolloutRestart(ctx context.Context, appID string) er
 		if d.Spec.Template.Annotations == nil {
 			d.Spec.Template.Annotations = map[string]string{}
 		}
-		// 写入 restartedAt 注解触发 Deployment 重建 pod，与 kubectl rollout restart 等价。
-		d.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"] = time.Now().UTC().Format(time.RFC3339)
-		_, uerr := api.Update(ctx, d, metav1.UpdateOptions{})
-		return uerr
+		// UUID 不依赖本机时钟精度，连续快速重试也必然改变模板并产生新 generation。
+		d.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"] = uuid.NewString()
+		updated, updateErr := api.Update(ctx, d, metav1.UpdateOptions{})
+		if updateErr == nil {
+			generation = updated.Generation
+		}
+		return updateErr
 	})
-	return wrapK8s("滚动重启 Deployment", err)
+	if err != nil {
+		return 0, wrapK8s("滚动重启 Deployment", err)
+	}
+	return generation, nil
+}
+
+// DeploymentGeneration 读取当前 Deployment generation；真实 API 资源必须返回正数。
+func (a *KubernetesAdapter) DeploymentGeneration(ctx context.Context, appID string) (int64, error) {
+	deployment, err := a.client.AppsV1().Deployments(a.namespace).Get(ctx, deploymentName(appID), metav1.GetOptions{})
+	if err != nil {
+		return 0, wrapK8s("查询 Deployment generation", err)
+	}
+	if deployment.Generation <= 0 {
+		return 0, fmt.Errorf("app %s Deployment generation 无效: %d", appID, deployment.Generation)
+	}
+	return deployment.Generation, nil
 }
 
 // PatchSecretKeys 对 app-<id>-token Secret 增删指定 key，不动其他 key。
@@ -389,6 +416,80 @@ func (a *KubernetesAdapter) Status(ctx context.Context, appID string) (AppStatus
 
 // waitReadyPollInterval 是 WaitReady 轮询 pod 状态的间隔。
 var waitReadyPollInterval = 2 * time.Second
+
+// waitRolloutReadyPollInterval 控制 Deployment rollout 状态轮询节奏；变量形式便于单测缩短等待。
+var waitRolloutReadyPollInterval = 2 * time.Second
+
+// WaitRolloutReady 等待本次 Deployment generation 被 controller 观察并完整可用。
+// 仅检查 Pod Ready 会误把尚未替换的旧 Pod 当作新配置已经生效，因此必须同时校验
+// observedGeneration、updated/available/unavailable replicas 四项 rollout 事实。
+func (a *KubernetesAdapter) WaitRolloutReady(ctx context.Context, appID string, targetGeneration int64, timeout time.Duration, onPoll func(AppStatus)) error {
+	if targetGeneration <= 0 {
+		return fmt.Errorf("等待 app %s Deployment rollout 的目标 generation 无效: %d", appID, targetGeneration)
+	}
+	tctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	ticker := time.NewTicker(waitRolloutReadyPollInterval)
+	defer ticker.Stop()
+	for {
+		deployment, err := a.client.AppsV1().Deployments(a.namespace).Get(tctx, deploymentName(appID), metav1.GetOptions{})
+		if err != nil {
+			return wrapK8s("查询 Deployment rollout", err)
+		}
+		// Deployment condition 可能仍属于上一代 Pod 模板。只有 controller 已观察到当前
+		// generation 后，ProgressDeadlineExceeded / ReplicaFailure 才能证明本次发布失败。
+		controllerObservedCurrentGeneration := deployment.Status.ObservedGeneration >= deployment.Generation
+		if controllerObservedCurrentGeneration {
+			if reason := terminalDeploymentRolloutReason(deployment); reason != "" {
+				return fmt.Errorf("等待 app %s Deployment rollout 失败：%s", appID, reason)
+			}
+		}
+		if deployment.Spec.Replicas != nil && *deployment.Spec.Replicas <= 0 {
+			return fmt.Errorf("等待 app %s Deployment rollout 失败：目标副本数必须大于 0，当前为 %d", appID, *deployment.Spec.Replicas)
+		}
+		// replicas 理论上会被 API default 成 1；nil 表示尚无可靠目标副本事实，只能继续等待。
+		if deployment.Spec.Replicas != nil {
+			expected := *deployment.Spec.Replicas
+			if deployment.Generation >= targetGeneration &&
+				controllerObservedCurrentGeneration &&
+				deployment.Status.UpdatedReplicas == expected &&
+				deployment.Status.AvailableReplicas == expected &&
+				deployment.Status.UnavailableReplicas == 0 {
+				if onPoll != nil {
+					onPoll(AppStatus{Phase: "Running", Ready: true})
+				}
+				return nil
+			}
+		}
+		if onPoll != nil {
+			onPoll(AppStatus{Phase: "Pending", Message: fmt.Sprintf("Deployment generation=%d observed=%d updated=%d available=%d unavailable=%d", deployment.Generation, deployment.Status.ObservedGeneration, deployment.Status.UpdatedReplicas, deployment.Status.AvailableReplicas, deployment.Status.UnavailableReplicas)})
+		}
+		select {
+		case <-tctx.Done():
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return fmt.Errorf("等待 app %s Deployment rollout 超时（target=%d generation=%d observed=%d）", appID, targetGeneration, deployment.Generation, deployment.Status.ObservedGeneration)
+		case <-ticker.C:
+		}
+	}
+}
+
+// terminalDeploymentRolloutReason 提取 controller 已明确宣告无法推进的终止态。
+func terminalDeploymentRolloutReason(deployment *appsv1.Deployment) string {
+	for _, condition := range deployment.Status.Conditions {
+		if condition.Type == appsv1.DeploymentProgressing && condition.Status == corev1.ConditionFalse && condition.Reason == "ProgressDeadlineExceeded" {
+			return condition.Reason
+		}
+		if condition.Type == appsv1.DeploymentReplicaFailure && condition.Status == corev1.ConditionTrue {
+			if condition.Message != "" {
+				return condition.Message
+			}
+			return condition.Reason
+		}
+	}
+	return ""
+}
 
 // WaitReady 轮询 Status 直到 hermes 容器 Ready、pod 进入确定性坏态、或 timeout/ctx 取消。
 // 用 timeout 派生 tctx 控制硬上限，ticker 控制轮询节奏；

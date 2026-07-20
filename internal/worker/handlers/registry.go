@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"oc-manager/internal/store/sqlc"
 )
@@ -54,3 +55,16 @@ func (r *Registry) Lookup(jobType string) (HandlerFunc, error) {
 // ErrHandlerNotFound 表示当前 worker 未注册该 job_type 的 handler。
 // worker 在 dispatch 时遇到该错误会标记 job 失败但不重试。
 var ErrHandlerNotFound = errors.New("未注册的 job 类型")
+
+// DeferredJobError 表示任务因业务互斥暂不执行，应无损退回 pending 而非计作一次失败。
+type DeferredJobError struct {
+	// Delay 是再次允许 scheduler 入队前的短延迟。
+	Delay time.Duration
+	// Reason 仅用于进程内诊断，不写入 last_error，避免把正常互斥展示成失败。
+	Reason string
+}
+
+// Error 实现 error；worker 通过 errors.As 识别该控制流错误。
+func (e *DeferredJobError) Error() string {
+	return fmt.Sprintf("任务延后 %s: %s", e.Delay, e.Reason)
+}

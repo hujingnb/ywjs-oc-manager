@@ -138,6 +138,18 @@ func TestRenderDeploymentAICC(t *testing.T) {
 	assertGolden(t, "deployment-aicc.golden.yaml", dep)
 }
 
+// TestRenderDeploymentAICCIncludesConfigRevision 验证企业配置 revision 属于 Pod 模板事实，
+// revision 前进时 EnsureApp 必须产生新 Deployment generation 供初始化核验。
+func TestRenderDeploymentAICCIncludesConfigRevision(t *testing.T) {
+	spec := testSpec()
+	spec.AppType = domain.AppTypeAICC
+	spec.ConfigRevision = 8
+
+	deployment := RenderDeployment(spec, "oc-aicc")
+
+	assert.Equal(t, "8", deployment.Spec.Template.Annotations["oc-manager.ywjs.com/aicc-config-revision"])
+}
+
 // TestRenderAICCNetworkPolicy 验证客服 Pod 默认拒绝出网，仅允许解析 DNS、访问 manager 知识 API、
 // 模型网关、共享 Firecrawl 正文提取服务，以及 Hermes 原生只读网页检索直连 HTTP/HTTPS 公网。
 func TestRenderAICCNetworkPolicy(t *testing.T) {

@@ -43,6 +43,10 @@ type fakeOrchestrator struct {
 	waitReadyCalls []string
 	// waitReadyErr 非 nil 时 WaitReady 返回该错误（模拟 pod 就绪超时）。
 	waitReadyErr error
+	// rolloutEvents 记录 AICC 初始化用于证明新 generation 的 restart/wait 时序。
+	rolloutEvents *[]string
+	// deploymentGeneration 模拟 EnsureApp 返回资源后读取到的本次目标 generation。
+	deploymentGeneration int64
 }
 
 func (f *fakeOrchestrator) EnsureApp(_ context.Context, spec k8sorch.AppSpec) error {
@@ -57,6 +61,33 @@ func (f *fakeOrchestrator) WaitReady(_ context.Context, appID string, _ time.Dur
 		onPoll(k8sorch.AppStatus{})
 	}
 	return f.waitReadyErr
+}
+
+// WaitRolloutReady 模拟 Deployment generation 已收敛；app_initialize 真实性回归可按调用记录断言。
+func (f *fakeOrchestrator) WaitRolloutReady(_ context.Context, appID string, _ int64, _ time.Duration, onPoll func(k8sorch.AppStatus)) error {
+	if f.rolloutEvents != nil {
+		*f.rolloutEvents = append(*f.rolloutEvents, "wait-rollout:"+appID)
+	}
+	if onPoll != nil {
+		onPoll(k8sorch.AppStatus{Phase: "Running", Ready: true})
+	}
+	return nil
+}
+
+// DeploymentGeneration 返回 EnsureApp 对应的当前 generation，默认 1。
+func (f *fakeOrchestrator) DeploymentGeneration(context.Context, string) (int64, error) {
+	if f.deploymentGeneration == 0 {
+		return 1, nil
+	}
+	return f.deploymentGeneration, nil
+}
+
+// RolloutRestartAndGetGeneration 记录重入时的强制重启，并返回新的目标 generation。
+func (f *fakeOrchestrator) RolloutRestartAndGetGeneration(_ context.Context, _ string) (int64, error) {
+	if f.rolloutEvents != nil {
+		*f.rolloutEvents = append(*f.rolloutEvents, "restart:"+testAppID)
+	}
+	return 2, nil
 }
 
 func (f *fakeOrchestrator) Scale(_ context.Context, _ string, _ int32) error {
@@ -81,7 +112,8 @@ func (f *fakeOrchestrator) Status(_ context.Context, _ string) (k8sorch.AppStatu
 
 // RolloutRestart 空实现：满足 k8sorch.Orchestrator 接口，测试中无需断言滚动重启调用。
 func (f *fakeOrchestrator) RolloutRestart(_ context.Context, _ string) error {
-	return nil
+	_, err := f.RolloutRestartAndGetGeneration(context.Background(), testAppID)
+	return err
 }
 
 // TestAppInitializeHandlesHappyPath 验证 k8s 路径应用初始化成功：
@@ -480,6 +512,8 @@ type appInitStub struct {
 	appliedAICCRevision int32
 	// appliedAICCRevisionErr 模拟 revision stamp 写库失败，验证任务返回错误供 worker 重试。
 	appliedAICCRevisionErr error
+	// rolloutEvents 与 fakeOrchestrator 共享，用于断言 stamp 必须晚于 restart 和 generation wait。
+	rolloutEvents *[]string
 	// lifecycleEvents 记录关键写库顺序，验证 revision stamp 不留下崩溃重入窗口。
 	lifecycleEvents []string
 	apiKeySet       bool
@@ -658,6 +692,9 @@ func (s *appInitStub) SetAICCAgentAppliedConfigRevision(_ context.Context, arg s
 	}
 	s.appliedAICCRevision = arg.AppliedConfigRevision
 	s.lifecycleEvents = append(s.lifecycleEvents, "aicc-revision")
+	if s.rolloutEvents != nil {
+		*s.rolloutEvents = append(*s.rolloutEvents, fmt.Sprintf("stamp:%d", arg.AppliedConfigRevision))
+	}
 	return nil
 }
 
@@ -1074,7 +1111,6 @@ func TestAppInitialize_AppliedVersionRecorded(t *testing.T) {
 			return "", false
 		},
 	})
-
 	require.NoError(t, handler.Handle(context.Background(), buildJob(t, testAppID, "")))
 
 	// 初始化成功后 SetAppAppliedVersion 必须被调用。
@@ -1101,6 +1137,7 @@ func TestAppInitialize_AICCHiddenAppUsesDedicatedRuntimeImage(t *testing.T) {
 			return aiccImageRef, true
 		},
 	})
+	handler.SetOrchestrator(&fakeOrchestrator{}, AppInitializeK8sConfig{})
 
 	require.NoError(t, handler.Handle(context.Background(), buildJob(t, testAppID, "")))
 	assert.Zero(t, store.assistantVersionCalls)
@@ -1126,6 +1163,7 @@ func TestAppInitializeAICCUsesOrganizationConfigWithoutVersion(t *testing.T) {
 			return aiccImageRef, true
 		},
 	})
+	handler.SetOrchestrator(&fakeOrchestrator{}, AppInitializeK8sConfig{})
 
 	err := handler.Handle(context.Background(), buildJob(t, store.app.ID, ""))
 
@@ -1147,6 +1185,7 @@ func TestAppInitializeAICCStampsRevisionBeforeBindingWaiting(t *testing.T) {
 			return "registry.example.com/aicc:v2", true
 		},
 	})
+	handler.SetOrchestrator(&fakeOrchestrator{}, AppInitializeK8sConfig{})
 
 	err := handler.Handle(context.Background(), buildJob(t, store.app.ID, ""))
 
@@ -1205,8 +1244,11 @@ func TestAppInitializeAICCRejectsInvalidOrganizationModelConfig(t *testing.T) {
 func TestAppInitializeAICCRevisionStampFailureRetries(t *testing.T) {
 	store := newAppInitStub(t)
 	store.app.AppType = string(domain.AppTypeAICC)
+	store.aiccConfig.Revision = 7
 	store.appliedAICCRevisionErr = errors.New("数据库暂时不可用")
-	orch := &fakeOrchestrator{}
+	rolloutEvents := []string{}
+	store.rolloutEvents = &rolloutEvents
+	orch := &fakeOrchestrator{rolloutEvents: &rolloutEvents}
 	handler := NewAppInitializeHandler(store, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}, AppInitializeConfig{
 		Cipher: testCipher(t), AICCModelValidator: testAllowAICCModelValidator(),
 		ResolveAICCRuntimeImage: func() (string, bool) { return "registry.example.com/aicc:v2", true },
@@ -1220,9 +1262,18 @@ func TestAppInitializeAICCRevisionStampFailureRetries(t *testing.T) {
 	assert.Equal(t, domain.AppStatusError, store.app.Status)
 	assert.NotContains(t, store.lifecycleEvents, "status:"+domain.AppStatusBindingWaiting)
 	store.appliedAICCRevisionErr = nil
+	// 配置在 stamp 失败后的重试窗口继续前进；第二次必须先重启新 generation，不能把 8 直接盖到旧 Pod。
+	store.aiccConfig.Revision = 8
 
 	require.NoError(t, handler.Handle(context.Background(), buildJob(t, store.app.ID, "")))
 	assert.Equal(t, store.aiccConfig.Revision, store.appliedAICCRevision)
+	require.Len(t, orch.ensureAppCalls, 2)
+	assert.Equal(t, int32(7), orch.ensureAppCalls[0].ConfigRevision)
+	assert.Equal(t, int32(8), orch.ensureAppCalls[1].ConfigRevision)
+	assert.Equal(t, []string{
+		"wait-rollout:" + testAppID,
+		"restart:" + testAppID, "wait-rollout:" + testAppID, "stamp:8",
+	}, rolloutEvents)
 }
 
 // TestAppInitialize_AICCAllowsDirectPublicEgress 验证 AICC 未配置专属网页检索代理时仍可初始化，

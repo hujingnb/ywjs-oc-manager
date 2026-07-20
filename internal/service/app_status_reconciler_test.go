@@ -4,6 +4,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -48,6 +49,8 @@ type fakeAppStatusStore struct {
 	createdJobs  []sqlc.CreateJobParams
 	// runtimePhase 按 app id 记录最后一次 SetAppRuntimePhase 写入的 runtime_phase 值，供 Tick 断言。
 	runtimePhase map[string]string
+	// rolloutJobs 模拟 jobs 表，用于验证只有携带当前 app marker 的活跃 rollout 才拥有 Ready 门禁。
+	rolloutJobs []sqlc.Job
 }
 
 func newFakeAppStatusStore() *fakeAppStatusStore {
@@ -87,6 +90,23 @@ func (f *fakeAppStatusStore) SetAppRuntimeSnapshot(_ context.Context, arg sqlc.S
 // SetAppRuntimePhase 记录最新一次写入的 runtime_phase（覆盖同 id 上次记录），供 Tick 断言使用。
 func (f *fakeAppStatusStore) SetAppRuntimePhase(_ context.Context, arg sqlc.SetAppRuntimePhaseParams) error {
 	f.runtimePhase[arg.ID] = arg.RuntimePhase
+	return nil
+}
+
+// SetAppRuntimePhaseReadyUnlessActiveAICCModelRollout 模拟任务 ownership SQL：仅活跃且 marker 匹配的 rollout 阻止 Ready。
+func (f *fakeAppStatusStore) SetAppRuntimePhaseReadyUnlessActiveAICCModelRollout(_ context.Context, appID string) error {
+	for _, job := range f.rolloutJobs {
+		if job.Type != domain.JobTypeAICCModelRollout || (job.Status != domain.JobStatusPending && job.Status != domain.JobStatusRunning) {
+			continue
+		}
+		var payload struct {
+			RepairAppID string `json:"repair_app_id"`
+		}
+		if json.Unmarshal(job.PayloadJson, &payload) == nil && payload.RepairAppID == appID {
+			return nil
+		}
+	}
+	f.runtimePhase[appID] = domain.RuntimePhaseReady
 	return nil
 }
 
@@ -153,6 +173,19 @@ func (f *fakeOrch) Status(_ context.Context, appID string) (k8sorch.AppStatus, e
 // 以下方法仅为实现 k8sorch.Orchestrator 接口，reconciler 测试不会调用。
 func (f *fakeOrch) EnsureApp(_ context.Context, _ k8sorch.AppSpec) error { panic("not used") }
 func (f *fakeOrch) WaitReady(_ context.Context, _ string, _ time.Duration, _ func(k8sorch.AppStatus)) error {
+	panic("not used")
+}
+
+// WaitRolloutReady 满足编排接口；状态 reconciler 本身不触发模型 rollout。
+func (f *fakeOrch) WaitRolloutReady(context.Context, string, int64, time.Duration, func(k8sorch.AppStatus)) error {
+	panic("not used")
+}
+
+// DeploymentGeneration 在 reconciler 测试中不会使用。
+func (f *fakeOrch) DeploymentGeneration(context.Context, string) (int64, error) { panic("not used") }
+
+// RolloutRestartAndGetGeneration 在 reconciler 测试中不会使用。
+func (f *fakeOrch) RolloutRestartAndGetGeneration(context.Context, string) (int64, error) {
 	panic("not used")
 }
 func (f *fakeOrch) Scale(_ context.Context, _ string, _ int32) error { panic("not used") }
@@ -612,6 +645,8 @@ func TestTick_WritesRuntimePhase(t *testing.T) {
 	store.rows = []string{appID1, appID2}
 	store.apps[appID1] = appWithStatus(appID1, domain.AppStatusRunning)
 	store.apps[appID2] = appWithStatus(appID2, domain.AppStatusRunning)
+	// 普通 Start/Restart 会先写 restarting；没有 rollout ownership 时 Ready 必须能正常收敛。
+	store.runtimePhase[appID1] = domain.RuntimePhaseRestarting
 
 	orch := newFakeOrch()
 	// appID1：pod Running 且 Ready，携带 Raw。
@@ -635,6 +670,61 @@ func TestTick_WritesRuntimePhase(t *testing.T) {
 	// appID2 pod Pending → runtime_phase 应为 restarting（重建空窗，非坏死）。
 	assert.Equal(t, domain.RuntimePhaseRestarting, store.runtimePhase[appID2],
 		"pod Pending(重建空窗)时 runtime_phase 应写 restarting")
+}
+
+// TestTickDoesNotOverrideRolloutRestartingWithStaleReadyPod 验证 rollout 已先写 restarting 后，
+// reconciler 即使仍观察到旧 Pod Ready 也不能覆盖；generation gate handler 完成后才有权写 ready。
+func TestTickDoesNotOverrideRolloutRestartingWithStaleReadyPod(t *testing.T) {
+	store := newFakeAppStatusStore()
+	store.rows = []string{appID1}
+	store.apps[appID1] = appWithStatus(appID1, domain.AppStatusRunning)
+	store.runtimePhase[appID1] = domain.RuntimePhaseRestarting
+	store.rolloutJobs = []sqlc.Job{{
+		Type: domain.JobTypeAICCModelRollout, Status: domain.JobStatusPending,
+		PayloadJson: []byte(`{"repair_app_id":"` + appID1 + `","repair_target_generation":2}`),
+	}}
+	orch := newFakeOrch()
+	orch.set(appID1, k8sorch.AppStatus{Phase: "Running", Ready: true}, nil)
+
+	reconciler := NewAppStatusReconciler(store, orch, &fakeNotifier{})
+	require.NoError(t, reconciler.Tick(context.Background()))
+
+	assert.Equal(t, domain.RuntimePhaseRestarting, store.runtimePhase[appID1])
+}
+
+// TestTickAllowsReadyWithoutActiveRolloutOwnership 验证普通启动/重启，以及 terminal/已清 marker 的 rollout
+// 均不持有 app；旧 restarting 必须随 Ready Pod 正常收敛为 ready。
+func TestTickAllowsReadyWithoutActiveRolloutOwnership(t *testing.T) {
+	testCases := []struct {
+		name string
+		jobs []sqlc.Job
+	}{
+		// 普通 Start/Restart：没有 rollout job，不得阻止 Ready 收敛。
+		{name: "普通生命周期无 rollout", jobs: nil},
+		// rollout 已失败：terminal job 不再拥有 app。
+		{name: "failed marker", jobs: []sqlc.Job{{Type: domain.JobTypeAICCModelRollout, Status: domain.JobStatusFailed, PayloadJson: []byte(`{"repair_app_id":"` + appID1 + `"}`)}}},
+		// rollout 已成功：terminal job 不再拥有 app。
+		{name: "succeeded marker", jobs: []sqlc.Job{{Type: domain.JobTypeAICCModelRollout, Status: domain.JobStatusSucceeded, PayloadJson: []byte(`{"repair_app_id":"` + appID1 + `"}`)}}},
+		// 活跃任务已清 marker：不再拥有任何 app。
+		{name: "cleared marker", jobs: []sqlc.Job{{Type: domain.JobTypeAICCModelRollout, Status: domain.JobStatusPending, PayloadJson: []byte(`{"org_id":"org-1"}`)}}},
+	}
+	for _, testCase := range testCases {
+		// 每个子测试覆盖一种不应阻止普通 Ready 收敛的 ownership 边界。
+		t.Run(testCase.name, func(t *testing.T) {
+			store := newFakeAppStatusStore()
+			store.rows = []string{appID1}
+			store.apps[appID1] = appWithStatus(appID1, domain.AppStatusRunning)
+			store.runtimePhase[appID1] = domain.RuntimePhaseRestarting
+			store.rolloutJobs = testCase.jobs
+			orch := newFakeOrch()
+			orch.set(appID1, k8sorch.AppStatus{Phase: "Running", Ready: true}, nil)
+
+			reconciler := NewAppStatusReconciler(store, orch, &fakeNotifier{})
+			require.NoError(t, reconciler.Tick(context.Background()))
+
+			assert.Equal(t, domain.RuntimePhaseReady, store.runtimePhase[appID1])
+		})
+	}
 }
 
 // ============================================================

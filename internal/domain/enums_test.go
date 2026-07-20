@@ -85,6 +85,11 @@ func TestWebPublishJobTypeRegistered(t *testing.T) {
 	assert.True(t, IsJobType(JobTypeWebPublishProvision))
 }
 
+// TestAICCModelRolloutJobTypeRegistered 验证逐台模型切换任务已登记，避免 worker 拒绝持久任务。
+func TestAICCModelRolloutJobTypeRegistered(t *testing.T) {
+	assert.True(t, IsJobType(JobTypeAICCModelRollout))
+}
+
 // TestSiteStatus 覆盖：三个合法站点状态通过校验，非法值拒绝，
 // 保证写库前 status 字段取值受 CHECK 约束对齐。
 func TestSiteStatus(t *testing.T) {

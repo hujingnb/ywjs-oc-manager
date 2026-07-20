@@ -3,9 +3,11 @@ package k8sorch
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
@@ -107,4 +109,20 @@ func TestRoutingOrchestratorRejectsUnknownAppType(t *testing.T) {
 	// 空类型也不具备明确 namespace 归属，必须与未知枚举一致 fail-closed。
 	_, err = r.target(context.Background(), "empty")
 	assert.Error(t, err)
+}
+
+// TestRoutingOrchestratorWaitRolloutReadyRoutesAICC 验证 generation 就绪检查透传到 AICC namespace，
+// 不会误查普通应用 namespace 中同名或缺失的 Deployment。
+func TestRoutingOrchestratorWaitRolloutReadyRoutesAICC(t *testing.T) {
+	replicas := int32(1)
+	cs := fake.NewSimpleClientset(&appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "app-aicc", Namespace: "oc-aicc", Generation: 3},
+		Spec:       appsv1.DeploymentSpec{Replicas: &replicas},
+		Status: appsv1.DeploymentStatus{
+			ObservedGeneration: 3, UpdatedReplicas: 1, AvailableReplicas: 1,
+		},
+	})
+	router := NewRoutingOrchestrator(NewKubernetesAdapter(cs, "oc-apps"), NewAICCKubernetesAdapter(cs, "oc-aicc"), routingResolver{"aicc": domain.AppTypeAICC})
+
+	require.NoError(t, router.WaitRolloutReady(context.Background(), "aicc", 3, time.Second, nil))
 }

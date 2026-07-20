@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	null "github.com/guregu/null/v5"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
@@ -93,6 +95,31 @@ func TestWorkerTickMarksFailedForUnknownType(t *testing.T) {
 	require.Equal(t, domain.JobStatusFailed, store.snapshot("job-1").Status)
 }
 
+// TestWorkerTickDefersWithoutConsumingAttempt 验证 handler 请求 defer 时，worker 释放槽位并把任务
+// 原样退回 pending：不走普通 RetryJob/MarkJobFailed，且抵消 MarkJobRunning 增加的 attempts。
+func TestWorkerTickDefersWithoutConsumingAttempt(t *testing.T) {
+	store := newJobStoreStub(t)
+	registry := handlers.NewRegistry()
+	registry.MustRegister("deferred", func(context.Context, sqlc.Job) error {
+		return &handlers.DeferredJobError{Delay: 2 * time.Second, Reason: "等待同企业旧任务"}
+	})
+	queue := &queueStub{ids: []string{store.id("job-1")}}
+	store.put("job-1", sqlc.Job{ID: store.id("job-1"), Type: "deferred", Status: domain.JobStatusPending, Attempts: 1, MaxAttempts: 2, LastError: null.StringFrom("旧错误")})
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	worker := New(store, queue, registry, Config{WorkerID: "w1"})
+	worker.SetClock(func() time.Time { return now })
+
+	require.NoError(t, worker.Tick(context.Background()))
+	job := store.snapshot("job-1")
+	assert.Equal(t, domain.JobStatusPending, job.Status)
+	assert.Equal(t, int32(1), job.Attempts)
+	assert.Equal(t, now.Add(2*time.Second), job.RunAfter)
+	assert.False(t, job.LastError.Valid)
+	assert.Equal(t, 1, store.deferCalls)
+	assert.Zero(t, store.retryCalls)
+	assert.Zero(t, store.markFailedCalls)
+}
+
 type queueStub struct {
 	ids []string
 }
@@ -110,6 +137,9 @@ type jobStoreStub struct {
 	jobs             map[string]sqlc.Job // 以 name 为 key 存储 job
 	idByName         map[string]string   // name → string uuid
 	markRunningCalls int
+	deferCalls       int
+	retryCalls       int
+	markFailedCalls  int
 }
 
 func newJobStoreStub(t *testing.T) *jobStoreStub {
@@ -182,6 +212,7 @@ func (s *jobStoreStub) MarkJobSucceeded(_ context.Context, id string) error {
 
 // MarkJobFailed 更新 job 状态为 failed；:exec 语义仅返回 error。
 func (s *jobStoreStub) MarkJobFailed(_ context.Context, arg sqlc.MarkJobFailedParams) error {
+	s.markFailedCalls++
 	name, job := s.findByID(arg.ID)
 	job.Status = domain.JobStatusFailed
 	job.LastError = arg.LastError
@@ -191,6 +222,7 @@ func (s *jobStoreStub) MarkJobFailed(_ context.Context, arg sqlc.MarkJobFailedPa
 
 // RetryJob 把 job 重置回 pending 并设退避时间；:exec 语义仅返回 error。
 func (s *jobStoreStub) RetryJob(_ context.Context, arg sqlc.RetryJobParams) error {
+	s.retryCalls++
 	name, job := s.findByID(arg.ID)
 	job.Status = domain.JobStatusPending
 	job.RunAfter = arg.RunAfter
@@ -199,3 +231,17 @@ func (s *jobStoreStub) RetryJob(_ context.Context, arg sqlc.RetryJobParams) erro
 	return nil
 }
 
+// DeferJob 抵消本次领取增加的 attempts，并按指定时间把任务退回 pending。
+func (s *jobStoreStub) DeferJob(_ context.Context, arg sqlc.DeferJobParams) (int64, error) {
+	s.deferCalls++
+	name, job := s.findByID(arg.ID)
+	job.Status = domain.JobStatusPending
+	job.RunAfter = arg.RunAfter
+	if job.Attempts > 0 {
+		job.Attempts--
+	}
+	job.LastError = null.String{}
+	job.LockedBy = null.String{}
+	s.jobs[name] = job
+	return 1, nil
+}

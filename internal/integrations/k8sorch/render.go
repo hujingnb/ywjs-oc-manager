@@ -1,6 +1,8 @@
 package k8sorch
 
 import (
+	"strconv"
+
 	"oc-manager/internal/domain"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -398,6 +400,12 @@ func RenderDeployment(spec AppSpec, namespace string) *appsv1.Deployment {
 				},
 			},
 		},
+	}
+	// AICC bootstrap 配置 revision 进入 pod template，EnsureApp 才会为模型变更产生可核验 generation。
+	if domain.IsAICCAppType(spec.AppType) && spec.ConfigRevision > 0 {
+		dep.Spec.Template.Annotations = map[string]string{
+			"oc-manager.ywjs.com/aicc-config-revision": strconv.FormatInt(int64(spec.ConfigRevision), 10),
+		}
 	}
 	// 将 AppSpec.Labels 合并到 Deployment 与 pod template 的 label，支持外部选择器扩展。
 	for k, v := range spec.Labels {

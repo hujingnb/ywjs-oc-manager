@@ -126,6 +126,19 @@ UPDATE apps
 SET runtime_phase = ?, updated_at = now()
 WHERE id = ?;
 
+-- name: SetAppRuntimePhaseReadyUnlessActiveAICCModelRollout :exec
+-- 仅携带当前 app repair marker 的活跃 rollout 拥有 Ready 门禁；普通启动/重启不受影响。
+UPDATE apps
+SET runtime_phase = 'ready', updated_at = now()
+WHERE apps.id = sqlc.arg(app_id)
+  AND NOT EXISTS (
+      SELECT 1
+      FROM jobs
+      WHERE jobs.type = 'aicc_model_rollout'
+        AND jobs.status IN ('pending', 'running')
+        AND CAST(jobs.payload_json->>'$.repair_app_id' AS CHAR) = apps.id
+  );
+
 -- name: SetAppRestartPolicy :exec
 -- 管理员 PATCH /apps/:appId/restart-policy 写入；mode/max_per_window/window_seconds 校验在 service 层。
 UPDATE apps

@@ -68,6 +68,24 @@ func (r *RoutingOrchestrator) WaitReady(ctx context.Context, id string, timeout 
 	}
 	return o.WaitReady(ctx, id, timeout, cb)
 }
+
+// WaitRolloutReady 把 Deployment generation 就绪检查路由到应用所属 namespace。
+func (r *RoutingOrchestrator) WaitRolloutReady(ctx context.Context, id string, targetGeneration int64, timeout time.Duration, cb func(AppStatus)) error {
+	o, err := r.target(ctx, id)
+	if err != nil {
+		return err
+	}
+	return o.WaitRolloutReady(ctx, id, targetGeneration, timeout, cb)
+}
+
+// DeploymentGeneration 把当前 Deployment generation 查询路由到应用所属 namespace。
+func (r *RoutingOrchestrator) DeploymentGeneration(ctx context.Context, id string) (int64, error) {
+	o, err := r.target(ctx, id)
+	if err != nil {
+		return 0, err
+	}
+	return o.DeploymentGeneration(ctx, id)
+}
 func (r *RoutingOrchestrator) Scale(ctx context.Context, id string, n int32) error {
 	o, e := r.target(ctx, id)
 	if e != nil {
@@ -116,6 +134,15 @@ func (r *RoutingOrchestrator) RolloutRestart(ctx context.Context, id string) err
 		return e
 	}
 	return o.RolloutRestart(ctx, id)
+}
+
+// RolloutRestartAndGetGeneration 路由滚动重启并透传本次 Update 返回的 generation。
+func (r *RoutingOrchestrator) RolloutRestartAndGetGeneration(ctx context.Context, id string) (int64, error) {
+	o, err := r.target(ctx, id)
+	if err != nil {
+		return 0, err
+	}
+	return o.RolloutRestartAndGetGeneration(ctx, id)
 }
 
 // PatchSecretKeys 把渠道凭据写到应用所属 namespace 的 Secret。
