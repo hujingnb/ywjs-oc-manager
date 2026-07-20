@@ -64,14 +64,14 @@ func TestAICCPlatformPromptRolloutCoordinatorCreatesSuccessorOnlyAfterOldJobSucc
 	assert.Empty(t, store.jobs)
 	assert.Empty(t, notifier.jobIDs)
 
-	// 场景：worker 已将旧任务成功落库，当前 hash 仍有落后客服时恰好创建并通知一个 successor。
+	// 场景：成功前 hook 排除当前 running 旧任务；当前 hash 仍有落后客服时恰好创建并通知一个 successor。
 	store.hasActive = false
-	require.NoError(t, coordinator.EnqueueIfNeeded(context.Background()))
+	require.NoError(t, coordinator.EnqueueIfNeededExcluding(context.Background(), "old-running-job"))
 	require.Len(t, store.jobs, 1)
 	assert.Equal(t, []string{store.jobs[0].ID}, notifier.jobIDs)
 
 	// 场景：同一成功后回调被重复触发时，新任务已 active，singleton 语义不再重复创建。
-	require.NoError(t, coordinator.EnqueueIfNeeded(context.Background()))
+	require.NoError(t, coordinator.EnqueueIfNeededExcluding(context.Background(), "old-running-job"))
 	assert.Len(t, store.jobs, 1)
 	assert.Len(t, notifier.jobIDs, 1)
 }
@@ -154,6 +154,11 @@ type fakePromptRolloutStore struct {
 
 // HasActiveAICCPlatformPromptRolloutJob 返回测试预置的同类活跃任务状态。
 func (s *fakePromptRolloutStore) HasActiveAICCPlatformPromptRolloutJob(context.Context) (bool, error) {
+	return s.hasActive, s.activeErr
+}
+
+// HasOtherActiveAICCPlatformPromptRolloutJob 模拟排除当前 running 旧任务后的其它活跃任务判断。
+func (s *fakePromptRolloutStore) HasOtherActiveAICCPlatformPromptRolloutJob(context.Context, string) (bool, error) {
 	return s.hasActive, s.activeErr
 }
 

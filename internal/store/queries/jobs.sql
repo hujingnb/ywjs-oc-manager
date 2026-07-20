@@ -36,6 +36,15 @@ SELECT EXISTS (
       AND status IN ('pending', 'running')
 );
 
+-- name: HasOtherActiveAICCPlatformPromptRolloutJob :one
+-- 成功前后继调度排除当前 running 旧任务，但仍阻止任何其它 pending/running 同类任务。
+SELECT EXISTS (
+    SELECT 1 FROM jobs
+    WHERE type = 'aicc_platform_prompt_rollout'
+      AND status IN ('pending', 'running')
+      AND id <> ?
+);
+
 -- name: LockAICCPlatformPromptRolloutGuard :one
 -- 事务先锁住唯一 guard 行，再判断活跃任务、落后客服并创建任务，消除多副本启动的 TOCTOU。
 SELECT singleton

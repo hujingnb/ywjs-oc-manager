@@ -241,6 +241,8 @@ type Querier interface {
 	HardDeleteOrganization(ctx context.Context, id string) error
 	// 全局平台提示词任务只允许一个 pending/running job，避免多个启动副本重复重启客服。
 	HasActiveAICCPlatformPromptRolloutJob(ctx context.Context) (bool, error)
+	// 成功前后继调度排除当前 running 旧任务，但仍阻止任何其它 pending/running 同类任务。
+	HasOtherActiveAICCPlatformPromptRolloutJob(ctx context.Context, id string) (bool, error)
 	// 仅检查有效、活跃的 AICC；平台提示词尚未被 bootstrap 写入的客服需要静默重启。
 	HasStaleAICCPlatformPromptAgents(ctx context.Context, appliedPlatformPromptHash string) (bool, error)
 	// status、尝试上限、到期时间和会话无 processing 任务均在同一 UPDATE 中判断，避免 dispatcher 先读后写造成重复租约。

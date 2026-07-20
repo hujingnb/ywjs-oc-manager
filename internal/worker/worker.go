@@ -154,15 +154,14 @@ func (w *Worker) processJobID(ctx context.Context, id string) error {
 		}
 		return w.handleHandlerError(ctx, job, err)
 	}
+	// 成功前回调失败走现有 retry，防止后继调度错误发生在 succeeded 后而永久丢失。
+	if beforeSuccess := w.registry.LookupBeforeSuccess(job.Type); beforeSuccess != nil {
+		if err := beforeSuccess(ctx, job); err != nil {
+			return w.handleHandlerError(ctx, job, fmt.Errorf("job 成功前回调失败: %w", err))
+		}
+	}
 	if err := w.store.MarkJobSucceeded(ctx, job.ID); err != nil {
 		return fmt.Errorf("标记 job 成功失败: %w", err)
-	}
-	// 后继调度必须在 succeeded 事实落库后执行；running 旧任务仍会被 singleton 协调器视为活跃，
-	// 从而拒绝创建当前提示词 hash 的 successor。
-	if afterSuccess := w.registry.LookupAfterSuccess(job.Type); afterSuccess != nil {
-		if err := afterSuccess(ctx, job); err != nil {
-			return fmt.Errorf("job 成功后回调失败: %w", err)
-		}
 	}
 	return nil
 }

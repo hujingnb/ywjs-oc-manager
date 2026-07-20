@@ -15,6 +15,7 @@ import (
 type AICCPlatformPromptRolloutStore interface {
 	// HasActiveAICCPlatformPromptRolloutJob 判断是否已有同类 pending/running job，防止启动副本重复创建。
 	HasActiveAICCPlatformPromptRolloutJob(ctx context.Context) (bool, error)
+	HasOtherActiveAICCPlatformPromptRolloutJob(ctx context.Context, id string) (bool, error)
 	// HasStaleAICCPlatformPromptAgents 判断是否仍有活跃客服尚未 bootstrap 当前提示词 hash。
 	HasStaleAICCPlatformPromptAgents(ctx context.Context, promptHash string) (bool, error)
 	// CreateJob 持久化任务，成功后才允许通知队列。
@@ -40,12 +41,31 @@ func NewAICCPlatformPromptRolloutCoordinator(tx AICCPlatformPromptRolloutTxRunne
 
 // EnqueueIfNeeded 仅在没有同类活跃任务且存在提示词落后客服时创建任务，并在写入成功后通知 worker。
 func (c *AICCPlatformPromptRolloutCoordinator) EnqueueIfNeeded(ctx context.Context) error {
+	return c.enqueueIfNeeded(ctx, "")
+}
+
+// EnqueueIfNeededExcluding 在当前旧任务仍 running 的成功前回调中创建后继；只排除自身，仍阻止其它活跃任务。
+func (c *AICCPlatformPromptRolloutCoordinator) EnqueueIfNeededExcluding(ctx context.Context, excludeJobID string) error {
+	if excludeJobID == "" {
+		return c.EnqueueIfNeeded(ctx)
+	}
+	return c.enqueueIfNeeded(ctx, excludeJobID)
+}
+
+// enqueueIfNeeded 在 singleton guard 事务内完成活跃任务判断与创建，excludeJobID 仅用于当前成功前任务。
+func (c *AICCPlatformPromptRolloutCoordinator) enqueueIfNeeded(ctx context.Context, excludeJobID string) error {
 	if c.tx == nil {
 		return fmt.Errorf("AICC 平台提示词发布任务事务 runner 未配置")
 	}
 	var jobID string
 	err := c.tx.WithAICCPlatformPromptRolloutTx(ctx, func(store AICCPlatformPromptRolloutStore) error {
-		active, err := store.HasActiveAICCPlatformPromptRolloutJob(ctx)
+		var active bool
+		var err error
+		if excludeJobID == "" {
+			active, err = store.HasActiveAICCPlatformPromptRolloutJob(ctx)
+		} else {
+			active, err = store.HasOtherActiveAICCPlatformPromptRolloutJob(ctx, excludeJobID)
+		}
 		if err != nil {
 			return fmt.Errorf("检查活跃 AICC 平台提示词发布任务失败: %w", err)
 		}

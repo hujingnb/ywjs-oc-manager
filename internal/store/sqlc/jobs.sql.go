@@ -220,6 +220,23 @@ func (q *Queries) HasActiveAICCPlatformPromptRolloutJob(ctx context.Context) (bo
 	return exists, err
 }
 
+const hasOtherActiveAICCPlatformPromptRolloutJob = `-- name: HasOtherActiveAICCPlatformPromptRolloutJob :one
+SELECT EXISTS (
+    SELECT 1 FROM jobs
+    WHERE type = 'aicc_platform_prompt_rollout'
+      AND status IN ('pending', 'running')
+      AND id <> ?
+)
+`
+
+// 成功前后继调度排除当前 running 旧任务，但仍阻止任何其它 pending/running 同类任务。
+func (q *Queries) HasOtherActiveAICCPlatformPromptRolloutJob(ctx context.Context, id string) (bool, error) {
+	row := q.db.QueryRowContext(ctx, hasOtherActiveAICCPlatformPromptRolloutJob, id)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const listReadyJobs = `-- name: ListReadyJobs :many
 SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
 FROM jobs
