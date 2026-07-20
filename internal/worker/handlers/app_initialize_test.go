@@ -1203,6 +1203,33 @@ func TestAppInitialize_AICCRunningImageDriftTriggersSilentRestart(t *testing.T) 
 	assert.Equal(t, nextImage, store.lastAppliedVersion.AppliedImageRef)
 }
 
+// TestAppInitialize_AICCBindingWaitingImageDriftTriggersSilentRestart 验证未绑定外部渠道的在线客服
+// 仍会执行镜像升级和 HPA 收敛，不会被 binding_waiting 幂等分支提前返回。
+func TestAppInitialize_AICCBindingWaitingImageDriftTriggersSilentRestart(t *testing.T) {
+	store := newAppInitStub(t)
+	store.app.AppType = string(domain.AppTypeAICC)
+	store.app.VersionID = null.String{}
+	store.app.Status = domain.AppStatusBindingWaiting
+	store.app.AppliedImageRef = "registry.example.com/aicc:v1-old"
+	store.aiccAgent = sqlc.AiccAgent{ID: "agent-1", AppID: store.app.ID, OrgID: store.app.OrgID}
+	store.aiccConfig = sqlc.OrganizationAiccConfig{OrgID: store.app.OrgID, Enabled: true, Model: null.StringFrom("qwen-max"), Revision: 8}
+	const nextImage = "registry.example.com/aicc:v2"
+	rolloutEvents := []string{}
+	handler := NewAppInitializeHandler(store, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}, AppInitializeConfig{
+		Cipher:             testCipher(t),
+		AICCModelValidator: testAllowAICCModelValidator(),
+		ResolveAICCRuntimeImage: func() (string, bool) {
+			return nextImage, true
+		},
+	})
+	handler.SetOrchestrator(&fakeOrchestrator{rolloutEvents: &rolloutEvents}, AppInitializeK8sConfig{})
+
+	require.NoError(t, handler.Handle(context.Background(), buildJob(t, store.app.ID, "")))
+	assert.Contains(t, rolloutEvents, "restart:"+testAppID)
+	assert.Contains(t, rolloutEvents, "wait-rollout:"+testAppID)
+	assert.Equal(t, nextImage, store.lastAppliedVersion.AppliedImageRef)
+}
+
 // TestAppInitializeAICCStampsRevisionBeforeBindingWaiting 验证 AICC 在 pod Ready 后
 // 先确认配置 revision，再进入幂等终态，避免两次写库之间崩溃后重试永久漏 stamp。
 func TestAppInitializeAICCStampsRevisionBeforeBindingWaiting(t *testing.T) {

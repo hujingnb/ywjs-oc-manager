@@ -26,6 +26,7 @@
 //   - starting → binding_waiting：容器健康检查通过后等渠道扫码；
 //   - 任意 init 子状态 → error：失败收敛到 error，last_error_status 记录来源阶段以便排障；
 //   - binding_waiting → binding_failed：渠道扫码超时或 token 过期；
+//   - binding_waiting → pulling_runtime_image：仅 AICC 后台镜像升级任务使用；
 //   - binding_failed → binding_waiting：用户手动重启绑定流程；
 //   - binding_failed → error：多次失败后用户放弃或自动收敛；
 //   - running → error：运行时容器异常退出，收敛到 error 等待人工或重试；
@@ -65,10 +66,12 @@ var appTransitions = map[AppTransition]struct{}{
 	// binding / running 段：渠道绑定与容器运行状态切换。
 	{From: AppStatusBindingWaiting, To: AppStatusRunning}:       {},
 	{From: AppStatusBindingWaiting, To: AppStatusBindingFailed}: {},
-	{From: AppStatusBindingFailed, To: AppStatusBindingWaiting}: {},
-	{From: AppStatusBindingFailed, To: AppStatusError}:          {},
-	{From: AppStatusRunning, To: AppStatusStopped}:              {},
-	{From: AppStatusRunning, To: AppStatusError}:                {},
+	// AICC 无外部渠道绑定也可处于 binding_waiting；镜像升级任务需重新进入初始化阶段。
+	{From: AppStatusBindingWaiting, To: AppStatusPullingRuntimeImage}: {},
+	{From: AppStatusBindingFailed, To: AppStatusBindingWaiting}:       {},
+	{From: AppStatusBindingFailed, To: AppStatusError}:                {},
+	{From: AppStatusRunning, To: AppStatusStopped}:                    {},
+	{From: AppStatusRunning, To: AppStatusError}:                      {},
 	// AICC 运行时镜像升级由后台任务自动重新进入初始化阶段；普通实例不会从 handler 走此路径。
 	{From: AppStatusRunning, To: AppStatusPullingRuntimeImage}: {},
 	{From: AppStatusStopped, To: AppStatusRunning}:             {},

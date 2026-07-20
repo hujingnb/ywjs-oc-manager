@@ -260,7 +260,7 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	// 触发的镜像重建在 transitionTo 阶段已经把行推到 binding_waiting，但若此时
 	// channel_bindings 已是 bound（凭证保留在 k8s Secret，hermes 容器重启后无需
 	// 重新扫码），就直接续推到 running，让概览页与渠道页状态收敛。
-	if app.Status == domain.AppStatusBindingWaiting {
+	if app.Status == domain.AppStatusBindingWaiting && !domain.IsAICCAppType(domain.AppType(app.AppType)) {
 		if err := h.promoteIfChannelBound(ctx, &app); err != nil {
 			return err
 		}
@@ -271,7 +271,7 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	}
 	// starting/error(starting) 表示上轮已创建或等待过 Deployment 但未完成 stamp；重入需强制新 generation。
 	aiccStartingReentry := domain.IsAICCAppType(domain.AppType(app.AppType)) &&
-		(app.Status == domain.AppStatusRunning || app.Status == domain.AppStatusStarting || (app.Status == domain.AppStatusError && app.LastErrorStatus.Valid && app.LastErrorStatus.String == domain.AppStatusStarting))
+		(app.Status == domain.AppStatusRunning || app.Status == domain.AppStatusBindingWaiting || app.Status == domain.AppStatusStarting || (app.Status == domain.AppStatusError && app.LastErrorStatus.Valid && app.LastErrorStatus.String == domain.AppStatusStarting))
 
 	resolved, err := h.resolveInitializeConfig(ctx, app)
 	if err != nil {

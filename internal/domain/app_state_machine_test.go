@@ -25,14 +25,15 @@ func TestIsAppTransitionAllowed_LegalTransitions(t *testing.T) {
 		{AppStatusStarting, AppStatusBindingWaiting},              // 容器健康检查通过后等渠道扫码
 
 		// binding / running 段：渠道绑定与容器运行状态切换。
-		{AppStatusBindingWaiting, AppStatusRunning},       // 渠道扫码成功后进入运行态
-		{AppStatusBindingWaiting, AppStatusBindingFailed}, // 扫码超时 / token 过期落到 binding_failed
-		{AppStatusBindingFailed, AppStatusBindingWaiting}, // 用户手动重启绑定
-		{AppStatusBindingFailed, AppStatusError},          // 多次失败后用户放弃或自动收敛
-		{AppStatusRunning, AppStatusStopped},              // 用户主动停止
-		{AppStatusRunning, AppStatusError},                // 运行时容器异常退出
-		{AppStatusStopped, AppStatusRunning},              // 用户重启
-		{AppStatusStopped, AppStatusError},                // 停止状态下底层异常（例如镜像被清理）
+		{AppStatusBindingWaiting, AppStatusRunning},             // 渠道扫码成功后进入运行态
+		{AppStatusBindingWaiting, AppStatusBindingFailed},       // 扫码超时 / token 过期落到 binding_failed
+		{AppStatusBindingWaiting, AppStatusPullingRuntimeImage}, // AICC 等待绑定期间自动升级运行时
+		{AppStatusBindingFailed, AppStatusBindingWaiting},       // 用户手动重启绑定
+		{AppStatusBindingFailed, AppStatusError},                // 多次失败后用户放弃或自动收敛
+		{AppStatusRunning, AppStatusStopped},                    // 用户主动停止
+		{AppStatusRunning, AppStatusError},                      // 运行时容器异常退出
+		{AppStatusStopped, AppStatusRunning},                    // 用户重启
+		{AppStatusStopped, AppStatusError},                      // 停止状态下底层异常（例如镜像被清理）
 
 		// restarting 段：渠道解绑触发 RolloutRestart 重建 pod 的过渡态。
 		{AppStatusRunning, AppStatusRestarting}, // 解绑置位：running → restarting
