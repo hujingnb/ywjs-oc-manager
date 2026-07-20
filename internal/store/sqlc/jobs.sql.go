@@ -108,6 +108,38 @@ func (q *Queries) GetAICCModelRolloutLeaderJob(ctx context.Context, orgID json.R
 	return i, err
 }
 
+const getAICCPlatformPromptRolloutLeaderJob = `-- name: GetAICCPlatformPromptRolloutLeaderJob :one
+SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
+FROM jobs
+WHERE type = 'aicc_platform_prompt_rollout'
+  AND status IN ('pending', 'running')
+ORDER BY created_at ASC, id ASC
+LIMIT 1
+`
+
+// pending/running 任务按创建时间和主键稳定选 leader，供 worker 在重试与多副本下保持顺序。
+func (q *Queries) GetAICCPlatformPromptRolloutLeaderJob(ctx context.Context) (Job, error) {
+	row := q.db.QueryRowContext(ctx, getAICCPlatformPromptRolloutLeaderJob)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Type,
+		&i.Status,
+		&i.Priority,
+		&i.RunAfter,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.PayloadJson,
+		&i.LockedBy,
+		&i.LockedAt,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
 const getJob = `-- name: GetJob :one
 SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
 FROM jobs
@@ -171,6 +203,23 @@ func (q *Queries) GetLatestAppInitJob(ctx context.Context, appID string) (Job, e
 	return i, err
 }
 
+const hasActiveAICCPlatformPromptRolloutJob = `-- name: HasActiveAICCPlatformPromptRolloutJob :one
+SELECT EXISTS (
+    SELECT 1
+    FROM jobs
+    WHERE type = 'aicc_platform_prompt_rollout'
+      AND status IN ('pending', 'running')
+)
+`
+
+// 全局平台提示词任务只允许一个 pending/running job，避免多个启动副本重复重启客服。
+func (q *Queries) HasActiveAICCPlatformPromptRolloutJob(ctx context.Context) (bool, error) {
+	row := q.db.QueryRowContext(ctx, hasActiveAICCPlatformPromptRolloutJob)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const listReadyJobs = `-- name: ListReadyJobs :many
 SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
 FROM jobs
@@ -216,6 +265,21 @@ func (q *Queries) ListReadyJobs(ctx context.Context, limit int32) ([]Job, error)
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockAICCPlatformPromptRolloutGuard = `-- name: LockAICCPlatformPromptRolloutGuard :one
+SELECT singleton
+FROM aicc_platform_prompt_rollout_guards
+WHERE singleton = 1
+FOR UPDATE
+`
+
+// 事务先锁住唯一 guard 行，再判断活跃任务、落后客服并创建任务，消除多副本启动的 TOCTOU。
+func (q *Queries) LockAICCPlatformPromptRolloutGuard(ctx context.Context) (int8, error) {
+	row := q.db.QueryRowContext(ctx, lockAICCPlatformPromptRolloutGuard)
+	var singleton int8
+	err := row.Scan(&singleton)
+	return singleton, err
 }
 
 const lockJobForUpdate = `-- name: LockJobForUpdate :one

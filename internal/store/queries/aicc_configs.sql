@@ -42,6 +42,30 @@ WHERE aa.org_id = ?
 ORDER BY aa.id
 LIMIT ?;
 
+-- name: HasStaleAICCPlatformPromptAgents :one
+-- 仅检查有效、活跃的 AICC；平台提示词尚未被 bootstrap 写入的客服需要静默重启。
+SELECT EXISTS (
+  SELECT 1
+  FROM aicc_agents aa
+  JOIN apps a ON a.id = aa.app_id AND a.deleted_at IS NULL
+  WHERE aa.deleted_at IS NULL
+    AND aa.status = 'active'
+    AND a.app_type = 'aicc'
+    AND a.applied_platform_prompt_hash <> ?
+);
+
+-- name: ListPendingAICCPlatformPromptRolloutAgents :many
+-- 按客服主键稳定领取一台提示词落后的活跃客服，避免并行重启影响公开接待。
+SELECT aa.*
+FROM aicc_agents aa
+JOIN apps a ON a.id = aa.app_id AND a.deleted_at IS NULL
+WHERE aa.deleted_at IS NULL
+  AND aa.status = 'active'
+  AND a.app_type = 'aicc'
+  AND a.applied_platform_prompt_hash <> ?
+ORDER BY aa.id
+LIMIT ?;
+
 -- name: SetAICCAgentAppliedConfigRevision :exec
 -- 条件更新只允许 revision 前进，防止较旧的并发 rollout 覆盖新配置应用进度。
 UPDATE aicc_agents

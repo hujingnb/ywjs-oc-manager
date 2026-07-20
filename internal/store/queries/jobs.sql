@@ -27,6 +27,31 @@ WHERE type = 'aicc_model_rollout'
 ORDER BY created_at ASC, id ASC
 LIMIT 1;
 
+-- name: HasActiveAICCPlatformPromptRolloutJob :one
+-- 全局平台提示词任务只允许一个 pending/running job，避免多个启动副本重复重启客服。
+SELECT EXISTS (
+    SELECT 1
+    FROM jobs
+    WHERE type = 'aicc_platform_prompt_rollout'
+      AND status IN ('pending', 'running')
+);
+
+-- name: LockAICCPlatformPromptRolloutGuard :one
+-- 事务先锁住唯一 guard 行，再判断活跃任务、落后客服并创建任务，消除多副本启动的 TOCTOU。
+SELECT singleton
+FROM aicc_platform_prompt_rollout_guards
+WHERE singleton = 1
+FOR UPDATE;
+
+-- name: GetAICCPlatformPromptRolloutLeaderJob :one
+-- pending/running 任务按创建时间和主键稳定选 leader，供 worker 在重试与多副本下保持顺序。
+SELECT *
+FROM jobs
+WHERE type = 'aicc_platform_prompt_rollout'
+  AND status IN ('pending', 'running')
+ORDER BY created_at ASC, id ASC
+LIMIT 1;
+
 -- name: UpdateJobPayload :execrows
 -- rollout 在外部副作用之间持久化专属恢复标记；仅允许当前 running 任务更新自身 payload。
 UPDATE jobs

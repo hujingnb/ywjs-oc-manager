@@ -40,6 +40,7 @@ sql:
       - internal/migrations/000038_aicc_intent_analysis_retries.up.sql
       - internal/migrations/000039_aicc_resolution_phase.up.sql
       - internal/migrations/000040_aicc_assistant_version_isolation.up.sql
+      - internal/migrations/000041_aicc_platform_prompt_rollout_guard.up.sql
     queries: internal/store/queries
     gen:
       go:

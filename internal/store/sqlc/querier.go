@@ -158,6 +158,8 @@ type Querier interface {
 	GetAICCMessageTaskByMessageID(ctx context.Context, messageID string) (AiccMessageTask, error)
 	// 同企业 pending/running 任务共同参与稳定排序，旧任务失败恢复 pending 后仍不会被新任务抢占。
 	GetAICCModelRolloutLeaderJob(ctx context.Context, orgID json.RawMessage) (Job, error)
+	// pending/running 任务按创建时间和主键稳定选 leader，供 worker 在重试与多副本下保持顺序。
+	GetAICCPlatformPromptRolloutLeaderJob(ctx context.Context) (Job, error)
 	GetAICCSession(ctx context.Context, id string) (AiccSession, error)
 	GetAICCSessionByToken(ctx context.Context, sessionToken string) (AiccSession, error)
 	GetAICCSessionContext(ctx context.Context, sessionID string) (AiccSessionContext, error)
@@ -231,6 +233,10 @@ type Querier interface {
 	// 用于组织创建链路失败时回滚刚刚 INSERT 的孤儿记录。
 	// 正常生命周期不可见此查询；普通"删除"必须走 SoftDeleteOrganization。
 	HardDeleteOrganization(ctx context.Context, id string) error
+	// 全局平台提示词任务只允许一个 pending/running job，避免多个启动副本重复重启客服。
+	HasActiveAICCPlatformPromptRolloutJob(ctx context.Context) (bool, error)
+	// 仅检查有效、活跃的 AICC；平台提示词尚未被 bootstrap 写入的客服需要静默重启。
+	HasStaleAICCPlatformPromptAgents(ctx context.Context, appliedPlatformPromptHash string) (bool, error)
 	// status、尝试上限、到期时间和会话无 processing 任务均在同一 UPDATE 中判断，避免 dispatcher 先读后写造成重复租约。
 	LeaseAICCMessageTask(ctx context.Context, arg LeaseAICCMessageTaskParams) (int64, error)
 	ListAICCAgentKnowledge(ctx context.Context, agentID string) ([]AiccAgentKnowledge, error)
@@ -303,6 +309,8 @@ type Querier interface {
 	ListOrganizations(ctx context.Context, arg ListOrganizationsParams) ([]Organization, error)
 	// 仅选择仍有效且活跃的智能体；app 软删除后不得继续下发企业模型配置。
 	ListPendingAICCModelRolloutAgents(ctx context.Context, arg ListPendingAICCModelRolloutAgentsParams) ([]AiccAgent, error)
+	// 按客服主键稳定领取一台提示词落后的活跃客服，避免并行重启影响公开接待。
+	ListPendingAICCPlatformPromptRolloutAgents(ctx context.Context, arg ListPendingAICCPlatformPromptRolloutAgentsParams) ([]AiccAgent, error)
 	ListPlatformSkills(ctx context.Context) ([]PlatformSkill, error)
 	// 扁平列出某个组织或实例知识库文件，支持按状态和文件名过滤。
 	ListRAGFlowDocumentsByScope(ctx context.Context, arg ListRAGFlowDocumentsByScopeParams) ([]RagflowDocument, error)
@@ -359,6 +367,8 @@ type Querier interface {
 	ListVisibleCustomSkills(ctx context.Context, arg ListVisibleCustomSkillsParams) ([]ListVisibleCustomSkillsRow, error)
 	// 平台管理员全局视图：列出所有企业的发布能力配置。
 	ListWebPublishConfigs(ctx context.Context) ([]OrgWebPublishConfig, error)
+	// 事务先锁住唯一 guard 行，再判断活跃任务、落后客服并创建任务，消除多副本启动的 TOCTOU。
+	LockAICCPlatformPromptRolloutGuard(ctx context.Context) (int8, error)
 	// 全局单行锁只覆盖 admission 检查与消息/任务写入，确保所有 manager 副本观察同一容量事实。
 	LockAICCQueueGovernance(ctx context.Context) (int8, error)
 	LockAICCSessionForUpdate(ctx context.Context, id string) (AiccSession, error)

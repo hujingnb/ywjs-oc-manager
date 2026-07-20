@@ -310,6 +310,29 @@ func TestAICCAssistantVersionIsolationMigration(t *testing.T) {
 	assert.Less(t, normalizeBackupIndex, restoreOrganizationIndex)
 }
 
+// TestAICCPlatformPromptRolloutGuardMigration 验证后续迁移独立扩展任务类型，并持久化 singleton guard 供并发启动串行化。
+func TestAICCPlatformPromptRolloutGuardMigration(t *testing.T) {
+	upBytes, err := FS.ReadFile("000041_aicc_platform_prompt_rollout_guard.up.sql")
+	require.NoError(t, err)
+	downBytes, err := FS.ReadFile("000041_aicc_platform_prompt_rollout_guard.down.sql")
+	require.NoError(t, err)
+	up, down := string(upBytes), string(downBytes)
+
+	// up 必须创建且初始化唯一 guard 行，并在新迁移中而非已应用的 000040 放宽任务类型。
+	assert.Contains(t, up, "CREATE TABLE aicc_platform_prompt_rollout_guards")
+	assert.Contains(t, up, "INSERT INTO aicc_platform_prompt_rollout_guards (singleton) VALUES (1)")
+	assert.Contains(t, up, "'aicc_platform_prompt_rollout'")
+	// down 必须先删除旧代码不认识的任务，再恢复约束并清理 guard 表。
+	deleteIndex := strings.Index(down, "DELETE FROM jobs WHERE type = 'aicc_platform_prompt_rollout'")
+	constraintIndex := strings.Index(down, "ADD CONSTRAINT jobs_type_check")
+	dropGuardIndex := strings.Index(down, "DROP TABLE aicc_platform_prompt_rollout_guards")
+	require.NotEqual(t, -1, deleteIndex)
+	require.NotEqual(t, -1, constraintIndex)
+	require.NotEqual(t, -1, dropGuardIndex)
+	assert.Less(t, deleteIndex, constraintIndex)
+	assert.Less(t, constraintIndex, dropGuardIndex)
+}
+
 // TestAppsAppTypeMigrationGuardrails 验证应用类型迁移会保留 AICC 标记语义，
 // 并将普通应用的 owner 唯一约束限定在未删除的 standard 应用。
 func TestAppsAppTypeMigrationGuardrails(t *testing.T) {

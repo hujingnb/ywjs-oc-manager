@@ -67,6 +67,26 @@ func (q *Queries) GetOrganizationAICCConfigForUpdate(ctx context.Context, orgID 
 	return i, err
 }
 
+const hasStaleAICCPlatformPromptAgents = `-- name: HasStaleAICCPlatformPromptAgents :one
+SELECT EXISTS (
+  SELECT 1
+  FROM aicc_agents aa
+  JOIN apps a ON a.id = aa.app_id AND a.deleted_at IS NULL
+  WHERE aa.deleted_at IS NULL
+    AND aa.status = 'active'
+    AND a.app_type = 'aicc'
+    AND a.applied_platform_prompt_hash <> ?
+)
+`
+
+// 仅检查有效、活跃的 AICC；平台提示词尚未被 bootstrap 写入的客服需要静默重启。
+func (q *Queries) HasStaleAICCPlatformPromptAgents(ctx context.Context, appliedPlatformPromptHash string) (bool, error) {
+	row := q.db.QueryRowContext(ctx, hasStaleAICCPlatformPromptAgents, appliedPlatformPromptHash)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const listOrganizationAICCConfigs = `-- name: ListOrganizationAICCConfigs :many
 SELECT org_id, enabled, model, agent_limit, revision, created_at, updated_at FROM organization_aicc_configs ORDER BY org_id
 `
@@ -124,6 +144,68 @@ type ListPendingAICCModelRolloutAgentsParams struct {
 // 仅选择仍有效且活跃的智能体；app 软删除后不得继续下发企业模型配置。
 func (q *Queries) ListPendingAICCModelRolloutAgents(ctx context.Context, arg ListPendingAICCModelRolloutAgentsParams) ([]AiccAgent, error) {
 	rows, err := q.db.QueryContext(ctx, listPendingAICCModelRolloutAgents, arg.OrgID, arg.AppliedConfigRevision, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AiccAgent{}
+	for rows.Next() {
+		var i AiccAgent
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.AppID,
+			&i.Name,
+			&i.Status,
+			&i.Scenario,
+			&i.Greeting,
+			&i.AnswerBoundary,
+			&i.PrivacyMode,
+			&i.PrivacyText,
+			&i.RetentionDays,
+			&i.ThemeJson,
+			&i.AllowedDomainsJson,
+			&i.PublicToken,
+			&i.WidgetToken,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.Persona,
+			&i.AppliedConfigRevision,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingAICCPlatformPromptRolloutAgents = `-- name: ListPendingAICCPlatformPromptRolloutAgents :many
+SELECT aa.id, aa.org_id, aa.app_id, aa.name, aa.status, aa.scenario, aa.greeting, aa.answer_boundary, aa.privacy_mode, aa.privacy_text, aa.retention_days, aa.theme_json, aa.allowed_domains_json, aa.public_token, aa.widget_token, aa.created_at, aa.updated_at, aa.deleted_at, aa.persona, aa.applied_config_revision
+FROM aicc_agents aa
+JOIN apps a ON a.id = aa.app_id AND a.deleted_at IS NULL
+WHERE aa.deleted_at IS NULL
+  AND aa.status = 'active'
+  AND a.app_type = 'aicc'
+  AND a.applied_platform_prompt_hash <> ?
+ORDER BY aa.id
+LIMIT ?
+`
+
+type ListPendingAICCPlatformPromptRolloutAgentsParams struct {
+	AppliedPlatformPromptHash string `db:"applied_platform_prompt_hash" json:"applied_platform_prompt_hash"`
+	Limit                     int32  `db:"limit" json:"limit"`
+}
+
+// 按客服主键稳定领取一台提示词落后的活跃客服，避免并行重启影响公开接待。
+func (q *Queries) ListPendingAICCPlatformPromptRolloutAgents(ctx context.Context, arg ListPendingAICCPlatformPromptRolloutAgentsParams) ([]AiccAgent, error) {
+	rows, err := q.db.QueryContext(ctx, listPendingAICCPlatformPromptRolloutAgents, arg.AppliedPlatformPromptHash, arg.Limit)
 	if err != nil {
 		return nil, err
 	}

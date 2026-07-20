@@ -120,6 +120,8 @@ const (
 	JobTypeWebPublishProvision = "web_publish_provision"
 	// JobTypeAICCModelRollout 将企业模型 revision 下发到仍未同步的 AICC 智能体。
 	JobTypeAICCModelRollout = "aicc_model_rollout"
+	// JobTypeAICCPlatformPromptRollout 逐台下发平台提示词更新，不与企业模型 revision 复用。
+	JobTypeAICCPlatformPromptRollout = "aicc_platform_prompt_rollout"
 )
 
 var (
@@ -170,6 +172,7 @@ var (
 		JobTypeWorkspaceArchiveCleanup,
 		JobTypeWebPublishProvision,
 		JobTypeAICCModelRollout,
+		JobTypeAICCPlatformPromptRollout,
 	)
 
 	validProvisioningStatuses = set(ProvisioningDisabled, ProvisioningInProgress, ProvisioningReady, ProvisioningFailed)

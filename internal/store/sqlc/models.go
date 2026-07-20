@@ -195,6 +195,10 @@ type AiccMessageTask struct {
 	UpdatedAt            time.Time   `db:"updated_at" json:"updated_at"`
 }
 
+type AiccPlatformPromptRolloutGuard struct {
+	Singleton int8 `db:"singleton" json:"singleton"`
+}
+
 type AiccQueueGovernance struct {
 	ID int8 `db:"id" json:"id"`
 }

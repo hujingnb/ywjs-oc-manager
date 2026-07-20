@@ -37,3 +37,23 @@ func TestOrganizationAICCConfigRunnerRollsBackWhenJobInsertFails(t *testing.T) {
 	require.ErrorIs(t, err, jobErr)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+// TestAICCPlatformPromptRolloutRunnerLocksGuardBeforeCallback 验证协调器的检查和创建闭包运行前已在同一事务中锁定 singleton guard。
+func TestAICCPlatformPromptRolloutRunnerLocksGuardBeforeCallback(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	runner := NewAICCPlatformPromptRolloutRunner(New(db))
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT singleton\nFROM aicc_platform_prompt_rollout_guards\nWHERE singleton = 1\nFOR UPDATE")).
+		WillReturnRows(sqlmock.NewRows([]string{"singleton"}).AddRow(1))
+	mock.ExpectCommit()
+
+	err = runner.WithAICCPlatformPromptRolloutTx(context.Background(), func(service.AICCPlatformPromptRolloutStore) error {
+		// callback 代表活跃任务检查、落后检查和创建任务，必须在 guard 加锁后执行。
+		return nil
+	})
+
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
