@@ -387,6 +387,29 @@ func (q *Queries) MarkJobSucceeded(ctx context.Context, id string) error {
 	return err
 }
 
+const requeueExpiredRunningJobs = `-- name: RequeueExpiredRunningJobs :execrows
+UPDATE jobs
+SET status = 'pending',
+    run_after = now(),
+    locked_by = NULL,
+    locked_at = NULL,
+    last_error = 'worker lock expired; requeued after lease timeout',
+    updated_at = now()
+WHERE status = 'running'
+  AND locked_at < ?
+`
+
+// manager 进程异常退出会遗留 status=running 的任务；超过调用方传入的租约阈值后统一回到 pending，
+// 由 scheduler 重新投递。仅回收明确带有过期 locked_at 的记录，避免误碰历史异常空锁行。
+// attempts 不回退：已开始的执行仍应计入重试预算，防止反复重启绕过 max_attempts。
+func (q *Queries) RequeueExpiredRunningJobs(ctx context.Context, lockedBefore null.Time) (int64, error) {
+	result, err := q.db.ExecContext(ctx, requeueExpiredRunningJobs, lockedBefore)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const requeueJob = `-- name: RequeueJob :exec
 UPDATE jobs
 SET status = 'pending',

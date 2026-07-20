@@ -963,6 +963,12 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	eg.Go(func() error { return loop.Run(gctx) })
 	eg.Go(func() error { return aiccMessageLoop.Run(gctx) })
 
+	// 通用 jobs 的 running 锁不带续租心跳；进程崩溃或滚动重启后，超过五分钟的遗留锁必须回到 pending。
+	// recovery 启动即扫描一次，随后周期复查；恢复记录由 scheduler 的扫库逻辑重新投递给 worker。
+	jobRecovery := scheduler.NewJobRecovery(dbStore.Queries, distLocker, uuid.NewString(), scheduler.JobRecoveryConfig{})
+	jobRecovery.SetLogger(logger)
+	jobRecovery.Start(gctx)
+
 	// reaper 启动:周期 60s tick,扫 5 个 init 子状态下连续 90s 无更新的孤儿。
 	// 多 manager 共存时通过 Redis 锁 ocm:reaper:lock 互斥;装配在 workerPool 启动之后,
 	// 是因为多副本场景下"reaper 在 worker 之前完成"的串行约束本就拿不到,

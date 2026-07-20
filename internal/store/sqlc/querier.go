@@ -418,6 +418,10 @@ type Querier interface {
 	ReplaceOrganizationIndustryKnowledgeBases(ctx context.Context, orgID string) error
 	// 覆盖行业库同名文件时按旧远端 document ID 乐观替换本地映射；created_by 表示最近一次覆盖上传人，created_at 仍保留首创时间。
 	ReplaceRAGFlowIndustryDocument(ctx context.Context, arg ReplaceRAGFlowIndustryDocumentParams) error
+	// manager 进程异常退出会遗留 status=running 的任务；超过调用方传入的租约阈值后统一回到 pending，
+	// 由 scheduler 重新投递。仅回收明确带有过期 locked_at 的记录，避免误碰历史异常空锁行。
+	// attempts 不回退：已开始的执行仍应计入重试预算，防止反复重启绕过 max_attempts。
+	RequeueExpiredRunningJobs(ctx context.Context, lockedBefore null.Time) (int64, error)
 	// 访客显式重试仅能恢复终态失败任务；重置尝试计数后 dispatcher 才可按既有领取条件重新执行。
 	RequeueFailedAICCMessageTask(ctx context.Context, messageID string) (int64, error)
 	// reaper 把已 running / succeeded 的 job 重置为 pending。
