@@ -7,6 +7,7 @@ import { apiRequest } from '@/api/client'
 import type { Organization } from '@/api'
 
 const ORG_LIST_KEY = ['organizations'] as const
+const ORG_AICC_CONFIG_KEY = 'organization-aicc-config'
 
 // ModelOptionDTO 是 new-api 实时模型目录在前端使用的最小视图。
 export interface ModelOptionDTO {
@@ -133,10 +134,44 @@ export interface OrganizationUpdatePayload {
 export interface OrganizationAICCConfigPayload {
   // enabled 表示是否开通 AICC。
   enabled: boolean
+  // model 是企业 AICC 使用的实时模型目录 ID；关闭时也提交完整配置快照。
+  model: string
   // agent_limit 是智能体数量上限；null/undefined 表示不限。
   agent_limit?: number | null
   // industry_knowledge_base_ids 是平台为该企业授权的行业知识库；空数组表示不授权任何行业库。
   industry_knowledge_base_ids: string[]
+}
+
+// OrganizationAICCConfig 是企业独立 AICC 配置接口返回的完整快照。
+export interface OrganizationAICCConfig {
+  // org_id 标识配置所属企业，切换编辑对象时用于拒绝旧请求结果。
+  org_id: string
+  // enabled 表示是否开通 AICC。
+  enabled: boolean
+  // model 是当前客服模型；尚未配置时为空。
+  model?: string
+  // agent_limit 是智能体数量上限；缺省表示不限。
+  agent_limit?: number
+  // revision 仅在模型变化时递增。
+  revision: number
+  // industry_knowledge_bases 是该企业获授权的行业知识库引用。
+  industry_knowledge_bases: Array<{ id: string; name: string }>
+}
+
+// useOrganizationAICCConfigQuery 按企业读取独立 AICC 配置。
+// orgId 为空时暂停请求，避免编辑表单关闭期间产生无效调用。
+export function useOrganizationAICCConfigQuery(orgId: Ref<string | undefined>) {
+  return useQuery<OrganizationAICCConfig | null>({
+    queryKey: [ORG_AICC_CONFIG_KEY, orgId],
+    enabled: () => Boolean(orgId.value),
+    queryFn: async () => {
+      if (!orgId.value) return null
+      const response = await apiRequest<{ config: OrganizationAICCConfig }>(
+        `/api/v1/organizations/${orgId.value}/aicc-config`,
+      )
+      return response.config
+    },
+  })
 }
 
 // useUpdateOrganization 更新组织资料与助手版本 allowlist，自动失效列表缓存。
@@ -157,19 +192,20 @@ export function useUpdateOrganization() {
   })
 }
 
-// useUpdateOrganizationAICCConfig 更新企业 AICC 开通配置，成功后刷新组织列表。
+// useUpdateOrganizationAICCConfig 以完整快照更新企业 AICC 配置，成功后刷新列表和对应配置。
 export function useUpdateOrganizationAICCConfig() {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async ({ id, payload }: { id: string; payload: OrganizationAICCConfigPayload }) => {
-      const response = await apiRequest<{ organization: Organization }>(
+      const response = await apiRequest<{ config: OrganizationAICCConfig }>(
         `/api/v1/organizations/${id}/aicc-config`,
-        { method: 'PATCH', body: payload },
+        { method: 'PUT', body: payload },
       )
-      return response.organization
+      return response.config
     },
-    onSuccess: () => {
+    onSuccess: (_config, variables) => {
       void client.invalidateQueries({ queryKey: ORG_LIST_KEY })
+      void client.invalidateQueries({ queryKey: [ORG_AICC_CONFIG_KEY, variables.id] })
     },
   })
 }

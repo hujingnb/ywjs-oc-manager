@@ -170,7 +170,7 @@
           <template v-if="modalMode === 'edit'">
             <n-grid-item>
               <n-form-item :label="t('platform.orgs.form.labelAICCEnabled')">
-                <n-switch v-model:value="editForm.aicc_enabled" />
+                <n-switch v-model:value="editForm.aicc_enabled" :disabled="!isAICCConfigEditable" />
               </n-form-item>
             </n-grid-item>
             <n-grid-item>
@@ -178,8 +178,27 @@
                 <n-input-number
                   v-model:value="editForm.aicc_agent_limit"
                   :min="0" :precision="0" clearable style="width: 100%"
+                  :disabled="!isAICCConfigEditable"
                   :placeholder="t('platform.orgs.form.placeholderAICCAgentLimit')"
                 />
+              </n-form-item>
+            </n-grid-item>
+            <n-grid-item :span="2">
+              <n-form-item :label="t('platform.orgs.form.labelAICCModel')">
+                <n-select
+                  v-model:value="editForm.aicc_model"
+                  filterable clearable
+                  :loading="modelsQuery.isLoading.value || modelsQuery.isFetching.value || aiccConfigQuery.isLoading.value || aiccConfigQuery.isFetching.value"
+                  :disabled="modelsQuery.isLoading.value || modelsQuery.isFetching.value || modelsQuery.isError.value || !isAICCConfigEditable"
+                  :options="modelOptions"
+                  :placeholder="t('platform.orgs.form.placeholderAICCModel')"
+                />
+                <template #feedback>
+                  <span v-if="modelsQuery.isError.value" class="danger">{{ t('platform.orgs.form.aiccModelLoadFail') }}</span>
+                  <span v-else-if="isSelectedModelUnavailable" class="danger">{{ t('platform.orgs.form.aiccSelectedModelUnavailable', { model: editForm.aicc_model }) }}</span>
+                  <span v-else-if="aiccConfigQuery.isError.value" class="danger">{{ t('platform.orgs.form.aiccConfigLoadFail') }}</span>
+                  <span v-else-if="editForm.aicc_enabled && !editForm.aicc_model" class="danger">{{ t('platform.orgs.form.aiccModelRequired') }}</span>
+                </template>
               </n-form-item>
             </n-grid-item>
             <n-grid-item :span="2">
@@ -187,6 +206,7 @@
                 <n-select
                   v-model:value="editForm.industry_knowledge_base_ids"
                   multiple filterable clearable
+                  :disabled="!isAICCConfigEditable"
                   :options="industryKnowledgeOptions"
                   :placeholder="t('platform.orgs.form.placeholderAICCIndustryKnowledge')"
                 />
@@ -196,8 +216,8 @@
               <n-space justify="end">
                 <n-button
                   attr-type="button"
-                  :loading="aiccConfigSubmitting"
-                  :disabled="aiccConfigSubmitting"
+                  :loading="isAICCConfigSubmitting"
+                  :disabled="isAICCConfigSubmitting || editSubmitting || isAICCConfigSaveDisabled"
                   @click="submitAICCConfig"
                 >{{ t('platform.orgs.form.saveAICCConfig') }}</n-button>
               </n-space>
@@ -246,8 +266,8 @@
               <n-button
                 type="primary"
                 attr-type="button"
-                :loading="modalMode === 'create' ? creating : editSubmitting"
-                :disabled="modalMode === 'create' ? creating : editSubmitting"
+                :loading="modalMode === 'create' ? creating : (editSubmitting || isAICCConfigSubmitting)"
+                :disabled="modalMode === 'create' ? creating : (editSubmitting || isAICCConfigSubmitting || isAICCConfigSaveDisabled)"
                 @click="submitAnyForm"
               >{{ t('common.actions.save') }}</n-button>
             </n-space>
@@ -339,11 +359,22 @@
         />
       </div>
     </n-modal>
+
+    <!-- 已启用企业换模会逐个滚动运行中客服，提交前明确告知影响范围。 -->
+    <ConfirmActionModal
+      :visible="modelChangeConfirmVisible"
+      :title="t('platform.orgs.modelChangeConfirm.title')"
+      :message="t('platform.orgs.modelChangeConfirm.message')"
+      :busy="aiccConfigSubmitting || editSubmitting"
+      :confirm-label="t('platform.orgs.modelChangeConfirm.confirmLabel')"
+      @confirm="confirmModelChange"
+      @cancel="cancelModelChange"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, h, reactive, ref } from 'vue'
+import { computed, h, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQueries, type UseMutationReturnType } from '@tanstack/vue-query'
@@ -355,9 +386,14 @@ import {
 
 import { formatOrgStatus } from '@/domain/status'
 import {
-  useCreateOrganization, useOrganizationsQuery, useUpdateOrganization, useUpdateOrganizationAICCConfig, useUpdateOrganizationStatus,
+  useCreateOrganization, useModelsQuery, useOrganizationAICCConfigQuery, useOrganizationsQuery,
+  useUpdateOrganization, useUpdateOrganizationAICCConfig, useUpdateOrganizationStatus,
 } from '@/api/hooks/useOrganizations'
-import type { OrganizationFormPayload } from '@/api/hooks/useOrganizations'
+import type {
+  OrganizationAICCConfigPayload,
+  OrganizationFormPayload,
+  OrganizationUpdatePayload,
+} from '@/api/hooks/useOrganizations'
 import { useAssistantVersionsQuery } from '@/api/hooks/useAssistantVersions'
 import { useIndustryKnowledgeBasesQuery } from '@/api/hooks/useIndustryKnowledge'
 import { apiRequest } from '@/api/client'
@@ -365,6 +401,7 @@ import { useBillingStatusQuery, useOrgBalanceQuery, useRechargeMutation, useRech
 import type { BalanceDTO } from '@/api/hooks/useRecharge'
 import type { Organization } from '@/api'
 import DataTableList from '@/components/DataTableList.vue'
+import ConfirmActionModal from '@/components/ConfirmActionModal.vue'
 import { statusColumn, actionColumn } from '@/components/columns'
 import { useFormModal } from '@/composables/useFormModal'
 import { formatDisplayAmount, formatQuotaValue } from '@/pages/usage/usageFormatting'
@@ -384,6 +421,15 @@ const modalMode = ref<'create' | 'edit'>('create')
 const editingOrg = ref<Organization | null>(null)
 // editFormVisible 控制编辑模式下表单的显隐（与 formVisible 分离以避免状态混用）。
 const editFormVisible = ref(false)
+// editingOrgId 驱动独立 AICC 配置查询；关闭表单时清空 ID 以暂停请求。
+const editingOrgId = computed(() => editingOrg.value?.id)
+const aiccConfigQuery = useOrganizationAICCConfigQuery(editingOrgId)
+// 模型目录仅在编辑企业时加载；任何加载异常都采用 fail-closed，禁止写入配置。
+const modelsQuery = useModelsQuery(() => editFormVisible.value)
+const modelOptions = computed(() => (modelsQuery.data.value ?? []).map(model => ({
+  label: model.name,
+  value: model.id,
+})))
 // 行业知识库是平台资源，仅在编辑企业时加载，作为 AICC 企业授权的多选来源。
 const industryKnowledgeBasesQuery = useIndustryKnowledgeBasesQuery(() => editFormVisible.value)
 const industryKnowledgeOptions = computed(() => (industryKnowledgeBasesQuery.data.value?.items ?? []).map(base => ({
@@ -452,6 +498,7 @@ const editForm = reactive({
   personal_knowledge_quota_original_bytes: undefined as number | undefined,
   assistant_version_ids: [] as string[],
   aicc_enabled: false,
+  aicc_model: '',
   aicc_agent_limit: undefined as number | undefined,
   industry_knowledge_base_ids: [] as string[],
 })
@@ -461,11 +508,133 @@ const editSubmitting = ref(false)
 const editError = ref<string | null>(null)
 // aiccConfigSubmitting 控制 AICC 配置独立保存按钮的 loading 状态。
 const aiccConfigSubmitting = ref(false)
+// aiccConfigSubmittingSessionToken 将异步保存状态绑定到发起时的编辑会话，避免旧请求锁住后来打开的企业。
+const aiccConfigSubmittingSessionToken = ref<number | null>(null)
 // aiccConfigError 保存 AICC 配置独立保存失败时的错误信息。
 const aiccConfigError = ref<string | null>(null)
+// originalAICCModel 记录独立 GET 快照，只要已有模型变化就需要二次确认。
+const originalAICCModel = ref('')
+// modelChangeConfirmVisible 与 pendingAICCSubmitMode 保存确认后的提交入口。
+const modelChangeConfirmVisible = ref(false)
+const pendingAICCSubmitMode = ref<'config' | 'all' | null>(null)
+// pendingAICCSubmitOrgID 把确认动作绑定到发起保存时的企业，切换企业后旧确认自动失效。
+const pendingAICCSubmitOrgID = ref<string | null>(null)
+// successfulOrganizationPayloadSnapshot 记录已成功 PATCH 的企业资料，部分成功重试时避免重复写入相同快照。
+const successfulOrganizationPayloadSnapshot = ref<{ orgID: string; serializedPayload: string } | null>(null)
+// aiccConfigSessionToken 在打开、切换或关闭企业时递增；所有异步回调都必须验证自己仍属于当前会话。
+const aiccConfigSessionToken = ref(0)
+// aiccConfigHydrated 保存当前会话已接收的首个有效服务端快照，防止后台 refetch 覆盖管理员未保存的输入。
+const aiccConfigHydrated = ref<{ sessionToken: number; orgID: string; revision: number } | null>(null)
+// aiccConfigDirty 标记首个快照后的本地编辑，作为回填保护的显式业务状态。
+const aiccConfigDirty = ref(false)
+// isAICCConfigHydrating 防止服务端首个快照写入表单时被误判为管理员编辑。
+const isAICCConfigHydrating = ref(false)
+
+// isAICCConfigReady 拒绝把上一企业或未完成加载的配置误用于当前编辑对象。
+const isAICCConfigReady = computed(() => (
+  Boolean(editingOrgId.value)
+  && aiccConfigQuery.data.value?.org_id === editingOrgId.value
+  && !aiccConfigQuery.isLoading.value
+  && !aiccConfigQuery.isFetching.value
+  && !aiccConfigQuery.isError.value
+))
+// isAICCConfigEditable 允许已水合会话在后台刷新时继续编辑，但首次请求尚未得到有效快照或请求失败时一律禁用。
+const isAICCConfigEditable = computed(() => (
+  Boolean(editingOrgId.value)
+  && aiccConfigHydrated.value?.sessionToken === aiccConfigSessionToken.value
+  && aiccConfigHydrated.value.orgID === editingOrgId.value
+  && !aiccConfigQuery.isError.value
+))
+// isAICCConfigSubmitting 只反映当前会话发起的独立保存，旧会话迟到请求不应阻断当前企业编辑。
+const isAICCConfigSubmitting = computed(() => (
+  aiccConfigSubmitting.value
+  && aiccConfigSubmittingSessionToken.value === aiccConfigSessionToken.value
+  && Boolean(editingOrgId.value)
+))
+// isSelectedModelUnavailable 防止目录刷新后继续提交刚下架的新选择。
+const isSelectedModelUnavailable = computed(() => (
+  Boolean(editForm.aicc_model)
+  && !modelsQuery.isLoading.value
+  && !modelsQuery.isFetching.value
+  && !modelsQuery.isError.value
+  && !(modelsQuery.data.value ?? []).some(model => model.id === editForm.aicc_model)
+))
+// isAICCConfigSaveDisabled 汇总加载态、错误态和启用时必选模型规则，主保存与独立保存保持一致。
+const isAICCConfigSaveDisabled = computed(() => (
+  !isAICCConfigReady.value
+  || modelsQuery.isLoading.value
+  || modelsQuery.isFetching.value
+  || modelsQuery.isError.value
+  || isSelectedModelUnavailable.value
+  || (editForm.aicc_enabled && !editForm.aicc_model)
+))
+
+// 管理员编辑首个 AICC 快照后，如果字段发生变化即视为本地未保存输入；后台刷新不得覆盖。
+watch(
+  () => [
+    editForm.aicc_enabled,
+    editForm.aicc_model,
+    editForm.aicc_agent_limit,
+    editForm.industry_knowledge_base_ids.join(','),
+  ],
+  () => {
+    if (isAICCConfigHydrating.value) return
+    if (
+      aiccConfigHydrated.value?.sessionToken === aiccConfigSessionToken.value
+      && aiccConfigHydrated.value.orgID === editingOrgId.value
+    ) aiccConfigDirty.value = true
+  },
+  { flush: 'sync' },
+)
+
+// 独立 GET 只回填当前编辑会话的首个完整快照；后续同企业数据更新保留本地未保存输入。
+watch(
+  [
+    editFormVisible,
+    () => aiccConfigQuery.data.value,
+    () => aiccConfigQuery.isLoading.value,
+    () => aiccConfigQuery.isFetching.value,
+    () => aiccConfigQuery.isError.value,
+  ],
+  ([visible, config]) => {
+    if (
+      !visible || !config || config.org_id !== editingOrgId.value
+      || aiccConfigQuery.isLoading.value || aiccConfigQuery.isFetching.value || aiccConfigQuery.isError.value
+    ) return
+    if (
+      aiccConfigHydrated.value?.sessionToken === aiccConfigSessionToken.value
+      && aiccConfigHydrated.value.orgID === config.org_id
+    ) return
+    isAICCConfigHydrating.value = true
+    editForm.aicc_enabled = config.enabled
+    editForm.aicc_model = config.model ?? ''
+    editForm.aicc_agent_limit = typeof config.agent_limit === 'number' ? config.agent_limit : undefined
+    editForm.industry_knowledge_base_ids = config.industry_knowledge_bases.map(base => base.id)
+    originalAICCModel.value = config.model ?? ''
+    aiccConfigHydrated.value = {
+      sessionToken: aiccConfigSessionToken.value,
+      orgID: config.org_id,
+      revision: config.revision,
+    }
+    aiccConfigDirty.value = false
+    isAICCConfigHydrating.value = false
+  },
+  { immediate: true },
+)
 
 // openEditForm 打开编辑模式，将当前组织的资料预填到 editForm。
 function openEditForm(org: Organization) {
+  // 每次打开或切换企业都启动全新的编辑会话，旧会话的部分成功和确认状态不得复用。
+  successfulOrganizationPayloadSnapshot.value = null
+  modelChangeConfirmVisible.value = false
+  pendingAICCSubmitMode.value = null
+  pendingAICCSubmitOrgID.value = null
+  aiccConfigSessionToken.value += 1
+  aiccConfigHydrated.value = null
+  aiccConfigDirty.value = false
+  isAICCConfigHydrating.value = false
+  aiccConfigSubmitting.value = false
+  aiccConfigSubmittingSessionToken.value = null
   editingOrg.value = org
   modalMode.value = 'edit'
   editForm.name = org.name
@@ -487,11 +656,12 @@ function openEditForm(org: Organization) {
   editForm.personal_knowledge_quota_original_bytes = typeof org.default_app_knowledge_quota_bytes === 'number'
     ? org.default_app_knowledge_quota_bytes : undefined
   editForm.assistant_version_ids = org.assistant_version_ids ? [...org.assistant_version_ids] : []
-  editForm.aicc_enabled = Boolean(org.aicc_enabled)
-  editForm.aicc_agent_limit = typeof org.aicc_agent_limit === 'number'
-    ? org.aicc_agent_limit : undefined
-  editForm.industry_knowledge_base_ids = org.industry_knowledge_base_ids
-    ? [...org.industry_knowledge_base_ids] : []
+  // AICC 字段等待独立 GET 回填，不能使用组织列表中的兼容字段作为可提交真值。
+  editForm.aicc_enabled = false
+  editForm.aicc_model = ''
+  editForm.aicc_agent_limit = undefined
+  editForm.industry_knowledge_base_ids = []
+  originalAICCModel.value = ''
   editError.value = null
   aiccConfigError.value = null
   editFormVisible.value = true
@@ -501,6 +671,17 @@ function openEditForm(org: Organization) {
 function closeAnyForm() {
   formVisible.value = false
   editFormVisible.value = false
+  editingOrg.value = null
+  modelChangeConfirmVisible.value = false
+  pendingAICCSubmitMode.value = null
+  pendingAICCSubmitOrgID.value = null
+  successfulOrganizationPayloadSnapshot.value = null
+  aiccConfigSessionToken.value += 1
+  aiccConfigHydrated.value = null
+  aiccConfigDirty.value = false
+  isAICCConfigHydrating.value = false
+  aiccConfigSubmitting.value = false
+  aiccConfigSubmittingSessionToken.value = null
   modalMode.value = 'create'
 }
 
@@ -513,65 +694,169 @@ async function submitAnyForm() {
   }
 }
 
-// submitEditOrganization 提交编辑表单，调用 PATCH /organizations/:id。
+// buildAICCConfigPayload 构造 PUT 所需的完整配置快照，避免部分更新遗漏模型。
+function buildAICCConfigPayload(): OrganizationAICCConfigPayload {
+  return {
+    enabled: editForm.aicc_enabled,
+    model: editForm.aicc_model,
+    agent_limit: typeof editForm.aicc_agent_limit === 'number' ? editForm.aicc_agent_limit : null,
+    industry_knowledge_base_ids: [...editForm.industry_knowledge_base_ids],
+  }
+}
+
+// buildOrganizationUpdatePayload 捕获当前企业资料的完整 PATCH 快照，异步提交期间不再读取响应式表单。
+function buildOrganizationUpdatePayload(): OrganizationUpdatePayload {
+  return {
+    name: editForm.name,
+    contact_name: editForm.contact_name || undefined,
+    contact_phone: editForm.contact_phone || undefined,
+    remark: editForm.remark || undefined,
+    credit_warning_threshold: typeof editForm.credit_warning_threshold === 'number'
+      ? editForm.credit_warning_threshold : undefined,
+    max_instance_count: typeof editForm.max_instance_count === 'number'
+      ? editForm.max_instance_count : undefined,
+    knowledge_quota_bytes: editQuotaBytesForPayload(),
+    default_app_knowledge_quota_bytes: editPersonalQuotaBytesForPayload(),
+    assistant_version_ids: [...editForm.assistant_version_ids],
+  }
+}
+
+// validateAICCConfig 作为点击与键盘提交的共同兜底，目录或配置不可信时一律拒绝保存。
+function validateAICCConfig(): boolean {
+  aiccConfigError.value = null
+  if (editSubmitting.value || isAICCConfigSubmitting.value) return false
+  if (modelsQuery.isError.value) {
+    aiccConfigError.value = t('platform.orgs.form.aiccModelLoadFail')
+    return false
+  }
+  if (!isAICCConfigReady.value || modelsQuery.isLoading.value || modelsQuery.isFetching.value) {
+    aiccConfigError.value = t('platform.orgs.form.aiccConfigNotReady')
+    return false
+  }
+  if (isSelectedModelUnavailable.value) {
+    aiccConfigError.value = t('platform.orgs.form.aiccSelectedModelUnavailable', { model: editForm.aicc_model })
+    return false
+  }
+  if (editForm.aicc_enabled && !editForm.aicc_model) {
+    aiccConfigError.value = t('platform.orgs.form.aiccModelRequired')
+    return false
+  }
+  return true
+}
+
+// needsModelChangeConfirmation 只要已有模型变化就确认；关闭状态下后端同样会安排 rollout。
+function needsModelChangeConfirmation(): boolean {
+  return Boolean(originalAICCModel.value)
+    && editForm.aicc_model !== originalAICCModel.value
+}
+
+// requestAICCSubmit 在需要换模确认时暂存入口，否则直接执行对应写入。
+async function requestAICCSubmit(mode: 'config' | 'all') {
+  if (editSubmitting.value || isAICCConfigSubmitting.value) return
+  if (!validateAICCConfig()) return
+  if (needsModelChangeConfirmation()) {
+    pendingAICCSubmitMode.value = mode
+    pendingAICCSubmitOrgID.value = editingOrgId.value ?? null
+    modelChangeConfirmVisible.value = true
+    return
+  }
+  if (mode === 'all') await executeEditOrganization()
+  else await executeAICCConfigUpdate()
+}
+
+// submitEditOrganization 提交编辑表单；AICC 校验与换模确认通过后才开始任何写操作。
 async function submitEditOrganization() {
+  await requestAICCSubmit('all')
+}
+
+// executeEditOrganization 调用组织 PATCH 与独立 AICC PUT，维持既有主保存按钮行为。
+async function executeEditOrganization() {
   if (!editingOrg.value) return
+  // 所有请求参数必须在第一个 await 前冻结，避免关闭表单或切换企业后读到另一编辑会话的数据。
+  const orgID = editingOrg.value.id
+  const organizationPayload = buildOrganizationUpdatePayload()
+  const aiccPayload = buildAICCConfigPayload()
+  const serializedOrganizationPayload = JSON.stringify(organizationPayload)
+  const canReuseSuccessfulPatch = successfulOrganizationPayloadSnapshot.value?.orgID === orgID
+    && successfulOrganizationPayloadSnapshot.value.serializedPayload === serializedOrganizationPayload
   editError.value = null
   editSubmitting.value = true
+  let organizationUpdated = canReuseSuccessfulPatch
   try {
-    await updateMutation.mutateAsync({
-      id: editingOrg.value.id,
-      payload: {
-        name: editForm.name,
-        contact_name: editForm.contact_name || undefined,
-        contact_phone: editForm.contact_phone || undefined,
-        remark: editForm.remark || undefined,
-        credit_warning_threshold: typeof editForm.credit_warning_threshold === 'number'
-          ? editForm.credit_warning_threshold : undefined,
-        max_instance_count: typeof editForm.max_instance_count === 'number'
-          ? editForm.max_instance_count : undefined,
-        knowledge_quota_bytes: editQuotaBytesForPayload(),
-        default_app_knowledge_quota_bytes: editPersonalQuotaBytesForPayload(),
-        assistant_version_ids: editForm.assistant_version_ids,
-      },
-    })
-    // 企业编辑页的主保存必须同时提交 AICC 开关，避免管理员误以为已保存但配置仍为旧值。
-    await updateAICCConfigMutation.mutateAsync({
-      id: editingOrg.value.id,
-      payload: {
-        enabled: editForm.aicc_enabled,
-        agent_limit: typeof editForm.aicc_agent_limit === 'number' ? editForm.aicc_agent_limit : null,
-        industry_knowledge_base_ids: [...editForm.industry_knowledge_base_ids],
-      },
-    })
-    editFormVisible.value = false
-    modalMode.value = 'create'
+    if (!canReuseSuccessfulPatch) {
+      await updateMutation.mutateAsync({ id: orgID, payload: organizationPayload })
+      organizationUpdated = true
+      // 仅当前编辑会话仍是原企业时保存部分成功快照，迟到请求不得污染新会话。
+      if (editingOrgId.value === orgID) {
+        successfulOrganizationPayloadSnapshot.value = { orgID, serializedPayload: serializedOrganizationPayload }
+      }
+    }
+    // 企业编辑页的主保存必须同时提交 AICC 完整快照，避免管理员误以为已保存但配置仍为旧值。
+    await updateAICCConfigMutation.mutateAsync({ id: orgID, payload: aiccPayload })
+    // 迟到成功只完成原请求，不得关闭管理员随后打开的另一企业表单。
+    if (editingOrgId.value === orgID) closeAnyForm()
   } catch (err) {
-    editError.value = err instanceof Error ? err.message : t('platform.orgs.editError')
+    const message = err instanceof Error ? err.message : t('platform.orgs.editError')
+    // 迟到失败不得把原企业错误展示到新编辑会话。
+    if (editingOrgId.value === orgID) {
+      editError.value = organizationUpdated
+        ? t('platform.orgs.aiccPartialSuccessError', { message })
+        : message
+    }
   } finally {
     editSubmitting.value = false
   }
 }
 
-// submitAICCConfig 独立保存企业 AICC 开通配置，避免基础资料保存与 AICC 配置出现非原子双提交。
+// submitAICCConfig 独立保存企业 AICC 配置，先执行目录校验与换模确认。
 async function submitAICCConfig() {
+  await requestAICCSubmit('config')
+}
+
+// executeAICCConfigUpdate 发送独立 PUT；成功后的缓存刷新由 hook 统一处理。
+async function executeAICCConfigUpdate() {
   if (!editingOrg.value) return
+  // 独立保存同样必须在第一个 await 前冻结企业与完整 payload，防止切换会话后串写。
+  const orgID = editingOrg.value.id
+  const payload = buildAICCConfigPayload()
+  const sessionToken = aiccConfigSessionToken.value
   aiccConfigError.value = null
   aiccConfigSubmitting.value = true
+  aiccConfigSubmittingSessionToken.value = sessionToken
   try {
-    await updateAICCConfigMutation.mutateAsync({
-      id: editingOrg.value.id,
-      payload: {
-        enabled: editForm.aicc_enabled,
-        agent_limit: typeof editForm.aicc_agent_limit === 'number' ? editForm.aicc_agent_limit : null,
-        industry_knowledge_base_ids: [...editForm.industry_knowledge_base_ids],
-      },
-    })
+    await updateAICCConfigMutation.mutateAsync({ id: orgID, payload })
   } catch (err) {
-    aiccConfigError.value = err instanceof Error ? err.message : t('platform.orgs.aiccConfigError')
+    // 迟到失败只能写回同一企业、同一编辑会话，避免把旧错误展示给新企业。
+    if (editingOrgId.value === orgID && aiccConfigSessionToken.value === sessionToken) {
+      aiccConfigError.value = err instanceof Error ? err.message : t('platform.orgs.aiccConfigError')
+    }
   } finally {
-    aiccConfigSubmitting.value = false
+    // 迟到 finally 不得解除新会话的保存状态。
+    if (editingOrgId.value === orgID && aiccConfigSessionToken.value === sessionToken) {
+      aiccConfigSubmitting.value = false
+      aiccConfigSubmittingSessionToken.value = null
+    }
   }
+}
+
+// confirmModelChange 按原入口继续提交，确保取消时不会提前写入组织或 AICC 配置。
+async function confirmModelChange() {
+  const mode = pendingAICCSubmitMode.value
+  const orgID = pendingAICCSubmitOrgID.value
+  modelChangeConfirmVisible.value = false
+  pendingAICCSubmitMode.value = null
+  pendingAICCSubmitOrgID.value = null
+  // 确认时重新校验企业归属、共同提交锁和最新模型目录，确认窗口内发生的变化必须 fail-closed。
+  if (!mode || !orgID || editingOrgId.value !== orgID || !validateAICCConfig()) return
+  if (mode === 'all') await executeEditOrganization()
+  else if (mode === 'config') await executeAICCConfigUpdate()
+}
+
+// cancelModelChange 清空待执行入口，关闭弹框不产生任何 mutation。
+function cancelModelChange() {
+  modelChangeConfirmVisible.value = false
+  pendingAICCSubmitMode.value = null
+  pendingAICCSubmitOrgID.value = null
 }
 // selectedOrg 保存当前充值弹框的目标组织，关闭弹框不会修改列表数据。
 const selectedOrg = ref<Organization | null>(null)
