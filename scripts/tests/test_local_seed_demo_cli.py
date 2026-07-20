@@ -15,28 +15,35 @@ from local_seed_demo.seeder import SeedConflict, SeedRuntimeError
 
 
 class FakeAPI:
-    """记录登录调用，避免 CLI 测试访问真实 manager。"""
+    """记录就绪检查和登录调用，避免 CLI 测试访问真实 manager。"""
 
     def __init__(self, base_url):
         """保存公开地址及后续登录事实，不保存测试密码到异常消息。"""
         self.base_url = base_url
+        self.calls = []
         self.logins = []
+
+    def wait_ready(self):
+        """记录 CLI 已经先通过同一 Ingress 等待 manager 就绪。"""
+        self.calls.append("ready")
 
     def login(self, org_code, username, password):
         """记录依赖装配是否使用平台管理员约定。"""
+        self.calls.append("login")
         self.logins.append((org_code, username, password))
 
 
 class RecordingFactory:
     """为每次调用创建独立客户端，并记录 ManagerAPI 构造参数。"""
 
-    def __init__(self):
-        """初始化客户端调用记录。"""
+    def __init__(self, client_type=FakeAPI):
+        """初始化客户端类型及调用记录，便于注入就绪检查异常。"""
+        self.client_type = client_type
         self.clients = []
 
     def __call__(self, base_url):
         """按真实 ManagerAPI 的单个必需位置参数签名创建客户端。"""
-        client = FakeAPI(base_url)
+        client = self.client_type(base_url)
         self.clients.append(client)
         return client
 
@@ -128,6 +135,7 @@ class LocalSeedDemoCLITest(unittest.TestCase):
         self.assertEqual(3, len(factory.clients))
         self.assertIs(factory.clients[0], observed["platform"])
         self.assertIsNot(observed["org_clients"][0], observed["org_clients"][1])
+        self.assertEqual(["ready", "login"], factory.clients[0].calls)
         self.assertEqual([("", "admin", "admin123")], factory.clients[0].logins)
         self.assertTrue(all(client.base_url == "http://ocm.localhost" for client in factory.clients))
         self.assertEqual(
@@ -135,6 +143,37 @@ class LocalSeedDemoCLITest(unittest.TestCase):
             output.getvalue(),
         )
         self.assertNotIn("token", output.getvalue().lower())
+
+    # 覆盖 manager Ingress 尚未就绪时立即停止，禁止登录和构造种子编排器。
+    def test_readiness_failure_stops_before_login_and_seeder_construction(self):
+        self.write_env("DEEPSEEK_API_KEY=x\nSILICONFLOW_API_KEY=y\n")
+        output = io.StringIO()
+
+        class FailingReadinessAPI(FakeAPI):
+            """模拟健康检查收到携带不可信 message 的网关错误。"""
+
+            def wait_ready(self):
+                """记录就绪检查后抛出结构化 API 错误。"""
+                self.calls.append("ready")
+                raise APIError(
+                    "GET /healthz",
+                    502,
+                    "http_error",
+                    "server-private-message",
+                )
+
+        factory = RecordingFactory(client_type=FailingReadinessAPI)
+        with mock.patch("local_seed_demo.cli.DemoSeeder") as seeder:
+            self.assertEqual(
+                1,
+                main(root=self.root, stdout=output, api_factory=factory),
+            )
+
+        self.assertEqual(1, len(factory.clients))
+        self.assertEqual(["ready"], factory.clients[0].calls)
+        self.assertEqual([], factory.clients[0].logins)
+        seeder.assert_not_called()
+        self.assertNotIn("server-private-message", output.getvalue())
 
     # 覆盖上下大小写 NO_PROXY 既有条目合并且本地域名不重复丢失的路径。
     def test_no_proxy_merges_existing_entries_and_syncs_both_names(self):

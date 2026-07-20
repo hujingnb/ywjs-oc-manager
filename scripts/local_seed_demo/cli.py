@@ -179,6 +179,8 @@ def main(root=None, stdout=sys.stdout, api_factory=ManagerAPI):
     try:
         # 平台客户端负责全局写入；企业管理员操作必须按需创建独立客户端和 token。
         platform = api_factory("http://ocm.localhost")
+        # 必须先通过同一 Ingress 确认 manager 可达，避免滚动更新窗口内登录收到 502。
+        platform.wait_ready()
         platform.login("", "admin", "admin" + "123")
         DemoSeeder(
             platform,
