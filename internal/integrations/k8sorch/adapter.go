@@ -10,6 +10,7 @@ import (
 	"oc-manager/internal/domain"
 
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -95,10 +96,8 @@ func (a *KubernetesAdapter) applyHPA(ctx context.Context, h *autoscalingv2.Horiz
 	existing, err := api.Get(ctx, h.Name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		_, cerr := api.Create(ctx, h, metav1.CreateOptions{})
-		// HPA 属于可选弹性能力；部分线上集群未提供 autoscaling/v2 API 时，
-		// 不能因为 HPA 创建失败阻断客服 Deployment 的升级与就绪收敛。
 		if apierrors.IsNotFound(cerr) {
-			return nil
+			return a.applyHPAAutoscalingV1(ctx, h)
 		}
 		return wrapK8s("创建 HPA", cerr)
 	}
@@ -108,9 +107,37 @@ func (a *KubernetesAdapter) applyHPA(ctx context.Context, h *autoscalingv2.Horiz
 	h.ResourceVersion = existing.ResourceVersion
 	_, uerr := api.Update(ctx, h, metav1.UpdateOptions{})
 	if apierrors.IsNotFound(uerr) {
-		return nil
+		return a.applyHPAAutoscalingV1(ctx, h)
 	}
 	return wrapK8s("更新 HPA", uerr)
+}
+
+// applyHPAAutoscalingV1 在老集群未提供 autoscaling/v2 时保留 CPU 自动扩容能力。
+// v1 只支持 CPU 资源指标，因此外部业务指标和内存指标由 v2 路径提供，不能伪造映射。
+func (a *KubernetesAdapter) applyHPAAutoscalingV1(ctx context.Context, h *autoscalingv2.HorizontalPodAutoscaler) error {
+	api := a.client.AutoscalingV1().HorizontalPodAutoscalers(a.namespace)
+	minReplicas := int32(1)
+	maxReplicas := h.Spec.MaxReplicas
+	v1 := &autoscalingv1.HorizontalPodAutoscaler{
+		ObjectMeta: metav1.ObjectMeta{Name: h.Name, Namespace: h.Namespace, Labels: h.Labels},
+		Spec: autoscalingv1.HorizontalPodAutoscalerSpec{
+			ScaleTargetRef:                 autoscalingv1.CrossVersionObjectReference{APIVersion: "apps/v1", Kind: "Deployment", Name: h.Spec.ScaleTargetRef.Name},
+			MinReplicas:                    &minReplicas,
+			MaxReplicas:                    maxReplicas,
+			TargetCPUUtilizationPercentage: int32Ptr(70),
+		},
+	}
+	existing, err := api.Get(ctx, v1.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		_, err = api.Create(ctx, v1, metav1.CreateOptions{})
+		return wrapK8s("创建 autoscaling/v1 HPA", err)
+	}
+	if err != nil {
+		return wrapK8s("查询 autoscaling/v1 HPA", err)
+	}
+	v1.ResourceVersion = existing.ResourceVersion
+	_, err = api.Update(ctx, v1, metav1.UpdateOptions{})
+	return wrapK8s("更新 autoscaling/v1 HPA", err)
 }
 
 // applyDeployment 全量收敛 Deployment 模板；AICC 由 HPA 管理副本数，更新时必须保留控制器当前值。

@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -269,7 +270,16 @@ func TestEnsureAppAICCCreatesHPA(t *testing.T) {
 func TestEnsureAppAICCIgnoresUnavailableHPAAPI(t *testing.T) {
 	cs := fake.NewSimpleClientset()
 	cs.PrependReactor("create", "horizontalpodautoscalers", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: "autoscaling", Resource: "horizontalpodautoscalers"}, action.(k8stesting.CreateAction).GetObject().(*autoscalingv2.HorizontalPodAutoscaler).Name)
+		name := "app-a1"
+		if create, ok := action.(k8stesting.CreateAction); ok {
+			switch object := create.GetObject().(type) {
+			case *autoscalingv2.HorizontalPodAutoscaler:
+				name = object.Name
+			case *autoscalingv1.HorizontalPodAutoscaler:
+				return false, nil, nil
+			}
+		}
+		return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: "autoscaling", Resource: "horizontalpodautoscalers"}, name)
 	})
 	a := NewAICCKubernetesAdapter(cs, "oc-aicc")
 	app := testSpec()
