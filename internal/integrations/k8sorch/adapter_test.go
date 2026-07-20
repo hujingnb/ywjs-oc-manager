@@ -288,6 +288,10 @@ func TestEnsureAppAICCIgnoresUnavailableHPAAPI(t *testing.T) {
 	require.NoError(t, a.EnsureApp(context.Background(), app))
 	_, err := cs.AppsV1().Deployments("oc-aicc").Get(context.Background(), "app-a1", metav1.GetOptions{})
 	require.NoError(t, err)
+	hpa, err := cs.AutoscalingV1().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-a1", metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Contains(t, hpa.Annotations["autoscaling.alpha.kubernetes.io/metrics"], `"name":"cpu"`)
+	assert.Contains(t, hpa.Annotations["autoscaling.alpha.kubernetes.io/metrics"], `"name":"memory"`)
 }
 
 // TestEnsureAppAICCRequestsStableHPAGVR 通过 fake client 的 action 记录验证，

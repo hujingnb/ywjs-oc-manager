@@ -112,14 +112,21 @@ func (a *KubernetesAdapter) applyHPA(ctx context.Context, h *autoscalingv2.Horiz
 	return wrapK8s("更新 HPA", uerr)
 }
 
-// applyHPAAutoscalingV1 在老集群未提供 autoscaling/v2 时保留 CPU 自动扩容能力。
-// v1 只支持 CPU 资源指标，因此外部业务指标和内存指标由 v2 路径提供，不能伪造映射。
+// applyHPAAutoscalingV1 在老集群未提供 autoscaling/v2 时保留已有 v1 HPA。
+// v1 结构无法表达 v2 的多指标配置；已有对象可能通过历史 annotation 提供内存扩缩容，不能覆盖。
 func (a *KubernetesAdapter) applyHPAAutoscalingV1(ctx context.Context, h *autoscalingv2.HorizontalPodAutoscaler) error {
 	api := a.client.AutoscalingV1().HorizontalPodAutoscalers(a.namespace)
 	minReplicas := int32(1)
 	maxReplicas := h.Spec.MaxReplicas
 	v1 := &autoscalingv1.HorizontalPodAutoscaler{
-		ObjectMeta: metav1.ObjectMeta{Name: h.Name, Namespace: h.Namespace, Labels: h.Labels},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: h.Name, Namespace: h.Namespace, Labels: h.Labels,
+			// Kubernetes v1 通过 alpha metrics annotation 扩展资源指标；沿用线上现有格式，
+			// 让新建 HPA 同时按 CPU 70% 与内存 75% 扩容。
+			Annotations: map[string]string{
+				"autoscaling.alpha.kubernetes.io/metrics": `[{"type":"Resource","resource":{"name":"cpu","targetAverageUtilization":70}},{"type":"Resource","resource":{"name":"memory","targetAverageUtilization":75}}]`,
+			},
+		},
 		Spec: autoscalingv1.HorizontalPodAutoscalerSpec{
 			ScaleTargetRef:                 autoscalingv1.CrossVersionObjectReference{APIVersion: "apps/v1", Kind: "Deployment", Name: h.Spec.ScaleTargetRef.Name},
 			MinReplicas:                    &minReplicas,
@@ -135,9 +142,9 @@ func (a *KubernetesAdapter) applyHPAAutoscalingV1(ctx context.Context, h *autosc
 	if err != nil {
 		return wrapK8s("查询 autoscaling/v1 HPA", err)
 	}
-	v1.ResourceVersion = existing.ResourceVersion
-	_, err = api.Update(ctx, v1, metav1.UpdateOptions{})
-	return wrapK8s("更新 autoscaling/v1 HPA", err)
+	// 已存在的 v1 HPA 由集群侧继续维护，避免降级 reconcile 抹掉历史内存指标 annotation。
+	_ = existing
+	return nil
 }
 
 // applyDeployment 全量收敛 Deployment 模板；AICC 由 HPA 管理副本数，更新时必须保留控制器当前值。
