@@ -58,6 +58,18 @@ func TestPlatformPrompts_Invariants(t *testing.T) {
 				assert.NotContains(t, testCase.prompt, text)
 			}
 			if testCase.appType == domain.AppTypeAICC {
+				// 寒暄和人设表达仅在不涉及企业事实或待确认信息时，才允许直接答复。
+				assert.Contains(t, testCase.prompt, "寒暄、身份介绍、礼貌回应和人设表达")
+				assert.Contains(t, testCase.prompt, "不涉及企业事实或需确认的信息时")
+				assert.Contains(t, testCase.prompt, "可以直接答复")
+				// 人设直答不得成为虚构企业信息的例外，必须保留防编造约束。
+				assert.Contains(t, testCase.prompt, "不得借此编造企业信息")
+				// 人设内容一旦涉及企业事实或需确认信息，仍须先执行知识检索。
+				assert.Contains(t, testCase.prompt, "涉及企业事实或需确认的信息的人设表达，仍必须先调用 aicc_knowledge_search")
+				// 所有企业范围及需确认的信息均须检索，避免该限制仅约束人设表达。
+				assert.Contains(t, testCase.prompt, "涉及企业事实、产品、价格、政策、售后、行业、资料或需确认的信息的问题")
+				// 企业问题必须先检索，不能仅因工具名称出现而遗漏强制调用要求。
+				assert.Contains(t, testCase.prompt, "必须先调用 aicc_knowledge_search")
 				// AICC 只能使用平台审核且处于当前白名单的客服 Skill，不得回退至通用能力。
 				assert.Contains(t, testCase.prompt, "仅可使用平台审核并在当前 AICC 白名单中的客服 Skill")
 				assert.Contains(t, testCase.prompt, "不得调用未审核、通用或未在白名单中的 Skill")
