@@ -121,10 +121,10 @@ func (a *KubernetesAdapter) applyHPAAutoscalingV1(ctx context.Context, h *autosc
 	v1 := &autoscalingv1.HorizontalPodAutoscaler{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: h.Name, Namespace: h.Namespace, Labels: h.Labels,
-			// Kubernetes v1 通过 alpha metrics annotation 扩展资源指标；沿用线上现有格式，
-			// 让新建 HPA 同时按 CPU 70% 与内存 75% 扩容。
+			// Kubernetes v1 的 CPU 目标由 spec.targetCPUUtilizationPercentage 表达；
+			// alpha metrics annotation 只补充 v1 spec 无法表达的内存 75% 指标。
 			Annotations: map[string]string{
-				"autoscaling.alpha.kubernetes.io/metrics": `[{"type":"Resource","resource":{"name":"cpu","targetAverageUtilization":70}},{"type":"Resource","resource":{"name":"memory","targetAverageUtilization":75}}]`,
+				"autoscaling.alpha.kubernetes.io/metrics": `[{"type":"Resource","resource":{"name":"memory","targetAverageUtilization":75}}]`,
 			},
 		},
 		Spec: autoscalingv1.HorizontalPodAutoscalerSpec{
@@ -142,7 +142,7 @@ func (a *KubernetesAdapter) applyHPAAutoscalingV1(ctx context.Context, h *autosc
 	if err != nil {
 		return wrapK8s("查询 autoscaling/v1 HPA", err)
 	}
-	// 已存在的 v1 HPA 保留副本范围等集群侧状态，只补齐 CPU+内存资源指标 annotation，
+	// 已存在的 v1 HPA 保留副本范围等集群侧状态，只补齐内存资源指标 annotation，
 	// 避免旧版本曾写成 CPU-only 后，后续 reconcile 永久遗漏内存监控。
 	if existing.Annotations == nil {
 		existing.Annotations = map[string]string{}

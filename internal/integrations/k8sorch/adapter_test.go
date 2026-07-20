@@ -268,7 +268,12 @@ func TestEnsureAppAICCCreatesHPA(t *testing.T) {
 // TestEnsureAppAICCIgnoresUnavailableHPAAPI 验证集群未提供 autoscaling/v2 时，
 // 可选 HPA 不得阻断客服 Deployment 的升级任务。
 func TestEnsureAppAICCIgnoresUnavailableHPAAPI(t *testing.T) {
-	existing := &autoscalingv1.HorizontalPodAutoscaler{ObjectMeta: metav1.ObjectMeta{Name: "app-a1", Namespace: "oc-aicc"}}
+	existing := &autoscalingv1.HorizontalPodAutoscaler{
+		ObjectMeta: metav1.ObjectMeta{Name: "app-a1", Namespace: "oc-aicc"},
+		Spec: autoscalingv1.HorizontalPodAutoscalerSpec{
+			TargetCPUUtilizationPercentage: int32Ptr(70),
+		},
+	}
 	cs := fake.NewSimpleClientset(existing)
 	cs.PrependReactor("create", "horizontalpodautoscalers", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		name := "app-a1"
@@ -291,8 +296,10 @@ func TestEnsureAppAICCIgnoresUnavailableHPAAPI(t *testing.T) {
 	require.NoError(t, err)
 	hpa, err := cs.AutoscalingV1().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-a1", metav1.GetOptions{})
 	require.NoError(t, err)
-	assert.Contains(t, hpa.Annotations["autoscaling.alpha.kubernetes.io/metrics"], `"name":"cpu"`)
 	assert.Contains(t, hpa.Annotations["autoscaling.alpha.kubernetes.io/metrics"], `"name":"memory"`)
+	assert.NotContains(t, hpa.Annotations["autoscaling.alpha.kubernetes.io/metrics"], `"name":"cpu"`)
+	require.NotNil(t, hpa.Spec.TargetCPUUtilizationPercentage)
+	assert.Equal(t, int32(70), *hpa.Spec.TargetCPUUtilizationPercentage)
 }
 
 // TestEnsureAppAICCRequestsStableHPAGVR 通过 fake client 的 action 记录验证，
