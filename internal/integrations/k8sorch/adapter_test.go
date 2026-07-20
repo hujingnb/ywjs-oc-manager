@@ -268,7 +268,8 @@ func TestEnsureAppAICCCreatesHPA(t *testing.T) {
 // TestEnsureAppAICCIgnoresUnavailableHPAAPI 验证集群未提供 autoscaling/v2 时，
 // 可选 HPA 不得阻断客服 Deployment 的升级任务。
 func TestEnsureAppAICCIgnoresUnavailableHPAAPI(t *testing.T) {
-	cs := fake.NewSimpleClientset()
+	existing := &autoscalingv1.HorizontalPodAutoscaler{ObjectMeta: metav1.ObjectMeta{Name: "app-a1", Namespace: "oc-aicc"}}
+	cs := fake.NewSimpleClientset(existing)
 	cs.PrependReactor("create", "horizontalpodautoscalers", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		name := "app-a1"
 		if create, ok := action.(k8stesting.CreateAction); ok {

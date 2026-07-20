@@ -142,9 +142,14 @@ func (a *KubernetesAdapter) applyHPAAutoscalingV1(ctx context.Context, h *autosc
 	if err != nil {
 		return wrapK8s("查询 autoscaling/v1 HPA", err)
 	}
-	// 已存在的 v1 HPA 由集群侧继续维护，避免降级 reconcile 抹掉历史内存指标 annotation。
-	_ = existing
-	return nil
+	// 已存在的 v1 HPA 保留副本范围等集群侧状态，只补齐 CPU+内存资源指标 annotation，
+	// 避免旧版本曾写成 CPU-only 后，后续 reconcile 永久遗漏内存监控。
+	if existing.Annotations == nil {
+		existing.Annotations = map[string]string{}
+	}
+	existing.Annotations["autoscaling.alpha.kubernetes.io/metrics"] = v1.Annotations["autoscaling.alpha.kubernetes.io/metrics"]
+	_, err = api.Update(ctx, existing, metav1.UpdateOptions{})
+	return wrapK8s("更新 autoscaling/v1 HPA 指标", err)
 }
 
 // applyDeployment 全量收敛 Deployment 模板；AICC 由 HPA 管理副本数，更新时必须保留控制器当前值。
