@@ -145,20 +145,6 @@
               <div class="field-full">
                 <n-form-item>
                   <template #label>
-                    <FieldLabel :label="t('aicc.manager.form.model')" :help="t('aicc.manager.form.help.model')" />
-                  </template>
-                  <n-tag type="info" :bordered="false">{{ organizationConfigQuery.data.value?.model || t('aicc.manager.form.modelUnavailable') }}</n-tag>
-                </n-form-item>
-                <n-alert v-if="organizationConfigQuery.isFetching.value" type="info" :bordered="false">
-                  {{ t('aicc.manager.form.configLoading') }}
-                </n-alert>
-                <n-alert v-else-if="organizationConfigError" type="error" :bordered="false">
-                  {{ t('aicc.manager.form.configLoadFailed') }}
-                </n-alert>
-              </div>
-              <div class="field-full">
-                <n-form-item>
-                  <template #label>
                     <FieldLabel :label="t('aicc.manager.form.industryKnowledge')" :help="t('aicc.manager.form.help.industryKnowledge')" />
                   </template>
                   <n-select

@@ -350,7 +350,7 @@ describe('AICCManagerPage', () => {
 
     const helpTriggers = wrapper.findAll('[data-test="field-help"]')
 
-    expect(helpTriggers).toHaveLength(17)
+    expect(helpTriggers).toHaveLength(16)
     expect(helpTriggers.every(trigger => trigger.text() === '?')).toBe(true)
     expect(helpTriggers.some(trigger =>
       trigger.attributes('aria-label') === '开启后，系统会根据敏感词命中、异常频率等规则标记高风险访客，并阻止其继续发送消息。',
@@ -395,8 +395,8 @@ describe('AICCManagerPage', () => {
     expect(saveButton?.attributes('disabled')).toBeUndefined()
   })
 
-  // 场景：新建客服只能查看企业已配置模型，并从企业授权范围选择行业知识库，不能编辑模型或助手版本路由。
-  it('shows the organization model as read-only and industry knowledge candidates in the agent form', () => {
+  // 场景：新建客服只配置自身人设和企业授权的行业知识库，企业客服模型不在客服设置页展示。
+  it('hides the organization model and shows industry knowledge candidates in the agent form', () => {
     queryState.organizationConfig.data.value = {
       org_id: 'org-1',
       enabled: true,
@@ -408,8 +408,8 @@ describe('AICCManagerPage', () => {
     context.startCreateAgent()
     const wrapper = mountManager(context, { initialSection: 'settings' })
 
-    expect(wrapper.text()).toContain('企业客服模型')
-    expect(wrapper.text()).toContain('gpt-aicc')
+    expect(wrapper.text()).not.toContain('企业客服模型')
+    expect(wrapper.text()).not.toContain('gpt-aicc')
     expect(wrapper.find('#aicc-industry-knowledge').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('助手版本')
     expect(wrapper.text()).not.toContain('路由')
@@ -432,7 +432,6 @@ describe('AICCManagerPage', () => {
 
     expect(wrapper.find('#aicc-industry-knowledge').attributes('disabled')).toBeDefined()
     expect(wrapper.findAll('button').find(button => button.text().includes('保存配置'))?.attributes('disabled')).toBeDefined()
-    expect(wrapper.text()).toContain('正在加载企业客服配置')
   })
 
   // 覆盖配置失败保护：读取企业授权失败时，页面必须阻止保存并展示可操作的失败提示。
@@ -442,7 +441,6 @@ describe('AICCManagerPage', () => {
     const wrapper = mountManager(context, { initialSection: 'settings' })
 
     expect(wrapper.findAll('button').find(button => button.text().includes('保存配置'))?.attributes('disabled')).toBeDefined()
-    expect(wrapper.text()).toContain('企业客服配置加载失败')
   })
 
   // 覆盖已撤销授权的回显：历史行业库 ID 不在候选列表时仍须有警告标签，避免管理员无法识别并移除。
