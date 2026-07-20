@@ -120,18 +120,26 @@ class _ScenarioHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"status": "ok"})
             return
 
-        # 健康检查重试场景第一次模拟 Traefik 暂无 Endpoint 返回的瞬时 502。
+        # 健康稳定性场景前两次成功，验证尚未达到连续三次门槛时不能提前返回。
         if (
             self.server.scenario == "health_retry"
-            and len(self.server.requests) == 1
+            and len(self.server.requests) in {1, 2}
+        ):
+            self._send_json(200, {"status": "ok"})
+            return
+
+        # 第三次模拟 Traefik 路由切换返回 502，连续成功计数必须清零。
+        if (
+            self.server.scenario == "health_retry"
+            and len(self.server.requests) == 3
         ):
             self._send_json(502, {"code": "bad_gateway", "message": "入口尚未就绪"})
             return
 
-        # 健康检查重试场景第二次恢复，只有精确 ok 状态才允许后续登录写请求。
+        # 第四至六次恢复，只有重新连续成功三次才允许后续登录写请求。
         if (
             self.server.scenario == "health_retry"
-            and len(self.server.requests) == 2
+            and len(self.server.requests) in {4, 5, 6}
         ):
             self._send_json(200, {"status": "ok"})
             return
@@ -360,8 +368,8 @@ class ManagerAPITest(unittest.TestCase):
         self.assertEqual([1], sleeps)
         self.assertEqual(2, len(server.requests))
 
-    # 覆盖同一 Ingress 健康检查先返回 502 再恢复，要求复用 GET 首档退避后接受 ok。
-    def test_wait_ready_retries_transient_502_then_accepts_ok(self):
+    # 覆盖连续两次成功后出现 502，要求稳定计数清零并重新连续成功三次。
+    def test_wait_ready_resets_stability_after_transient_502(self):
         server = self._start_server("health_retry")
         base_url = f"http://127.0.0.1:{server.server_port}"
         sleeps = []
@@ -370,13 +378,13 @@ class ManagerAPITest(unittest.TestCase):
         result = client.wait_ready()
 
         self.assertEqual({"status": "ok"}, result)
-        self.assertEqual([1], sleeps)
+        self.assertEqual([1, 1, 1, 1, 1], sleeps)
         self.assertEqual(
-            ["GET", "GET"],
+            ["GET", "GET", "GET", "GET", "GET", "GET"],
             [request["method"] for request in server.requests],
         )
         self.assertEqual(
-            ["/healthz", "/healthz"],
+            ["/healthz"] * 6,
             [request["path"] for request in server.requests],
         )
 
@@ -399,27 +407,43 @@ class ManagerAPITest(unittest.TestCase):
     def test_wait_ready_uses_anonymous_health_path(self):
         server = self._start_server("health_ok")
         base_url = f"http://127.0.0.1:{server.server_port}"
-        client = ManagerAPI(base_url)
+        sleeps = []
+        client = ManagerAPI(base_url, sleep=sleeps.append)
         client.access_token = "existing-token"
 
         self.assertEqual({"status": "ok"}, client.wait_ready())
 
-        self.assertEqual(1, len(server.requests))
-        self.assertEqual("GET", server.requests[0]["method"])
-        self.assertEqual("/healthz", server.requests[0]["path"])
-        self.assertIsNone(server.requests[0]["authorization"])
+        self.assertEqual([1, 1], sleeps)
+        self.assertEqual(3, len(server.requests))
+        self.assertTrue(
+            all(request["method"] == "GET" for request in server.requests)
+        )
+        self.assertTrue(
+            all(request["path"] == "/healthz" for request in server.requests)
+        )
+        self.assertTrue(
+            all(request["authorization"] is None for request in server.requests)
+        )
 
     # 覆盖 wait_ready 默认总预算，要求首次请求得到约 60 秒剩余 timeout。
     def test_wait_ready_uses_default_sixty_second_deadline(self):
         clock = _DeadlineClock()
-        response = io.BytesIO(b'{"status":"ok"}')
-        client = ManagerAPI("http://manager.test", monotonic=clock.monotonic)
+        responses = [io.BytesIO(b'{"status":"ok"}') for _ in range(3)]
+        client = ManagerAPI(
+            "http://manager.test",
+            sleep=clock.sleep,
+            monotonic=clock.monotonic,
+        )
 
-        with mock.patch("urllib.request.urlopen", return_value=response) as urlopen:
+        with mock.patch("urllib.request.urlopen", side_effect=responses) as urlopen:
             self.assertEqual({"status": "ok"}, client.wait_ready())
 
-        self.assertEqual(1, urlopen.call_count)
-        self.assertAlmostEqual(60, urlopen.call_args.kwargs["timeout"])
+        self.assertEqual([1, 1], clock.sleeps)
+        self.assertEqual(3, urlopen.call_count)
+        self.assertEqual(
+            [60, 59, 58],
+            [call.kwargs["timeout"] for call in urlopen.call_args_list],
+        )
 
     # 覆盖持续小包响应不能续命：0.2 秒绝对预算应在宽松的 0.5 秒上限内中止读取。
     def test_wait_ready_deadline_interrupts_slow_trickle_response(self):
@@ -510,20 +534,27 @@ class ManagerAPITest(unittest.TestCase):
         self.assertLess(elapsed, 0.5)
         excepthook.assert_not_called()
 
-    # 覆盖 daemon worker 正常完成，主线程应无竞态地返回健康对象且仅调用一次匿名 GET。
-    def test_wait_ready_returns_worker_payload_once(self):
-        client = ManagerAPI("http://manager.test")
+    # 覆盖 daemon worker 连续三次成功后才返回，并在两次探测之间固定等待一秒。
+    def test_wait_ready_requires_three_consecutive_successes(self):
+        sleeps = []
+        client = ManagerAPI("http://manager.test", sleep=sleeps.append)
 
         with mock.patch.object(
             client,
             "_request",
             return_value={"status": "ok"},
         ) as request:
-            result = client.wait_ready(timeout=1)
+            result = client.wait_ready(timeout=60)
 
         self.assertEqual({"status": "ok"}, result)
-        request.assert_called_once()
-        self.assertEqual(False, request.call_args.kwargs["authenticated"])
+        self.assertEqual([1, 1], sleeps)
+        self.assertEqual(3, request.call_count)
+        self.assertTrue(
+            all(
+                call.kwargs["authenticated"] is False
+                for call in request.call_args_list
+            )
+        )
 
     # 覆盖 HTTP 200 HTML，要求映射为固定安全字段而非暴露 JSON 解析异常或响应体。
     def test_success_html_response_raises_safe_api_error(self):

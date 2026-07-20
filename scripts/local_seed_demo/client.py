@@ -72,56 +72,81 @@ class ManagerAPI:
     def wait_ready(self, timeout=60):
         """经登录使用的同一 Ingress 等待 manager 健康入口在总预算内就绪。"""
         operation = "GET /healthz"
+        required_consecutive_successes = 3
+        probe_interval = 1
         # 外层 deadline 还覆盖 DNS；内层继续约束 socket、响应读取与有限退避。
         deadline = self.monotonic() + timeout
-        remaining = deadline - self.monotonic()
-        if remaining <= 0:
-            raise RequestDeadlineExceeded(operation)
+        consecutive_successes = 0
 
-        result_queue = queue.Queue(maxsize=1)
+        while consecutive_successes < required_consecutive_successes:
+            remaining = deadline - self.monotonic()
+            if remaining <= 0:
+                raise RequestDeadlineExceeded(operation)
 
-        def request_health():
-            """在 daemon worker 中执行匿名幂等 GET，并搬运结果或控制流异常。"""
-            try:
-                payload = self._request(
-                    "GET",
-                    "/healthz",
-                    None,
-                    authenticated=False,
-                    deadline=deadline,
-                )
-            except BaseException as error:
-                # BaseException 仅用于跨线程传输；主线程原对象 raise，CLI 顶层仍不捕获。
-                result_queue.put_nowait((False, error))
-                return
-            result_queue.put_nowait((True, payload))
+            result_queue = queue.Queue(maxsize=1)
 
-        worker = threading.Thread(
-            target=request_health,
-            name="manager-health-check",
-            daemon=True,
-        )
-        worker.start()
-        remaining = deadline - self.monotonic()
-        if remaining <= 0:
-            raise RequestDeadlineExceeded(operation)
-        try:
-            succeeded, result = result_queue.get(timeout=remaining)
-        except queue.Empty:
-            # daemon 可能稍后自行结束，但其匿名 GET 不会修改 token 或主线程输出。
-            raise RequestDeadlineExceeded(operation) from None
-        if not succeeded:
-            raise result
-        payload = result
-        # 只有明确的 ok 对象才可进入登录；模糊健康状态不得触发不可重放的 POST。
-        if not isinstance(payload, dict) or payload.get("status") != "ok":
-            raise APIError(
-                operation,
-                200,
-                "invalid_health_response",
-                "manager 健康检查响应异常",
+            def request_health():
+                """在 daemon worker 中执行单次匿名 GET，并搬运结果或控制流异常。"""
+                try:
+                    payload = self._request(
+                        "GET",
+                        "/healthz",
+                        None,
+                        authenticated=False,
+                        deadline=deadline,
+                        retry_delays=(),
+                    )
+                except BaseException as error:
+                    # BaseException 仅用于跨线程传输；主线程原对象 raise，CLI 顶层仍不捕获。
+                    result_queue.put_nowait((False, error))
+                    return
+                result_queue.put_nowait((True, payload))
+
+            worker = threading.Thread(
+                target=request_health,
+                name="manager-health-check",
+                daemon=True,
             )
-        return payload
+            worker.start()
+            remaining = deadline - self.monotonic()
+            if remaining <= 0:
+                raise RequestDeadlineExceeded(operation)
+            try:
+                succeeded, result = result_queue.get(timeout=remaining)
+            except queue.Empty:
+                # daemon 可能稍后自行结束，但其匿名 GET 不会修改 token 或主线程输出。
+                raise RequestDeadlineExceeded(operation) from None
+            if not succeeded:
+                # 瞬时网关状态和连接失败会破坏连续稳定性，但仍允许在总预算内重试。
+                if isinstance(result, APIError) and (
+                    result.status in TRANSIENT_STATUSES
+                    or (
+                        result.status is None
+                        and result.code == "connection_error"
+                    )
+                ):
+                    consecutive_successes = 0
+                else:
+                    raise result
+            else:
+                payload = result
+                # 只有明确的 ok 对象才计入稳定性；模糊状态不得继续轮询或触发登录。
+                if not isinstance(payload, dict) or payload.get("status") != "ok":
+                    raise APIError(
+                        operation,
+                        200,
+                        "invalid_health_response",
+                        "manager 健康检查响应异常",
+                    )
+                consecutive_successes += 1
+                if consecutive_successes == required_consecutive_successes:
+                    return payload
+
+            # 成功未达门槛或瞬时失败后均固定等待，且间隔仍受同一绝对 deadline 约束。
+            self._sleep_before_retry(probe_interval, deadline, operation)
+
+        # 循环只会在达到门槛时返回，此处用于静态表达不可达状态。
+        raise RuntimeError("不可达的健康检查状态")
 
     def login(self, org_code, username, password):
         """以明文 JSON 完成受控本地登录，并只保留返回的访问令牌与用户数据。"""
@@ -151,7 +176,15 @@ class ManagerAPI:
             "PATCH", path, body, authenticated=True, deadline=None
         )
 
-    def _request(self, method, path, body, authenticated, deadline=None):
+    def _request(
+        self,
+        method,
+        path,
+        body,
+        authenticated,
+        deadline=None,
+        retry_delays=None,
+    ):
         """发送 JSON 请求，并严格区分可重试读取与可能已生效的写入。"""
         operation = f"{method} {path}"
         headers = {"Accept": "application/json"}
@@ -166,8 +199,9 @@ class ManagerAPI:
             encoded_body = json.dumps(body).encode("utf-8")
             headers["Content-Type"] = "application/json"
 
-        # GET 最多经历五档退避；写请求始终只有一次网络尝试。
-        retry_delays = _GET_RETRY_DELAYS if method == "GET" else ()
+        # 默认 GET 最多经历五档退避；健康门禁可传空序列显式观察每次探测结果。
+        if retry_delays is None:
+            retry_delays = _GET_RETRY_DELAYS if method == "GET" else ()
         for attempt in range(len(retry_delays) + 1):
             request = urllib.request.Request(
                 f"{self.base_url}{path}",
