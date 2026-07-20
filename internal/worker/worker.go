@@ -176,6 +176,13 @@ func (w *Worker) handleHandlerError(ctx context.Context, job sqlc.Job, handlerEr
 		}); err != nil {
 			return fmt.Errorf("标记 job 失败失败: %w", err)
 		}
+		// 终态失败后补偿不能让原任务重新循环；例如提示词 successor 创建失败耗尽重试时，
+		// coordinator 可在旧任务不再 active 后安全创建持久后继任务。
+		if afterFailure := w.registry.LookupAfterFailure(job.Type); afterFailure != nil {
+			if err := afterFailure(ctx, job); err != nil {
+				return fmt.Errorf("job 终态失败补偿失败: %w", err)
+			}
+		}
 		return nil
 	}
 	delay := w.backoff(int(job.Attempts))

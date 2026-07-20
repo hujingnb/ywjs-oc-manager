@@ -82,6 +82,22 @@ func TestWorkerTickRetriesBeforeSuccessCallbackFailure(t *testing.T) {
 	assert.Equal(t, 1, successors)
 }
 
+// TestWorkerTickCompensatesPromptFailureAfterMaxAttempts 验证成功前回调持续失败直至终态后，
+// 失败补偿仅执行一次；原 job 保持 failed，不会被补偿回调重新循环。
+func TestWorkerTickCompensatesPromptFailureAfterMaxAttempts(t *testing.T) {
+	store := newJobStoreStub(t)
+	registry := handlers.NewRegistry()
+	registry.MustRegister("prompt-rollout", func(context.Context, sqlc.Job) error { return nil })
+	require.NoError(t, registry.RegisterBeforeSuccess("prompt-rollout", func(context.Context, sqlc.Job) error { return errors.New("后继失败") }))
+	compensations := 0
+	require.NoError(t, registry.RegisterAfterFailure("prompt-rollout", func(context.Context, sqlc.Job) error { compensations++; return nil }))
+	store.put("job-1", sqlc.Job{ID: store.id("job-1"), Type: "prompt-rollout", Status: domain.JobStatusPending, MaxAttempts: 1})
+
+	require.NoError(t, New(store, &queueStub{ids: []string{store.id("job-1")}}, registry, Config{WorkerID: "w1"}).Tick(context.Background()))
+	assert.Equal(t, domain.JobStatusFailed, store.snapshot("job-1").Status)
+	assert.Equal(t, 1, compensations)
+}
+
 // TestWorkerTickRetriesUntilMaxAttempts 验证workerTickRetriesUntil最大Attempts的边界条件场景。
 func TestWorkerTickRetriesUntilMaxAttempts(t *testing.T) {
 	store := newJobStoreStub(t)

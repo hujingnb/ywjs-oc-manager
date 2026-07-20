@@ -20,11 +20,12 @@ type HandlerFunc func(ctx context.Context, job sqlc.Job) error
 type Registry struct {
 	handlers      map[string]HandlerFunc
 	beforeSuccess map[string]HandlerFunc
+	afterFailure  map[string]HandlerFunc
 }
 
 // NewRegistry 创建空的注册表。
 func NewRegistry() *Registry {
-	return &Registry{handlers: map[string]HandlerFunc{}, beforeSuccess: map[string]HandlerFunc{}}
+	return &Registry{handlers: map[string]HandlerFunc{}, beforeSuccess: map[string]HandlerFunc{}, afterFailure: map[string]HandlerFunc{}}
 }
 
 // RegisterBeforeSuccess 登记成功落库前的可重试回调；失败会保留当前 job 重试，防止后继调度丢失。
@@ -44,6 +45,24 @@ func (r *Registry) RegisterBeforeSuccess(jobType string, fn HandlerFunc) error {
 
 // LookupBeforeSuccess 返回成功落库前回调；未登记时返回 nil，保持既有 job 行为不变。
 func (r *Registry) LookupBeforeSuccess(jobType string) HandlerFunc { return r.beforeSuccess[jobType] }
+
+// RegisterAfterFailure 登记终态失败后的补偿回调；回调失败不改变已 failed 的原任务。
+func (r *Registry) RegisterAfterFailure(jobType string, fn HandlerFunc) error {
+	if fn == nil {
+		return fmt.Errorf("job 类型 %q 的失败回调不能为空", jobType)
+	}
+	if _, ok := r.handlers[jobType]; !ok {
+		return fmt.Errorf("job 类型 %q 尚未注册 handler", jobType)
+	}
+	if _, ok := r.afterFailure[jobType]; ok {
+		return fmt.Errorf("job 类型 %q 已注册失败回调", jobType)
+	}
+	r.afterFailure[jobType] = fn
+	return nil
+}
+
+// LookupAfterFailure 返回终态失败补偿回调，未登记任务保持原有失败行为。
+func (r *Registry) LookupAfterFailure(jobType string) HandlerFunc { return r.afterFailure[jobType] }
 
 // Register 注册一个 job_type 的处理函数。
 // 重复注册同一类型会返回错误，避免 worker 启动时静默覆盖。

@@ -610,6 +610,12 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	}); err != nil {
 		return fmt.Errorf("注册 aicc_platform_prompt_rollout 成功前回调失败: %w", err)
 	}
+	// 成功前后继调度耗尽重试后，旧任务已 failed 不再阻塞；补偿检查创建持久 successor。
+	if err := registry.RegisterAfterFailure(domain.JobTypeAICCPlatformPromptRollout, func(callbackCtx context.Context, _ sqlc.Job) error {
+		return aiccPlatformPromptRolloutCoordinator.EnqueueIfNeeded(callbackCtx)
+	}); err != nil {
+		return fmt.Errorf("注册 aicc_platform_prompt_rollout 失败补偿回调失败: %w", err)
+	}
 	// 生命周期 handler 走 k8s 编排（appOrchestrator + ObjectStore）：传入上方构造的真实 orch
 	// （未启用 k8s 时为 nil，handler 内部已做守卫）。
 	// workspaceObjStore 在 S3 启用时已有值（供 workspace + bootstrap），复用给 lifecycle handler。
