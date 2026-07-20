@@ -10,7 +10,6 @@ import (
 	"oc-manager/internal/domain"
 
 	appsv1 "k8s.io/api/apps/v1"
-	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	autoscalingv2beta2 "k8s.io/api/autoscaling/v2beta2"
 	corev1 "k8s.io/api/core/v1"
@@ -137,9 +136,6 @@ func (a *KubernetesAdapter) applyHPAAutoscalingV2Beta2(ctx context.Context, h *a
 	existing, err := api.Get(ctx, hpa.Name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		_, err = api.Create(ctx, hpa, metav1.CreateOptions{})
-		if apierrors.IsNotFound(err) {
-			return a.applyHPAAutoscalingV1(ctx, h)
-		}
 		return wrapK8s("创建 autoscaling/v2beta2 HPA", err)
 	}
 	if err != nil {
@@ -147,50 +143,7 @@ func (a *KubernetesAdapter) applyHPAAutoscalingV2Beta2(ctx context.Context, h *a
 	}
 	hpa.ResourceVersion = existing.ResourceVersion
 	_, err = api.Update(ctx, hpa, metav1.UpdateOptions{})
-	if apierrors.IsNotFound(err) {
-		return a.applyHPAAutoscalingV1(ctx, h)
-	}
 	return wrapK8s("更新 autoscaling/v2beta2 HPA", err)
-}
-
-// applyHPAAutoscalingV1 是既不支持 v2、也不支持 v2beta2 时的最终兼容路径。
-// v1 结构无法表达 v2 的多指标配置；已有对象可能通过历史 annotation 提供内存扩缩容，不能覆盖。
-func (a *KubernetesAdapter) applyHPAAutoscalingV1(ctx context.Context, h *autoscalingv2.HorizontalPodAutoscaler) error {
-	api := a.client.AutoscalingV1().HorizontalPodAutoscalers(a.namespace)
-	minReplicas := int32(1)
-	maxReplicas := h.Spec.MaxReplicas
-	v1 := &autoscalingv1.HorizontalPodAutoscaler{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: h.Name, Namespace: h.Namespace, Labels: h.Labels,
-			// Kubernetes v1 的 CPU 目标由 spec.targetCPUUtilizationPercentage 表达；
-			// alpha metrics annotation 只补充 v1 spec 无法表达的内存 75% 指标。
-			Annotations: map[string]string{
-				"autoscaling.alpha.kubernetes.io/metrics": `[{"type":"Resource","resource":{"name":"memory","targetAverageUtilization":75}}]`,
-			},
-		},
-		Spec: autoscalingv1.HorizontalPodAutoscalerSpec{
-			ScaleTargetRef:                 autoscalingv1.CrossVersionObjectReference{APIVersion: "apps/v1", Kind: "Deployment", Name: h.Spec.ScaleTargetRef.Name},
-			MinReplicas:                    &minReplicas,
-			MaxReplicas:                    maxReplicas,
-			TargetCPUUtilizationPercentage: int32Ptr(70),
-		},
-	}
-	existing, err := api.Get(ctx, v1.Name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		_, err = api.Create(ctx, v1, metav1.CreateOptions{})
-		return wrapK8s("创建 autoscaling/v1 HPA", err)
-	}
-	if err != nil {
-		return wrapK8s("查询 autoscaling/v1 HPA", err)
-	}
-	// 已存在的 v1 HPA 保留副本范围等集群侧状态，只补齐内存资源指标 annotation，
-	// 避免旧版本曾写成 CPU-only 后，后续 reconcile 永久遗漏内存监控。
-	if existing.Annotations == nil {
-		existing.Annotations = map[string]string{}
-	}
-	existing.Annotations["autoscaling.alpha.kubernetes.io/metrics"] = v1.Annotations["autoscaling.alpha.kubernetes.io/metrics"]
-	_, err = api.Update(ctx, existing, metav1.UpdateOptions{})
-	return wrapK8s("更新 autoscaling/v1 HPA 指标", err)
 }
 
 // applyDeployment 全量收敛 Deployment 模板；AICC 由 HPA 管理副本数，更新时必须保留控制器当前值。

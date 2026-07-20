@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
-	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	autoscalingv2beta2 "k8s.io/api/autoscaling/v2beta2"
 	corev1 "k8s.io/api/core/v1"
@@ -266,16 +265,10 @@ func TestEnsureAppAICCCreatesHPA(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestEnsureAppAICCIgnoresUnavailableHPAAPI 验证集群未提供 autoscaling/v2 时，
-// 可选 HPA 不得阻断客服 Deployment 的升级任务。
-func TestEnsureAppAICCIgnoresUnavailableHPAAPI(t *testing.T) {
-	existing := &autoscalingv1.HorizontalPodAutoscaler{
-		ObjectMeta: metav1.ObjectMeta{Name: "app-a1", Namespace: "oc-aicc"},
-		Spec: autoscalingv1.HorizontalPodAutoscalerSpec{
-			TargetCPUUtilizationPercentage: int32Ptr(70),
-		},
-	}
-	cs := fake.NewSimpleClientset(existing)
+// TestEnsureAppAICCFallsBackToV2Beta2HPA 验证集群未提供 autoscaling/v2 时，
+// 自动使用 v2beta2 创建 CPU、内存双指标 HPA。
+func TestEnsureAppAICCFallsBackToV2Beta2HPA(t *testing.T) {
+	cs := fake.NewSimpleClientset()
 	cs.PrependReactor("create", "horizontalpodautoscalers", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		name := "app-a1"
 		if create, ok := action.(k8stesting.CreateAction); ok {
@@ -283,8 +276,6 @@ func TestEnsureAppAICCIgnoresUnavailableHPAAPI(t *testing.T) {
 			case *autoscalingv2.HorizontalPodAutoscaler:
 				name = object.Name
 			case *autoscalingv2beta2.HorizontalPodAutoscaler:
-				return false, nil, nil
-			case *autoscalingv1.HorizontalPodAutoscaler:
 				return false, nil, nil
 			}
 		}
