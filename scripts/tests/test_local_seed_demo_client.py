@@ -490,6 +490,90 @@ class ManagerAPITest(unittest.TestCase):
                 time.sleep(0.01)
             self.assertEqual([], health_workers)
 
+    # 覆盖可注入时钟停滞时的多轮探测，真实墙钟总预算仍须在 0.2 秒内中止。
+    def test_wait_ready_enforces_wall_deadline_when_injected_clock_stalls(self):
+        request_count = 0
+        second_probe_completed = threading.Event()
+
+        def frozen_monotonic():
+            """模拟不会随真实请求耗时推进的测试单调时钟。"""
+            return 0
+
+        def slow_health_request(*args, **kwargs):
+            """每次探测真实阻塞 0.08 秒，复现逐轮重复授予完整预算的问题。"""
+            nonlocal request_count
+            request_count += 1
+            current_request = request_count
+            time.sleep(0.08)
+            # 墙钟超时发生在第二轮中途；完成信号用于退出 mock 前清理该 daemon。
+            if current_request == 2:
+                second_probe_completed.set()
+            return {"status": "ok"}
+
+        client = ManagerAPI(
+            "http://manager.test",
+            sleep=lambda _: None,
+            monotonic=frozen_monotonic,
+        )
+
+        started_at = time.monotonic()
+        with mock.patch.object(client, "_request", side_effect=slow_health_request):
+            with self.assertRaises(client_module.RequestDeadlineExceeded):
+                client.wait_ready(timeout=0.1)
+            elapsed = time.monotonic() - started_at
+            self.assertTrue(second_probe_completed.wait(0.2))
+            # side effect 返回后还需等待 worker 完成入队，确保撤销 mock 时无线程残留。
+            worker_deadline = time.monotonic() + 0.2
+            while time.monotonic() < worker_deadline:
+                health_workers = [
+                    thread
+                    for thread in threading.enumerate()
+                    if thread.name == "manager-health-check" and thread.is_alive()
+                ]
+                if not health_workers:
+                    break
+                time.sleep(0.001)
+            self.assertEqual([], health_workers)
+
+        self.assertLess(elapsed, 0.2)
+
+    # 覆盖探测耗时与稳定间隔共享墙钟预算，冻结注入时钟不能让间隔越过 0.05 秒上限。
+    def test_wait_ready_wall_deadline_includes_probe_interval(self):
+        def frozen_monotonic():
+            """模拟内部 deadline 不会随探测和真实休眠推进。"""
+            return 0
+
+        def slow_health_request(*args, **kwargs):
+            """单次探测消耗大部分墙钟预算，剩余时间不足完整稳定间隔。"""
+            time.sleep(0.04)
+            return {"status": "ok"}
+
+        client = ManagerAPI(
+            "http://manager.test",
+            monotonic=frozen_monotonic,
+        )
+
+        started_at = time.monotonic()
+        with mock.patch.object(client, "_request", side_effect=slow_health_request):
+            with self.assertRaises(client_module.RequestDeadlineExceeded):
+                client.wait_ready(timeout=0.05)
+        elapsed = time.monotonic() - started_at
+
+        # 主线程按墙钟退出后等待已截断的间隔 worker 收尾，避免跨测试残留 daemon。
+        worker_deadline = time.monotonic() + 0.1
+        while time.monotonic() < worker_deadline:
+            interval_workers = [
+                thread
+                for thread in threading.enumerate()
+                if thread.name == "manager-health-interval" and thread.is_alive()
+            ]
+            if not interval_workers:
+                break
+            time.sleep(0.001)
+
+        self.assertLess(elapsed, 0.08)
+        self.assertEqual([], interval_workers)
+
     # 覆盖 daemon worker 返回 APIError，主线程必须原样重新抛出同一异常对象。
     def test_wait_ready_reraises_worker_api_error(self):
         expected = APIError("GET /healthz", 200, "invalid_response", "响应异常")

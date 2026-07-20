@@ -76,10 +76,15 @@ class ManagerAPI:
         probe_interval = 1
         # 外层 deadline 还覆盖 DNS；内层继续约束 socket、响应读取与有限退避。
         deadline = self.monotonic() + timeout
+        # 真实墙钟不受测试注入时钟停滞影响，防止多轮 worker 重复获得完整等待预算。
+        wall_deadline = time.monotonic() + timeout
         consecutive_successes = 0
 
         while consecutive_successes < required_consecutive_successes:
-            remaining = deadline - self.monotonic()
+            remaining = min(
+                deadline - self.monotonic(),
+                wall_deadline - time.monotonic(),
+            )
             if remaining <= 0:
                 raise RequestDeadlineExceeded(operation)
 
@@ -108,7 +113,11 @@ class ManagerAPI:
                 daemon=True,
             )
             worker.start()
-            remaining = deadline - self.monotonic()
+            # Queue 等待同时受可注入 deadline 与不可停滞墙钟约束，DNS 阻塞不能跨越总预算。
+            remaining = min(
+                deadline - self.monotonic(),
+                wall_deadline - time.monotonic(),
+            )
             if remaining <= 0:
                 raise RequestDeadlineExceeded(operation)
             try:
@@ -142,8 +151,50 @@ class ManagerAPI:
                 if consecutive_successes == required_consecutive_successes:
                     return payload
 
-            # 成功未达门槛或瞬时失败后均固定等待，且间隔仍受同一绝对 deadline 约束。
-            self._sleep_before_retry(probe_interval, deadline, operation)
+            # 成功未达门槛或瞬时失败后均固定等待；临近上限时按墙钟剩余预算截断间隔。
+            interval_remaining = min(
+                deadline - self.monotonic(),
+                wall_deadline - time.monotonic(),
+            )
+            if interval_remaining <= 0:
+                raise RequestDeadlineExceeded(operation)
+
+            interval_queue = queue.Queue(maxsize=1)
+
+            def wait_probe_interval():
+                """在线程中执行可注入休眠，避免异常实现阻塞主线程跨过墙钟预算。"""
+                try:
+                    self._sleep_before_retry(
+                        min(probe_interval, interval_remaining),
+                        deadline,
+                        operation,
+                    )
+                except BaseException as error:
+                    # 与健康请求一致，控制流异常须由主线程原样传播而非打印线程 traceback。
+                    interval_queue.put_nowait((False, error))
+                    return
+                interval_queue.put_nowait((True, None))
+
+            interval_worker = threading.Thread(
+                target=wait_probe_interval,
+                name="manager-health-interval",
+                daemon=True,
+            )
+            interval_worker.start()
+            remaining = min(
+                deadline - self.monotonic(),
+                wall_deadline - time.monotonic(),
+            )
+            if remaining <= 0:
+                raise RequestDeadlineExceeded(operation)
+            try:
+                interval_succeeded, interval_result = interval_queue.get(
+                    timeout=remaining
+                )
+            except queue.Empty:
+                raise RequestDeadlineExceeded(operation) from None
+            if not interval_succeeded:
+                raise interval_result
 
         # 循环只会在达到门槛时返回，此处用于静态表达不可达状态。
         raise RuntimeError("不可达的健康检查状态")
