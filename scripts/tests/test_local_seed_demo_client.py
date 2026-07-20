@@ -299,6 +299,23 @@ class _ScenarioHandler(BaseHTTPRequestHandler):
         # 非测试契约内的路径统一返回 404，避免测试服务器静默接受错误写入。
         self._send_json(404, {"code": "not_found", "message": "不存在"})
 
+    def do_PUT(self):
+        """模拟已接收 AICC 配置更新后响应中断的真实写入链路。"""
+        self._record_request()
+
+        # PUT 与 POST 一样可能在服务端处理成功后断连，客户端必须交给 seeder 回查。
+        if (
+            self.server.scenario == "uncertain_aicc_put"
+            and self.path == "/api/v1/organizations/org-1/aicc-config"
+        ):
+            self.close_connection = True
+            self.connection.shutdown(socket.SHUT_RDWR)
+            self.connection.close()
+            return
+
+        # 非测试契约内的路径统一返回 404，避免测试服务器静默接受错误写入。
+        self._send_json(404, {"code": "not_found", "message": "不存在"})
+
 
 class ManagerAPITest(unittest.TestCase):
     """通过本地真实套接字验证 manager 客户端的可观察协议行为。"""
@@ -862,6 +879,26 @@ class ManagerAPITest(unittest.TestCase):
 
         self.assertEqual(1, len(server.requests))
         self.assertNotIn("demo", str(raised.exception))
+
+    # 覆盖 AICC PUT 已到达服务端但响应中断，要求转换为 seeder 可回查的不确定写入。
+    def test_put_disconnect_after_arrival_raises_uncertain_write_without_retry(self):
+        server = self._start_server("uncertain_aicc_put")
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        client = ManagerAPI(base_url)
+
+        with self.assertRaises(UncertainWrite) as raised:
+            client.put(
+                "/api/v1/organizations/org-1/aicc-config",
+                {"enabled": True, "model": "demo-model"},
+            )
+
+        self.assertEqual(1, len(server.requests))
+        self.assertEqual("PUT", server.requests[0]["method"])
+        self.assertEqual(
+            {"enabled": True, "model": "demo-model"},
+            server.requests[0]["json_body"],
+        )
+        self.assertNotIn("demo-model", str(raised.exception))
 
     # 覆盖亚秒剩余预算：urlopen timeout 取客户端上限与 remaining 的较小正值。
     def test_get_deadline_limits_urlopen_timeout(self):

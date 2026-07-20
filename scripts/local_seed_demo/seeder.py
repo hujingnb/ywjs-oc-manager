@@ -18,6 +18,9 @@ _ROUTING_SLOTS = (
     "mcp",
 )
 
+# AICC 独立配置直接引用 new-api 的实时模型目录，不得从普通实例的版本 allowlist 推断。
+_AICC_DEMO_MODEL = "deepseek-chat"
+
 # 企业普通 PATCH 是完整资料更新，新增 allowlist 时必须逐项从响应 round-trip。
 _ORGANIZATION_PROFILE_FIELDS = (
     "name",
@@ -85,7 +88,6 @@ VERSION_SPECS = (
     ),
 )
 
-# demo-full 的版本顺序具有业务语义：缺少客服智能体时必须优先使用智能客服版。
 ORGANIZATION_SPECS = (
     OrganizationSpec(
         code="demo-full",
@@ -355,7 +357,6 @@ class DemoSeeder:
 
     def ensure_agents(self, state):
         """按稳定企业和安全名称规则补齐、启动两家企业的演示智能客服。"""
-        customer_version_id = state.versions["本地智能客服版"]["id"]
         for spec in ORGANIZATION_SPECS:
             if not spec.needs_aicc:
                 continue
@@ -363,13 +364,6 @@ class DemoSeeder:
             org_id = organization["id"]
             agent = self._find_demo_agent(org_id, spec.code)
             if agent is None:
-                allowlist = organization.get("assistant_version_ids") or []
-                if not allowlist or allowlist[0] != customer_version_id:
-                    actual_first = allowlist[0] if allowlist else "<empty>"
-                    raise SeedConflict(
-                        f"企业 {spec.code} 缺少客服智能体时，allowlist 首项实际为 "
-                        f"{actual_first}，期望为本地智能客服版（{customer_version_id}）"
-                    )
                 agent = self._create_agent(org_id, spec.code)
 
             target = f"企业 {spec.code} 的演示智能客服"
@@ -782,15 +776,21 @@ class DemoSeeder:
         return response["organization"]
 
     def _enable_required_aicc(self, organization):
-        """只开启 AICC 并把有限数量下限补到 1；None 继续表示不限。"""
+        """用 AICC 独立 PUT 配置开启能力，并显式指定本地客服模型。"""
         current_enabled = bool(organization.get("aicc_enabled", False))
+        current_model = organization.get("aicc_model", "")
         current_limit = organization.get("aicc_agent_limit")
         desired_limit = None if current_limit is None else max(current_limit, 1)
-        if current_enabled and desired_limit == current_limit:
+        if (
+            current_enabled
+            and current_model == _AICC_DEMO_MODEL
+            and desired_limit == current_limit
+        ):
             return organization
 
         body = {
             "enabled": True,
+            "model": _AICC_DEMO_MODEL,
             "agent_limit": desired_limit,
             "industry_knowledge_base_ids": list(
                 organization.get("industry_knowledge_base_ids") or []
@@ -799,25 +799,39 @@ class DemoSeeder:
         path = f"/api/v1/organizations/{organization['id']}/aicc-config"
         code = organization["code"]
 
-        # AICC 回查同时比较开通状态、上限和行业库，防止把部分写入误判为完成。
+        # AICC 回查同时比较开通状态、模型、上限和行业库，防止把部分写入误判为完成。
         def lookup_aicc():
             found = self._lookup_organization(code)
             if found is None:
                 return None
             reached = (
                 bool(found.get("aicc_enabled", False))
+                and found.get("aicc_model", "") == _AICC_DEMO_MODEL
                 and found.get("aicc_agent_limit") == desired_limit
                 and list(found.get("industry_knowledge_base_ids") or [])
                 == body["industry_knowledge_base_ids"]
             )
-            return {"organization": found} if reached else None
+            return {"config": self._aicc_config_from_organization(found)} if reached else None
 
         response = self.ensure_uncertain_write(
-            lambda: self.platform.patch(path, body),
+            lambda: self.platform.put(path, body),
             lookup_aicc,
             f"补齐企业 AICC {code}",
         )
-        return response["organization"]
+        config = self._required_object(response, "config", f"企业 {code} 的 AICC 配置")
+        updated = dict(organization)
+        updated["aicc_enabled"] = config.get("enabled", False)
+        updated["aicc_model"] = config.get("model", "")
+        if config.get("agent_limit") is None:
+            updated.pop("aicc_agent_limit", None)
+        else:
+            updated["aicc_agent_limit"] = config["agent_limit"]
+        updated["industry_knowledge_base_ids"] = [
+            item["id"]
+            for item in config.get("industry_knowledge_bases", [])
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        ]
+        return updated
 
     @staticmethod
     def ensure_uncertain_write(create, lookup, target_context):
@@ -834,33 +848,19 @@ class DemoSeeder:
                 # 上下文由固定操作和稳定 name/code 组成，异常链仅保留脱敏的网络操作名。
                 raise SeedConflict(f"{target_context} 第二次写入结果仍不确定") from error
 
-    def validate_aicc_version_order(
-        self, versions, organizations=None, agents=None
-    ):
-        """客服智能体缺失时，保证 AICC 企业首个版本是固定智能客服版。"""
-        if isinstance(versions, SeedState):
-            state = versions
-            versions = state.versions
-            organizations = state.organizations
-            agents = state.agents
-        organizations = organizations or {}
-        agents = agents or {}
-        customer_id = versions["本地智能客服版"]["id"]
-
-        for spec in ORGANIZATION_SPECS:
-            if not spec.needs_aicc or spec.code not in organizations:
-                continue
-            # 已有客服智能体不会依赖 allowlist 默认首项，因而无需阻断后续幂等执行。
-            if agents.get(spec.code):
-                continue
-            allowlist = organizations[spec.code].get("assistant_version_ids") or []
-            if not allowlist or allowlist[0] != customer_id:
-                # 实际首项只来自服务端版本 ID；空列表使用固定安全文本，便于定位配置而不泄露请求体。
-                actual_first = allowlist[0] if allowlist else "<empty>"
-                raise SeedConflict(
-                    f"企业 {spec.code} 缺少客服智能体时，allowlist 首项实际为 "
-                    f"{actual_first}，期望为本地智能客服版（{customer_id}）"
-                )
+    @staticmethod
+    def _aicc_config_from_organization(organization):
+        """把组织列表中的兼容字段投影为 AICC GET/PUT 的 config 响应。"""
+        return {
+            "org_id": organization["id"],
+            "enabled": bool(organization.get("aicc_enabled", False)),
+            "model": organization.get("aicc_model", ""),
+            "agent_limit": organization.get("aicc_agent_limit"),
+            "industry_knowledge_bases": [
+                {"id": base_id, "name": base_id}
+                for base_id in organization.get("industry_knowledge_base_ids") or []
+            ],
+        }
 
     def _list_versions(self):
         """读取正式 versions envelope，并复制为可在本轮追加的普通列表。"""

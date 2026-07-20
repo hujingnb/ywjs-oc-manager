@@ -31,6 +31,8 @@ make local-reset   # 删集群并清空 .k3d-data，自动重跑 local-up 完成
 既有资源发生冲突、异步 Job 失败或运行时未就绪都会严格返回失败。修复配置或冲突后可运行
 `make local-seed-demo` 从当前状态继续补齐，无需重建集群。
 
+本地 seed 为 `demo-full` 与 `demo-aicc` 显式提交 AICC 独立配置的 `model=deepseek-chat`，不从普通实例的助手版本 allowlist 或其顺序推断客服模型。AICC 配置使用 `PUT /api/v1/organizations/{orgId}/aicc-config`；模型变更会让客服隐藏应用逐台静默滚动重启。普通实例仍按其助手版本运行，二者互不替代。
+
 ## 访问入口（traefik Ingress, *.localhost → 127.0.0.1:80）
 
 | 服务 | 地址 | 账号 | 密码 |

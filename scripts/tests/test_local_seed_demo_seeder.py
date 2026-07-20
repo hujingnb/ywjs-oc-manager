@@ -358,30 +358,34 @@ class FakeManagerAPI:
         raise AssertionError(f"出现未声明的 POST 路径: {path}")
 
     def patch(self, path, body):
-        """模拟企业资料与 AICC 配置更新，所有更新都返回 organization envelope。"""
+        """模拟普通企业资料 PATCH，所有更新都返回 organization envelope。"""
         safe_body = copy.deepcopy(body)
         self.calls.append(("PATCH", path, safe_body))
         org_id = path.split("/")[4]
         organization = next(item for item in self.organizations if item["id"] == org_id)
 
-        # AICC 分支只更新三项配置，便于验证播种器没有改动企业资料。
-        if path.endswith("/aicc-config"):
-            updated = copy.deepcopy(organization)
-            updated["aicc_enabled"] = safe_body["enabled"]
-            # OrganizationResult 对 NULL 上限使用 omitempty；有限值才会出现在 JSON 响应中。
-            if safe_body["agent_limit"] is None:
-                updated.pop("aicc_agent_limit", None)
-            else:
-                updated["aicc_agent_limit"] = safe_body["agent_limit"]
-            updated["industry_knowledge_base_ids"] = copy.deepcopy(
-                safe_body["industry_knowledge_base_ids"]
-            )
-            return self._finish_patch(path, organization, updated)
-
         # 普通资料分支使用完整 DTO 覆盖对应字段，复现 handler 的 round-trip 约束。
         updated = copy.deepcopy(organization)
         updated.update(safe_body)
         return self._finish_patch(path, organization, updated)
+
+    def put(self, path, body):
+        """模拟 AICC 独立配置全量保存，返回正式 config envelope。"""
+        safe_body = copy.deepcopy(body)
+        self.calls.append(("PUT", path, safe_body))
+        org_id = path.split("/")[4]
+        organization = next(item for item in self.organizations if item["id"] == org_id)
+        updated = copy.deepcopy(organization)
+        updated["aicc_enabled"] = safe_body["enabled"]
+        updated["aicc_model"] = safe_body["model"]
+        if safe_body["agent_limit"] is None:
+            updated.pop("aicc_agent_limit", None)
+        else:
+            updated["aicc_agent_limit"] = safe_body["agent_limit"]
+        updated["industry_knowledge_base_ids"] = copy.deepcopy(
+            safe_body["industry_knowledge_base_ids"]
+        )
+        return self._finish_put(path, organization, updated)
 
     def _finish_write(self, method, path, created, collection, envelope):
         """按中断脚本决定先落库再断连、先断连不落库或正常返回。"""
@@ -406,6 +410,33 @@ class FakeManagerAPI:
         current.clear()
         current.update(copy.deepcopy(updated))
         return {"organization": copy.deepcopy(current)}
+
+    def _finish_put(self, path, current, updated):
+        """PUT 中断时仅在 applied=True 时替换服务端对象并返回 config envelope。"""
+        outcomes = self.uncertain.get(("PUT", path), [])
+        if outcomes:
+            applied = outcomes.pop(0)
+            if applied:
+                current.clear()
+                current.update(copy.deepcopy(updated))
+            raise UncertainWrite(f"PUT {path}")
+        current.clear()
+        current.update(copy.deepcopy(updated))
+        return {"config": self._aicc_config(current)}
+
+    @staticmethod
+    def _aicc_config(organization):
+        """从企业列表事实投影 GET/PUT 使用的独立 AICC 配置响应。"""
+        return {
+            "org_id": organization["id"],
+            "enabled": organization["aicc_enabled"],
+            "model": organization.get("aicc_model", ""),
+            "agent_limit": organization.get("aicc_agent_limit"),
+            "industry_knowledge_bases": [
+                {"id": base_id, "name": base_id}
+                for base_id in organization.get("industry_knowledge_base_ids") or []
+            ],
+        }
 
     def _finish_composite(self, method, path, apply, response):
         """模拟事务写入在响应前后断连，并确保 applied=True 只提交一次完整事实。"""
@@ -694,9 +725,10 @@ class DemoSeederTest(unittest.TestCase):
             aicc_body = next(
                 body
                 for method, path, body in api.calls
-                if method == "PATCH" and path == aicc_path
+                if method == "PUT" and path == aicc_path
             )
             self.assertIsNone(aicc_body["agent_limit"])
+            self.assertEqual("deepseek-chat", aicc_body["model"])
             self.assertTrue(organization["aicc_enabled"])
             self.assertNotIn("aicc_agent_limit", organization)
             self.assertIsNone(organization.get("aicc_agent_limit"))
@@ -739,7 +771,7 @@ class DemoSeederTest(unittest.TestCase):
         )
         self.assertEqual("人工维护的企业名", second.organizations["demo-full"]["name"])
         self.assertIn(extra_id, second.organizations["demo-full"]["assistant_version_ids"])
-        self.assertEqual([], [call for call in api.calls if call[0] in {"POST", "PATCH"}])
+        self.assertEqual([], [call for call in api.calls if call[0] in {"POST", "PATCH", "PUT"}])
 
     # 覆盖既有企业只补缺失版本与 AICC 单向开通，同时完整保留企业资料和行业库授权。
     def test_existing_organizations_only_append_and_enable_required_aicc(self):
@@ -945,8 +977,8 @@ class DemoSeederTest(unittest.TestCase):
         ]
         self.assertEqual(2, len(organization_posts))
 
-    # 覆盖 AICC PATCH 两次均中断：冲突需包含企业 code 与操作类型并保留异常链。
-    def test_second_uncertain_aicc_patch_reports_safe_target(self):
+    # 覆盖 AICC PUT 两次均中断：冲突需包含企业 code 与操作类型并保留异常链。
+    def test_second_uncertain_aicc_put_reports_safe_target(self):
         versions = [
             {"id": "general", "name": "本地通用助手版"},
             {"id": "customer", "name": "本地智能客服版"},
@@ -964,7 +996,7 @@ class DemoSeederTest(unittest.TestCase):
         ]
         api = FakeManagerAPI(versions=versions, organizations=organizations)
         path = "/api/v1/organizations/full/aicc-config"
-        api.interrupt("PATCH", path, False, False)
+        api.interrupt("PUT", path, False, False)
 
         with self.assertRaises(SeedConflict) as raised:
             self._seeder(api).ensure_platform_data()
@@ -974,11 +1006,11 @@ class DemoSeederTest(unittest.TestCase):
         self.assertIn("AICC", message)
         self.assertIn("不确定", message)
         self.assertIsInstance(raised.exception.__cause__, UncertainWrite)
-        patch_calls = [call for call in api.calls if call[:2] == ("PATCH", path)]
-        self.assertEqual(2, len(patch_calls))
+        put_calls = [call for call in api.calls if call[:2] == ("PUT", path)]
+        self.assertEqual(2, len(put_calls))
 
-    # 覆盖企业 PATCH 响应中断但目标状态已落库：回查确认后不重复 PATCH。
-    def test_uncertain_patch_uses_target_state_found_by_lookup(self):
+    # 覆盖企业 AICC PUT 响应中断但目标状态已落库：回查确认后不重复 PUT。
+    def test_uncertain_aicc_put_uses_target_state_found_by_lookup(self):
         versions = [
             {"id": "general", "name": "本地通用助手版"},
             {"id": "customer", "name": "本地智能客服版"},
@@ -996,16 +1028,16 @@ class DemoSeederTest(unittest.TestCase):
         ]
         api = FakeManagerAPI(versions=versions, organizations=organizations)
         path = "/api/v1/organizations/full/aicc-config"
-        api.interrupt("PATCH", path, True)
+        api.interrupt("PUT", path, True)
 
         state = self._seeder(api).ensure_platform_data()
 
         self.assertTrue(state.organizations["demo-full"]["aicc_enabled"])
-        patch_calls = [call for call in api.calls if call[:2] == ("PATCH", path)]
-        self.assertEqual(1, len(patch_calls))
+        put_calls = [call for call in api.calls if call[:2] == ("PUT", path)]
+        self.assertEqual(1, len(put_calls))
 
-    # 覆盖企业 PATCH 首次中断且目标未出现：确认后只补发一次，并最终得到目标状态。
-    def test_uncertain_patch_retries_once_after_target_absent(self):
+    # 覆盖企业 AICC PUT 首次中断且目标未出现：确认后只补发一次，并最终得到目标状态。
+    def test_uncertain_aicc_put_retries_once_after_target_absent(self):
         versions = [
             {"id": "general", "name": "本地通用助手版"},
             {"id": "customer", "name": "本地智能客服版"},
@@ -1023,59 +1055,13 @@ class DemoSeederTest(unittest.TestCase):
         ]
         api = FakeManagerAPI(versions=versions, organizations=organizations)
         path = "/api/v1/organizations/full/aicc-config"
-        api.interrupt("PATCH", path, False)
+        api.interrupt("PUT", path, False)
 
         state = self._seeder(api).ensure_platform_data()
 
         self.assertTrue(state.organizations["demo-full"]["aicc_enabled"])
-        patch_calls = [call for call in api.calls if call[:2] == ("PATCH", path)]
-        self.assertEqual(2, len(patch_calls))
-
-    # 覆盖缺失客服智能体时的版本顺序保护：allowlist 首项错误必须点名企业和违规条件。
-    def test_validate_aicc_version_order_rejects_wrong_first_allowlist_item(self):
-        versions = {
-            "本地通用助手版": {"id": "general", "name": "本地通用助手版"},
-            "本地智能客服版": {"id": "customer", "name": "本地智能客服版"},
-        }
-        organizations = {
-            "demo-full": FakeManagerAPI.organization(
-                "full", "demo-full", "完整", ["general", "customer"]
-            )
-        }
-        seeder = self._seeder(FakeManagerAPI())
-
-        with self.assertRaises(SeedConflict) as raised:
-            seeder.validate_aicc_version_order(versions, organizations, agents={})
-
-        message = str(raised.exception)
-        self.assertIn("demo-full", message)
-        self.assertIn("allowlist 首项", message)
-        self.assertIn("general", message)
-        self.assertIn("customer", message)
-        self.assertIn("本地智能客服版", message)
-
-    # 覆盖空 allowlist 的冲突详情：实际首项必须使用固定安全文本而非空字符串。
-    def test_validate_aicc_version_order_reports_empty_allowlist(self):
-        versions = {
-            "本地通用助手版": {"id": "general", "name": "本地通用助手版"},
-            "本地智能客服版": {"id": "customer", "name": "本地智能客服版"},
-        }
-        organizations = {
-            "demo-full": FakeManagerAPI.organization(
-                "full", "demo-full", "完整", []
-            )
-        }
-        seeder = self._seeder(FakeManagerAPI())
-
-        with self.assertRaises(SeedConflict) as raised:
-            seeder.validate_aicc_version_order(versions, organizations, agents={})
-
-        message = str(raised.exception)
-        self.assertIn("demo-full", message)
-        self.assertIn("allowlist 首项", message)
-        self.assertIn("<empty>", message)
-        self.assertIn("customer", message)
-        self.assertIn("本地智能客服版", message)
+        put_calls = [call for call in api.calls if call[:2] == ("PUT", path)]
+        self.assertEqual(2, len(put_calls))
 
     def _member_state(self):
         """构造 Task 3 所需版本与三企业状态，隔离平台初始化对成员断言的噪声。"""

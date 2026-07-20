@@ -224,7 +224,13 @@ Hermes 检索 / 写入：
 RAGFlow 只承担文件主库、解析和检索能力，不承载 oc-manager 的业务权限。
 manager 是唯一权限边界：用户侧请求先走 JWT/角色权限校验，Hermes runtime 请求
 先走 app runtime token 校验，再由 manager 固定解析可访问的 org/app/industry dataset。
-industry dataset 只能由当前助手版本显式选择后参与检索。
+普通实例的 industry dataset 只能由当前助手版本显式选择后参与检索；AICC 则由企业授权范围和客服自身选择共同决定。
+
+### 4.2.1 AICC 独立配置与滚动生效
+
+平台管理员通过 `GET/PUT /api/v1/organizations/{orgId}/aicc-config` 读取或完整保存企业 AICC 配置。配置包含开通状态、企业统一 `model`、智能体上限和行业知识库授权；不存在 PATCH 写入口。AICC agent 再保存自己的 persona 与行业库选择，服务端校验选择不越过企业授权范围。
+
+模型变化增加 AICC 配置 revision 并入队 rollout。worker 对该企业客服隐藏应用逐台刷新配置并等待新 Deployment 就绪，再推进已应用 revision，因此对外表现为静默滚动重启。AICC 不读取 assistant version，也不消费其路由、版本号或 Skill；普通实例的助手版本链路保持不变。
 Hermes 不接收 RAGFlow API key、RAGFlow dataset ID，也不直接访问 RAGFlow HTTP API。
 
 ### 4.3 容器生命周期

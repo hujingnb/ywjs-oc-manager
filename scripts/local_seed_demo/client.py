@@ -227,6 +227,12 @@ class ManagerAPI:
             "PATCH", path, body, authenticated=True, deadline=None
         )
 
+    def put(self, path, body):
+        """执行认证全量更新，并与 POST 一样禁止在连接中断后自动重放。"""
+        return self._request(
+            "PUT", path, body, authenticated=True, deadline=None
+        )
+
     def _request(
         self,
         method,
@@ -302,7 +308,7 @@ class ManagerAPI:
                         retry_delays[attempt], deadline, operation
                     )
                     continue
-                if method in {"POST", "PATCH"}:
+                if method in {"POST", "PATCH", "PUT"}:
                     raise UncertainWrite(operation) from None
                 raise APIError(operation, None, "connection_error", "连接 manager 失败") from None
 

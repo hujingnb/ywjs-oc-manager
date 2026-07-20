@@ -19,7 +19,8 @@
 - 注册和维护 Runtime Node
 - 查看全平台应用状态、审计日志和用量概览
 - 为已有成员补建应用实例（`CanCreateAppForMember`）
-- 跨企业维护企业知识库，管理平台级行业知识库，供助手版本选择后检索
+- 跨企业维护企业知识库，管理平台级行业知识库，供普通实例助手版本或已开通企业的智能客服选择后检索
+- 为企业开通智能客服并选择企业统一模型、数量上限和行业知识库授权
 
 **权限边界**：
 - 可跨企业读取所有资源（企业、成员、应用、用量、审计）
@@ -34,7 +35,7 @@
 **典型操作**：
 - 创建、禁用、重置、删除本企业成员账号；创建账号时同步创建对应应用
 - 查看和管理本企业所有应用（渠道绑定、启停、重建）
-- 设置企业级 AI 人设及成员是否允许覆盖的策略
+- 为本企业智能客服维护客服级人设和行业知识库选择
 - 上传、删除企业级知识库文件（由 RAGFlow 解析后供本企业应用检索）
 - 浏览和下载本企业企业级、应用级知识库文件
 - 查看本企业 Token 用量、成员用量、审计日志
@@ -96,7 +97,7 @@
 
 ### 2.3 应用（App）
 
-应用是核心运营单元，代表一个运行在 Runtime Node 上的 Hermes 容器实例。
+应用是核心运营单元，代表一个运行在 Runtime Node 上的 Hermes 容器实例。普通实例与智能客服隐藏应用共享基础运行时治理，但其配置来源严格隔离。
 
 | 属性 | 说明 |
 |------|------|
@@ -108,8 +109,7 @@
 | Docker 容器 ID | 运行时写入 |
 | new-api api_key ID | 对应 new-api 中的 token |
 | api_key 状态（APIKeyStatus） | `pending` / `active` / `disabled` / `error` |
-| 人设来源（PersonaMode） | `org_inherited` / `app_override` |
-| 应用级人设内容 | `app_override` 时生效 |
+| 助手版本 | 普通实例必选，承载镜像、模型、路由、行业库和 Skill |
 | 创建时间 / 更新时间 / 删除时间 | 软删除 |
 
 **AppStatus 状态机**：
@@ -127,7 +127,9 @@
 
 合法转移由 `internal/domain/app_state_machine.go` 维护。
 
-**关联**：每个应用对应一个容器、一个 new-api api_key、最多一个渠道绑定、一份应用私有知识库、一个工作目录。
+**关联**：每个普通实例对应一个容器、一个 new-api api_key、最多一个渠道绑定、一份应用私有知识库、一个工作目录。
+
+智能客服由企业独立 AICC 配置统一指定实时模型；每个客服另有自己的 persona 和从企业授权范围中选择的行业知识库。它不绑定 assistant version，也没有路由模型、版本号或版本 Skill；模型修改后由后台逐台静默滚动重启客服隐藏应用。
 
 ### 2.4 Runtime Node（运行节点）
 
@@ -149,7 +151,7 @@
 
 - **企业级知识库**：由企业管理员上传到 RAGFlow org dataset；Hermes 只读检索，读取者可下载单个原文件。
 - **应用级知识库**：由应用所有者上传到 RAGFlow app dataset；Hermes 可检索并可通过 `oc-kb add` 写入当前实例知识库。
-- **行业知识库**：由平台管理员或外部商业知识库上传入口写入 RAGFlow industry dataset；助手版本可选择一个或多个行业库，Hermes 只读检索。
+- **行业知识库**：由平台管理员或外部商业知识库上传入口写入 RAGFlow industry dataset；普通实例的助手版本可选择一个或多个行业库，智能客服则在企业授权范围内逐客服选择，Hermes 只读检索。
 
 知识库内容以 RAGFlow 为事实来源；manager 只维护 org/app/industry 与 RAGFlow dataset/document 的映射，并在自身权限模型内控制读写边界。
 
@@ -217,12 +219,12 @@ worker 执行 app_initialize：
   → manager 按行业库 ID 或行业名称定位 industry dataset
   → 同名文件覆盖旧 document，并触发 RAGFlow parse
 
-Hermes → oc-kb search/add
+普通实例 Hermes → oc-kb search/add
   → 调 manager runtime API
   → manager 用 app runtime token 解析当前实例
   → 固定访问当前实例 dataset、所属企业 dataset 和当前助手版本选择的行业 dataset
 
-企业知识库和行业知识库对 Hermes 只读；实例知识库对 Hermes 读写。行业知识库按助手版本关联，检索时每个关联行业库都会返回最多 `top_k` 条。
+企业知识库和行业知识库对 Hermes 只读；实例知识库对 Hermes 读写。普通实例的行业库按助手版本关联；智能客服仅检索自己选择且企业已获授权的行业库。
 ```
 
 ### 3.4 容器治理（启停 / 重启 / 健康自愈 / 重建）
@@ -283,6 +285,7 @@ Hermes → oc-kb search/add
 | `CanReadAppKnowledge` | 读取 / 下载应用知识库 | 全部 | 本企业应用 | 自己应用 |
 | `CanWriteAppKnowledge` | 写入 / 删除 / 重解析应用知识库文档 | 不可 | 本企业应用 | 自己应用 |
 | `CanManageIndustryKnowledge` | 管理平台级行业知识库 | 全部 | 不可 | 不可 |
+| `CanManageAICCConfig` | 开通企业 AICC、选择统一模型和行业库授权 | 全部 | 不可 | 不可 |
 | `CanViewOrgPersona` | 读取企业人设 | 全部 | 本企业 | 本企业 |
 | `CanManageOrgPersona` | 写入企业人设 | 全部（等同 CanManageOrg） | 本企业 | 不可 |
 | `CanViewOrgUsage` | 查看企业聚合用量 | 全部 | 本企业 | 不可 |
