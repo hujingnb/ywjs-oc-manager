@@ -390,9 +390,9 @@ type Querier interface {
 	// last_error_status 不加 CHECK 约束，值由调用方在 Go 层负责合法性。
 	MarkAppFailed(ctx context.Context, arg MarkAppFailedParams) error
 	MarkChannelBindingBound(ctx context.Context, arg MarkChannelBindingBoundParams) error
-	MarkJobFailed(ctx context.Context, arg MarkJobFailedParams) error
-	MarkJobRunning(ctx context.Context, arg MarkJobRunningParams) error
-	MarkJobSucceeded(ctx context.Context, id string) error
+	MarkJobFailed(ctx context.Context, arg MarkJobFailedParams) (int64, error)
+	MarkJobRunning(ctx context.Context, arg MarkJobRunningParams) (int64, error)
+	MarkJobSucceeded(ctx context.Context, arg MarkJobSucceededParams) (int64, error)
 	// 标记 dataset 生命周期失败，保留错误文本用于管理面排障。
 	MarkRAGFlowDatasetFailed(ctx context.Context, arg MarkRAGFlowDatasetFailedParams) error
 	// 人工重解析表示用户显式介入，把文档重置为 queued 交刷新任务继续推进。
@@ -410,6 +410,8 @@ type Querier interface {
 	RenameIndustryKnowledgeBase(ctx context.Context, arg RenameIndustryKnowledgeBaseParams) error
 	// 续租使用数据库当前时间，避免 worker 时钟漂移把有效租约提前判过期。
 	RenewAICCMessageTaskLease(ctx context.Context, arg RenewAICCMessageTaskLeaseParams) (int64, error)
+	// handler 执行期间周期续租；随机 token 防止同 worker_id 的旧进程覆盖新 owner。
+	RenewJobLease(ctx context.Context, arg RenewJobLeaseParams) (int64, error)
 	// 续期：把过期时间延后到 now + N 天（N 由 service 按企业 site_ttl_days 传入），并置回 active。
 	RenewPublishedSite(ctx context.Context, arg RenewPublishedSiteParams) error
 	// 替换助手版本行业知识库关联前先清空旧关联，由调用方在同一事务中重新插入。
@@ -418,9 +420,9 @@ type Querier interface {
 	ReplaceOrganizationIndustryKnowledgeBases(ctx context.Context, orgID string) error
 	// 覆盖行业库同名文件时按旧远端 document ID 乐观替换本地映射；created_by 表示最近一次覆盖上传人，created_at 仍保留首创时间。
 	ReplaceRAGFlowIndustryDocument(ctx context.Context, arg ReplaceRAGFlowIndustryDocumentParams) error
-	// manager 进程异常退出会遗留 status=running 的任务；超过调用方传入的租约阈值后统一回到 pending，
-	// 由 scheduler 重新投递。仅回收明确带有过期 locked_at 的记录，避免误碰历史异常空锁行。
-	// attempts 不回退：已开始的执行仍应计入重试预算，防止反复重启绕过 max_attempts。
+	// manager 进程异常退出会遗留 status=running 的任务；超过调用方传入的租约阈值后处理为 pending 或 failed。
+	// attempts 未耗尽的任务由 scheduler 重新投递；已耗尽的任务直接失败，不能因重启额外执行一次 handler。
+	// 仅处理明确带有过期 locked_at 的记录，避免误碰历史异常空锁行；attempts 始终不回退。
 	RequeueExpiredRunningJobs(ctx context.Context, lockedBefore null.Time) (int64, error)
 	// 访客显式重试仅能恢复终态失败任务；重置尝试计数后 dispatcher 才可按既有领取条件重新执行。
 	RequeueFailedAICCMessageTask(ctx context.Context, messageID string) (int64, error)
@@ -435,7 +437,7 @@ type Querier interface {
 	ResetRAGFlowDocumentsParseStatusByDataset(ctx context.Context, datasetID string) error
 	// 重试请求会在同一更新内判定上限；最后一次失败直接终态化，且继续记录 worker 返回的错误摘要。
 	RetryAICCMessageTask(ctx context.Context, arg RetryAICCMessageTaskParams) (int64, error)
-	RetryJob(ctx context.Context, arg RetryJobParams) error
+	RetryJob(ctx context.Context, arg RetryJobParams) (int64, error)
 	RevokeRefreshToken(ctx context.Context, id string) error
 	RevokeRefreshTokensByUser(ctx context.Context, userID string) error
 	// 条件更新只允许 revision 前进，防止较旧的并发 rollout 覆盖新配置应用进度。

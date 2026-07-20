@@ -107,7 +107,7 @@ func (h *AICCModelRolloutHandler) Handle(ctx context.Context, job sqlc.Job) erro
 			if err := h.claimOwnership(ctx, job.ID, payload.RepairAppID); err != nil {
 				return err
 			}
-			if err := h.recoverMarkedAgent(ctx, job.ID, &payload); err != nil {
+			if err := h.recoverMarkedAgent(ctx, job, &payload); err != nil {
 				return err
 			}
 			continue
@@ -141,17 +141,17 @@ func (h *AICCModelRolloutHandler) Handle(ctx context.Context, job sqlc.Job) erro
 		payload.RepairAppID = agent.AppID
 		payload.RepairTargetGeneration = 0
 		payload.RepairTargetRevision = targetRevision
-		if err := h.persistPayload(ctx, job.ID, payload); err != nil {
+		if err := h.persistPayload(ctx, job, payload); err != nil {
 			return aiccRolloutStageError(payload.OrgID, agent.ID, "persist_repair_marker", err)
 		}
-		if err := h.recoverMarkedAgent(ctx, job.ID, &payload); err != nil {
+		if err := h.recoverMarkedAgent(ctx, job, &payload); err != nil {
 			return err
 		}
 	}
 }
 
 // recoverMarkedAgent 在 generation=0 时执行 restart 并先回写 generation；随后核验并幂等收口。
-func (h *AICCModelRolloutHandler) recoverMarkedAgent(ctx context.Context, jobID string, payload *AICCModelRolloutPayload) error {
+func (h *AICCModelRolloutHandler) recoverMarkedAgent(ctx context.Context, job sqlc.Job, payload *AICCModelRolloutPayload) error {
 	if payload.RepairAppID == "" || payload.RepairTargetGeneration < 0 || payload.RepairTargetRevision <= 0 {
 		return aiccRolloutStageError(payload.OrgID, payload.RepairAgentID, "validate_repair_marker", errors.New("任务恢复标记不完整"))
 	}
@@ -167,24 +167,24 @@ func (h *AICCModelRolloutHandler) recoverMarkedAgent(ctx context.Context, jobID 
 			return aiccRolloutStageError(payload.OrgID, payload.RepairAgentID, "restart", fmt.Errorf("返回无效 generation %d", targetGeneration))
 		}
 		payload.RepairTargetGeneration = targetGeneration
-		if err := h.persistPayload(ctx, jobID, *payload); err != nil {
+		if err := h.persistPayload(ctx, job, *payload); err != nil {
 			return aiccRolloutStageError(payload.OrgID, payload.RepairAgentID, "persist_repair_generation", err)
 		}
 	}
 	if err := h.orch.WaitRolloutReady(ctx, payload.RepairAppID, payload.RepairTargetGeneration, h.timeout, nil); err != nil {
 		return aiccRolloutStageError(payload.OrgID, payload.RepairAgentID, "wait_rollout_ready", err)
 	}
-	return h.finishMarkedAgent(ctx, jobID, payload)
+	return h.finishMarkedAgent(ctx, job, payload)
 }
 
 // finishMarkedAgent 按 stamp→ready→clear 顺序收口；marker 直到全部成功才清除。
-func (h *AICCModelRolloutHandler) finishMarkedAgent(ctx context.Context, jobID string, payload *AICCModelRolloutPayload) error {
+func (h *AICCModelRolloutHandler) finishMarkedAgent(ctx context.Context, job sqlc.Job, payload *AICCModelRolloutPayload) error {
 	if err := h.store.SetAICCAgentAppliedConfigRevision(ctx, sqlc.SetAICCAgentAppliedConfigRevisionParams{
 		AppliedConfigRevision: payload.RepairTargetRevision, ID: payload.RepairAgentID, AppliedConfigRevision_2: payload.RepairTargetRevision,
 	}); err != nil {
 		return aiccRolloutStageError(payload.OrgID, payload.RepairAgentID, "stamp_revision", err)
 	}
-	rows, err := h.store.SetAppRuntimePhaseReadyForAICCRolloutOwner(ctx, sqlc.SetAppRuntimePhaseReadyForAICCRolloutOwnerParams{ID: payload.RepairAppID, OwnerJobID: jobID, OwnerJobType: domain.JobTypeAICCModelRollout})
+	rows, err := h.store.SetAppRuntimePhaseReadyForAICCRolloutOwner(ctx, sqlc.SetAppRuntimePhaseReadyForAICCRolloutOwnerParams{ID: payload.RepairAppID, OwnerJobID: job.ID, OwnerJobType: domain.JobTypeAICCModelRollout})
 	if err != nil {
 		return aiccRolloutStageError(payload.OrgID, payload.RepairAgentID, "mark_ready", err)
 	}
@@ -197,10 +197,10 @@ func (h *AICCModelRolloutHandler) finishMarkedAgent(ctx context.Context, jobID s
 	payload.RepairAppID = ""
 	payload.RepairTargetGeneration = 0
 	payload.RepairTargetRevision = 0
-	if err := h.persistPayload(ctx, jobID, *payload); err != nil {
+	if err := h.persistPayload(ctx, job, *payload); err != nil {
 		return aiccRolloutStageError(payload.OrgID, agentID, "clear_repair_marker", err)
 	}
-	return h.releaseOwnership(ctx, jobID, appID)
+	return h.releaseOwnership(ctx, job.ID, appID)
 }
 
 // claimOwnership 让模型 rollout 在写 marker 或重启前领取跨类型 app guard，异类 active owner 时 defer。
@@ -237,12 +237,12 @@ func (h *AICCModelRolloutHandler) releaseOwnership(ctx context.Context, jobID, a
 }
 
 // persistPayload 原子替换当前 running job payload，保留 org/初始 target 并更新恢复标记。
-func (h *AICCModelRolloutHandler) persistPayload(ctx context.Context, jobID string, payload AICCModelRolloutPayload) error {
+func (h *AICCModelRolloutHandler) persistPayload(ctx context.Context, job sqlc.Job, payload AICCModelRolloutPayload) error {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	rows, err := h.store.UpdateJobPayload(ctx, sqlc.UpdateJobPayloadParams{ID: jobID, PayloadJson: raw})
+	rows, err := h.store.UpdateJobPayload(ctx, sqlc.UpdateJobPayloadParams{ID: job.ID, PayloadJson: raw, LockedBy: job.LockedBy, LeaseToken: job.LeaseToken})
 	if err != nil {
 		return err
 	}

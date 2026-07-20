@@ -42,6 +42,7 @@ sql:
       - internal/migrations/000040_aicc_assistant_version_isolation.up.sql
       - internal/migrations/000041_aicc_platform_prompt_rollout_guard.up.sql
       - internal/migrations/000042_aicc_rollout_app_ownership.up.sql
+      - internal/migrations/000043_jobs_lease_token.up.sql
     queries: internal/store/queries
     gen:
       go:

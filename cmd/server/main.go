@@ -963,7 +963,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	eg.Go(func() error { return loop.Run(gctx) })
 	eg.Go(func() error { return aiccMessageLoop.Run(gctx) })
 
-	// 通用 jobs 的 running 锁不带续租心跳；进程崩溃或滚动重启后，超过五分钟的遗留锁必须回到 pending。
+	// 通用 jobs 在执行期间持续续租；进程崩溃、滚动重启或续租停止后，超过五分钟的遗留锁必须回到 pending。
 	// recovery 启动即扫描一次，随后周期复查；恢复记录由 scheduler 的扫库逻辑重新投递给 worker。
 	jobRecovery := scheduler.NewJobRecovery(dbStore.Queries, distLocker, uuid.NewString(), scheduler.JobRecoveryConfig{})
 	jobRecovery.SetLogger(logger)

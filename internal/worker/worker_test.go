@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,6 +35,122 @@ func TestWorkerTickMarksSuccess(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, calls)
 	require.Equal(t, domain.JobStatusSucceeded, store.snapshot("job-1").Status)
+}
+
+// TestWorkerProcessJobID_DoesNotOverwriteReclaimedJob 覆盖旧 worker 在任务已被新 owner 接管后完成，不能覆盖新 owner 的 running 状态。
+func TestWorkerProcessJobID_DoesNotOverwriteReclaimedJob(t *testing.T) {
+	store := newJobStoreStub(t)
+	registry := handlers.NewRegistry()
+	registry.MustRegister("reclaimed", func(_ context.Context, job sqlc.Job) error {
+		// 模拟旧 owner 的 lease 过期后被 recovery 回收、新 worker 用不同 token 重新领取。
+		name, current := store.findByID(job.ID)
+		current.Status = domain.JobStatusRunning
+		current.LockedBy = null.StringFrom("worker-new")
+		current.LeaseToken = null.StringFrom("lease-new")
+		store.jobs[name] = current
+		return nil
+	})
+	store.put("job-1", sqlc.Job{ID: store.id("job-1"), Type: "reclaimed", Status: domain.JobStatusPending, MaxAttempts: 3})
+
+	// 旧 worker 的成功写入必须返回 stale-owner 错误，且数据库状态保留给新 owner。
+	err := New(store, &queueStub{ids: []string{store.id("job-1")}}, registry, Config{WorkerID: "worker-old"}).processJobID(context.Background(), store.id("job-1"))
+
+	require.ErrorIs(t, err, ErrStaleJobOwner)
+	current := store.snapshot("job-1")
+	assert.Equal(t, domain.JobStatusRunning, current.Status)
+	assert.Equal(t, "worker-new", current.LockedBy.String)
+	assert.Equal(t, "lease-new", current.LeaseToken.String)
+}
+
+// TestWorkerProcessJobID_RenewsLeaseDuringLongHandler 覆盖长时间 handler 持续续租，避免 recovery 把仍在执行的任务误判为遗留锁。
+func TestWorkerProcessJobID_RenewsLeaseDuringLongHandler(t *testing.T) {
+	store := newJobStoreStub(t)
+	registry := handlers.NewRegistry()
+	releaseHandler := make(chan struct{})
+	registry.MustRegister("long-running", func(context.Context, sqlc.Job) error {
+		<-releaseHandler
+		return nil
+	})
+	store.put("job-1", sqlc.Job{ID: store.id("job-1"), Type: "long-running", Status: domain.JobStatusPending, MaxAttempts: 3})
+	worker := New(store, &queueStub{}, registry, Config{WorkerID: "worker-1", LeaseRenewInterval: time.Millisecond})
+
+	// handler 阻塞超过一个续租周期时，必须先刷新 locked_at；随后正常结束仍可完成。
+	done := make(chan error, 1)
+	go func() { done <- worker.processJobID(context.Background(), store.id("job-1")) }()
+	require.Eventually(t, func() bool { return store.renewCalls.Load() > 0 }, time.Second, time.Millisecond)
+	close(releaseHandler)
+	require.NoError(t, <-done)
+	assert.Equal(t, domain.JobStatusSucceeded, store.snapshot("job-1").Status)
+}
+
+// TestWorkerProcessJobID_CancelsHandlerWhenLeaseRenewalFails 覆盖续租未命中当前 owner 时，旧 handler 必须收到 context 取消并停止后续副作用。
+func TestWorkerProcessJobID_CancelsHandlerWhenLeaseRenewalFails(t *testing.T) {
+	store := newJobStoreStub(t)
+	store.renewLeaseLost = true
+	registry := handlers.NewRegistry()
+	handlerCanceled := make(chan error, 1)
+	registry.MustRegister("renew-failed", func(ctx context.Context, _ sqlc.Job) error {
+		<-ctx.Done()
+		handlerCanceled <- ctx.Err()
+		return ctx.Err()
+	})
+	store.put("job-1", sqlc.Job{ID: store.id("job-1"), Type: "renew-failed", Status: domain.JobStatusPending, MaxAttempts: 3})
+
+	// RenewJobLease 返回 0 等价于 owner 已不再匹配，worker 应取消 handler 且拒绝写入 retry/success 状态。
+	err := New(store, &queueStub{}, registry, Config{WorkerID: "worker-1", LeaseRenewInterval: time.Millisecond}).processJobID(context.Background(), store.id("job-1"))
+
+	require.ErrorIs(t, err, ErrStaleJobOwner)
+	require.ErrorIs(t, <-handlerCanceled, context.Canceled)
+	assert.Equal(t, domain.JobStatusRunning, store.snapshot("job-1").Status)
+}
+
+// TestWorkerProcessJobID_AllowsNewWorkerToTakeOverStaleOwner 覆盖 recovery 回收过期锁后，新 worker 能领取任务且旧 owner 不能回写结果。
+func TestWorkerProcessJobID_AllowsNewWorkerToTakeOverStaleOwner(t *testing.T) {
+	store := newJobStoreStub(t)
+	oldRegistry := handlers.NewRegistry()
+	oldStarted := make(chan struct{})
+	releaseOld := make(chan struct{})
+	oldRegistry.MustRegister("takeover", func(context.Context, sqlc.Job) error {
+		close(oldStarted)
+		<-releaseOld
+		return nil
+	})
+	store.put("job-1", sqlc.Job{ID: store.id("job-1"), Type: "takeover", Status: domain.JobStatusPending, MaxAttempts: 3})
+	oldWorker := New(store, &queueStub{}, oldRegistry, Config{WorkerID: "worker-old"})
+	oldDone := make(chan error, 1)
+	go func() { oldDone <- oldWorker.processJobID(context.Background(), store.id("job-1")) }()
+	<-oldStarted
+
+	// 模拟 recovery 清除旧 lease 后的新 worker 重新领取并成功完成任务。
+	name, recovered := store.findByID(store.id("job-1"))
+	recovered.Status = domain.JobStatusPending
+	recovered.LockedBy = null.String{}
+	recovered.LeaseToken = null.String{}
+	store.jobs[name] = recovered
+	newRegistry := handlers.NewRegistry()
+	newRegistry.MustRegister("takeover", func(context.Context, sqlc.Job) error { return nil })
+	require.NoError(t, New(store, &queueStub{}, newRegistry, Config{WorkerID: "worker-new"}).processJobID(context.Background(), store.id("job-1")))
+
+	close(releaseOld)
+	require.ErrorIs(t, <-oldDone, ErrStaleJobOwner)
+	assert.Equal(t, domain.JobStatusSucceeded, store.snapshot("job-1").Status)
+}
+
+// TestWorkerProcessJobID_DoesNotExecuteExhaustedRecoveredJob 覆盖过期锁恢复后 attempts 已达上限的任务不能再次执行 handler。
+func TestWorkerProcessJobID_DoesNotExecuteExhaustedRecoveredJob(t *testing.T) {
+	store := newJobStoreStub(t)
+	registry := handlers.NewRegistry()
+	calls := 0
+	registry.MustRegister("exhausted", func(context.Context, sqlc.Job) error {
+		calls++
+		return nil
+	})
+	store.put("job-1", sqlc.Job{ID: store.id("job-1"), Type: "exhausted", Status: domain.JobStatusPending, Attempts: 3, MaxAttempts: 3})
+
+	// 领取 SQL 必须拒绝 attempts 已耗尽的 pending job，避免 stale recovery 额外执行一次业务副作用。
+	require.NoError(t, New(store, &queueStub{}, registry, Config{WorkerID: "worker-1"}).processJobID(context.Background(), store.id("job-1")))
+	assert.Zero(t, calls)
+	assert.Equal(t, domain.JobStatusPending, store.snapshot("job-1").Status)
 }
 
 // TestWorkerTickRunsSuccessCallbackBeforeSucceeded 验证后继调度在成功前运行；回调失败可沿当前 job 重试。
@@ -202,6 +319,8 @@ type jobStoreStub struct {
 	deferCalls       int
 	retryCalls       int
 	markFailedCalls  int
+	renewCalls       atomic.Int32
+	renewLeaseLost   bool
 }
 
 func newJobStoreStub(t *testing.T) *jobStoreStub {
@@ -253,50 +372,66 @@ func (s *jobStoreStub) GetJob(_ context.Context, id string) (sqlc.Job, error) {
 	return job, nil
 }
 
-// MarkJobRunning 更新 job 状态为 running；:exec 语义仅返回 error。
-func (s *jobStoreStub) MarkJobRunning(_ context.Context, arg sqlc.MarkJobRunningParams) error {
+// MarkJobRunning 仅领取 pending job，并保存随机 lease token。
+func (s *jobStoreStub) MarkJobRunning(_ context.Context, arg sqlc.MarkJobRunningParams) (int64, error) {
 	s.markRunningCalls++
 	name, job := s.findByID(arg.ID)
+	if job.Status != domain.JobStatusPending || job.Attempts >= job.MaxAttempts {
+		return 0, nil
+	}
 	job.Status = domain.JobStatusRunning
 	job.LockedBy = arg.LockedBy
+	job.LeaseToken = arg.LeaseToken
 	job.Attempts++
 	s.jobs[name] = job
-	return nil
+	return 1, nil
 }
 
-// MarkJobSucceeded 更新 job 状态为 succeeded；:exec 语义仅返回 error。
-func (s *jobStoreStub) MarkJobSucceeded(_ context.Context, id string) error {
-	name, job := s.findByID(id)
+// MarkJobSucceeded 仅允许当前 token 所属 owner 写入终态。
+func (s *jobStoreStub) MarkJobSucceeded(_ context.Context, arg sqlc.MarkJobSucceededParams) (int64, error) {
+	name, job := s.findByID(arg.ID)
+	if job.Status != domain.JobStatusRunning || job.LockedBy != arg.LockedBy || job.LeaseToken != arg.LeaseToken {
+		return 0, nil
+	}
 	job.Status = domain.JobStatusSucceeded
 	s.jobs[name] = job
-	return nil
+	return 1, nil
 }
 
-// MarkJobFailed 更新 job 状态为 failed；:exec 语义仅返回 error。
-func (s *jobStoreStub) MarkJobFailed(_ context.Context, arg sqlc.MarkJobFailedParams) error {
+// MarkJobFailed 仅允许当前 token 所属 owner 写入终态。
+func (s *jobStoreStub) MarkJobFailed(_ context.Context, arg sqlc.MarkJobFailedParams) (int64, error) {
 	s.markFailedCalls++
 	name, job := s.findByID(arg.ID)
+	if job.Status != domain.JobStatusRunning || job.LockedBy != arg.LockedBy || job.LeaseToken != arg.LeaseToken {
+		return 0, nil
+	}
 	job.Status = domain.JobStatusFailed
 	job.LastError = arg.LastError
 	s.jobs[name] = job
-	return nil
+	return 1, nil
 }
 
-// RetryJob 把 job 重置回 pending 并设退避时间；:exec 语义仅返回 error。
-func (s *jobStoreStub) RetryJob(_ context.Context, arg sqlc.RetryJobParams) error {
+// RetryJob 仅允许当前 token 所属 owner 释放任务并设退避时间。
+func (s *jobStoreStub) RetryJob(_ context.Context, arg sqlc.RetryJobParams) (int64, error) {
 	s.retryCalls++
 	name, job := s.findByID(arg.ID)
+	if job.Status != domain.JobStatusRunning || job.LockedBy != arg.LockedBy || job.LeaseToken != arg.LeaseToken {
+		return 0, nil
+	}
 	job.Status = domain.JobStatusPending
 	job.RunAfter = arg.RunAfter
 	job.LastError = arg.LastError
 	s.jobs[name] = job
-	return nil
+	return 1, nil
 }
 
 // DeferJob 抵消本次领取增加的 attempts，并按指定时间把任务退回 pending。
 func (s *jobStoreStub) DeferJob(_ context.Context, arg sqlc.DeferJobParams) (int64, error) {
 	s.deferCalls++
 	name, job := s.findByID(arg.ID)
+	if job.Status != domain.JobStatusRunning || job.LockedBy != arg.LockedBy || job.LeaseToken != arg.LeaseToken {
+		return 0, nil
+	}
 	job.Status = domain.JobStatusPending
 	job.RunAfter = arg.RunAfter
 	if job.Attempts > 0 {
@@ -304,6 +439,20 @@ func (s *jobStoreStub) DeferJob(_ context.Context, arg sqlc.DeferJobParams) (int
 	}
 	job.LastError = null.String{}
 	job.LockedBy = null.String{}
+	job.LeaseToken = null.String{}
 	s.jobs[name] = job
+	return 1, nil
+}
+
+// RenewJobLease 仅在当前 owner 未被接管时刷新 lease；测试桩无需存储真实时间。
+func (s *jobStoreStub) RenewJobLease(_ context.Context, arg sqlc.RenewJobLeaseParams) (int64, error) {
+	_, job := s.findByID(arg.ID)
+	if job.Status != domain.JobStatusRunning || job.LockedBy != arg.LockedBy || job.LeaseToken != arg.LeaseToken {
+		return 0, nil
+	}
+	s.renewCalls.Add(1)
+	if s.renewLeaseLost {
+		return 0, nil
+	}
 	return 1, nil
 }

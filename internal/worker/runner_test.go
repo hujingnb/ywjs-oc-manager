@@ -17,23 +17,26 @@ import (
 
 // countingStore 在 Tick 调用 Reserve 后立刻返回空，确保 Tick 快速跑完。
 // 同时统计调用次数，方便断言并发执行情况。
-// JobStore 迁移为 MySQL/string 接口：所有方法仅返回 error（:exec 语义）。
+// JobStore 的状态写入均返回影响行数，pool 测试不会实际领取任务，仅提供接口桩。
 type countingStore struct{}
 
 func (countingStore) GetJob(_ context.Context, _ string) (sqlc.Job, error) {
 	return sqlc.Job{}, errors.New("unused")
 }
-func (countingStore) MarkJobRunning(_ context.Context, _ sqlc.MarkJobRunningParams) error {
-	return nil
+func (countingStore) MarkJobRunning(_ context.Context, _ sqlc.MarkJobRunningParams) (int64, error) {
+	return 1, nil
 }
-func (countingStore) MarkJobSucceeded(_ context.Context, _ string) error {
-	return nil
+func (countingStore) MarkJobSucceeded(_ context.Context, _ sqlc.MarkJobSucceededParams) (int64, error) {
+	return 1, nil
 }
-func (countingStore) MarkJobFailed(_ context.Context, _ sqlc.MarkJobFailedParams) error {
-	return nil
+func (countingStore) MarkJobFailed(_ context.Context, _ sqlc.MarkJobFailedParams) (int64, error) {
+	return 1, nil
 }
-func (countingStore) RetryJob(_ context.Context, _ sqlc.RetryJobParams) error {
-	return nil
+func (countingStore) RetryJob(_ context.Context, _ sqlc.RetryJobParams) (int64, error) {
+	return 1, nil
+}
+func (countingStore) RenewJobLease(_ context.Context, _ sqlc.RenewJobLeaseParams) (int64, error) {
+	return 1, nil
 }
 
 // DeferJob 满足 JobStore 接口；pool 测试不会领取具体任务。

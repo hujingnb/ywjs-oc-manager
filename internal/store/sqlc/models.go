@@ -474,6 +474,7 @@ type Job struct {
 	CreatedAt   time.Time       `db:"created_at" json:"created_at"`
 	UpdatedAt   time.Time       `db:"updated_at" json:"updated_at"`
 	FinishedAt  null.Time       `db:"finished_at" json:"finished_at"`
+	LeaseToken  null.String     `db:"lease_token" json:"lease_token"`
 }
 
 // 企业网站发布能力配置与证书托管状态

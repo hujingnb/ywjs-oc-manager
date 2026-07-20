@@ -57,18 +57,28 @@ SET status = 'pending',
     last_error = NULL,
     locked_by = NULL,
     locked_at = NULL,
+    lease_token = NULL,
     updated_at = now()
 WHERE id = ? AND status = 'running'
+  AND locked_by = ?
+  AND lease_token = ?
 `
 
 type DeferJobParams struct {
-	RunAfter time.Time `db:"run_after" json:"run_after"`
-	ID       string    `db:"id" json:"id"`
+	RunAfter   time.Time   `db:"run_after" json:"run_after"`
+	ID         string      `db:"id" json:"id"`
+	LockedBy   null.String `db:"locked_by" json:"locked_by"`
+	LeaseToken null.String `db:"lease_token" json:"lease_token"`
 }
 
 // 非 leader 任务释放 worker 槽并短延迟回队列；抵消本次领取增加的 attempts，不消耗业务重试额度。
 func (q *Queries) DeferJob(ctx context.Context, arg DeferJobParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, deferJob, arg.RunAfter, arg.ID)
+	result, err := q.db.ExecContext(ctx, deferJob,
+		arg.RunAfter,
+		arg.ID,
+		arg.LockedBy,
+		arg.LeaseToken,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -76,7 +86,7 @@ func (q *Queries) DeferJob(ctx context.Context, arg DeferJobParams) (int64, erro
 }
 
 const getAICCModelRolloutLeaderJob = `-- name: GetAICCModelRolloutLeaderJob :one
-SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
+SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at, lease_token
 FROM jobs
 WHERE type = 'aicc_model_rollout'
   AND status IN ('pending', 'running')
@@ -104,12 +114,13 @@ func (q *Queries) GetAICCModelRolloutLeaderJob(ctx context.Context, orgID json.R
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.FinishedAt,
+		&i.LeaseToken,
 	)
 	return i, err
 }
 
 const getAICCPlatformPromptRolloutLeaderJob = `-- name: GetAICCPlatformPromptRolloutLeaderJob :one
-SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
+SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at, lease_token
 FROM jobs
 WHERE type = 'aicc_platform_prompt_rollout'
   AND status IN ('pending', 'running')
@@ -136,12 +147,13 @@ func (q *Queries) GetAICCPlatformPromptRolloutLeaderJob(ctx context.Context) (Jo
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.FinishedAt,
+		&i.LeaseToken,
 	)
 	return i, err
 }
 
 const getJob = `-- name: GetJob :one
-SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
+SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at, lease_token
 FROM jobs
 WHERE id = ?
 `
@@ -164,12 +176,13 @@ func (q *Queries) GetJob(ctx context.Context, id string) (Job, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.FinishedAt,
+		&i.LeaseToken,
 	)
 	return i, err
 }
 
 const getLatestAppInitJob = `-- name: GetLatestAppInitJob :one
-SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
+SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at, lease_token
 FROM jobs
 WHERE type = 'app_initialize'
   -- 调用方为保持 JSON 参数类型传入带双引号的 app_id；必须先解包再与 ->> 的文本结果比较，
@@ -199,6 +212,7 @@ func (q *Queries) GetLatestAppInitJob(ctx context.Context, appID string) (Job, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.FinishedAt,
+		&i.LeaseToken,
 	)
 	return i, err
 }
@@ -238,7 +252,7 @@ func (q *Queries) HasOtherActiveAICCPlatformPromptRolloutJob(ctx context.Context
 }
 
 const listReadyJobs = `-- name: ListReadyJobs :many
-SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
+SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at, lease_token
 FROM jobs
 WHERE status = 'pending'
   AND run_after <= now()
@@ -270,6 +284,7 @@ func (q *Queries) ListReadyJobs(ctx context.Context, limit int32) ([]Job, error)
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.FinishedAt,
+			&i.LeaseToken,
 		); err != nil {
 			return nil, err
 		}
@@ -300,7 +315,7 @@ func (q *Queries) LockAICCPlatformPromptRolloutGuard(ctx context.Context) (int8,
 }
 
 const lockJobForUpdate = `-- name: LockJobForUpdate :one
-SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at
+SELECT id, type, status, priority, run_after, attempts, max_attempts, payload_json, locked_by, locked_at, last_error, created_at, updated_at, finished_at, lease_token
 FROM jobs
 WHERE id = ?
 FOR UPDATE
@@ -324,11 +339,12 @@ func (q *Queries) LockJobForUpdate(ctx context.Context, id string) (Job, error) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.FinishedAt,
+		&i.LeaseToken,
 	)
 	return i, err
 }
 
-const markJobFailed = `-- name: MarkJobFailed :exec
+const markJobFailed = `-- name: MarkJobFailed :execrows
 UPDATE jobs
 SET
     status = 'failed',
@@ -336,72 +352,130 @@ SET
     finished_at = now(),
     locked_by = NULL,
     locked_at = NULL,
+    lease_token = NULL,
     updated_at = now()
-WHERE id = ?
+WHERE id = ? AND status = 'running'
+  AND locked_by = ?
+  AND lease_token = ?
 `
 
 type MarkJobFailedParams struct {
-	LastError null.String `db:"last_error" json:"last_error"`
-	ID        string      `db:"id" json:"id"`
+	LastError  null.String `db:"last_error" json:"last_error"`
+	ID         string      `db:"id" json:"id"`
+	LockedBy   null.String `db:"locked_by" json:"locked_by"`
+	LeaseToken null.String `db:"lease_token" json:"lease_token"`
 }
 
-func (q *Queries) MarkJobFailed(ctx context.Context, arg MarkJobFailedParams) error {
-	_, err := q.db.ExecContext(ctx, markJobFailed, arg.LastError, arg.ID)
-	return err
+func (q *Queries) MarkJobFailed(ctx context.Context, arg MarkJobFailedParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markJobFailed,
+		arg.LastError,
+		arg.ID,
+		arg.LockedBy,
+		arg.LeaseToken,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
-const markJobRunning = `-- name: MarkJobRunning :exec
+const markJobRunning = `-- name: MarkJobRunning :execrows
 UPDATE jobs
 SET
     status = 'running',
     locked_by = ?,
     locked_at = now(),
+    lease_token = ?,
     attempts = attempts + 1,
     updated_at = now()
-WHERE id = ?
+WHERE id = ? AND status = 'pending' AND attempts < max_attempts
 `
 
 type MarkJobRunningParams struct {
-	LockedBy null.String `db:"locked_by" json:"locked_by"`
-	ID       string      `db:"id" json:"id"`
+	LockedBy   null.String `db:"locked_by" json:"locked_by"`
+	LeaseToken null.String `db:"lease_token" json:"lease_token"`
+	ID         string      `db:"id" json:"id"`
 }
 
-func (q *Queries) MarkJobRunning(ctx context.Context, arg MarkJobRunningParams) error {
-	_, err := q.db.ExecContext(ctx, markJobRunning, arg.LockedBy, arg.ID)
-	return err
+func (q *Queries) MarkJobRunning(ctx context.Context, arg MarkJobRunningParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markJobRunning, arg.LockedBy, arg.LeaseToken, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
-const markJobSucceeded = `-- name: MarkJobSucceeded :exec
+const markJobSucceeded = `-- name: MarkJobSucceeded :execrows
 UPDATE jobs
 SET
     status = 'succeeded',
     finished_at = now(),
     locked_by = NULL,
     locked_at = NULL,
+    lease_token = NULL,
     updated_at = now()
-WHERE id = ?
+WHERE id = ? AND status = 'running'
+  AND locked_by = ?
+  AND lease_token = ?
 `
 
-func (q *Queries) MarkJobSucceeded(ctx context.Context, id string) error {
-	_, err := q.db.ExecContext(ctx, markJobSucceeded, id)
-	return err
+type MarkJobSucceededParams struct {
+	ID         string      `db:"id" json:"id"`
+	LockedBy   null.String `db:"locked_by" json:"locked_by"`
+	LeaseToken null.String `db:"lease_token" json:"lease_token"`
+}
+
+func (q *Queries) MarkJobSucceeded(ctx context.Context, arg MarkJobSucceededParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markJobSucceeded, arg.ID, arg.LockedBy, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const renewJobLease = `-- name: RenewJobLease :execrows
+UPDATE jobs
+SET locked_at = now(), updated_at = now()
+WHERE id = ? AND status = 'running'
+  AND locked_by = ?
+  AND lease_token = ?
+`
+
+type RenewJobLeaseParams struct {
+	ID         string      `db:"id" json:"id"`
+	LockedBy   null.String `db:"locked_by" json:"locked_by"`
+	LeaseToken null.String `db:"lease_token" json:"lease_token"`
+}
+
+// handler 执行期间周期续租；随机 token 防止同 worker_id 的旧进程覆盖新 owner。
+func (q *Queries) RenewJobLease(ctx context.Context, arg RenewJobLeaseParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, renewJobLease, arg.ID, arg.LockedBy, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const requeueExpiredRunningJobs = `-- name: RequeueExpiredRunningJobs :execrows
 UPDATE jobs
-SET status = 'pending',
-    run_after = now(),
+SET status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'pending' END,
+    run_after = CASE WHEN attempts >= max_attempts THEN run_after ELSE now() END,
     locked_by = NULL,
     locked_at = NULL,
-    last_error = 'worker lock expired; requeued after lease timeout',
+    lease_token = NULL,
+    last_error = CASE
+        WHEN attempts >= max_attempts THEN 'worker lock expired; max attempts reached'
+        ELSE 'worker lock expired; requeued after lease timeout'
+    END,
+    finished_at = CASE WHEN attempts >= max_attempts THEN now() ELSE finished_at END,
     updated_at = now()
 WHERE status = 'running'
   AND locked_at < ?
 `
 
-// manager 进程异常退出会遗留 status=running 的任务；超过调用方传入的租约阈值后统一回到 pending，
-// 由 scheduler 重新投递。仅回收明确带有过期 locked_at 的记录，避免误碰历史异常空锁行。
-// attempts 不回退：已开始的执行仍应计入重试预算，防止反复重启绕过 max_attempts。
+// manager 进程异常退出会遗留 status=running 的任务；超过调用方传入的租约阈值后处理为 pending 或 failed。
+// attempts 未耗尽的任务由 scheduler 重新投递；已耗尽的任务直接失败，不能因重启额外执行一次 handler。
+// 仅处理明确带有过期 locked_at 的记录，避免误碰历史异常空锁行；attempts 始终不回退。
 func (q *Queries) RequeueExpiredRunningJobs(ctx context.Context, lockedBefore null.Time) (int64, error) {
 	result, err := q.db.ExecContext(ctx, requeueExpiredRunningJobs, lockedBefore)
 	if err != nil {
@@ -415,6 +489,7 @@ UPDATE jobs
 SET status = 'pending',
     locked_by = NULL,
     locked_at = NULL,
+    lease_token = NULL,
     last_error = NULL,
     updated_at = now()
 WHERE id = ?
@@ -428,7 +503,7 @@ func (q *Queries) RequeueJob(ctx context.Context, id string) error {
 	return err
 }
 
-const retryJob = `-- name: RetryJob :exec
+const retryJob = `-- name: RetryJob :execrows
 UPDATE jobs
 SET
     status = 'pending',
@@ -436,35 +511,58 @@ SET
     last_error = ?,
     locked_by = NULL,
     locked_at = NULL,
+    lease_token = NULL,
     updated_at = now()
-WHERE id = ?
+WHERE id = ? AND status = 'running'
+  AND locked_by = ?
+  AND lease_token = ?
 `
 
 type RetryJobParams struct {
-	RunAfter  time.Time   `db:"run_after" json:"run_after"`
-	LastError null.String `db:"last_error" json:"last_error"`
-	ID        string      `db:"id" json:"id"`
+	RunAfter   time.Time   `db:"run_after" json:"run_after"`
+	LastError  null.String `db:"last_error" json:"last_error"`
+	ID         string      `db:"id" json:"id"`
+	LockedBy   null.String `db:"locked_by" json:"locked_by"`
+	LeaseToken null.String `db:"lease_token" json:"lease_token"`
 }
 
-func (q *Queries) RetryJob(ctx context.Context, arg RetryJobParams) error {
-	_, err := q.db.ExecContext(ctx, retryJob, arg.RunAfter, arg.LastError, arg.ID)
-	return err
+func (q *Queries) RetryJob(ctx context.Context, arg RetryJobParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, retryJob,
+		arg.RunAfter,
+		arg.LastError,
+		arg.ID,
+		arg.LockedBy,
+		arg.LeaseToken,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const updateJobPayload = `-- name: UpdateJobPayload :execrows
 UPDATE jobs
 SET payload_json = ?, updated_at = now()
 WHERE id = ? AND status = 'running'
+  AND locked_by = ?
+  AND lease_token = ?
 `
 
 type UpdateJobPayloadParams struct {
 	PayloadJson json.RawMessage `db:"payload_json" json:"payload_json"`
 	ID          string          `db:"id" json:"id"`
+	LockedBy    null.String     `db:"locked_by" json:"locked_by"`
+	LeaseToken  null.String     `db:"lease_token" json:"lease_token"`
 }
 
 // rollout 在外部副作用之间持久化专属恢复标记；仅允许当前 running 任务更新自身 payload。
 func (q *Queries) UpdateJobPayload(ctx context.Context, arg UpdateJobPayloadParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, updateJobPayload, arg.PayloadJson, arg.ID)
+	result, err := q.db.ExecContext(ctx, updateJobPayload,
+		arg.PayloadJson,
+		arg.ID,
+		arg.LockedBy,
+		arg.LeaseToken,
+	)
 	if err != nil {
 		return 0, err
 	}

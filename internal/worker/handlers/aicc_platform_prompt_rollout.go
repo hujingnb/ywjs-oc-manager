@@ -104,7 +104,7 @@ func (h *AICCPlatformPromptRolloutHandler) Handle(ctx context.Context, job sqlc.
 			if err := h.claimOwnership(ctx, job.ID, payload.RepairAppID); err != nil {
 				return err
 			}
-			if err := h.recoverMarkedAgent(ctx, job.ID, &payload); err != nil {
+			if err := h.recoverMarkedAgent(ctx, job, &payload); err != nil {
 				return err
 			}
 			continue
@@ -127,17 +127,17 @@ func (h *AICCPlatformPromptRolloutHandler) Handle(ctx context.Context, job sqlc.
 		payload.RepairAgentID = agent.ID
 		payload.RepairAppID = agent.AppID
 		payload.RepairTargetGeneration = 0
-		if err := h.persistPayload(ctx, job.ID, payload); err != nil {
+		if err := h.persistPayload(ctx, job, payload); err != nil {
 			return aiccPlatformPromptRolloutStageError(agent.ID, "persist_repair_marker", err)
 		}
-		if err := h.recoverMarkedAgent(ctx, job.ID, &payload); err != nil {
+		if err := h.recoverMarkedAgent(ctx, job, &payload); err != nil {
 			return err
 		}
 	}
 }
 
 // recoverMarkedAgent 从 marker 恢复一台客服；generation=0 时才允许触发一次新的 rollout restart。
-func (h *AICCPlatformPromptRolloutHandler) recoverMarkedAgent(ctx context.Context, jobID string, payload *AICCPlatformPromptRolloutPayload) error {
+func (h *AICCPlatformPromptRolloutHandler) recoverMarkedAgent(ctx context.Context, job sqlc.Job, payload *AICCPlatformPromptRolloutPayload) error {
 	if payload.RepairAppID == "" || payload.RepairTargetGeneration < 0 {
 		return aiccPlatformPromptRolloutStageError(payload.RepairAgentID, "validate_repair_marker", errors.New("任务恢复标记不完整"))
 	}
@@ -153,7 +153,7 @@ func (h *AICCPlatformPromptRolloutHandler) recoverMarkedAgent(ctx context.Contex
 			return aiccPlatformPromptRolloutStageError(payload.RepairAgentID, "restart", fmt.Errorf("返回无效 generation %d", generation))
 		}
 		payload.RepairTargetGeneration = generation
-		if err := h.persistPayload(ctx, jobID, *payload); err != nil {
+		if err := h.persistPayload(ctx, job, *payload); err != nil {
 			return aiccPlatformPromptRolloutStageError(payload.RepairAgentID, "persist_repair_generation", err)
 		}
 	}
@@ -168,7 +168,7 @@ func (h *AICCPlatformPromptRolloutHandler) recoverMarkedAgent(ctx context.Contex
 		return aiccPlatformPromptRolloutStageError(payload.RepairAgentID, "verify_prompt_hash", fmt.Errorf("bootstrap 已应用 hash=%q，目标 hash=%q", appliedHash, payload.TargetPromptHash))
 	}
 	readyRows, err := h.store.SetAppRuntimePhaseReadyForAICCRolloutOwner(ctx, sqlc.SetAppRuntimePhaseReadyForAICCRolloutOwnerParams{
-		ID: payload.RepairAppID, OwnerJobID: jobID, OwnerJobType: domain.JobTypeAICCPlatformPromptRollout,
+		ID: payload.RepairAppID, OwnerJobID: job.ID, OwnerJobType: domain.JobTypeAICCPlatformPromptRollout,
 	})
 	if err != nil {
 		return aiccPlatformPromptRolloutStageError(payload.RepairAgentID, "mark_ready", err)
@@ -181,10 +181,10 @@ func (h *AICCPlatformPromptRolloutHandler) recoverMarkedAgent(ctx context.Contex
 	payload.RepairAgentID = ""
 	payload.RepairAppID = ""
 	payload.RepairTargetGeneration = 0
-	if err := h.persistPayload(ctx, jobID, *payload); err != nil {
+	if err := h.persistPayload(ctx, job, *payload); err != nil {
 		return aiccPlatformPromptRolloutStageError(agentID, "clear_repair_marker", err)
 	}
-	return h.releaseOwnership(ctx, jobID, appID)
+	return h.releaseOwnership(ctx, job.ID, appID)
 }
 
 // claimOwnership 在持久 marker 或外部 restart 前领取跨类型 guard；异类活跃 owner 使任务 defer。
@@ -221,12 +221,12 @@ func (h *AICCPlatformPromptRolloutHandler) releaseOwnership(ctx context.Context,
 }
 
 // persistPayload 仅接受当前 running job 的单行更新，避免失去 marker 时误把另一任务当作本任务恢复。
-func (h *AICCPlatformPromptRolloutHandler) persistPayload(ctx context.Context, jobID string, payload AICCPlatformPromptRolloutPayload) error {
+func (h *AICCPlatformPromptRolloutHandler) persistPayload(ctx context.Context, job sqlc.Job, payload AICCPlatformPromptRolloutPayload) error {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	rows, err := h.store.UpdateJobPayload(ctx, sqlc.UpdateJobPayloadParams{ID: jobID, PayloadJson: raw})
+	rows, err := h.store.UpdateJobPayload(ctx, sqlc.UpdateJobPayloadParams{ID: job.ID, PayloadJson: raw, LockedBy: job.LockedBy, LeaseToken: job.LeaseToken})
 	if err != nil {
 		return err
 	}

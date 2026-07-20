@@ -90,7 +90,7 @@ func (r *JobRecovery) Start(ctx context.Context) {
 	}()
 }
 
-// Tick 执行一次受分布式锁保护的回收，返回本轮重新入队的任务数。
+// Tick 执行一次受分布式锁保护的回收，返回本轮处理的过期锁数量；耗尽重试的任务会直接进入 failed。
 func (r *JobRecovery) Tick(ctx context.Context) (int64, error) {
 	if r.store == nil || r.locker == nil {
 		return 0, fmt.Errorf("job recovery 未配置 store 或 locker")
@@ -106,21 +106,21 @@ func (r *JobRecovery) Tick(ctx context.Context) (int64, error) {
 	defer func() { _ = r.locker.Release(context.Background(), "ocm:jobs:recovery:lock", token) }()
 
 	lockedBefore := r.now().UTC().Add(-r.lease)
-	recovered, err := r.store.RequeueExpiredRunningJobs(ctx, null.TimeFrom(lockedBefore))
+	processed, err := r.store.RequeueExpiredRunningJobs(ctx, null.TimeFrom(lockedBefore))
 	if err != nil {
 		return 0, fmt.Errorf("回收过期 worker 锁: %w", err)
 	}
-	return recovered, nil
+	return processed, nil
 }
 
 // tickOnce 把单轮错误转成日志，确保下一周期仍可继续恢复。
 func (r *JobRecovery) tickOnce(ctx context.Context) {
-	recovered, err := r.Tick(ctx)
+	processed, err := r.Tick(ctx)
 	if err != nil {
 		r.logger.Error("job recovery 扫描失败", "error", err)
 		return
 	}
-	if recovered > 0 {
-		r.logger.Warn("已回收过期后台任务锁", "count", recovered, "lease", r.lease)
+	if processed > 0 {
+		r.logger.Warn("已处理过期后台任务锁", "count", processed, "lease", r.lease)
 	}
 }

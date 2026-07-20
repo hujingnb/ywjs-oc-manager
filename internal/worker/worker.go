@@ -12,8 +12,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	null "github.com/guregu/null/v5"
 
 	"oc-manager/internal/domain"
@@ -25,10 +27,11 @@ import (
 // 仅暴露当前实际使用的方法，便于在测试中使用内存桩。
 type JobStore interface {
 	GetJob(ctx context.Context, id string) (sqlc.Job, error)
-	MarkJobRunning(ctx context.Context, arg sqlc.MarkJobRunningParams) error
-	MarkJobSucceeded(ctx context.Context, id string) error
-	MarkJobFailed(ctx context.Context, arg sqlc.MarkJobFailedParams) error
-	RetryJob(ctx context.Context, arg sqlc.RetryJobParams) error
+	MarkJobRunning(ctx context.Context, arg sqlc.MarkJobRunningParams) (int64, error)
+	MarkJobSucceeded(ctx context.Context, arg sqlc.MarkJobSucceededParams) (int64, error)
+	MarkJobFailed(ctx context.Context, arg sqlc.MarkJobFailedParams) (int64, error)
+	RetryJob(ctx context.Context, arg sqlc.RetryJobParams) (int64, error)
+	RenewJobLease(ctx context.Context, arg sqlc.RenewJobLeaseParams) (int64, error)
 	// DeferJob 无损释放因业务互斥暂不可执行的任务，并抵消本次领取增加的 attempts。
 	DeferJob(ctx context.Context, arg sqlc.DeferJobParams) (int64, error)
 }
@@ -52,6 +55,8 @@ type Config struct {
 	BackoffMax time.Duration
 	// OnError 接收单个 job 的处理错误；Tick 会继续处理同批次其他 job。
 	OnError func(jobID string, err error)
+	// LeaseRenewInterval 是 handler 执行期间刷新任务 lease 的周期；默认一分钟，显著小于 recovery 的五分钟阈值。
+	LeaseRenewInterval time.Duration
 }
 
 // Worker 持有 store、queue 和 handler registry，并暴露单次 Tick 的处理入口。
@@ -80,6 +85,9 @@ func New(store JobStore, queue Queue, registry *handlers.Registry, cfg Config) *
 	}
 	if cfg.WorkerID == "" {
 		cfg.WorkerID = "worker"
+	}
+	if cfg.LeaseRenewInterval <= 0 {
+		cfg.LeaseRenewInterval = time.Minute
 	}
 	return &Worker{store: store, queue: queue, registry: registry, cfg: cfg, now: time.Now}
 }
@@ -112,56 +120,82 @@ func (w *Worker) processJobID(ctx context.Context, id string) error {
 		// 来自队列的 jobID 可能已经被其他 worker 处理；幂等地跳过。
 		return nil
 	}
-	// 并发去重主要依赖队列层 Reserve 的 ZREM/内存弹出语义；MarkJobRunning 按 id 更新 locked_by，
-	// SQL 本身不再额外校验 status=pending，因此这里先读状态再推进。
-	if err := w.store.MarkJobRunning(ctx, sqlc.MarkJobRunningParams{
-		ID:       job.ID,
-		LockedBy: null.StringFrom(w.cfg.WorkerID),
-	}); err != nil {
+	// MarkJobRunning 使用 status=pending 的条件更新和随机 lease token，读写之间被其他 worker 抢先领取时安全跳过。
+	leaseToken := null.StringFrom(uuid.NewString())
+	rows, err := w.store.MarkJobRunning(ctx, sqlc.MarkJobRunningParams{
+		ID:         job.ID,
+		LockedBy:   null.StringFrom(w.cfg.WorkerID),
+		LeaseToken: leaseToken,
+	})
+	if err != nil {
 		return fmt.Errorf("锁定 job 失败: %w", err)
 	}
-	// MarkJobRunning 是 :exec（不返回行）；它在 DB 内执行 attempts+1，故这里在内存中同步自增，
+	if rows != 1 {
+		// 其他 worker 可能已在本次读写之间领取任务；队列重复信号可安全忽略。
+		return nil
+	}
+	// MarkJobRunning 在 DB 内执行 attempts+1，故这里在内存中同步自增，
 	// 让后续 handler 与 handleHandlerError/backoff 看到与原 PG RETURNING 行一致的尝试次数，
 	// 否则 max_attempts 判定会比应有次数少一次。
 	job.Attempts++
+	job.LockedBy = null.StringFrom(w.cfg.WorkerID)
+	job.LeaseToken = leaseToken
+	// 续租失败或 token 被接管时取消 handler context，尽早停止旧 owner 的外部副作用；
+	// 即便某个下游调用不支持取消，后续 CAS 也会拒绝它覆盖新 owner 的任务状态。
+	handlerCtx, cancelHandler := context.WithCancel(ctx)
+	defer cancelHandler()
+	stopRenew, leaseLost := w.startLeaseRenewer(handlerCtx, job, cancelHandler)
+	defer stopRenew()
 	handler, err := w.registry.Lookup(job.Type)
 	if err != nil {
 		// 未注册类型无法通过重试自愈，直接进入 failed 终态，避免 scheduler 反复重新入队。
-		finalErr := w.store.MarkJobFailed(ctx, sqlc.MarkJobFailedParams{
-			ID:        job.ID,
-			LastError: null.StringFrom(err.Error()),
+		finalRows, finalErr := w.store.MarkJobFailed(ctx, sqlc.MarkJobFailedParams{
+			ID: job.ID, LastError: null.StringFrom(err.Error()), LockedBy: job.LockedBy, LeaseToken: job.LeaseToken,
 		})
 		if finalErr != nil {
 			return fmt.Errorf("标记 job 失败失败: %w", finalErr)
 		}
+		if finalRows != 1 {
+			return ErrStaleJobOwner
+		}
 		return nil
 	}
-	if err := handler(ctx, job); err != nil {
+	if err := handler(handlerCtx, job); err != nil {
+		if leaseLost.Load() {
+			return ErrStaleJobOwner
+		}
 		var deferred *handlers.DeferredJobError
 		if errors.As(err, &deferred) {
 			delay := deferred.Delay
 			if delay <= 0 {
 				delay = time.Second
 			}
-			rows, deferErr := w.store.DeferJob(ctx, sqlc.DeferJobParams{ID: job.ID, RunAfter: w.now().Add(delay)})
+			rows, deferErr := w.store.DeferJob(ctx, sqlc.DeferJobParams{ID: job.ID, RunAfter: w.now().Add(delay), LockedBy: job.LockedBy, LeaseToken: job.LeaseToken})
 			if deferErr != nil {
 				return fmt.Errorf("延后 job 失败: %w", deferErr)
 			}
 			if rows != 1 {
-				return fmt.Errorf("延后 job 影响行数异常: %d", rows)
+				return ErrStaleJobOwner
 			}
 			return nil
 		}
 		return w.handleHandlerError(ctx, job, err)
 	}
+	if leaseLost.Load() {
+		return ErrStaleJobOwner
+	}
 	// 成功前回调失败走现有 retry，防止后继调度错误发生在 succeeded 后而永久丢失。
 	if beforeSuccess := w.registry.LookupBeforeSuccess(job.Type); beforeSuccess != nil {
-		if err := beforeSuccess(ctx, job); err != nil {
+		if err := beforeSuccess(handlerCtx, job); err != nil {
 			return w.handleHandlerError(ctx, job, fmt.Errorf("job 成功前回调失败: %w", err))
 		}
 	}
-	if err := w.store.MarkJobSucceeded(ctx, job.ID); err != nil {
+	rows, err = w.store.MarkJobSucceeded(ctx, sqlc.MarkJobSucceededParams{ID: job.ID, LockedBy: job.LockedBy, LeaseToken: job.LeaseToken})
+	if err != nil {
 		return fmt.Errorf("标记 job 成功失败: %w", err)
+	}
+	if rows != 1 {
+		return ErrStaleJobOwner
 	}
 	return nil
 }
@@ -170,11 +204,14 @@ func (w *Worker) processJobID(ctx context.Context, id string) error {
 // handlerErr 会被持久化到 last_error，供后台任务列表和审计排障展示。
 func (w *Worker) handleHandlerError(ctx context.Context, job sqlc.Job, handlerErr error) error {
 	if job.Attempts >= job.MaxAttempts {
-		if err := w.store.MarkJobFailed(ctx, sqlc.MarkJobFailedParams{
-			ID:        job.ID,
-			LastError: null.StringFrom(handlerErr.Error()),
-		}); err != nil {
+		rows, err := w.store.MarkJobFailed(ctx, sqlc.MarkJobFailedParams{
+			ID: job.ID, LastError: null.StringFrom(handlerErr.Error()), LockedBy: job.LockedBy, LeaseToken: job.LeaseToken,
+		})
+		if err != nil {
 			return fmt.Errorf("标记 job 失败失败: %w", err)
+		}
+		if rows != 1 {
+			return ErrStaleJobOwner
 		}
 		// 终态失败后补偿不能让原任务重新循环；例如提示词 successor 创建失败耗尽重试时，
 		// coordinator 可在旧任务不再 active 后安全创建持久后继任务。
@@ -187,12 +224,14 @@ func (w *Worker) handleHandlerError(ctx context.Context, job sqlc.Job, handlerEr
 	}
 	delay := w.backoff(int(job.Attempts))
 	runAfter := w.now().Add(delay)
-	if err := w.store.RetryJob(ctx, sqlc.RetryJobParams{
-		ID:        job.ID,
-		RunAfter:  runAfter,
-		LastError: null.StringFrom(handlerErr.Error()),
-	}); err != nil {
+	rows, err := w.store.RetryJob(ctx, sqlc.RetryJobParams{
+		ID: job.ID, RunAfter: runAfter, LastError: null.StringFrom(handlerErr.Error()), LockedBy: job.LockedBy, LeaseToken: job.LeaseToken,
+	})
+	if err != nil {
 		return fmt.Errorf("重试 job 失败: %w", err)
+	}
+	if rows != 1 {
+		return ErrStaleJobOwner
 	}
 	return nil
 }
@@ -212,3 +251,33 @@ func (w *Worker) backoff(attempt int) time.Duration {
 
 // SetClock 替换 worker 内部时钟，仅供测试使用。
 func (w *Worker) SetClock(now func() time.Time) { w.now = now }
+
+// ErrStaleJobOwner 表示任务 lease 已被 recovery 回收并由其他 worker 接管；旧 owner 不得再覆盖新状态。
+var ErrStaleJobOwner = errors.New("job lease 已失效，当前 worker 不再拥有任务")
+
+// startLeaseRenewer 在 handler 执行期间刷新 locked_at。续租失败会取消 handler context，
+// 让支持 context 的外部调用尽快停止；后续 CAS 状态写入继续保护不支持取消的旧 owner 不覆盖新状态。
+func (w *Worker) startLeaseRenewer(ctx context.Context, job sqlc.Job, cancelHandler context.CancelFunc) (func(), *atomic.Bool) {
+	done := make(chan struct{})
+	leaseLost := &atomic.Bool{}
+	go func() {
+		ticker := time.NewTicker(w.cfg.LeaseRenewInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				rows, err := w.store.RenewJobLease(ctx, sqlc.RenewJobLeaseParams{ID: job.ID, LockedBy: job.LockedBy, LeaseToken: job.LeaseToken})
+				if err != nil || rows != 1 {
+					leaseLost.Store(true)
+					cancelHandler()
+					return
+				}
+			}
+		}
+	}()
+	return func() { close(done) }, leaseLost
+}
