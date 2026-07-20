@@ -2,6 +2,8 @@
 
 import http.client
 import json
+import queue
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -46,6 +48,10 @@ class RequestDeadlineExceeded(RuntimeError):
         super().__init__(f"{operation} 请求预算已耗尽")
 
 
+class _InvalidResponse(RuntimeError):
+    """表示响应消息边界或编码不符合 JSON API 契约，仅供客户端内部安全映射。"""
+
+
 class ManagerAPI:
     """封装演示数据脚本需要的认证、读取和写入 HTTP 操作。"""
 
@@ -65,19 +71,52 @@ class ManagerAPI:
 
     def wait_ready(self, timeout=60):
         """经登录使用的同一 Ingress 等待 manager 健康入口在总预算内就绪。"""
-        # 绝对 deadline 覆盖请求与有限退避，避免入口异常时突破调用方总等待预算。
+        operation = "GET /healthz"
+        # 外层 deadline 还覆盖 DNS；内层继续约束 socket、响应读取与有限退避。
         deadline = self.monotonic() + timeout
-        payload = self._request(
-            "GET",
-            "/healthz",
-            None,
-            authenticated=False,
-            deadline=deadline,
+        remaining = deadline - self.monotonic()
+        if remaining <= 0:
+            raise RequestDeadlineExceeded(operation)
+
+        result_queue = queue.Queue(maxsize=1)
+
+        def request_health():
+            """在 daemon worker 中仅执行匿名幂等 GET，并回传结果或普通异常。"""
+            try:
+                payload = self._request(
+                    "GET",
+                    "/healthz",
+                    None,
+                    authenticated=False,
+                    deadline=deadline,
+                )
+            except Exception as error:
+                # 不捕获 KeyboardInterrupt/SystemExit；普通异常由主线程保持类型重新抛出。
+                result_queue.put_nowait((False, error))
+                return
+            result_queue.put_nowait((True, payload))
+
+        worker = threading.Thread(
+            target=request_health,
+            name="manager-health-check",
+            daemon=True,
         )
+        worker.start()
+        remaining = deadline - self.monotonic()
+        if remaining <= 0:
+            raise RequestDeadlineExceeded(operation)
+        try:
+            succeeded, result = result_queue.get(timeout=remaining)
+        except queue.Empty:
+            # daemon 可能稍后自行结束，但其匿名 GET 不会修改 token 或主线程输出。
+            raise RequestDeadlineExceeded(operation) from None
+        if not succeeded:
+            raise result
+        payload = result
         # 只有明确的 ok 对象才可进入登录；模糊健康状态不得触发不可重放的 POST。
         if not isinstance(payload, dict) or payload.get("status") != "ok":
             raise APIError(
-                "GET /healthz",
+                operation,
                 200,
                 "invalid_health_response",
                 "manager 健康检查响应异常",
@@ -208,6 +247,7 @@ class ManagerAPI:
             )
             return json.loads(response_body)
         except (
+            _InvalidResponse,
             json.JSONDecodeError,
             UnicodeDecodeError,
             http.client.IncompleteRead,
@@ -222,6 +262,7 @@ class ManagerAPI:
     def _read_response_body(self, response, deadline, operation):
         """分段读取响应体，并在每次阻塞读取前后执行绝对 deadline 校验。"""
         chunks = []
+        expected_length = self._content_length(response)
         read1 = getattr(response, "read1", None)
         while True:
             self._raise_if_deadline_exhausted(deadline, operation)
@@ -230,14 +271,45 @@ class ManagerAPI:
             chunk = read1(64 * 1024) if callable(read1) else response.read(1)
             self._raise_if_deadline_exhausted(deadline, operation)
             if not chunk:
-                return b"".join(chunks)
+                response_body = b"".join(chunks)
+                if (
+                    expected_length is not None
+                    and len(response_body) != expected_length
+                ):
+                    raise _InvalidResponse("Content-Length 与响应体长度不一致")
+                return response_body
             chunks.append(chunk)
 
+    @staticmethod
+    def _content_length(response):
+        """严格解析重复 Content-Length，并拒绝非法、负数或互相冲突的声明。"""
+        headers = getattr(response, "headers", None)
+        get_all = getattr(headers, "get_all", None)
+        if not callable(get_all):
+            return None
+        values = get_all("Content-Length") or []
+        if not values:
+            return None
+
+        parsed_lengths = []
+        for value in values:
+            if (
+                not isinstance(value, str)
+                or not value.isascii()
+                or not value.isdigit()
+            ):
+                raise _InvalidResponse("Content-Length 不是非负十进制整数")
+            parsed_lengths.append(int(value))
+        if any(length != parsed_lengths[0] for length in parsed_lengths[1:]):
+            raise _InvalidResponse("多个 Content-Length 声明互相冲突")
+        return parsed_lengths[0]
+
     def _limit_response_read_timeout(self, response, deadline, operation):
-        """按剩余预算收紧真实 HTTPResponse socket，避免单次读取越过 deadline。"""
+        """兼容性 best-effort 收紧 CPython HTTPResponse socket 的单次读取预算。"""
         if deadline is None:
             return
         timeout = self._request_timeout(deadline, operation)
+        # urllib 未公开底层 socket；仅识别 CPython 当前链路，健康总上限不依赖此私有结构。
         response_fp = getattr(response, "fp", None)
         raw_stream = getattr(response_fp, "raw", None)
         response_socket = getattr(raw_stream, "_sock", None)
@@ -282,6 +354,7 @@ class ManagerAPI:
             )
             payload = json.loads(response_body)
         except (
+            _InvalidResponse,
             json.JSONDecodeError,
             UnicodeDecodeError,
             http.client.IncompleteRead,

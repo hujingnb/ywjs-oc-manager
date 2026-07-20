@@ -60,6 +60,20 @@ class _ReadOnlyResponse:
         self.body.close()
 
 
+class _CompletionResponse(_ReadOnlyResponse):
+    """在关闭时发出信号，供阻塞 urlopen 测试等待 worker 清理响应。"""
+
+    def __init__(self, body, response_closed):
+        """保存响应字节和响应已关闭的同步事件。"""
+        super().__init__(body)
+        self.response_closed = response_closed
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        """关闭响应后通知测试，避免 daemon worker 仍依赖即将撤销的 mock。"""
+        super().__exit__(exc_type, exc_value, traceback)
+        self.response_closed.set()
+
+
 class _ScenarioHandler(BaseHTTPRequestHandler):
     """按测试场景提供最小 HTTP 行为，并只保留协议断言需要的请求信息。"""
 
@@ -156,6 +170,41 @@ class _ScenarioHandler(BaseHTTPRequestHandler):
                     self.wfile.flush()
                 except (BrokenPipeError, ConnectionResetError):
                     return
+            return
+
+        # 有效 JSON 体故意短于声明长度，验证 EOF 时仍会执行 Content-Length 校验。
+        if self.server.scenario == "health_short_content_length":
+            response_body = b'{"status":"ok"}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(response_body) + 100))
+            self.end_headers()
+            self.wfile.write(response_body)
+            self.wfile.flush()
+            self.close_connection = True
+            self.connection.shutdown(socket.SHUT_RDWR)
+            self.connection.close()
+            return
+
+        # 非数字 Content-Length 不具备可验证的消息边界，必须作为非法响应拒绝。
+        if self.server.scenario == "health_invalid_content_length":
+            response_body = b'{"status":"ok"}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", "invalid")
+            self.end_headers()
+            self.wfile.write(response_body)
+            return
+
+        # 两个冲突 Content-Length 会形成代理解析歧义，即使 body 合法也必须拒绝。
+        if self.server.scenario == "health_conflicting_content_length":
+            response_body = b'{"status":"ok"}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(response_body)))
+            self.send_header("Content-Length", str(len(response_body) + 1))
+            self.end_headers()
+            self.wfile.write(response_body)
             return
 
         # 登录场景只允许读取助手版本，用于验证 Bearer token 会自动附加。
@@ -386,6 +435,63 @@ class ManagerAPITest(unittest.TestCase):
         self.assertLess(elapsed, 0.5)
         self.assertEqual(1, len(server.requests))
 
+    # 覆盖 DNS/urlopen 建连前阻塞：外层墙钟门禁必须在 0.2 秒预算后返回。
+    def test_wait_ready_deadline_interrupts_blocked_urlopen(self):
+        response_closed = threading.Event()
+        response = _CompletionResponse(b'{"status":"ok"}', response_closed)
+
+        def blocked_urlopen(*args, **kwargs):
+            """模拟 DNS 阶段不理会 socket timeout，并在 0.5 秒后才返回响应。"""
+            time.sleep(0.5)
+            return response
+
+        client = ManagerAPI("http://manager.test")
+        with mock.patch("urllib.request.urlopen", side_effect=blocked_urlopen):
+            started_at = time.monotonic()
+            with self.assertRaises(client_module.RequestDeadlineExceeded):
+                client.wait_ready(timeout=0.2)
+            elapsed = time.monotonic() - started_at
+            self.assertLess(elapsed, 0.5)
+            self.assertTrue(response_closed.wait(1))
+            # 响应关闭后 worker 只剩异常入队，退出 patch 前仍显式等待其结束。
+            worker_deadline = time.monotonic() + 1
+            while time.monotonic() < worker_deadline:
+                health_workers = [
+                    thread
+                    for thread in threading.enumerate()
+                    if thread.name == "manager-health-check" and thread.is_alive()
+                ]
+                if not health_workers:
+                    break
+                time.sleep(0.01)
+            self.assertEqual([], health_workers)
+
+    # 覆盖 daemon worker 返回 APIError，主线程必须原样重新抛出同一异常对象。
+    def test_wait_ready_reraises_worker_api_error(self):
+        expected = APIError("GET /healthz", 200, "invalid_response", "响应异常")
+        client = ManagerAPI("http://manager.test")
+
+        with mock.patch.object(client, "_request", side_effect=expected):
+            with self.assertRaises(APIError) as raised:
+                client.wait_ready()
+
+        self.assertIs(expected, raised.exception)
+
+    # 覆盖 daemon worker 正常完成，主线程应无竞态地返回健康对象且仅调用一次匿名 GET。
+    def test_wait_ready_returns_worker_payload_once(self):
+        client = ManagerAPI("http://manager.test")
+
+        with mock.patch.object(
+            client,
+            "_request",
+            return_value={"status": "ok"},
+        ) as request:
+            result = client.wait_ready(timeout=1)
+
+        self.assertEqual({"status": "ok"}, result)
+        request.assert_called_once()
+        self.assertEqual(False, request.call_args.kwargs["authenticated"])
+
     # 覆盖 HTTP 200 HTML，要求映射为固定安全字段而非暴露 JSON 解析异常或响应体。
     def test_success_html_response_raises_safe_api_error(self):
         server = self._start_server("health_html")
@@ -425,6 +531,43 @@ class ManagerAPITest(unittest.TestCase):
         self.assertEqual(200, raised.exception.status)
         self.assertEqual("invalid_response", raised.exception.code)
         self.assertEqual("manager 响应格式异常", raised.exception.safe_message)
+
+    # 覆盖有效健康 JSON 短于声明长度，EOF 后必须安全拒绝而非接受 status=ok。
+    def test_success_short_content_length_raises_safe_api_error(self):
+        server = self._start_server("health_short_content_length")
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        client = ManagerAPI(base_url)
+
+        with self.assertRaises(APIError) as raised:
+            client.wait_ready()
+
+        self.assertEqual(200, raised.exception.status)
+        self.assertEqual("invalid_response", raised.exception.code)
+        self.assertEqual("manager 响应格式异常", raised.exception.safe_message)
+
+    # 覆盖非数字 Content-Length，urllib 接受响应头时客户端仍须安全拒绝。
+    def test_success_invalid_content_length_raises_safe_api_error(self):
+        server = self._start_server("health_invalid_content_length")
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        client = ManagerAPI(base_url)
+
+        with self.assertRaises(APIError) as raised:
+            client.wait_ready()
+
+        self.assertEqual(200, raised.exception.status)
+        self.assertEqual("invalid_response", raised.exception.code)
+
+    # 覆盖冲突 Content-Length，urllib 保留重复头时客户端须拒绝代理解析歧义。
+    def test_success_conflicting_content_length_raises_safe_api_error(self):
+        server = self._start_server("health_conflicting_content_length")
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        client = ManagerAPI(base_url)
+
+        with self.assertRaises(APIError) as raised:
+            client.wait_ready()
+
+        self.assertEqual(200, raised.exception.status)
+        self.assertEqual("invalid_response", raised.exception.code)
 
     # 覆盖 GET 持续收到瞬时状态直至耗尽，锁定五档退避、六次请求和最终 APIError。
     def test_get_transient_status_exhausts_finite_backoff(self):
