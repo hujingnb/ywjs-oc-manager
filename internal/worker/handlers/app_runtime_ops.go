@@ -260,9 +260,8 @@ type RestartSeedStore interface {
 //
 //   - 镜像变更：UpdateImage 触发 Recreate（k8s 自动停旧 pod 起新 pod），
 //     由 app_initialize 路径写回 applied 版本。
-//   - 镜像不变：删除 S3 sessions 与 state.db（清会话数据让 hermes 启动新 session），
-//     然后 Scale(0) → Scale(1) 重建 pod，最后调 seedVersionSkills 补齐新增 skill，
-//     最后记录 applied 版本。
+//   - standard 镜像不变：删除 S3 sessions 与 state.db，重建 pod，补齐版本 skill 并记录 applied 版本；
+//   - AICC：直接重建 pod，从 bootstrap 读取企业配置，不触碰版本或 standard 对象存储。
 //
 // k8s 语义说明：
 //   - preStop hook 由 k8s 控制，oc-presync 在 pod 终止前同步数据到 S3，无需 manager 介入。
@@ -306,7 +305,7 @@ func (h *AppRestartContainerHandler) SetRestartSeedStore(s RestartSeedStore) {
 }
 
 // Handle 执行 app_restart_container job。
-// 镜像变更时走 UpdateImage 重建路径；镜像不变时清 S3 会话后 Scale(0)→Scale(1) 重启。
+// standard 保留镜像检测与 S3 会话清理；AICC 只 RolloutRestart 并重新 bootstrap 企业配置。
 func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	if job.Type != domain.JobTypeAppRestartContainer {
 		return fmt.Errorf("非 app_restart_container 任务: %s", job.Type)
@@ -319,13 +318,15 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 	if err != nil {
 		return err
 	}
+	isAICC := domain.IsAICCAppType(domain.AppType(app.AppType))
 
-	// 可选：调 refresher 刷新版本配置并获取当前版本镜像 ref。
+	// standard 可选调 refresher 刷新版本配置并获取当前版本镜像 ref。
+	// AICC 的模型与 persona 由 bootstrap 读取企业独立配置，禁止进入助手版本刷新链路。
 	// 失败时立即冒泡让 worker 重试：没刷新就 restart 等于"重启后还是老配置"，
 	// 比让 pod 先停再失败更糟（用户感知不到，version_synced 还会被错误置位）。
 	// k8s 路径无节点概念，nodeID 传空串（RefreshAppInput 接口签名兼容旧 docker 链路）。
 	var refreshResult AppInputRefreshResult
-	if h.inputRefresher != nil {
+	if !isAICC && h.inputRefresher != nil {
 		refreshResult, err = h.inputRefresher.RefreshAppInput(ctx, "", app)
 		if err != nil {
 			return fmt.Errorf("刷新应用版本配置失败: %w", err)
@@ -344,7 +345,7 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 	// 用 applied_image_ref（与 version_synced 同源、由 init/重启写入）而非 runtime_image_ref：
 	// k8s 路径下 runtime_image_ref 恒为空，会把「镜像未变」误判为「已变」而走 UpdateImage(相同镜像→不重建)，
 	// 导致镜像不变的重启（改语言 / 发布能力等）根本不重建 pod、不重新 bootstrap。
-	if h.inputRefresher != nil && refreshResult.ImageRef != "" && refreshResult.ImageRef != app.AppliedImageRef {
+	if !isAICC && h.inputRefresher != nil && refreshResult.ImageRef != "" && refreshResult.ImageRef != app.AppliedImageRef {
 		// UpdateImage patch Deployment 镜像，触发 Recreate 策略：k8s 自动停旧 pod 起新 pod。
 		// 幂等：若上一次 UpdateImage 成功但 handler 在 SetAppStatus 前崩溃，重入时再次
 		// UpdateImage 是幂等的（已是新镜像，Deployment 不会重建）。
@@ -389,7 +390,7 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 	// state.db：apps/<appID>/state.db（hermes SQLite 快照）
 	// 清除后新 pod 启动时 hermes 会重新初始化 session，snapshot 最新 SOUL.md（含
 	// 改后的 model / persona / 知识库），确保配置变更进入对话。
-	if h.objects != nil {
+	if !isAICC && h.objects != nil {
 		sessionsPrefix := storage.AppPrefix(payload.AppID) + "sessions/"
 		if err := h.objects.DeletePrefix(ctx, sessionsPrefix); err != nil {
 			return fmt.Errorf("清除 S3 sessions 失败: %w", err)
@@ -423,7 +424,7 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 	// 镜像不变重启：Scale(1) 成功后补齐版本新增 skill。
 	// 版本可能在上次启动后新增了 skill，重启时种子注入确保 app_skills 与版本保持同步（并集）。
 	// 最大努力：加载版本或注入失败只 warn，不阻断重启主流程。
-	if h.seedStore != nil && app.VersionID.Valid {
+	if !isAICC && h.seedStore != nil && app.VersionID.Valid {
 		if ver, err := h.seedStore.GetAssistantVersion(ctx, app.VersionID.String); err != nil {
 			slog.WarnContext(ctx, "镜像不变重启：加载助手版本失败，跳过 skill 种子注入", "app", app.ID, mlog.Err(err))
 		} else if err := seedVersionSkills(ctx, h.seedStore, app.ID, ver); err != nil {
@@ -433,7 +434,7 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 
 	// 记录已应用版本修订与镜像 ref，供前端 version_synced 检测；
 	// inputRefresher 为 nil（测试装配）时跳过，避免写入零值误置位。
-	if h.inputRefresher != nil {
+	if !isAICC && h.inputRefresher != nil {
 		if err := h.store.SetAppAppliedVersion(ctx, sqlc.SetAppAppliedVersionParams{
 			ID:                     app.ID,
 			AppliedVersionRevision: refreshResult.VersionRevision,

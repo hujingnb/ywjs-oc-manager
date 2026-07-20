@@ -19,11 +19,16 @@ import (
 
 // fakeBootstrapStore 实现 bootstrapStore，返回预置的 app/org/owner/version/appSkills/webPublishConfig。
 type fakeBootstrapStore struct {
-	app       sqlc.App
-	org       sqlc.Organization
-	owner     sqlc.User
-	version   sqlc.AssistantVersion
-	appSkills []sqlc.AppSkill
+	app     sqlc.App
+	org     sqlc.Organization
+	owner   sqlc.User
+	version sqlc.AssistantVersion
+	// assistantVersionCalls 记录版本查询次数，确保 AICC bootstrap 与助手版本彻底隔离。
+	assistantVersionCalls int
+	// aiccAgent / aiccConfig 是 AICC bootstrap 唯一允许读取的智能体与企业模型配置。
+	aiccAgent  sqlc.AiccAgent
+	aiccConfig sqlc.OrganizationAiccConfig
+	appSkills  []sqlc.AppSkill
 	// webPublishConfig 按 orgID 返回的 OrgWebPublishConfig；零值 Enabled=false 表示未开通。
 	// webPublishErr 为非 nil 时 GetWebPublishConfig 返回该错误（模拟 sql.ErrNoRows 等）。
 	webPublishConfig sqlc.OrgWebPublishConfig
@@ -57,7 +62,18 @@ func (f *fakeBootstrapStore) GetUser(_ context.Context, _ string) (sqlc.User, er
 
 // GetAssistantVersion 返回预置版本。
 func (f *fakeBootstrapStore) GetAssistantVersion(_ context.Context, _ string) (sqlc.AssistantVersion, error) {
+	f.assistantVersionCalls++
 	return f.version, nil
+}
+
+// GetAICCAgentByAppID 返回隐藏应用对应的客服智能体。
+func (f *fakeBootstrapStore) GetAICCAgentByAppID(_ context.Context, _ string) (sqlc.AiccAgent, error) {
+	return f.aiccAgent, nil
+}
+
+// GetOrganizationAICCConfig 返回企业启用状态、模型和当前 revision。
+func (f *fakeBootstrapStore) GetOrganizationAICCConfig(_ context.Context, _ string) (sqlc.OrganizationAiccConfig, error) {
+	return f.aiccConfig, nil
 }
 
 // ListAppSkillsByApp 返回预置的实例 skill 列表（来源切换后的运行时来源）。
@@ -192,10 +208,11 @@ func TestBootstrapBuildAICCIsStateless(t *testing.T) {
 	app := newBootstrapApp(t, cipher)
 	app.AppType = string(domain.AppTypeAICC)
 	store := &fakeBootstrapStore{
-		app:     app,
-		org:     sqlc.Organization{ID: "o1", Name: "Org"},
-		owner:   sqlc.User{ID: "u1", DisplayName: "Owner"},
-		version: sqlc.AssistantVersion{ID: "v1", MainModel: "gpt-x", SystemPrompt: "客服助手"},
+		app:        app,
+		org:        sqlc.Organization{ID: "o1", Name: "Org"},
+		owner:      sqlc.User{ID: "u1", DisplayName: "Owner"},
+		aiccAgent:  sqlc.AiccAgent{ID: "agent-1", AppID: app.ID, OrgID: app.OrgID, Persona: null.StringFrom("客服助手")},
+		aiccConfig: sqlc.OrganizationAiccConfig{OrgID: app.OrgID, Enabled: true, Model: null.StringFrom("gpt-x"), Revision: 1},
 	}
 	// AICC 不应触碰对象存储或 skill 来源，故两项依赖均显式传 nil。
 	svc := NewBootstrapService(store, cipher, nil, nil, BootstrapConfig{
@@ -214,6 +231,102 @@ func TestBootstrapBuildAICCIsStateless(t *testing.T) {
 	// 客服运行时不读取恢复快照，也不获得 S3 写回凭证。
 	assert.Nil(t, res.Restore)
 	assert.Nil(t, res.S3Write)
+}
+
+// TestBootstrapAICCUsesOrganizationModelAndAgentPersona 验证 AICC bootstrap 的模型与人设
+// 只来自企业独立配置，并按客服人设、业务场景、回答边界的固定顺序渲染非空段。
+func TestBootstrapAICCUsesOrganizationModelAndAgentPersona(t *testing.T) {
+	cipher := newRuntimeTokenTestCipher(t)
+	app := newBootstrapApp(t, cipher)
+	app.AppType = string(domain.AppTypeAICC)
+	app.VersionID = null.String{}
+	store := &fakeBootstrapStore{
+		app:   app,
+		org:   sqlc.Organization{ID: "o1", Name: "Org"},
+		owner: sqlc.User{ID: "u1", DisplayName: "Owner"},
+		aiccAgent: sqlc.AiccAgent{
+			ID: "agent-1", AppID: app.ID, OrgID: app.OrgID,
+			Persona: null.StringFrom("温和专业"), Scenario: null.StringFrom("官网售前"),
+			AnswerBoundary: null.StringFrom("不承诺最终价格"),
+		},
+		aiccConfig: sqlc.OrganizationAiccConfig{
+			OrgID: app.OrgID, Enabled: true, Model: null.StringFrom("qwen-max"), Revision: 4,
+		},
+	}
+	renderer := &captureBootstrapRenderer{}
+	svc := NewBootstrapService(store, cipher, nil, nil, BootstrapConfig{})
+	svc.renderer = renderer
+
+	_, err := svc.Build(context.Background(), app)
+
+	require.NoError(t, err)
+	assert.Equal(t, "qwen-max", renderer.input.Model)
+	assert.Equal(t, "## 客服人设\n温和专业\n\n## 业务场景\n官网售前\n\n## 回答边界\n不承诺最终价格", renderer.input.PersonaText)
+	assert.True(t, renderer.input.PersonaIsLiteral, "AICC 自由文本必须按字面量渲染")
+	assert.Equal(t, config.DefaultAICCSystemPromptTemplate, renderer.input.PlatformRule,
+		"平台安全规则必须独立渲染，不能混入企业 persona")
+	assert.Zero(t, store.assistantVersionCalls, "AICC bootstrap 不得读取助手版本")
+}
+
+// TestDefaultManifestRendererPreservesLiteralPersona 验证 bootstrap 默认 renderer 在字面量模式下
+// 原样输出企业自由文本，同时继续替换 platform rule 的受控占位符。
+func TestDefaultManifestRendererPreservesLiteralPersona(t *testing.T) {
+	literal := "产品 {product}\nJSON: {\"mode\":\"strict\"}\n模板 {{customer}}\n应用 {app_name}"
+	in := hermes.AppInputData{
+		AppName: "客服应用", PersonaText: literal, PersonaIsLiteral: true,
+		PlatformRule: "平台服务于 {app_name}",
+	}
+
+	_, persona, platform, err := (defaultManifestRenderer{}).Render(in)
+
+	require.NoError(t, err)
+	assert.Equal(t, literal, persona)
+	assert.Equal(t, "平台服务于 客服应用", platform)
+}
+
+// TestBootstrapAICCOmitsRoutingAndVersionSkills 验证 AICC manifest 不继承版本 routing 或 skill；
+// 空白 persona 段也必须省略，避免产生无内容标题。
+func TestBootstrapAICCOmitsRoutingAndVersionSkills(t *testing.T) {
+	cipher := newRuntimeTokenTestCipher(t)
+	app := newBootstrapApp(t, cipher)
+	app.AppType = string(domain.AppTypeAICC)
+	app.VersionID = null.String{}
+	store := &fakeBootstrapStore{
+		app: app, org: sqlc.Organization{ID: "o1"}, owner: sqlc.User{ID: "u1"},
+		version: sqlc.AssistantVersion{RoutingJson: []byte(`{"fast":"version-model"}`), SkillsJson: []byte(`["version-skill"]`)},
+		aiccAgent: sqlc.AiccAgent{ID: "agent-1", AppID: app.ID, OrgID: app.OrgID,
+			Scenario: null.StringFrom("仅保留此场景")},
+		aiccConfig: sqlc.OrganizationAiccConfig{OrgID: app.OrgID, Enabled: true,
+			Model: null.StringFrom("enterprise-model"), Revision: 2},
+		appSkills: []sqlc.AppSkill{{ID: "skill-1", AppID: app.ID, Name: "version-skill"}},
+	}
+	renderer := &captureBootstrapRenderer{}
+	svc := NewBootstrapService(store, cipher, nil, nil, BootstrapConfig{})
+	svc.renderer = renderer
+
+	res, err := svc.Build(context.Background(), app)
+
+	require.NoError(t, err)
+	assert.Nil(t, renderer.input.Routing)
+	assert.Nil(t, renderer.input.SkillRelPaths)
+	assert.Nil(t, res.Skills)
+	assert.Equal(t, "## 业务场景\n仅保留此场景", renderer.input.PersonaText)
+	assert.Zero(t, store.assistantVersionCalls)
+}
+
+// TestBootstrapStandardAppStillRequiresAssistantVersion 验证隔离分流不放宽普通应用契约：
+// standard app 未绑定 version_id 时仍返回 ErrAppNotReady。
+func TestBootstrapStandardAppStillRequiresAssistantVersion(t *testing.T) {
+	cipher := newRuntimeTokenTestCipher(t)
+	app := newBootstrapApp(t, cipher)
+	app.VersionID = null.String{}
+	store := &fakeBootstrapStore{app: app, org: sqlc.Organization{ID: "o1"}, owner: sqlc.User{ID: "u1"}}
+	svc := NewBootstrapService(store, cipher, newFakeObjectStore(), fakeSkills{}, BootstrapConfig{})
+
+	_, err := svc.Build(context.Background(), app)
+
+	require.ErrorIs(t, err, ErrAppNotReady)
+	assert.Zero(t, store.assistantVersionCalls, "version_id 为空时不应发起无效版本查询")
 }
 
 // TestBootstrapBuildStandardRequiresObjectStorage 验证普通应用仍依赖 S3：
@@ -284,10 +397,11 @@ func TestBootstrapBuildSelectsPlatformPromptByAICCHidden(t *testing.T) {
 		app := newBootstrapApp(t, cipher)
 		app.AppType = string(domain.AppTypeAICC)
 		store := &fakeBootstrapStore{
-			app:     app,
-			org:     sqlc.Organization{ID: "o1", Name: "Org"},
-			owner:   sqlc.User{ID: "u1", DisplayName: "Owner"},
-			version: sqlc.AssistantVersion{ID: "v1", MainModel: "gpt-x"},
+			app:        app,
+			org:        sqlc.Organization{ID: "o1", Name: "Org"},
+			owner:      sqlc.User{ID: "u1", DisplayName: "Owner"},
+			aiccAgent:  sqlc.AiccAgent{ID: "agent-1", AppID: app.ID, OrgID: app.OrgID},
+			aiccConfig: sqlc.OrganizationAiccConfig{OrgID: app.OrgID, Enabled: true, Model: null.StringFrom("gpt-x"), Revision: 1},
 		}
 		renderer := &captureBootstrapRenderer{}
 		svc := NewBootstrapService(store, cipher, newFakeObjectStore(), fakeSkills{}, BootstrapConfig{PresignTTL: time.Minute})

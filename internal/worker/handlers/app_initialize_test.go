@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -469,9 +470,20 @@ type appInitStub struct {
 	org  sqlc.Organization
 	user sqlc.User
 	// versions 按 string UUID 存放助手版本；GetAssistantVersion 从此 map 查找。
-	versions  map[string]sqlc.AssistantVersion
-	apiKeySet bool
-	statusSet bool
+	versions map[string]sqlc.AssistantVersion
+	// assistantVersionCalls 记录版本查询次数，用于锁定 AICC 初始化不得接触助手版本。
+	assistantVersionCalls int
+	// aiccAgent / aiccConfig 提供 AICC 独立运行时配置，避免测试继续借用版本数据。
+	aiccAgent  sqlc.AiccAgent
+	aiccConfig sqlc.OrganizationAiccConfig
+	// appliedAICCRevision 记录初始化成功后落库的企业配置 revision。
+	appliedAICCRevision int32
+	// appliedAICCRevisionErr 模拟 revision stamp 写库失败，验证任务返回错误供 worker 重试。
+	appliedAICCRevisionErr error
+	// lifecycleEvents 记录关键写库顺序，验证 revision stamp 不留下崩溃重入窗口。
+	lifecycleEvents []string
+	apiKeySet       bool
+	statusSet       bool
 	// lastSetAPIKey 记录最近一次 SetAppNewAPIKey 调用的入参, 用于断言落库字段
 	// (特别是 newapi_key_name 是否与 new-api CreateAPIKey 用的 token name 一致)。
 	lastSetAPIKey sqlc.SetAppNewAPIKeyParams
@@ -536,6 +548,12 @@ func newAppInitStub(t *testing.T) *appInitStub {
 		},
 		org:  sqlc.Organization{Name: "测试组织", Status: domain.StatusActive},
 		user: sqlc.User{DisplayName: "Alice"},
+		aiccAgent: sqlc.AiccAgent{
+			ID: "agent-default", AppID: testAppID, OrgID: testOrgID,
+		},
+		aiccConfig: sqlc.OrganizationAiccConfig{
+			OrgID: testOrgID, Enabled: true, Model: null.StringFrom("gpt-4o"), Revision: 1,
+		},
 		versions: map[string]sqlc.AssistantVersion{
 			testVersionID: defaultVersion,
 		},
@@ -574,6 +592,7 @@ func (s *appInitStub) TouchApp(_ context.Context, _ string) error {
 func (s *appInitStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParams) error {
 	s.statusSet = true
 	s.statusCalls = append(s.statusCalls, arg)
+	s.lifecycleEvents = append(s.lifecycleEvents, "status:"+arg.Status)
 	s.app.Status = arg.Status
 	return nil
 }
@@ -615,10 +634,31 @@ func (s *appInitStub) UpdateAppRuntimeImage(_ context.Context, arg sqlc.UpdateAp
 // GetAssistantVersion 从内存 versions map 返回版本，模拟 DB 查询。
 // ID 迁移为 string；版本不存在时返回 sql.ErrNoRows（与真实 DB 行为一致）。
 func (s *appInitStub) GetAssistantVersion(_ context.Context, id string) (sqlc.AssistantVersion, error) {
+	s.assistantVersionCalls++
 	if v, ok := s.versions[id]; ok {
 		return v, nil
 	}
 	return sqlc.AssistantVersion{}, sql.ErrNoRows
+}
+
+// GetAICCAgentByAppID 返回隐藏应用绑定的客服智能体。
+func (s *appInitStub) GetAICCAgentByAppID(_ context.Context, _ string) (sqlc.AiccAgent, error) {
+	return s.aiccAgent, nil
+}
+
+// GetOrganizationAICCConfig 返回企业当前启用的客服模型配置。
+func (s *appInitStub) GetOrganizationAICCConfig(_ context.Context, _ string) (sqlc.OrganizationAiccConfig, error) {
+	return s.aiccConfig, nil
+}
+
+// SetAICCAgentAppliedConfigRevision 记录 pod Ready 后确认应用的企业配置 revision。
+func (s *appInitStub) SetAICCAgentAppliedConfigRevision(_ context.Context, arg sqlc.SetAICCAgentAppliedConfigRevisionParams) error {
+	if s.appliedAICCRevisionErr != nil {
+		return s.appliedAICCRevisionErr
+	}
+	s.appliedAICCRevision = arg.AppliedConfigRevision
+	s.lifecycleEvents = append(s.lifecycleEvents, "aicc-revision")
+	return nil
 }
 
 // SetAppAppliedVersion :exec 语义仅返回 error；记录 applied 版本，供断言使用。
@@ -737,6 +777,24 @@ func testResolveRuntimeImage(imageID string) (string, bool) {
 		return testRuntimeImageRef, true
 	}
 	return "", false
+}
+
+// fakeAICCModelValidator 模拟 new-api 实时模型目录，保留存在性和目录错误两类结果。
+type fakeAICCModelValidator struct {
+	exists bool
+	err    error
+	calls  int
+}
+
+// HasModelInCatalog 返回预置目录结果并记录调用次数。
+func (f *fakeAICCModelValidator) HasModelInCatalog(_ context.Context, _ string) (bool, error) {
+	f.calls++
+	return f.exists, f.err
+}
+
+// testAllowAICCModelValidator 返回默认放行的实时模型目录桩。
+func testAllowAICCModelValidator() *fakeAICCModelValidator {
+	return &fakeAICCModelValidator{exists: true}
 }
 
 // mustUUIDForTest 在迁移后直接返回字符串 UUID（原来返回 pgtype.UUID）。
@@ -1027,8 +1085,8 @@ func TestAppInitialize_AppliedVersionRecorded(t *testing.T) {
 	assert.Equal(t, resolvedRef, store.lastAppliedVersion.AppliedImageRef, "applied_image_ref 应等于解析出的镜像 ref")
 }
 
-// TestAppInitialize_AICCHiddenAppUsesDedicatedRuntimeImage 验证 AICC 隐藏应用仍加载绑定版本的模型和技能，
-// 但运行时镜像必须只来自客服专用 resolver，不能回退到普通实例的版本镜像。
+// TestAppInitialize_AICCHiddenAppUsesDedicatedRuntimeImage 验证 AICC 隐藏应用使用客服专用 resolver，
+// 且初始化成功后只确认企业配置 revision，不写普通助手版本同步字段。
 func TestAppInitialize_AICCHiddenAppUsesDedicatedRuntimeImage(t *testing.T) {
 	store := newAppInitStub(t)
 	store.app.AppType = string(domain.AppTypeAICC)
@@ -1038,14 +1096,133 @@ func TestAppInitialize_AICCHiddenAppUsesDedicatedRuntimeImage(t *testing.T) {
 	handler := NewAppInitializeHandler(store, client, AppInitializeConfig{
 		Cipher:              testCipher(t),
 		ResolveRuntimeImage: testResolveRuntimeImage,
+		AICCModelValidator:  testAllowAICCModelValidator(),
 		ResolveAICCRuntimeImage: func() (string, bool) {
 			return aiccImageRef, true
 		},
 	})
 
 	require.NoError(t, handler.Handle(context.Background(), buildJob(t, testAppID, "")))
-	require.True(t, store.appliedVersionSet)
-	assert.Equal(t, aiccImageRef, store.lastAppliedVersion.AppliedImageRef)
+	assert.Zero(t, store.assistantVersionCalls)
+	assert.False(t, store.appliedVersionSet)
+	assert.Equal(t, int32(1), store.appliedAICCRevision)
+}
+
+// TestAppInitializeAICCUsesOrganizationConfigWithoutVersion 验证 AICC 初始化只读取企业独立配置：
+// 即使隐藏应用没有 version_id，也必须使用专用镜像完成启动且不查询助手版本。
+func TestAppInitializeAICCUsesOrganizationConfigWithoutVersion(t *testing.T) {
+	store := newAppInitStub(t)
+	store.app.AppType = string(domain.AppTypeAICC)
+	store.app.VersionID = null.String{}
+	store.aiccAgent = sqlc.AiccAgent{ID: "agent-1", AppID: store.app.ID, OrgID: store.app.OrgID}
+	store.aiccConfig = sqlc.OrganizationAiccConfig{
+		OrgID: store.app.OrgID, Enabled: true, Model: null.StringFrom("qwen-max"), Revision: 7,
+	}
+	const aiccImageRef = "registry.example.com/aicc:v2"
+	handler := NewAppInitializeHandler(store, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}, AppInitializeConfig{
+		Cipher:             testCipher(t),
+		AICCModelValidator: testAllowAICCModelValidator(),
+		ResolveAICCRuntimeImage: func() (string, bool) {
+			return aiccImageRef, true
+		},
+	})
+
+	err := handler.Handle(context.Background(), buildJob(t, store.app.ID, ""))
+
+	require.NoError(t, err)
+	assert.Zero(t, store.assistantVersionCalls, "AICC 初始化不得读取助手版本")
+	assert.False(t, store.appliedVersionSet, "AICC 初始化不得写助手版本应用状态")
+	assert.Equal(t, int32(7), store.appliedAICCRevision, "AICC 就绪后应确认企业配置 revision")
+}
+
+// TestAppInitializeAICCStampsRevisionBeforeBindingWaiting 验证 AICC 在 pod Ready 后
+// 先确认配置 revision，再进入幂等终态，避免两次写库之间崩溃后重试永久漏 stamp。
+func TestAppInitializeAICCStampsRevisionBeforeBindingWaiting(t *testing.T) {
+	store := newAppInitStub(t)
+	store.app.AppType = string(domain.AppTypeAICC)
+	handler := NewAppInitializeHandler(store, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}, AppInitializeConfig{
+		Cipher:             testCipher(t),
+		AICCModelValidator: testAllowAICCModelValidator(),
+		ResolveAICCRuntimeImage: func() (string, bool) {
+			return "registry.example.com/aicc:v2", true
+		},
+	})
+
+	err := handler.Handle(context.Background(), buildJob(t, store.app.ID, ""))
+
+	require.NoError(t, err)
+	revisionIndex := slices.Index(store.lifecycleEvents, "aicc-revision")
+	bindingIndex := slices.Index(store.lifecycleEvents, "status:"+domain.AppStatusBindingWaiting)
+	require.NotEqual(t, -1, revisionIndex)
+	require.NotEqual(t, -1, bindingIndex)
+	assert.Less(t, revisionIndex, bindingIndex, "revision 必须先于 binding_waiting 写入")
+}
+
+// TestAppInitializeAICCRejectsInvalidOrganizationModelConfig 表驱动覆盖企业 AICC 配置消费校验：
+// 开关、空模型、目录未命中与目录故障都必须在创建 pod 前失败，且不得 WaitReady 或 stamp。
+func TestAppInitializeAICCRejectsInvalidOrganizationModelConfig(t *testing.T) {
+	catalogErr := errors.New("new-api 模型目录不可用")
+	tests := []struct {
+		name      string
+		configure func(*appInitStub, *fakeAICCModelValidator)
+		wantError string
+	}{
+		// 企业已停用 AICC 时，即使残留模型值也不得继续初始化。
+		{name: "企业配置未启用", configure: func(store *appInitStub, _ *fakeAICCModelValidator) { store.aiccConfig.Enabled = false }, wantError: "未启用"},
+		// 企业模型为空时必须返回配置错误，不能查询空模型或创建 pod。
+		{name: "企业模型为空", configure: func(store *appInitStub, _ *fakeAICCModelValidator) { store.aiccConfig.Model = null.String{} }, wantError: "模型未配置"},
+		// 模型已从实时目录下线时必须区分为模型不存在。
+		{name: "实时目录不存在模型", configure: func(_ *appInitStub, validator *fakeAICCModelValidator) { validator.exists = false }, wantError: "模型不存在"},
+		// new-api 目录故障必须保留系统错误，不能误报成模型不存在。
+		{name: "实时目录查询失败", configure: func(_ *appInitStub, validator *fakeAICCModelValidator) { validator.err = catalogErr }, wantError: "模型目录"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newAppInitStub(t)
+			store.app.AppType = string(domain.AppTypeAICC)
+			validator := &fakeAICCModelValidator{exists: true}
+			tt.configure(store, validator)
+			orch := &fakeOrchestrator{}
+			handler := NewAppInitializeHandler(store, &fakeNewAPI{}, AppInitializeConfig{
+				Cipher: testCipher(t), AICCModelValidator: validator,
+				ResolveAICCRuntimeImage: func() (string, bool) { return "registry.example.com/aicc:v2", true },
+			})
+			handler.SetOrchestrator(orch, AppInitializeK8sConfig{})
+
+			err := handler.Handle(context.Background(), buildJob(t, store.app.ID, ""))
+
+			require.Error(t, err)
+			assert.ErrorContains(t, err, tt.wantError)
+			assert.Empty(t, orch.waitReadyCalls)
+			assert.Zero(t, store.appliedAICCRevision)
+			assert.True(t, store.failedSet)
+		})
+	}
+}
+
+// TestAppInitializeAICCRevisionStampFailureRetries 验证 pod Ready 后 revision 写库失败会进入 error
+// 并返回错误；worker 重试时可重新执行初始化并成功补写 revision。
+func TestAppInitializeAICCRevisionStampFailureRetries(t *testing.T) {
+	store := newAppInitStub(t)
+	store.app.AppType = string(domain.AppTypeAICC)
+	store.appliedAICCRevisionErr = errors.New("数据库暂时不可用")
+	orch := &fakeOrchestrator{}
+	handler := NewAppInitializeHandler(store, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}, AppInitializeConfig{
+		Cipher: testCipher(t), AICCModelValidator: testAllowAICCModelValidator(),
+		ResolveAICCRuntimeImage: func() (string, bool) { return "registry.example.com/aicc:v2", true },
+	})
+	handler.SetOrchestrator(orch, AppInitializeK8sConfig{})
+
+	err := handler.Handle(context.Background(), buildJob(t, store.app.ID, ""))
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "记录 AICC 已应用配置 revision 失败")
+	assert.Equal(t, domain.AppStatusError, store.app.Status)
+	assert.NotContains(t, store.lifecycleEvents, "status:"+domain.AppStatusBindingWaiting)
+	store.appliedAICCRevisionErr = nil
+
+	require.NoError(t, handler.Handle(context.Background(), buildJob(t, store.app.ID, "")))
+	assert.Equal(t, store.aiccConfig.Revision, store.appliedAICCRevision)
 }
 
 // TestAppInitialize_AICCAllowsDirectPublicEgress 验证 AICC 未配置专属网页检索代理时仍可初始化，
@@ -1056,6 +1233,7 @@ func TestAppInitialize_AICCAllowsDirectPublicEgress(t *testing.T) {
 	handler := NewAppInitializeHandler(store, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}, AppInitializeConfig{
 		Cipher:              testCipher(t),
 		ResolveRuntimeImage: testResolveRuntimeImage,
+		AICCModelValidator:  testAllowAICCModelValidator(),
 		ResolveAICCRuntimeImage: func() (string, bool) {
 			return "registry.example.com/app/oc-manager-aigowork-aicc:v1", true
 		},
@@ -1079,6 +1257,7 @@ func TestAppInitialize_AICCHiddenAppFailsWithoutDedicatedRuntimeImage(t *testing
 	handler := NewAppInitializeHandler(store, &fakeNewAPI{}, AppInitializeConfig{
 		Cipher:              testCipher(t),
 		ResolveRuntimeImage: testResolveRuntimeImage,
+		AICCModelValidator:  testAllowAICCModelValidator(),
 	})
 
 	err := handler.Handle(context.Background(), buildJob(t, testAppID, ""))

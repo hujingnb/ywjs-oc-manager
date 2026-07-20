@@ -40,8 +40,14 @@ type AppInitializeStore interface {
 	MarkAppFailed(ctx context.Context, arg sqlc.MarkAppFailedParams) error
 	// UpdateAppRuntimeImage 把 PullImageOnNode 返回的镜像引用和 sha256 写入 apps 表。
 	UpdateAppRuntimeImage(ctx context.Context, arg sqlc.UpdateAppRuntimeImageParams) error
-	// GetAssistantVersion 加载实例绑定的助手版本；初始化时必须存在否则标记失败。
+	// GetAssistantVersion 加载 standard 实例绑定的助手版本；AICC 初始化禁止调用。
 	GetAssistantVersion(ctx context.Context, id string) (sqlc.AssistantVersion, error)
+	// GetAICCAgentByAppID 加载 AICC 隐藏应用绑定的智能体，人设与配置 revision 均以该记录为准。
+	GetAICCAgentByAppID(ctx context.Context, appID string) (sqlc.AiccAgent, error)
+	// GetOrganizationAICCConfig 加载企业独立的 AICC 开关与模型配置。
+	GetOrganizationAICCConfig(ctx context.Context, orgID string) (sqlc.OrganizationAiccConfig, error)
+	// SetAICCAgentAppliedConfigRevision 在 AICC pod Ready 后确认已应用的企业配置 revision。
+	SetAICCAgentAppliedConfigRevision(ctx context.Context, arg sqlc.SetAICCAgentAppliedConfigRevisionParams) error
 	// SetAppAppliedVersion 在初始化/重启成功后记录已应用的版本修订与镜像 ref，
 	// 供前端 version_synced 检测使用。
 	SetAppAppliedVersion(ctx context.Context, arg sqlc.SetAppAppliedVersionParams) error
@@ -80,6 +86,12 @@ type NewAPIClientFactory interface {
 	UserScopedFor(ctx context.Context, app sqlc.App) (APIKeyClient, error)
 }
 
+// AICCModelCatalogValidator 是 app_initialize 消费企业模型配置时依赖的实时目录校验能力。
+// bool 区分模型不存在，error 保留 new-api 目录故障，避免把系统错误误报为配置错误。
+type AICCModelCatalogValidator interface {
+	HasModelInCatalog(ctx context.Context, id string) (bool, error)
+}
+
 // AppInitializeConfig 提供 handler 运行所需的外部配置。
 //
 // Cipher：把 new-api 返回的完整 sk- 加密后写入 apps.newapi_key_ciphertext，
@@ -108,6 +120,8 @@ type AppInitializeConfig struct {
 	// ResolveAICCRuntimeImage 返回 AICC 隐藏应用唯一允许使用的客服专用镜像。
 	// AICC 未注入或返回空值时直接失败，禁止回退到普通实例版本镜像。
 	ResolveAICCRuntimeImage func() (ref string, ok bool)
+	// AICCModelValidator 在创建 pod 前复验企业模型仍存在于 new-api 实时目录；nil 时 fail closed。
+	AICCModelValidator AICCModelCatalogValidator
 	// ManagerRuntimeBaseURL 保留供 restart 链路复用，app_initialize 不再直接使用。
 	ManagerRuntimeBaseURL string
 }
@@ -152,16 +166,16 @@ type AppInitializeK8sResourceSpec struct {
 //
 // 顺序：
 //  1. 加载 app 上下文，幂等检查；
-//  2. 校验实例绑定版本，解析 hermes 镜像 ref（phasePullRuntimeImage 状态）；
-//  3. seedVersionSkills：把版本 skill 快照并集注入 app_skills（最大努力，失败只 warn）；
+//  2. 按 app_type 解析 standard 版本或 AICC 企业配置与专用镜像；
+//  3. standard 执行 seedVersionSkills；AICC 跳过版本 skill（最大努力，失败只 warn）；
 //  4. ensureAPIKey（phasePrepare 状态）；
 //  5. EnsureAppRuntimeToken 拿 control token 明文（phasePrepare 状态）；
 //  6. EnsureApp：渲染 AppSpec → k8s Deployment + Service + Secret（phaseCreate 状态）；
 //  7. WaitReady：等 pod Ready（phaseStart 状态）；
-//  8. → binding_waiting → promoteIfChannelBound。
+//  8. → binding_waiting，分别记录 applied version 或 AICC config revision，再 promoteIfChannelBound。
 //
 // 任意一步失败立即冒泡，由 worker 重试或入 failed；状态机字段只在显式步骤里单独写。
-// seedVersionSkills 失败只 warn，不标记 failed，确保 skill 问题不阻断实例初始化。
+// standard 的 seedVersionSkills 失败只 warn，不标记 failed，确保 skill 问题不阻断实例初始化。
 type AppInitializeHandler struct {
 	store   AppInitializeStore
 	factory NewAPIClientFactory
@@ -210,8 +224,17 @@ func (h *AppInitializeHandler) SetSeedStore(s AppSkillSeedStore) {
 // 真超过它才返回超时 → markFailed，再由 reconciler 在 pod 实际 Ready 后兜底收敛。
 const readyTimeout = 30 * time.Minute
 
+// resolvedInitializeConfig 是按应用类型解析后的初始化输入。
+// standard 只设置 version，AICC 只设置 aiccAgent/aiccRevision，避免后续流程重新读取错误配置源。
+type resolvedInitializeConfig struct {
+	imageRef     string
+	version      *sqlc.AssistantVersion
+	aiccAgent    *sqlc.AiccAgent
+	aiccRevision int32
+}
+
 // Handle 是 worker 调用入口。
-// 4 阶段串行推进（k8s 路径）：版本校验 + ensureAPIKey/token → EnsureApp → WaitReady → binding_waiting。
+// 4 阶段串行推进（k8s 路径）：配置解析 + ensureAPIKey/token → EnsureApp → WaitReady → binding_waiting。
 // 任何失败收敛到 status=error 并写入 last_error_status 记录来源阶段。
 func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	if job.Type != domain.JobTypeAppInitialize {
@@ -246,48 +269,17 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		return nil
 	}
 
-	// 加载实例绑定的助手版本：未绑定版本的实例无法初始化，直接标记失败。
-	if !app.VersionID.Valid {
-		return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage, errors.New("实例未绑定助手版本，无法初始化"))
-	}
-	version, err := h.store.GetAssistantVersion(ctx, app.VersionID.String)
+	resolved, err := h.resolveInitializeConfig(ctx, app)
 	if err != nil {
-		return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage, fmt.Errorf("加载助手版本失败: %w", err))
-	}
-
-	// AICC 仍读取绑定版本以初始化模型、技能和行为配置，但运行时镜像必须与普通实例
-	// 隔离。普通实例继续根据版本 image_id 从 hermes.runtime_images 解析镜像。
-	var imageRef string
-	if domain.IsAICCAppType(domain.AppType(app.AppType)) {
-		if h.cfg.ResolveAICCRuntimeImage == nil {
-			return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage,
-				errors.New("AICC 运行时镜像解析器未注入"))
-		}
-		var ok bool
-		imageRef, ok = h.cfg.ResolveAICCRuntimeImage()
-		if !ok || strings.TrimSpace(imageRef) == "" {
-			return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage,
-				errors.New("AICC 运行时镜像未配置"))
-		}
-	} else {
-		if h.cfg.ResolveRuntimeImage == nil {
-			return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage,
-				errors.New("ResolveRuntimeImage 未注入，无法解析运行时镜像"))
-		}
-		var ok bool
-		imageRef, ok = h.cfg.ResolveRuntimeImage(version.ImageID)
-		if !ok {
-			return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage,
-				fmt.Errorf("版本镜像 %s 未在配置中", version.ImageID))
-		}
+		return h.markFailed(ctx, &app, domain.AppStatusPullingRuntimeImage, err)
 	}
 
 	// 版本 skill 种子注入：把版本 skills_json 里实例尚无的 skill 并集写入 app_skills，
 	// 供 bootstrap 后续为 pod 提供运行时 skill 下载 URL。
 	// 最大努力：失败只 warn，不标记 failed，不阻断初始化主流程。
-	if h.seedStore != nil {
-		if err := seedVersionSkills(ctx, h.seedStore, app.ID, version); err != nil {
-			slog.WarnContext(ctx, "版本 skill 种子注入失败", "app", app.ID, "version", version.ID, mlog.Err(err))
+	if h.seedStore != nil && resolved.version != nil {
+		if err := seedVersionSkills(ctx, h.seedStore, app.ID, *resolved.version); err != nil {
+			slog.WarnContext(ctx, "版本 skill 种子注入失败", "app", app.ID, "version", resolved.version.ID, mlog.Err(err))
 		}
 	}
 
@@ -313,7 +305,7 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		}},
 		// 阶段3（creating_container）：EnsureApp 渲染并 apply k8s Deployment + Service + Secret。
 		{domain.AppStatusCreatingContainer, func(ctx context.Context, app *sqlc.App, p appInitializePayload, r *progressReporter) error {
-			return h.phaseCreate(ctx, app, imageRef)
+			return h.phaseCreate(ctx, app, resolved.imageRef)
 		}},
 		// 阶段4（starting）：WaitReady 等待 pod Ready。
 		{domain.AppStatusStarting, func(ctx context.Context, app *sqlc.App, p appInitializePayload, r *progressReporter) error {
@@ -330,6 +322,18 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		}
 	}
 
+	// AICC 在 WaitReady 成功后、进入 binding_waiting 幂等终态前确认企业配置 revision。
+	// 这个顺序保证两次写库之间即使进程退出，重试仍会从 starting 重新执行并补齐 stamp。
+	if resolved.aiccAgent != nil {
+		if err := h.store.SetAICCAgentAppliedConfigRevision(ctx, sqlc.SetAICCAgentAppliedConfigRevisionParams{
+			AppliedConfigRevision:   resolved.aiccRevision,
+			ID:                      resolved.aiccAgent.ID,
+			AppliedConfigRevision_2: resolved.aiccRevision,
+		}); err != nil {
+			return h.markFailed(ctx, &app, domain.AppStatusStarting, fmt.Errorf("记录 AICC 已应用配置 revision 失败: %w", err))
+		}
+	}
+
 	if err := h.transitionTo(ctx, &app, domain.AppStatusBindingWaiting, reporter); err != nil {
 		return h.markFailed(ctx, &app, domain.AppStatusStarting, err)
 	}
@@ -342,15 +346,15 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		ID:           app.ID,
 	})
 
-	// 初始化成功后记录已应用的版本修订与镜像 ref，供前端 version_synced 检测使用。
-	// 写库失败时走 markFailed：把 app 收敛到 status=error 并记录 last_error_status，
-	// 避免行卡在 binding_waiting 而 worker 又把 job 当失败处理。
-	if err := h.store.SetAppAppliedVersion(ctx, sqlc.SetAppAppliedVersionParams{
-		ID:                     app.ID,
-		AppliedVersionRevision: version.Revision,
-		AppliedImageRef:        imageRef,
-	}); err != nil {
-		return h.markFailed(ctx, &app, domain.AppStatusBindingWaiting, fmt.Errorf("记录已应用版本信息失败: %w", err))
+	// standard 保留版本同步语义；AICC revision 已在进入 binding_waiting 前确认。
+	if resolved.version != nil {
+		if err := h.store.SetAppAppliedVersion(ctx, sqlc.SetAppAppliedVersionParams{
+			ID:                     app.ID,
+			AppliedVersionRevision: resolved.version.Revision,
+			AppliedImageRef:        resolved.imageRef,
+		}); err != nil {
+			return h.markFailed(ctx, &app, domain.AppStatusBindingWaiting, fmt.Errorf("记录已应用版本信息失败: %w", err))
+		}
 	}
 
 	// 镜像重建场景下，channel_bindings 上一次的 bound 状态不会被清空，凭证又落在
@@ -362,6 +366,64 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	}
 
 	return h.writeInitAuditLog(ctx, app, job, payload)
+}
+
+// resolveInitializeConfig 在任何版本读取前按 app_type 分流配置源。
+// AICC 必须使用企业独立模型配置与专用镜像；standard 必须继续绑定有效助手版本。
+func (h *AppInitializeHandler) resolveInitializeConfig(ctx context.Context, app sqlc.App) (resolvedInitializeConfig, error) {
+	if domain.IsAICCAppType(domain.AppType(app.AppType)) {
+		agent, err := h.store.GetAICCAgentByAppID(ctx, app.ID)
+		if err != nil {
+			return resolvedInitializeConfig{}, fmt.Errorf("加载 AICC 智能体失败: %w", err)
+		}
+		cfg, err := h.store.GetOrganizationAICCConfig(ctx, app.OrgID)
+		if err != nil {
+			return resolvedInitializeConfig{}, fmt.Errorf("加载企业 AICC 配置失败: %w", err)
+		}
+		if !cfg.Enabled {
+			return resolvedInitializeConfig{}, errors.New("企业 AICC 配置未启用")
+		}
+		if strings.TrimSpace(cfg.Model.String) == "" {
+			return resolvedInitializeConfig{}, errors.New("企业 AICC 模型未配置")
+		}
+		if h.cfg.AICCModelValidator == nil {
+			return resolvedInitializeConfig{}, errors.New("AICC 实时模型目录校验器未注入")
+		}
+		model := strings.TrimSpace(cfg.Model.String)
+		exists, err := h.cfg.AICCModelValidator.HasModelInCatalog(ctx, model)
+		if err != nil {
+			return resolvedInitializeConfig{}, fmt.Errorf("校验企业 AICC 模型目录失败: %w", err)
+		}
+		if !exists {
+			return resolvedInitializeConfig{}, fmt.Errorf("企业 AICC 模型不存在: %s", model)
+		}
+		if h.cfg.ResolveAICCRuntimeImage == nil {
+			return resolvedInitializeConfig{}, errors.New("AICC 运行时镜像解析器未注入")
+		}
+		imageRef, ok := h.cfg.ResolveAICCRuntimeImage()
+		if !ok || strings.TrimSpace(imageRef) == "" {
+			return resolvedInitializeConfig{}, errors.New("AICC 运行时镜像未配置")
+		}
+		return resolvedInitializeConfig{
+			imageRef: imageRef, aiccAgent: &agent, aiccRevision: cfg.Revision,
+		}, nil
+	}
+
+	if !app.VersionID.Valid {
+		return resolvedInitializeConfig{}, errors.New("实例未绑定助手版本，无法初始化")
+	}
+	version, err := h.store.GetAssistantVersion(ctx, app.VersionID.String)
+	if err != nil {
+		return resolvedInitializeConfig{}, fmt.Errorf("加载助手版本失败: %w", err)
+	}
+	if h.cfg.ResolveRuntimeImage == nil {
+		return resolvedInitializeConfig{}, errors.New("ResolveRuntimeImage 未注入，无法解析运行时镜像")
+	}
+	imageRef, ok := h.cfg.ResolveRuntimeImage(version.ImageID)
+	if !ok {
+		return resolvedInitializeConfig{}, fmt.Errorf("版本镜像 %s 未在配置中", version.ImageID)
+	}
+	return resolvedInitializeConfig{imageRef: imageRef, version: &version}, nil
 }
 
 // phasePrepare：ensureAPIKey + EnsureAppRuntimeToken。

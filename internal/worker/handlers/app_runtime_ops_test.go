@@ -371,6 +371,30 @@ func TestAppRestartContainerHandler_RefresherError_AbortsRestart(t *testing.T) {
 	require.False(t, objects.deletedSessionsPrefix)
 }
 
+// TestAppRestartContainerHandler_AICCSkipsVersionAndObjectStorage 验证 AICC 重启只触发 pod 重建：
+// 不刷新助手版本、不清理 standard 会话快照、不注入版本 skill，也不写 applied version。
+func TestAppRestartContainerHandler_AICCSkipsVersionAndObjectStorage(t *testing.T) {
+	stub := runtimeStub(t)
+	stub.app.AppType = string(domain.AppTypeAICC)
+	stub.app.VersionID = null.String{}
+	orch := &fakeAppOrchestrator{}
+	objects := &fakeObjectStore{}
+	refresher := &fakeInputRefresher{returnError: errors.New("AICC 不应调用 refresher")}
+	seedStore := &fakeRestartSeedStore{fakeSeedStore: &fakeSeedStore{}}
+	handler := NewAppRestartContainerHandler(stub, orch, objects)
+	handler.SetInputRefresher(refresher)
+	handler.SetRestartSeedStore(seedStore)
+
+	err := handler.Handle(context.Background(), runtimeJob(domain.JobTypeAppRestartContainer, testAppID))
+
+	require.NoError(t, err)
+	assert.Zero(t, refresher.calls)
+	assert.Empty(t, objects.deletedPrefixes)
+	assert.Zero(t, seedStore.assistantVersionCalls)
+	assert.False(t, stub.appliedVersionSet)
+	assert.Equal(t, 1, orch.rolloutRestartCalls)
+}
+
 // TestAppRestartContainerHandler_NoImage_SetsRestartingBeforeScale 验证镜像不变重启路径：
 // SetAppRuntimePhase(restarting) 在 Scale(0) 之前被调用，关闭渠道发起闸门（双轴模型）；
 // 最终业务态 status 仍更新为 running（Scale(0)→Scale(1) 完成后），runtime_phase 由
@@ -789,6 +813,18 @@ type fakeInputRefresher struct {
 	returnError error
 	// returnResult 是 RefreshAppInput 成功时返回的版本信息。
 	returnResult AppInputRefreshResult
+}
+
+// fakeRestartSeedStore 记录重启链路的版本读取次数，并复用 skill seed 所需的内存实现。
+type fakeRestartSeedStore struct {
+	*fakeSeedStore
+	assistantVersionCalls int
+}
+
+// GetAssistantVersion 记录版本读取；AICC 测试要求该方法完全不被调用。
+func (f *fakeRestartSeedStore) GetAssistantVersion(_ context.Context, _ string) (sqlc.AssistantVersion, error) {
+	f.assistantVersionCalls++
+	return sqlc.AssistantVersion{}, nil
 }
 
 func (f *fakeInputRefresher) RefreshAppInput(_ context.Context, nodeID string, app sqlc.App) (AppInputRefreshResult, error) {

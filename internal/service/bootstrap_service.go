@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/guregu/null/v5"
@@ -92,6 +93,10 @@ type bootstrapStore interface {
 	GetUser(ctx context.Context, id string) (sqlc.User, error)
 	// GetAssistantVersion 按版本 ID 查询助手版本记录。
 	GetAssistantVersion(ctx context.Context, id string) (sqlc.AssistantVersion, error)
+	// GetAICCAgentByAppID 读取隐藏应用绑定的客服智能体，提供企业 persona 配置。
+	GetAICCAgentByAppID(ctx context.Context, appID string) (sqlc.AiccAgent, error)
+	// GetOrganizationAICCConfig 读取企业 AICC 开关、模型与 revision。
+	GetOrganizationAICCConfig(ctx context.Context, orgID string) (sqlc.OrganizationAiccConfig, error)
 	// ListAppSkillsByApp 返回指定实例的全部 app_skills 行，是运行时 skill 下发的唯一来源。
 	// 方法名与 sqlc.Queries.ListAppSkillsByApp 保持一致，生产传入 dbStore.Queries 可直接满足。
 	ListAppSkillsByApp(ctx context.Context, appID string) ([]sqlc.AppSkill, error)
@@ -119,13 +124,17 @@ type bootstrapManifestRenderer interface {
 type defaultManifestRenderer struct{}
 
 // Render 渲染 persona/platform 文本并序列化 manifest YAML。
-// 内部依次调用 hermes.RenderPersonaText、hermes.RenderRuleText、
-// hermes.BuildManifest + hermes.MarshalManifestYAML，保持与 WriteAppInput 相同的渲染语义。
+// standard persona 与 platform rule 执行占位符替换；AICC literal persona 原样保留，
+// 再由 hermes.BuildManifest + hermes.MarshalManifestYAML 生成 manifest。
 func (defaultManifestRenderer) Render(in hermes.AppInputData) (string, string, string, error) {
 	vars := hermes.VariablesFromContext(in.OrgName, in.AppName, in.OwnerName)
-	persona, err := hermes.RenderPersonaText(in.PersonaText, vars)
-	if err != nil {
-		return "", "", "", fmt.Errorf("render persona: %w", err)
+	persona := in.PersonaText
+	if !in.PersonaIsLiteral {
+		var err error
+		persona, err = hermes.RenderPersonaText(in.PersonaText, vars)
+		if err != nil {
+			return "", "", "", fmt.Errorf("render persona: %w", err)
+		}
 	}
 	platform, err := hermes.RenderRuleText(in.PlatformRule, vars)
 	if err != nil {
@@ -136,6 +145,26 @@ func (defaultManifestRenderer) Render(in hermes.AppInputData) (string, string, s
 		return "", "", "", fmt.Errorf("marshal manifest: %w", err)
 	}
 	return string(yamlBytes), persona, platform, nil
+}
+
+// renderAICCAgentPersona 把企业管理员维护的静态配置渲染为唯一的智能体提示词来源。
+// 固定顺序便于审计与稳定 diff；空白段完全省略，平台安全规则由 PlatformRule 单独承载。
+func renderAICCAgentPersona(agent sqlc.AiccAgent) string {
+	sections := []struct {
+		title string
+		body  string
+	}{
+		{title: "客服人设", body: agent.Persona.String},
+		{title: "业务场景", body: agent.Scenario.String},
+		{title: "回答边界", body: agent.AnswerBoundary.String},
+	}
+	parts := make([]string, 0, len(sections))
+	for _, section := range sections {
+		if body := strings.TrimSpace(section.body); body != "" {
+			parts = append(parts, "## "+section.title+"\n"+body)
+		}
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 // BootstrapConfig 是 bootstrap 组装的静态配置（来自 manager 配置文件）。
@@ -246,7 +275,7 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 		return BootstrapResult{}, fmt.Errorf("解密 control token 失败: %w", err)
 	}
 
-	// 3. 查询组织、所有者与版本信息，用于模板渲染与 manifest 组装。
+	// 3. 查询组织与所有者，用于模板渲染；运行时模型和 persona 在下方按 app_type 独立解析。
 	org, err := s.store.GetOrganization(ctx, app.OrgID)
 	if err != nil {
 		return BootstrapResult{}, fmt.Errorf("查询组织失败: %w", err)
@@ -255,19 +284,41 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 	if err != nil {
 		return BootstrapResult{}, fmt.Errorf("查询所有者失败: %w", err)
 	}
-	// 版本 ID 未设置代表 app 尚未发布任何版本，无法 bootstrap。
-	if !app.VersionID.Valid {
-		return BootstrapResult{}, ErrAppNotReady
-	}
-	version, err := s.store.GetAssistantVersion(ctx, app.VersionID.String)
-	if err != nil {
-		return BootstrapResult{}, fmt.Errorf("查询版本失败: %w", err)
-	}
-
-	// 4. 解析 routing 映射；非法 JSON 容错退化为空 map（不影响整体 bootstrap 流程）。
-	routing := map[string]string{}
-	if len(version.RoutingJson) > 0 {
-		_ = json.Unmarshal(version.RoutingJson, &routing)
+	// 4. 按应用类型选择唯一配置源。AICC 不得查询或继承助手版本；standard 保留原版本契约。
+	var model, personaText string
+	var routing map[string]string
+	if appType == domain.AppTypeAICC {
+		agent, agentErr := s.store.GetAICCAgentByAppID(ctx, app.ID)
+		if agentErr != nil {
+			return BootstrapResult{}, fmt.Errorf("查询 AICC 智能体失败: %w", agentErr)
+		}
+		aiccCfg, cfgErr := s.store.GetOrganizationAICCConfig(ctx, app.OrgID)
+		if cfgErr != nil {
+			return BootstrapResult{}, fmt.Errorf("查询企业 AICC 配置失败: %w", cfgErr)
+		}
+		if !aiccCfg.Enabled {
+			return BootstrapResult{}, errors.New("企业 AICC 配置未启用")
+		}
+		model = strings.TrimSpace(aiccCfg.Model.String)
+		if model == "" {
+			return BootstrapResult{}, errors.New("企业 AICC 模型未配置")
+		}
+		personaText = renderAICCAgentPersona(agent)
+	} else {
+		// version_id 仍是 standard app 发布配置的强约束，隔离改造不能将其放宽。
+		if !app.VersionID.Valid {
+			return BootstrapResult{}, ErrAppNotReady
+		}
+		version, versionErr := s.store.GetAssistantVersion(ctx, app.VersionID.String)
+		if versionErr != nil {
+			return BootstrapResult{}, fmt.Errorf("查询版本失败: %w", versionErr)
+		}
+		model = version.MainModel
+		personaText = version.SystemPrompt
+		routing = map[string]string{}
+		if len(version.RoutingJson) > 0 {
+			_ = json.Unmarshal(version.RoutingJson, &routing)
+		}
 	}
 
 	// 5. 普通应用从 app_skills 取实例 skill 并预签名，AICC 固定为空。
@@ -306,12 +357,13 @@ func (s *BootstrapService) Build(ctx context.Context, app sqlc.App) (BootstrapRe
 	in := hermes.AppInputData{
 		AppID:                   app.ID,
 		AppName:                 app.Name,
-		Model:                   version.MainModel,
+		Model:                   model,
 		OpenAIAPIKey:            string(apiKeyPlain),
 		OpenAIBaseURL:           s.cfg.NewAPIBaseURL,
 		KnowledgeRuntimeBaseURL: s.cfg.KnowledgeBaseURL,
 		KnowledgeAppToken:       string(controlToken),
-		PersonaText:             version.SystemPrompt,
+		PersonaText:             personaText,
+		PersonaIsLiteral:        appType == domain.AppTypeAICC,
 		PlatformRule:            platformPrompt,
 		Routing:                 routing,
 		SkillRelPaths:           skillRelPaths,

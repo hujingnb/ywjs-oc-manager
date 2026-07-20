@@ -104,3 +104,22 @@ func TestWriteAppInput_NoRoutingOrSkills_OmitEmpty(t *testing.T) {
 	assert.NotContains(t, manifestYAML, "routing:", "空 routing 应被 omitempty 省略")
 	assert.NotContains(t, manifestYAML, "skills:", "空 skills 应被 omitempty 省略")
 }
+
+// TestWriteAppInputPreservesLiteralPersona 验证 AICC 自由文本不进入模板替换：
+// 产品占位符、JSON、双花括号和平台同名变量都必须逐字保留，平台规则仍正常渲染。
+func TestWriteAppInputPreservesLiteralPersona(t *testing.T) {
+	w := &fakeInputWriter{}
+	literal := "产品 {product}\nJSON: {\"mode\":\"strict\"}\n模板 {{customer}}\n应用 {app_name}"
+	in := AppInputData{
+		AppID: "app-aicc", AppName: "客服应用", Model: "qwen-max",
+		OpenAIAPIKey: "sk-test", OpenAIBaseURL: "http://new-api",
+		PersonaText: literal, PersonaIsLiteral: true,
+		PlatformRule: "平台服务于 {app_name}",
+	}
+
+	err := WriteAppInput(context.Background(), w, in.AppID, in)
+
+	require.NoError(t, err)
+	assert.Equal(t, literal, w.items["resources/persona.md"])
+	assert.Equal(t, "平台服务于 客服应用", w.items["resources/platform-rules.md"])
+}

@@ -569,6 +569,8 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 			ResolveAICCRuntimeImage: func() (string, bool) {
 				return cfg.AICC.RuntimeImage, cfg.AICC.RuntimeImage != ""
 			},
+			// AICC 初始化消费企业配置时再次查询实时模型目录，防止配置后模型已下线。
+			AICCModelValidator:    modelCatalogService,
 			ManagerRuntimeBaseURL: cfg.Hermes.ManagerRuntimeBaseURL,
 		},
 	)

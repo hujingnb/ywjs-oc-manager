@@ -33,15 +33,19 @@ type AppInputData struct {
 	WebPublishAppToken       string
 	WebPublishBaseDomain     string
 
-	// PersonaText 版本内置提示词（即 version.SystemPrompt），写入 resources/persona.md。
+	// PersonaText 是按应用类型解析后的智能体提示词：standard 来自版本，AICC 来自企业客服配置，
+	// 写入 resources/persona.md；平台安全规则必须始终通过 PlatformRule 独立下发。
 	PersonaText string
+	// PersonaIsLiteral 表示 PersonaText 已是企业自由文本，必须逐字写入，禁止占位符替换。
+	// standard 版本提示词保持 false，继续支持 {org_name}/{app_name}/{owner_name} 模板。
+	PersonaIsLiteral bool
 	// PlatformRule 平台层规则文本，写入 resources/platform-rules.md。
 	PlatformRule string
 
-	// Routing 智能路由映射，透传到 manifest.routing；空 map 时 omitempty 省略。
+	// Routing 智能路由映射，透传到 manifest.routing；AICC 固定传 nil，避免继承版本路由。
 	Routing map[string]string
-	// SkillRelPaths 已推送到 input/ 的版本 skill tar 相对路径列表，
-	// 透传到 manifest.resources.skills；空时 omitempty 省略。
+	// SkillRelPaths 已推送到 input/ 的 standard app skill 相对路径列表；AICC 固定传 nil，
+	// 透传到 manifest.resources.skills 时由 omitempty 省略。
 	SkillRelPaths []string
 	// Capabilities 是本次启动显式授予 runtime 的能力上限；普通应用留空，AICC 固定下发只读集合。
 	Capabilities []string
@@ -63,9 +67,13 @@ type AppInputData struct {
 // 读到「指向 resources 文件已不存在」的中间态。
 func WriteAppInput(ctx context.Context, w AppInputWriter, appID string, in AppInputData) error {
 	vars := VariablesFromContext(in.OrgName, in.AppName, in.OwnerName)
-	persona, err := RenderPersonaText(in.PersonaText, vars)
-	if err != nil {
-		return fmt.Errorf("render persona: %w", err)
+	persona := in.PersonaText
+	if !in.PersonaIsLiteral {
+		var err error
+		persona, err = RenderPersonaText(in.PersonaText, vars)
+		if err != nil {
+			return fmt.Errorf("render persona: %w", err)
+		}
 	}
 	platform, err := RenderRuleText(in.PlatformRule, vars)
 	if err != nil {
