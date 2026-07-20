@@ -265,6 +265,7 @@ type aiccRolloutStore struct {
 	failStampOnce    bool
 	failReadyOnce    bool
 	failClearOnce    bool
+	owner            aiccRolloutOwner
 }
 
 // GetAICCModelRolloutLeaderJob 返回数据库确定性排序得到的同企业 leader。
@@ -358,6 +359,56 @@ func (s *aiccRolloutStore) UpdateJobPayload(_ context.Context, arg sqlc.UpdateJo
 			*s.trace = append(*s.trace, "marker:clear")
 		}
 	}
+	return 1, nil
+}
+
+// ClaimAICCRolloutAppOwnership 模拟跨类型 guard：只有无 owner、失效 owner 或同一任务可重入领取。
+func (s *aiccRolloutStore) ClaimAICCRolloutAppOwnership(_ context.Context, arg sqlc.ClaimAICCRolloutAppOwnershipParams) error {
+	if !s.owner.active || (s.owner.jobID == arg.OwnerJobID && s.owner.jobType == arg.OwnerJobType) {
+		s.owner = aiccRolloutOwner{jobID: arg.OwnerJobID, jobType: arg.OwnerJobType, active: true}
+	}
+	return nil
+}
+
+// GetAICCRolloutAppOwnership 返回当前 owner，用于 handler 对异类 rollout defer。
+func (s *aiccRolloutStore) GetAICCRolloutAppOwnership(context.Context, string) (sqlc.AiccRolloutAppOwner, error) {
+	return sqlc.AiccRolloutAppOwner{AppID: "app-1", OwnerJobID: s.owner.jobID, OwnerJobType: s.owner.jobType}, nil
+}
+
+// SetAppRuntimePhaseReadyForAICCRolloutOwner 仅在 guard 尚属当前任务时推进 ready。
+func (s *aiccRolloutStore) SetAppRuntimePhaseReadyForAICCRolloutOwner(_ context.Context, arg sqlc.SetAppRuntimePhaseReadyForAICCRolloutOwnerParams) (int64, error) {
+	if s.owner.jobID != arg.OwnerJobID || s.owner.jobType != arg.OwnerJobType {
+		return 0, nil
+	}
+	if s.failReadyOnce {
+		s.failReadyOnce = false
+		return 0, errors.New("ready 写入失败")
+	}
+	if s.appPhases == nil {
+		s.appPhases = map[string]string{}
+	}
+	s.appPhases[arg.ID] = domain.RuntimePhaseReady
+	if s.trace != nil {
+		*s.trace = append(*s.trace, "ready")
+	}
+	return 1, nil
+}
+
+// ReleaseAICCRolloutAppOwnership 只释放当前任务自己的 app guard。
+func (s *aiccRolloutStore) ReleaseAICCRolloutAppOwnership(_ context.Context, arg sqlc.ReleaseAICCRolloutAppOwnershipParams) (int64, error) {
+	if s.owner.jobID != arg.OwnerJobID || s.owner.jobType != arg.OwnerJobType {
+		return 0, nil
+	}
+	s.owner = aiccRolloutOwner{}
+	return 1, nil
+}
+
+// ReleaseAICCRolloutAppOwnershipByOwner 模拟 clear 后重试清理自己的遗留 guard。
+func (s *aiccRolloutStore) ReleaseAICCRolloutAppOwnershipByOwner(_ context.Context, arg sqlc.ReleaseAICCRolloutAppOwnershipByOwnerParams) (int64, error) {
+	if s.owner.jobID != arg.OwnerJobID || s.owner.jobType != arg.OwnerJobType {
+		return 0, nil
+	}
+	s.owner = aiccRolloutOwner{}
 	return 1, nil
 }
 

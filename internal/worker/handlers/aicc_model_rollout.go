@@ -27,6 +27,11 @@ type AICCModelRolloutStore interface {
 	SetAppRuntimePhase(ctx context.Context, arg sqlc.SetAppRuntimePhaseParams) error
 	// UpdateJobPayload 持久化任务专属恢复标记，跨进程记录已核验的 generation 与目标智能体。
 	UpdateJobPayload(ctx context.Context, arg sqlc.UpdateJobPayloadParams) (int64, error)
+	ClaimAICCRolloutAppOwnership(ctx context.Context, arg sqlc.ClaimAICCRolloutAppOwnershipParams) error
+	GetAICCRolloutAppOwnership(ctx context.Context, appID string) (sqlc.AiccRolloutAppOwner, error)
+	SetAppRuntimePhaseReadyForAICCRolloutOwner(ctx context.Context, arg sqlc.SetAppRuntimePhaseReadyForAICCRolloutOwnerParams) (int64, error)
+	ReleaseAICCRolloutAppOwnership(ctx context.Context, arg sqlc.ReleaseAICCRolloutAppOwnershipParams) (int64, error)
+	ReleaseAICCRolloutAppOwnershipByOwner(ctx context.Context, arg sqlc.ReleaseAICCRolloutAppOwnershipByOwnerParams) (int64, error)
 }
 
 // AICCModelRolloutPayload 是配置更新事务写入持久 job 的最小载荷。
@@ -82,6 +87,11 @@ func (h *AICCModelRolloutHandler) Handle(ctx context.Context, job sqlc.Job) erro
 	}
 
 	for {
+		if payload.RepairAgentID == "" {
+			if err := h.releaseOwnership(ctx, job.ID, ""); err != nil {
+				return err
+			}
+		}
 		// 每台副作用前确认自己是 pending/running 稳定排序 leader。非 leader 无损 defer，
 		// 释放 worker 槽且不消耗 attempts；旧 pending 任务恢复后仍保持优先级。
 		leader, err := h.store.GetAICCModelRolloutLeaderJob(ctx, json.RawMessage(payload.OrgID))
@@ -94,6 +104,9 @@ func (h *AICCModelRolloutHandler) Handle(ctx context.Context, job sqlc.Job) erro
 		// marker 优先于最新配置处理：它代表本任务已持有的 app/revision；generation=0 时
 		// 先补做 restart，正数时继续核验既有 rollout，均必须先幂等收口。
 		if payload.RepairAgentID != "" {
+			if err := h.claimOwnership(ctx, job.ID, payload.RepairAppID); err != nil {
+				return err
+			}
 			if err := h.recoverMarkedAgent(ctx, job.ID, &payload); err != nil {
 				return err
 			}
@@ -118,6 +131,9 @@ func (h *AICCModelRolloutHandler) Handle(ctx context.Context, job sqlc.Job) erro
 			return nil
 		}
 		agent := agents[0]
+		if err := h.claimOwnership(ctx, job.ID, agent.AppID); err != nil {
+			return err
+		}
 
 		// 先持久化任务专属 ownership，再写共享 runtime phase 或触发外部 restart。这样即使
 		// 任一副作用后进程崩溃，reconciler 也能从活跃 job 精确识别旧 Ready Pod 不可解闸。
@@ -168,16 +184,54 @@ func (h *AICCModelRolloutHandler) finishMarkedAgent(ctx context.Context, jobID s
 	}); err != nil {
 		return aiccRolloutStageError(payload.OrgID, payload.RepairAgentID, "stamp_revision", err)
 	}
-	if err := h.store.SetAppRuntimePhase(ctx, sqlc.SetAppRuntimePhaseParams{ID: payload.RepairAppID, RuntimePhase: domain.RuntimePhaseReady}); err != nil {
+	rows, err := h.store.SetAppRuntimePhaseReadyForAICCRolloutOwner(ctx, sqlc.SetAppRuntimePhaseReadyForAICCRolloutOwnerParams{ID: payload.RepairAppID, OwnerJobID: jobID, OwnerJobType: domain.JobTypeAICCModelRollout})
+	if err != nil {
 		return aiccRolloutStageError(payload.OrgID, payload.RepairAgentID, "mark_ready", err)
 	}
+	if rows != 1 {
+		return aiccRolloutStageError(payload.OrgID, payload.RepairAgentID, "mark_ready", fmt.Errorf("ownership 不再属于当前任务，影响行数=%d", rows))
+	}
 	agentID := payload.RepairAgentID
+	appID := payload.RepairAppID
 	payload.RepairAgentID = ""
 	payload.RepairAppID = ""
 	payload.RepairTargetGeneration = 0
 	payload.RepairTargetRevision = 0
 	if err := h.persistPayload(ctx, jobID, *payload); err != nil {
 		return aiccRolloutStageError(payload.OrgID, agentID, "clear_repair_marker", err)
+	}
+	return h.releaseOwnership(ctx, jobID, appID)
+}
+
+// claimOwnership 让模型 rollout 在写 marker 或重启前领取跨类型 app guard，异类 active owner 时 defer。
+func (h *AICCModelRolloutHandler) claimOwnership(ctx context.Context, jobID, appID string) error {
+	if err := h.store.ClaimAICCRolloutAppOwnership(ctx, sqlc.ClaimAICCRolloutAppOwnershipParams{AppID: appID, OwnerJobID: jobID, OwnerJobType: domain.JobTypeAICCModelRollout}); err != nil {
+		return aiccRolloutStageError("-", "-", "claim_ownership", err)
+	}
+	owner, err := h.store.GetAICCRolloutAppOwnership(ctx, appID)
+	if err != nil {
+		return aiccRolloutStageError("-", "-", "read_ownership", err)
+	}
+	if owner.OwnerJobID != jobID || owner.OwnerJobType != domain.JobTypeAICCModelRollout {
+		return &DeferredJobError{Delay: aiccModelRolloutDeferDelay, Reason: fmt.Sprintf("等待 app=%s owner job=%s type=%s", appID, owner.OwnerJobID, owner.OwnerJobType)}
+	}
+	return nil
+}
+
+// releaseOwnership 只删除当前模型任务自己的 guard；无 marker 重试先清理上次 clear 后残留记录。
+func (h *AICCModelRolloutHandler) releaseOwnership(ctx context.Context, jobID, appID string) error {
+	var rows int64
+	var err error
+	if appID == "" {
+		rows, err = h.store.ReleaseAICCRolloutAppOwnershipByOwner(ctx, sqlc.ReleaseAICCRolloutAppOwnershipByOwnerParams{OwnerJobID: jobID, OwnerJobType: domain.JobTypeAICCModelRollout})
+	} else {
+		rows, err = h.store.ReleaseAICCRolloutAppOwnership(ctx, sqlc.ReleaseAICCRolloutAppOwnershipParams{AppID: appID, OwnerJobID: jobID, OwnerJobType: domain.JobTypeAICCModelRollout})
+	}
+	if err != nil {
+		return aiccRolloutStageError("-", "-", "release_ownership", err)
+	}
+	if rows > 1 {
+		return aiccRolloutStageError("-", "-", "release_ownership", fmt.Errorf("释放 ownership 影响行数异常: %d", rows))
 	}
 	return nil
 }

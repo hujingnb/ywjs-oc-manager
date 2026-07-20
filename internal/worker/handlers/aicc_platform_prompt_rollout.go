@@ -26,6 +26,20 @@ type AICCPlatformPromptRolloutStore interface {
 	SetAppRuntimePhase(ctx context.Context, arg sqlc.SetAppRuntimePhaseParams) error
 	// UpdateJobPayload 持久化任务的单台恢复 marker，进程失败后可从 generation 继续。
 	UpdateJobPayload(ctx context.Context, arg sqlc.UpdateJobPayloadParams) (int64, error)
+	// ClaimAICCRolloutAppOwnership 原子领取跨类型 app guard；旧 owner 非活跃时允许安全接管。
+	ClaimAICCRolloutAppOwnership(ctx context.Context, arg sqlc.ClaimAICCRolloutAppOwnershipParams) error
+	// GetAICCRolloutAppOwnership 返回 claim 后的实际 owner，异类活跃 owner 时任务必须 defer。
+	GetAICCRolloutAppOwnership(ctx context.Context, appID string) (sqlc.AiccRolloutAppOwner, error)
+	// SetAppRuntimePhaseReadyForAICCRolloutOwner 仅允许本任务 guard 仍存在时收口 ready。
+	SetAppRuntimePhaseReadyForAICCRolloutOwner(ctx context.Context, arg sqlc.SetAppRuntimePhaseReadyForAICCRolloutOwnerParams) (int64, error)
+	// ReleaseAICCRolloutAppOwnership 在 marker 清除后释放本任务 own guard。
+	ReleaseAICCRolloutAppOwnership(ctx context.Context, arg sqlc.ReleaseAICCRolloutAppOwnershipParams) (int64, error)
+	ReleaseAICCRolloutAppOwnershipByOwner(ctx context.Context, arg sqlc.ReleaseAICCRolloutAppOwnershipByOwnerParams) (int64, error)
+}
+
+// AICCPlatformPromptRolloutSuccessorEnqueuer 在旧 hash 下发完成后，检查是否需为当前 hash 创建后继任务。
+type AICCPlatformPromptRolloutSuccessorEnqueuer interface {
+	EnqueueIfNeeded(ctx context.Context) error
 }
 
 // AICCPlatformPromptRolloutPayload 是全局提示词任务的最小载荷。
@@ -42,9 +56,15 @@ type AICCPlatformPromptRolloutPayload struct {
 
 // AICCPlatformPromptRolloutHandler 逐台滚动重启提示词 hash 落后的 AICC Deployment。
 type AICCPlatformPromptRolloutHandler struct {
-	store   AICCPlatformPromptRolloutStore
-	orch    k8sorch.Orchestrator
-	timeout time.Duration
+	store     AICCPlatformPromptRolloutStore
+	orch      k8sorch.Orchestrator
+	timeout   time.Duration
+	successor AICCPlatformPromptRolloutSuccessorEnqueuer
+}
+
+// SetSuccessorEnqueuer 注入 singleton 协调器；服务启动时设置，避免 worker 直接复制创建去重逻辑。
+func (h *AICCPlatformPromptRolloutHandler) SetSuccessorEnqueuer(enqueuer AICCPlatformPromptRolloutSuccessorEnqueuer) {
+	h.successor = enqueuer
 }
 
 // NewAICCPlatformPromptRolloutHandler 构造独立 handler；依赖缺失会在执行时返回可重试诊断错误。
@@ -77,6 +97,13 @@ func (h *AICCPlatformPromptRolloutHandler) Handle(ctx context.Context, job sqlc.
 	}
 
 	for {
+		// 上次完成 clear 后若 release 因瞬态数据库错误失败，重试先清理自己的孤儿 guard；
+		// 不会释放其他任务 ownership，也不会遗漏仍有 marker 的恢复路径。
+		if payload.RepairAgentID == "" {
+			if err := h.releaseOwnership(ctx, job.ID, ""); err != nil {
+				return err
+			}
+		}
 		leader, err := h.store.GetAICCPlatformPromptRolloutLeaderJob(ctx)
 		if err != nil {
 			return aiccPlatformPromptRolloutStageError("-", "elect_leader", err)
@@ -85,6 +112,9 @@ func (h *AICCPlatformPromptRolloutHandler) Handle(ctx context.Context, job sqlc.
 			return &DeferredJobError{Delay: aiccPlatformPromptRolloutDeferDelay, Reason: fmt.Sprintf("等待平台提示词 leader job=%s", leader.ID)}
 		}
 		if payload.RepairAgentID != "" {
+			if err := h.claimOwnership(ctx, job.ID, payload.RepairAppID); err != nil {
+				return err
+			}
 			if err := h.recoverMarkedAgent(ctx, job.ID, &payload); err != nil {
 				return err
 			}
@@ -99,9 +129,17 @@ func (h *AICCPlatformPromptRolloutHandler) Handle(ctx context.Context, job sqlc.
 			return aiccPlatformPromptRolloutStageError("-", "list_pending", err)
 		}
 		if len(agents) == 0 {
+			if h.successor != nil {
+				if err := h.successor.EnqueueIfNeeded(ctx); err != nil {
+					return aiccPlatformPromptRolloutStageError("-", "enqueue_successor", err)
+				}
+			}
 			return nil
 		}
 		agent := agents[0]
+		if err := h.claimOwnership(ctx, job.ID, agent.AppID); err != nil {
+			return err
+		}
 		payload.RepairAgentID = agent.ID
 		payload.RepairAppID = agent.AppID
 		payload.RepairTargetGeneration = 0
@@ -145,15 +183,55 @@ func (h *AICCPlatformPromptRolloutHandler) recoverMarkedAgent(ctx context.Contex
 	if appliedHash != payload.TargetPromptHash {
 		return aiccPlatformPromptRolloutStageError(payload.RepairAgentID, "verify_prompt_hash", fmt.Errorf("bootstrap 已应用 hash=%q，目标 hash=%q", appliedHash, payload.TargetPromptHash))
 	}
-	if err := h.store.SetAppRuntimePhase(ctx, sqlc.SetAppRuntimePhaseParams{ID: payload.RepairAppID, RuntimePhase: domain.RuntimePhaseReady}); err != nil {
+	readyRows, err := h.store.SetAppRuntimePhaseReadyForAICCRolloutOwner(ctx, sqlc.SetAppRuntimePhaseReadyForAICCRolloutOwnerParams{
+		ID: payload.RepairAppID, OwnerJobID: jobID, OwnerJobType: domain.JobTypeAICCPlatformPromptRollout,
+	})
+	if err != nil {
 		return aiccPlatformPromptRolloutStageError(payload.RepairAgentID, "mark_ready", err)
 	}
+	if readyRows != 1 {
+		return aiccPlatformPromptRolloutStageError(payload.RepairAgentID, "mark_ready", fmt.Errorf("ownership 不再属于当前任务，影响行数=%d", readyRows))
+	}
 	agentID := payload.RepairAgentID
+	appID := payload.RepairAppID
 	payload.RepairAgentID = ""
 	payload.RepairAppID = ""
 	payload.RepairTargetGeneration = 0
 	if err := h.persistPayload(ctx, jobID, *payload); err != nil {
 		return aiccPlatformPromptRolloutStageError(agentID, "clear_repair_marker", err)
+	}
+	return h.releaseOwnership(ctx, jobID, appID)
+}
+
+// claimOwnership 在持久 marker 或外部 restart 前领取跨类型 guard；异类活跃 owner 使任务 defer。
+func (h *AICCPlatformPromptRolloutHandler) claimOwnership(ctx context.Context, jobID, appID string) error {
+	if err := h.store.ClaimAICCRolloutAppOwnership(ctx, sqlc.ClaimAICCRolloutAppOwnershipParams{AppID: appID, OwnerJobID: jobID, OwnerJobType: domain.JobTypeAICCPlatformPromptRollout}); err != nil {
+		return aiccPlatformPromptRolloutStageError("-", "claim_ownership", err)
+	}
+	owner, err := h.store.GetAICCRolloutAppOwnership(ctx, appID)
+	if err != nil {
+		return aiccPlatformPromptRolloutStageError("-", "read_ownership", err)
+	}
+	if owner.OwnerJobID != jobID || owner.OwnerJobType != domain.JobTypeAICCPlatformPromptRollout {
+		return &DeferredJobError{Delay: aiccPlatformPromptRolloutDeferDelay, Reason: fmt.Sprintf("等待 app=%s owner job=%s type=%s", appID, owner.OwnerJobID, owner.OwnerJobType)}
+	}
+	return nil
+}
+
+// releaseOwnership 只释放当前任务自己的 guard；appID 为空表示无 marker 重试时批量前的单 app 未知清理由 store 忽略。
+func (h *AICCPlatformPromptRolloutHandler) releaseOwnership(ctx context.Context, jobID, appID string) error {
+	var rows int64
+	var err error
+	if appID == "" {
+		rows, err = h.store.ReleaseAICCRolloutAppOwnershipByOwner(ctx, sqlc.ReleaseAICCRolloutAppOwnershipByOwnerParams{OwnerJobID: jobID, OwnerJobType: domain.JobTypeAICCPlatformPromptRollout})
+	} else {
+		rows, err = h.store.ReleaseAICCRolloutAppOwnership(ctx, sqlc.ReleaseAICCRolloutAppOwnershipParams{AppID: appID, OwnerJobID: jobID, OwnerJobType: domain.JobTypeAICCPlatformPromptRollout})
+	}
+	if err != nil {
+		return aiccPlatformPromptRolloutStageError("-", "release_ownership", err)
+	}
+	if rows > 1 {
+		return aiccPlatformPromptRolloutStageError("-", "release_ownership", fmt.Errorf("释放 ownership 影响行数异常: %d", rows))
 	}
 	return nil
 }

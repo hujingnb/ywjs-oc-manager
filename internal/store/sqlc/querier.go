@@ -25,6 +25,8 @@ type Querier interface {
 	AttachAICCLeadValuesToLead(ctx context.Context, arg AttachAICCLeadValuesToLeadParams) error
 	// 意向分析可能等待上游模型，租约需覆盖主请求超时和一次网络抖动，避免 30 秒后重复分析。
 	ClaimAICCIntentAnalysisRetry(ctx context.Context, arg ClaimAICCIntentAnalysisRetryParams) (int64, error)
+	// 当前任务可重入地领取 app；仅当原 owner 已不再 pending/running 时才接管，避免遗留 owner 永久阻塞。
+	ClaimAICCRolloutAppOwnership(ctx context.Context, arg ClaimAICCRolloutAppOwnershipParams) error
 	// 抢占 failed 或超时 creating 的 dataset 创建租约；只有成功更新行的调用方允许访问 RAGFlow 创建远端 dataset。
 	ClaimRAGFlowDatasetCreation(ctx context.Context, arg ClaimRAGFlowDatasetCreationParams) error
 	ClearAICCLeadLatestSession(ctx context.Context, latestSessionID null.String) error
@@ -160,6 +162,8 @@ type Querier interface {
 	GetAICCModelRolloutLeaderJob(ctx context.Context, orgID json.RawMessage) (Job, error)
 	// pending/running 任务按创建时间和主键稳定选 leader，供 worker 在重试与多副本下保持顺序。
 	GetAICCPlatformPromptRolloutLeaderJob(ctx context.Context) (Job, error)
+	// 在 claim 后读取 app 当前 owner；活跃异类 owner 存在时调用方必须 defer。
+	GetAICCRolloutAppOwnership(ctx context.Context, appID string) (AiccRolloutAppOwner, error)
 	GetAICCSession(ctx context.Context, id string) (AiccSession, error)
 	GetAICCSessionByToken(ctx context.Context, sessionToken string) (AiccSession, error)
 	GetAICCSessionContext(ctx context.Context, sessionID string) (AiccSessionContext, error)
@@ -396,6 +400,10 @@ type Querier interface {
 	// reaper 仅接管过期租约；耗尽尝试次数的任务转为 failed，其他任务立即回到 retry_wait。
 	RecoverExpiredAICCMessageTaskLeases(ctx context.Context) (int64, error)
 	RejectSkillTicket(ctx context.Context, arg RejectSkillTicketParams) error
+	// marker 已清除后仅 owner 自己可释放 guard，防止一个任务释放另一个任务的重启窗口。
+	ReleaseAICCRolloutAppOwnership(ctx context.Context, arg ReleaseAICCRolloutAppOwnershipParams) (int64, error)
+	// 无 marker 的重试仅清理当前任务遗留 ownership；不按 app 广泛删除，避免触碰异类任务。
+	ReleaseAICCRolloutAppOwnershipByOwner(ctx context.Context, arg ReleaseAICCRolloutAppOwnershipByOwnerParams) (int64, error)
 	// 重命名未删除行业知识库；唯一约束负责拦截同名未删除记录。
 	RenameIndustryKnowledgeBase(ctx context.Context, arg RenameIndustryKnowledgeBaseParams) error
 	// 续租使用数据库当前时间，避免 worker 时钟漂移把有效租约提前判过期。
@@ -443,8 +451,10 @@ type Querier interface {
 	// 裸 UPDATE runtime_phase(运行时就绪维度,与 status 正交,无状态机守卫,守卫不适用):
 	// reconciler 周期写、init worker 首启/就绪写、渠道解绑/升级重启前置 restarting 用。
 	SetAppRuntimePhase(ctx context.Context, arg SetAppRuntimePhaseParams) error
-	// 仅携带当前 app repair marker 的活跃 rollout 拥有 Ready 门禁；普通启动/重启不受影响。
-	SetAppRuntimePhaseReadyUnlessActiveAICCModelRollout(ctx context.Context, appID string) error
+	// 只允许仍持有 app 的本任务在核验成功后收口 ready，防止异类 owner 交错覆盖。
+	SetAppRuntimePhaseReadyForAICCRolloutOwner(ctx context.Context, arg SetAppRuntimePhaseReadyForAICCRolloutOwnerParams) (int64, error)
+	// reconciler 仅在没有任一活跃 rollout ownership 时写 ready，避免 Pod Ready 覆盖跨类型任务的重启窗口。
+	SetAppRuntimePhaseReadyUnlessActiveAICCRollout(ctx context.Context, appID string) error
 	SetAppRuntimeSnapshot(ctx context.Context, arg SetAppRuntimeSnapshotParams) error
 	// 首次写入 per-app control token（三用：bootstrap / oc-kb / oc-ops）；并发重复初始化拿不到行，由 service 读取既有 token。
 	SetAppRuntimeToken(ctx context.Context, arg SetAppRuntimeTokenParams) error

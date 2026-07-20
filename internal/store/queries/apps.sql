@@ -132,18 +132,61 @@ UPDATE apps
 SET runtime_phase = ?, updated_at = now()
 WHERE id = ?;
 
--- name: SetAppRuntimePhaseReadyUnlessActiveAICCModelRollout :exec
--- 仅携带当前 app repair marker 的活跃 rollout 拥有 Ready 门禁；普通启动/重启不受影响。
+-- name: SetAppRuntimePhaseReadyUnlessActiveAICCRollout :exec
+-- reconciler 仅在没有任一活跃 rollout ownership 时写 ready，避免 Pod Ready 覆盖跨类型任务的重启窗口。
 UPDATE apps
 SET runtime_phase = 'ready', updated_at = now()
 WHERE apps.id = sqlc.arg(app_id)
   AND NOT EXISTS (
       SELECT 1
-      FROM jobs
-      WHERE jobs.type = 'aicc_model_rollout'
+      FROM aicc_rollout_app_owners owner
+      JOIN jobs ON jobs.id = owner.owner_job_id
+      WHERE owner.app_id = apps.id
         AND jobs.status IN ('pending', 'running')
-        AND CAST(jobs.payload_json->>'$.repair_app_id' AS CHAR) = apps.id
   );
+
+-- name: ClaimAICCRolloutAppOwnership :exec
+-- 当前任务可重入地领取 app；仅当原 owner 已不再 pending/running 时才接管，避免遗留 owner 永久阻塞。
+INSERT INTO aicc_rollout_app_owners (app_id, owner_job_id, owner_job_type)
+VALUES (?, ?, ?)
+ON DUPLICATE KEY UPDATE
+    owner_job_id = IF(
+        owner_job_id = VALUES(owner_job_id)
+        OR NOT EXISTS (SELECT 1 FROM jobs WHERE id = owner_job_id AND status IN ('pending', 'running')),
+        VALUES(owner_job_id), owner_job_id
+    ),
+    owner_job_type = IF(
+        owner_job_id = VALUES(owner_job_id)
+        OR NOT EXISTS (SELECT 1 FROM jobs WHERE id = owner_job_id AND status IN ('pending', 'running')),
+        VALUES(owner_job_type), owner_job_type
+    ),
+    updated_at = now();
+
+-- name: GetAICCRolloutAppOwnership :one
+-- 在 claim 后读取 app 当前 owner；活跃异类 owner 存在时调用方必须 defer。
+SELECT app_id, owner_job_id, owner_job_type, updated_at
+FROM aicc_rollout_app_owners
+WHERE app_id = ?;
+
+-- name: SetAppRuntimePhaseReadyForAICCRolloutOwner :execrows
+-- 只允许仍持有 app 的本任务在核验成功后收口 ready，防止异类 owner 交错覆盖。
+UPDATE apps
+SET runtime_phase = 'ready', updated_at = now()
+WHERE id = ?
+  AND EXISTS (
+      SELECT 1 FROM aicc_rollout_app_owners
+      WHERE app_id = apps.id AND owner_job_id = ? AND owner_job_type = ?
+  );
+
+-- name: ReleaseAICCRolloutAppOwnership :execrows
+-- marker 已清除后仅 owner 自己可释放 guard，防止一个任务释放另一个任务的重启窗口。
+DELETE FROM aicc_rollout_app_owners
+WHERE app_id = ? AND owner_job_id = ? AND owner_job_type = ?;
+
+-- name: ReleaseAICCRolloutAppOwnershipByOwner :execrows
+-- 无 marker 的重试仅清理当前任务遗留 ownership；不按 app 广泛删除，避免触碰异类任务。
+DELETE FROM aicc_rollout_app_owners
+WHERE owner_job_id = ? AND owner_job_type = ?;
 
 -- name: SetAppRestartPolicy :exec
 -- 管理员 PATCH /apps/:appId/restart-policy 写入；mode/max_per_window/window_seconds 校验在 service 层。

@@ -64,6 +64,35 @@ func TestAICCPlatformPromptRolloutFollowerDefers(t *testing.T) {
 	assert.Empty(t, events)
 }
 
+// TestAICCPlatformPromptRolloutDefersWhenModelRolloutOwnsSameApp 验证同一 app 被活跃模型任务持有时，
+// 平台提示词任务不触发第二次 restart，也不能提前把 runtime phase 写回 ready。
+func TestAICCPlatformPromptRolloutDefersWhenModelRolloutOwnsSameApp(t *testing.T) {
+	events := []string{}
+	store := newPromptRolloutStore("old-hash", "current-hash")
+	store.events = &events
+	store.owner = aiccRolloutOwner{jobID: "model-job", jobType: domain.JobTypeAICCModelRollout, active: true}
+
+	err := NewAICCPlatformPromptRolloutHandler(store, &aiccPromptRolloutOrchestrator{events: &events, generation: 7}, time.Second).Handle(context.Background(), promptRolloutJob(t, "current-hash"))
+	var deferred *DeferredJobError
+	require.ErrorAs(t, err, &deferred)
+	assert.Empty(t, events)
+	assert.Empty(t, store.appPhases)
+}
+
+// TestAICCPlatformPromptRolloutEnqueuesSuccessorForCurrentHash 验证旧目标 hash 已完成时，
+// handler 通过 singleton 协调器检查当前 hash 落后客服并只创建一个后继任务。
+func TestAICCPlatformPromptRolloutEnqueuesSuccessorForCurrentHash(t *testing.T) {
+	events := []string{}
+	store := newPromptRolloutStore("old-hash", "old-target")
+	store.events = &events
+	successor := &fakePromptRolloutSuccessor{}
+	handler := NewAICCPlatformPromptRolloutHandler(store, &aiccPromptRolloutOrchestrator{events: &events, generation: 7}, time.Second)
+	handler.SetSuccessorEnqueuer(successor)
+
+	require.NoError(t, handler.Handle(context.Background(), promptRolloutJob(t, "old-target")))
+	assert.Equal(t, 1, successor.calls)
+}
+
 // TestAICCPlatformPromptRolloutPersistsMarkerBeforeRestartFailure 验证 restart 失败时 ownership marker
 // 已落库；后续 job 重试从 generation=0 marker 恢复，而不会丢失本次待重启客服。
 func TestAICCPlatformPromptRolloutPersistsMarkerBeforeRestartFailure(t *testing.T) {
@@ -126,7 +155,21 @@ type promptRolloutStore struct {
 	events               *[]string
 	trace                *[]string
 	keepOldHashAfterWait bool
+	owner                aiccRolloutOwner
 }
+
+// aiccRolloutOwner 记录测试中数据库 ownership guard 的当前持有任务。
+type aiccRolloutOwner struct {
+	jobID   string
+	jobType string
+	active  bool
+}
+
+// fakePromptRolloutSuccessor 记录 handler 完成旧 hash 后是否请求协调器检查后继任务。
+type fakePromptRolloutSuccessor struct{ calls int }
+
+// EnqueueIfNeeded 满足后继协调器接口；真实实现会在 singleton guard 事务中去重创建任务。
+func (f *fakePromptRolloutSuccessor) EnqueueIfNeeded(context.Context) error { f.calls++; return nil }
 
 // newPromptRolloutStore 创建一台默认 active 客服；oldHash 表示 bootstrap 更新前的 app 状态。
 func newPromptRolloutStore(oldHash, bootstrapHash string) *promptRolloutStore {
@@ -192,6 +235,46 @@ func (s *promptRolloutStore) UpdateJobPayload(_ context.Context, arg sqlc.Update
 			*s.trace = append(*s.trace, "marker:clear")
 		}
 	}
+	return 1, nil
+}
+
+// ClaimAICCRolloutAppOwnership 模拟数据库仅在无活跃异类 owner 时把 ownership 交给当前任务。
+func (s *promptRolloutStore) ClaimAICCRolloutAppOwnership(_ context.Context, arg sqlc.ClaimAICCRolloutAppOwnershipParams) error {
+	if !s.owner.active || (s.owner.jobID == arg.OwnerJobID && s.owner.jobType == arg.OwnerJobType) {
+		s.owner = aiccRolloutOwner{jobID: arg.OwnerJobID, jobType: arg.OwnerJobType, active: true}
+	}
+	return nil
+}
+
+// GetAICCRolloutAppOwnership 返回 claim 后唯一 owner，供 handler 判断应继续还是 defer。
+func (s *promptRolloutStore) GetAICCRolloutAppOwnership(context.Context, string) (sqlc.AiccRolloutAppOwner, error) {
+	return sqlc.AiccRolloutAppOwner{AppID: "app-1", OwnerJobID: s.owner.jobID, OwnerJobType: s.owner.jobType}, nil
+}
+
+// SetAppRuntimePhaseReadyForAICCRolloutOwner 仅匹配 owner 时模拟 ready 收口。
+func (s *promptRolloutStore) SetAppRuntimePhaseReadyForAICCRolloutOwner(_ context.Context, arg sqlc.SetAppRuntimePhaseReadyForAICCRolloutOwnerParams) (int64, error) {
+	if s.owner.jobID != arg.OwnerJobID || s.owner.jobType != arg.OwnerJobType {
+		return 0, nil
+	}
+	s.appPhases[arg.ID] = domain.RuntimePhaseReady
+	return 1, nil
+}
+
+// ReleaseAICCRolloutAppOwnership 仅释放匹配当前任务的 app guard。
+func (s *promptRolloutStore) ReleaseAICCRolloutAppOwnership(_ context.Context, arg sqlc.ReleaseAICCRolloutAppOwnershipParams) (int64, error) {
+	if s.owner.jobID != arg.OwnerJobID || s.owner.jobType != arg.OwnerJobType {
+		return 0, nil
+	}
+	s.owner = aiccRolloutOwner{}
+	return 1, nil
+}
+
+// ReleaseAICCRolloutAppOwnershipByOwner 模拟无 marker 重试时只清理当前任务残留 guard。
+func (s *promptRolloutStore) ReleaseAICCRolloutAppOwnershipByOwner(_ context.Context, arg sqlc.ReleaseAICCRolloutAppOwnershipByOwnerParams) (int64, error) {
+	if s.owner.jobID != arg.OwnerJobID || s.owner.jobType != arg.OwnerJobType {
+		return 0, nil
+	}
+	s.owner = aiccRolloutOwner{}
 	return 1, nil
 }
 

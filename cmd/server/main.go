@@ -599,6 +599,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	aiccPlatformPromptRolloutCoordinator := service.NewAICCPlatformPromptRolloutCoordinator(
 		store.NewAICCPlatformPromptRolloutRunner(dbStore), redisQueue,
 	)
+	aiccPlatformPromptRolloutHandler.SetSuccessorEnqueuer(aiccPlatformPromptRolloutCoordinator)
 	if err := aiccPlatformPromptRolloutCoordinator.EnqueueIfNeeded(ctx); err != nil {
 		return fmt.Errorf("启动 AICC 平台提示词下发任务失败: %w", err)
 	}

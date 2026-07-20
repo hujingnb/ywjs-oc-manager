@@ -203,6 +203,13 @@ type AiccQueueGovernance struct {
 	ID int8 `db:"id" json:"id"`
 }
 
+type AiccRolloutAppOwner struct {
+	AppID        string    `db:"app_id" json:"app_id"`
+	OwnerJobID   string    `db:"owner_job_id" json:"owner_job_id"`
+	OwnerJobType string    `db:"owner_job_type" json:"owner_job_type"`
+	UpdatedAt    time.Time `db:"updated_at" json:"updated_at"`
+}
+
 type AiccSession struct {
 	ID                            string      `db:"id" json:"id"`
 	AgentID                       string      `db:"agent_id" json:"agent_id"`

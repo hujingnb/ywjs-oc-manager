@@ -93,10 +93,10 @@ func (f *fakeAppStatusStore) SetAppRuntimePhase(_ context.Context, arg sqlc.SetA
 	return nil
 }
 
-// SetAppRuntimePhaseReadyUnlessActiveAICCModelRollout 模拟任务 ownership SQL：仅活跃且 marker 匹配的 rollout 阻止 Ready。
-func (f *fakeAppStatusStore) SetAppRuntimePhaseReadyUnlessActiveAICCModelRollout(_ context.Context, appID string) error {
+// SetAppRuntimePhaseReadyUnlessActiveAICCRollout 模拟跨类型任务 ownership SQL：活跃 rollout 阻止 Ready。
+func (f *fakeAppStatusStore) SetAppRuntimePhaseReadyUnlessActiveAICCRollout(_ context.Context, appID string) error {
 	for _, job := range f.rolloutJobs {
-		if job.Type != domain.JobTypeAICCModelRollout || (job.Status != domain.JobStatusPending && job.Status != domain.JobStatusRunning) {
+		if (job.Type != domain.JobTypeAICCModelRollout && job.Type != domain.JobTypeAICCPlatformPromptRollout) || (job.Status != domain.JobStatusPending && job.Status != domain.JobStatusRunning) {
 			continue
 		}
 		var payload struct {
@@ -690,6 +690,25 @@ func TestTickDoesNotOverrideRolloutRestartingWithStaleReadyPod(t *testing.T) {
 	require.NoError(t, reconciler.Tick(context.Background()))
 
 	assert.Equal(t, domain.RuntimePhaseRestarting, store.runtimePhase[appID1])
+}
+
+// TestTickDoesNotOverridePlatformPromptRolloutRestarting 验证平台提示词任务与模型任务使用同一 Ready 门禁；
+// Pod 旧 generation 暂时 Ready 时，reconciler 不得把提示词 rollout 的 restarting 提前覆盖为 ready。
+func TestTickDoesNotOverridePlatformPromptRolloutRestarting(t *testing.T) {
+	appID := "aicc-app-prompt-rollout"
+	store := newFakeAppStatusStore()
+	store.rows = []string{appID}
+	store.apps[appID] = appWithStatus(appID, domain.AppStatusRunning)
+	store.runtimePhase[appID] = domain.RuntimePhaseRestarting
+	store.rolloutJobs = []sqlc.Job{{
+		ID: "prompt-rollout-job", Type: domain.JobTypeAICCPlatformPromptRollout, Status: domain.JobStatusRunning,
+		PayloadJson: []byte(`{"repair_app_id":"aicc-app-prompt-rollout"}`),
+	}}
+	orch := newFakeOrch()
+	orch.set(appID, k8sorch.AppStatus{Phase: "Running", Ready: true}, nil)
+
+	require.NoError(t, NewAppStatusReconciler(store, orch, &fakeNotifier{}).Tick(context.Background()))
+	assert.Equal(t, domain.RuntimePhaseRestarting, store.runtimePhase[appID])
 }
 
 // TestTickAllowsReadyWithoutActiveRolloutOwnership 验证普通启动/重启，以及 terminal/已清 marker 的 rollout

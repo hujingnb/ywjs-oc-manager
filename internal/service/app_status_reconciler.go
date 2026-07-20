@@ -34,8 +34,8 @@ type appStatusStore interface {
 	SetAppRuntimeSnapshot(ctx context.Context, arg sqlc.SetAppRuntimeSnapshotParams) error
 	// SetAppRuntimePhase 裸 UPDATE runtime_phase(运行时就绪维度,与 status 正交)。
 	SetAppRuntimePhase(ctx context.Context, arg sqlc.SetAppRuntimePhaseParams) error
-	// SetAppRuntimePhaseReadyUnlessActiveAICCModelRollout 仅在没有活跃 rollout marker 持有 app 时写 ready。
-	SetAppRuntimePhaseReadyUnlessActiveAICCModelRollout(ctx context.Context, appID string) error
+	// SetAppRuntimePhaseReadyUnlessActiveAICCRollout 仅在没有任一活跃跨类型 rollout ownership 时写 ready。
+	SetAppRuntimePhaseReadyUnlessActiveAICCRollout(ctx context.Context, appID string) error
 	// ListErrorApps 返回 status=error 的 app id，供兜底恢复「pod 已 Ready 但卡 error」。
 	ListErrorApps(ctx context.Context) ([]string, error)
 	// ListRestartingApps 返回 status=restarting 的 app id，供收敛「解绑触发重启」过渡态。
@@ -106,7 +106,7 @@ func (r *AppStatusReconciler) Tick(ctx context.Context) error {
 		if phase == domain.RuntimePhaseReady {
 			// rollout handler 会在目标 generation 就绪后无条件结束 restarting；reconciler 仅受
 			// 活跃任务 marker 约束，普通 Start/Restart 仍可随 Pod Ready 正常收敛。
-			_ = r.store.SetAppRuntimePhaseReadyUnlessActiveAICCModelRollout(ctx, appID)
+			_ = r.store.SetAppRuntimePhaseReadyUnlessActiveAICCRollout(ctx, appID)
 		} else {
 			_ = r.store.SetAppRuntimePhase(ctx, sqlc.SetAppRuntimePhaseParams{
 				RuntimePhase: phase,
