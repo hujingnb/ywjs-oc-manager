@@ -95,6 +95,11 @@ func (a *KubernetesAdapter) applyHPA(ctx context.Context, h *autoscalingv2.Horiz
 	existing, err := api.Get(ctx, h.Name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		_, cerr := api.Create(ctx, h, metav1.CreateOptions{})
+		// HPA 属于可选弹性能力；部分线上集群未提供 autoscaling/v2 API 时，
+		// 不能因为 HPA 创建失败阻断客服 Deployment 的升级与就绪收敛。
+		if apierrors.IsNotFound(cerr) {
+			return nil
+		}
 		return wrapK8s("创建 HPA", cerr)
 	}
 	if err != nil {
@@ -102,6 +107,9 @@ func (a *KubernetesAdapter) applyHPA(ctx context.Context, h *autoscalingv2.Horiz
 	}
 	h.ResourceVersion = existing.ResourceVersion
 	_, uerr := api.Update(ctx, h, metav1.UpdateOptions{})
+	if apierrors.IsNotFound(uerr) {
+		return nil
+	}
 	return wrapK8s("更新 HPA", uerr)
 }
 

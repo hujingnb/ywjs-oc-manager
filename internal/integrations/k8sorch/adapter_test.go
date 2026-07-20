@@ -10,8 +10,10 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
@@ -260,6 +262,22 @@ func TestEnsureAppAICCCreatesHPA(t *testing.T) {
 	require.Error(t, err)
 	_, err = cs.AutoscalingV2().HorizontalPodAutoscalers("oc-apps").Get(context.Background(), "app-a1", metav1.GetOptions{})
 	require.Error(t, err)
+}
+
+// TestEnsureAppAICCIgnoresUnavailableHPAAPI 验证集群未提供 autoscaling/v2 时，
+// 可选 HPA 不得阻断客服 Deployment 的升级任务。
+func TestEnsureAppAICCIgnoresUnavailableHPAAPI(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	cs.PrependReactor("create", "horizontalpodautoscalers", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: "autoscaling", Resource: "horizontalpodautoscalers"}, action.(k8stesting.CreateAction).GetObject().(*autoscalingv2.HorizontalPodAutoscaler).Name)
+	})
+	a := NewAICCKubernetesAdapter(cs, "oc-aicc")
+	app := testSpec()
+	app.AppType = domain.AppTypeAICC
+
+	require.NoError(t, a.EnsureApp(context.Background(), app))
+	_, err := cs.AppsV1().Deployments("oc-aicc").Get(context.Background(), "app-a1", metav1.GetOptions{})
+	require.NoError(t, err)
 }
 
 // TestEnsureAppAICCRequestsStableHPAGVR 通过 fake client 的 action 记录验证，
