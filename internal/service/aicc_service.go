@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/guregu/null/v5"
 
@@ -43,12 +44,16 @@ type AICCStore interface {
 	CountAICCAgentsByOrg(ctx context.Context, orgID string) (int64, error)
 	// CreateAuditLog 写入 AICC 管理动作审计。
 	CreateAuditLog(ctx context.Context, arg sqlc.CreateAuditLogParams) error
+	// CreateJob 在资料事务中创建运行中客服的容器重启任务。
+	CreateJob(ctx context.Context, arg sqlc.CreateJobParams) error
 	// CreateAICCAgent 写入智能体主记录；隐藏 app 由 AICCHiddenAppCreator 先创建。
 	CreateAICCAgent(ctx context.Context, arg sqlc.CreateAICCAgentParams) error
 	// GetAICCAgent 按 ID 读取未删除智能体。
 	GetAICCAgent(ctx context.Context, id string) (sqlc.AiccAgent, error)
-	// GetAppWithVersion 读取 AICC 绑定隐藏 app 的运行时状态；版本字段由 sqlc 行一并返回。
-	GetAppWithVersion(ctx context.Context, id string) (sqlc.GetAppWithVersionRow, error)
+	// GetAICCAgentForUpdate 在资料或知识写事务中锁定智能体主行，确保并发更新串行。
+	GetAICCAgentForUpdate(ctx context.Context, id string) (sqlc.AiccAgent, error)
+	// GetApp 读取 AICC 绑定隐藏 app 的运行时状态；AICC app 不依赖助手版本。
+	GetApp(ctx context.Context, id string) (sqlc.App, error)
 	// GetAICCAgentSettings 读取智能体运营配置；历史智能体可能没有配置行。
 	GetAICCAgentSettings(ctx context.Context, agentID string) (sqlc.AiccAgentSetting, error)
 	// UpsertAICCAgentSettings 保存智能体运营配置快照。
@@ -61,6 +66,8 @@ type AICCStore interface {
 	ListAICCAgentKnowledge(ctx context.Context, agentID string) ([]sqlc.AiccAgentKnowledge, error)
 	// ListOrganizationIndustryKnowledgeBases 列出平台为企业授权的行业知识库。
 	ListOrganizationIndustryKnowledgeBases(ctx context.Context, orgID string) ([]sqlc.IndustryKnowledgeBasis, error)
+	// ListOrganizationIndustryKnowledgeBasesForUpdate 在 AICC 写事务中锁定企业授权行，与平台撤权串行。
+	ListOrganizationIndustryKnowledgeBasesForUpdate(ctx context.Context, orgID string) ([]sqlc.IndustryKnowledgeBasis, error)
 	// DeleteAICCAgentKnowledgeByAgent 清空智能体知识范围，配合 AddAICCAgentKnowledge 整组替换。
 	DeleteAICCAgentKnowledgeByAgent(ctx context.Context, agentID string) error
 	// AddAICCAgentKnowledge 写入单条知识范围配置。
@@ -161,9 +168,10 @@ type AICCHiddenAppDeleter interface {
 
 // AICCService 负责 AICC 智能体管理与隐藏 app 绑定。
 type AICCService struct {
-	store AICCStore
-	apps  AICCHiddenAppCreator
-	tx    AICCTxRunner
+	store       AICCStore
+	apps        AICCHiddenAppCreator
+	tx          AICCTxRunner
+	jobNotifier JobNotifier
 }
 
 // NewAICCService 创建 AICC 管理服务。
@@ -173,6 +181,9 @@ func NewAICCService(store AICCStore, apps AICCHiddenAppCreator) *AICCService {
 
 // SetTxRunner 注入管理侧事务 runner；未注入时仍可用于轻量单测。
 func (s *AICCService) SetTxRunner(tx AICCTxRunner) { s.tx = tx }
+
+// SetJobNotifier 注入事务提交后的即时任务通知器；nil 时由 scheduler 周期扫描兜底。
+func (s *AICCService) SetJobNotifier(notifier JobNotifier) { s.jobNotifier = notifier }
 
 // CreateAgent 创建 AICC 智能体并自动创建隐藏 app。
 func (s *AICCService) CreateAgent(ctx context.Context, principal auth.Principal, input AICCAgentInput) (AICCAgentResult, error) {
@@ -208,10 +219,21 @@ func (s *AICCService) CreateAgent(ctx context.Context, principal auth.Principal,
 	if err != nil {
 		return AICCAgentResult{}, fmt.Errorf("查询企业 AICC 配置失败: %w", err)
 	}
-	if !config.Enabled {
+	if !config.Enabled || strings.TrimSpace(strOrEmpty(config.Model)) == "" {
 		return AICCAgentResult{}, ErrForbidden
 	}
+	knowledge, err := normalizeAICCKnowledgeInput(AICCKnowledgeInput{
+		UseOrgKnowledge:          true,
+		IndustryKnowledgeBaseIDs: normalized.IndustryKnowledgeBaseIDs,
+	})
+	if err != nil {
+		return AICCAgentResult{}, err
+	}
 	if err := s.ensureAgentLimit(ctx, org.ID, config.AgentLimit); err != nil {
+		return AICCAgentResult{}, err
+	}
+	// 在创建外部隐藏 app 前先做只读预校验，非法授权请求不得留下补偿删除后的 tombstone app/job。
+	if err := s.validateIndustryKnowledgeReadOnly(ctx, s.store, orgID, knowledge.IndustryKnowledgeBaseIDs); err != nil {
 		return AICCAgentResult{}, err
 	}
 	agentID := newUUID()
@@ -236,24 +258,41 @@ func (s *AICCService) CreateAgent(ctx context.Context, principal auth.Principal,
 	if createdAppID != "" {
 		appID = createdAppID
 	}
-	if err := s.store.CreateAICCAgent(ctx, sqlc.CreateAICCAgentParams{
-		ID:                 agentID,
-		OrgID:              orgID,
-		AppID:              appID,
-		Name:               normalized.Name,
-		Status:             domain.AICCAgentStatusDraft,
-		Scenario:           nullStr(normalized.Scenario),
-		Greeting:           nullStr(normalized.Greeting),
-		AnswerBoundary:     nullStr(normalized.AnswerBoundary),
-		PrivacyMode:        normalized.PrivacyMode,
-		PrivacyText:        nullStr(normalized.PrivacyText),
-		RetentionDays:      normalized.RetentionDays,
-		ThemeJson:          normalized.ThemeJSON,
-		AllowedDomainsJson: normalized.AllowedDomainsJSON,
-		PublicToken:        publicToken,
-		WidgetToken:        widgetToken,
-	}); err != nil {
-		createErr := fmt.Errorf("创建 AICC 智能体失败: %w", err)
+	create := func(store AICCStore) error {
+		if err := s.validateIndustryKnowledge(ctx, store, orgID, knowledge.IndustryKnowledgeBaseIDs); err != nil {
+			return err
+		}
+		if err := store.CreateAICCAgent(ctx, sqlc.CreateAICCAgentParams{
+			ID:                 agentID,
+			OrgID:              orgID,
+			AppID:              appID,
+			Name:               normalized.Name,
+			Persona:            nullStr(normalized.Persona),
+			Status:             domain.AICCAgentStatusDraft,
+			Scenario:           nullStr(normalized.Scenario),
+			Greeting:           nullStr(normalized.Greeting),
+			AnswerBoundary:     nullStr(normalized.AnswerBoundary),
+			PrivacyMode:        normalized.PrivacyMode,
+			PrivacyText:        nullStr(normalized.PrivacyText),
+			RetentionDays:      normalized.RetentionDays,
+			ThemeJson:          normalized.ThemeJSON,
+			AllowedDomainsJson: normalized.AllowedDomainsJSON,
+			PublicToken:        publicToken,
+			WidgetToken:        widgetToken,
+		}); err != nil {
+			return fmt.Errorf("创建 AICC 智能体失败: %w", err)
+		}
+		agent := sqlc.AiccAgent{ID: agentID, OrgID: orgID, AppID: appID}
+		if err := s.replaceAgentIndustryKnowledge(ctx, store, agent, knowledge); err != nil {
+			return err
+		}
+		return s.recordAICCAudit(ctx, store, principal, orgID, agentID, "create", map[string]any{
+			"name":   normalized.Name,
+			"app_id": appID,
+		})
+	}
+	if err := s.withAICCTx(ctx, create); err != nil {
+		createErr := err
 		if rollbackErr := s.rollbackHiddenApp(ctx, principal, appID); rollbackErr != nil {
 			return AICCAgentResult{}, errors.Join(createErr, rollbackErr)
 		}
@@ -261,12 +300,6 @@ func (s *AICCService) CreateAgent(ctx context.Context, principal auth.Principal,
 	}
 	row, err := s.getAgentRow(ctx, agentID)
 	if err != nil {
-		return AICCAgentResult{}, err
-	}
-	if err := s.recordAICCAudit(ctx, s.store, principal, row.OrgID, row.ID, "create", map[string]any{
-		"name":   row.Name,
-		"app_id": row.AppID,
-	}); err != nil {
 		return AICCAgentResult{}, err
 	}
 	return s.toAICCAgentResult(ctx, row)
@@ -410,31 +443,76 @@ func (s *AICCService) UpdateAgent(ctx context.Context, principal auth.Principal,
 	if err != nil {
 		return AICCAgentResult{}, err
 	}
-	if err := s.store.UpdateAICCAgentProfile(ctx, sqlc.UpdateAICCAgentProfileParams{
-		ID:                 agentID,
-		Name:               normalized.Name,
-		Scenario:           nullStr(normalized.Scenario),
-		Greeting:           nullStr(normalized.Greeting),
-		AnswerBoundary:     nullStr(normalized.AnswerBoundary),
-		PrivacyMode:        normalized.PrivacyMode,
-		PrivacyText:        nullStr(normalized.PrivacyText),
-		RetentionDays:      normalized.RetentionDays,
-		ThemeJson:          normalized.ThemeJSON,
-		AllowedDomainsJson: normalized.AllowedDomainsJSON,
-	}); errors.Is(err, sql.ErrNoRows) {
-		return AICCAgentResult{}, ErrNotFound
-	} else if err != nil {
-		return AICCAgentResult{}, fmt.Errorf("更新 AICC 智能体失败: %w", err)
-	}
-	row, err = s.getAgentRow(ctx, agentID)
+	knowledge, err := normalizeAICCKnowledgeInput(AICCKnowledgeInput{IndustryKnowledgeBaseIDs: normalized.IndustryKnowledgeBaseIDs})
 	if err != nil {
 		return AICCAgentResult{}, err
 	}
-	if err := s.recordAICCAudit(ctx, s.store, principal, row.OrgID, row.ID, "update", map[string]any{
-		"name":           row.Name,
-		"privacy_mode":   row.PrivacyMode,
-		"retention_days": row.RetentionDays,
-	}); err != nil {
+	var restartJobID string
+	update := func(store AICCStore) error {
+		// 锁后重新读取资料、知识和状态，以事务时点事实决定知识开关与是否重启。
+		lockedRow, err := store.GetAICCAgentForUpdate(ctx, agentID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("锁定 AICC 智能体失败: %w", err)
+		}
+		currentKnowledge, err := store.ListAICCAgentKnowledge(ctx, agentID)
+		if err != nil {
+			return fmt.Errorf("查询 AICC 知识范围失败: %w", err)
+		}
+		knowledge.UseOrgKnowledge = toAICCKnowledgeResult(lockedRow, currentKnowledge).UseOrgKnowledge
+		promptChanged := strOrEmpty(lockedRow.Persona) != normalized.Persona ||
+			strOrEmpty(lockedRow.Scenario) != normalized.Scenario ||
+			strOrEmpty(lockedRow.AnswerBoundary) != normalized.AnswerBoundary
+		if err := s.validateIndustryKnowledge(ctx, store, lockedRow.OrgID, knowledge.IndustryKnowledgeBaseIDs); err != nil {
+			return err
+		}
+		if err := store.UpdateAICCAgentProfile(ctx, sqlc.UpdateAICCAgentProfileParams{
+			ID:                 agentID,
+			Name:               normalized.Name,
+			Persona:            nullStr(normalized.Persona),
+			Scenario:           nullStr(normalized.Scenario),
+			Greeting:           nullStr(normalized.Greeting),
+			AnswerBoundary:     nullStr(normalized.AnswerBoundary),
+			PrivacyMode:        normalized.PrivacyMode,
+			PrivacyText:        nullStr(normalized.PrivacyText),
+			RetentionDays:      normalized.RetentionDays,
+			ThemeJson:          normalized.ThemeJSON,
+			AllowedDomainsJson: normalized.AllowedDomainsJSON,
+		}); errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return fmt.Errorf("更新 AICC 智能体失败: %w", err)
+		}
+		if err := s.replaceAgentIndustryKnowledge(ctx, store, lockedRow, knowledge); err != nil {
+			return err
+		}
+		if lockedRow.Status == domain.AICCAgentStatusActive && promptChanged {
+			payload, err := json.Marshal(map[string]any{"app_id": lockedRow.AppID})
+			if err != nil {
+				return fmt.Errorf("序列化 AICC 重启任务失败: %w", err)
+			}
+			restartJobID = newUUID()
+			if err := store.CreateJob(ctx, sqlc.CreateJobParams{
+				ID: restartJobID, Type: domain.JobTypeAppRestartContainer, Priority: 100,
+				RunAfter: time.Now().UTC(), MaxAttempts: 3, PayloadJson: payload,
+			}); err != nil {
+				return fmt.Errorf("创建 AICC 重启任务失败: %w", err)
+			}
+		}
+		return s.recordAICCAudit(ctx, store, principal, lockedRow.OrgID, lockedRow.ID, "update", map[string]any{
+			"name": normalized.Name, "privacy_mode": normalized.PrivacyMode, "retention_days": normalized.RetentionDays,
+		})
+	}
+	if err := s.withAICCTx(ctx, update); err != nil {
+		return AICCAgentResult{}, err
+	}
+	if restartJobID != "" && s.jobNotifier != nil {
+		_ = s.jobNotifier.Enqueue(ctx, restartJobID)
+	}
+	row, err = s.getAgentRow(ctx, agentID)
+	if err != nil {
 		return AICCAgentResult{}, err
 	}
 	return s.toAICCAgentResult(ctx, row)
@@ -545,48 +623,22 @@ func (s *AICCService) ReplaceAgentKnowledge(ctx context.Context, principal auth.
 	if err != nil {
 		return AICCKnowledgeResult{}, err
 	}
-	if len(normalized.IndustryKnowledgeBaseIDs) > 0 {
-		bases, err := s.store.ListOrganizationIndustryKnowledgeBases(ctx, agent.OrgID)
-		if err != nil {
-			return AICCKnowledgeResult{}, fmt.Errorf("查询企业已授权行业知识库失败: %w", err)
-		}
-		authorized := make(map[string]struct{}, len(bases))
-		for _, base := range bases {
-			authorized[base.ID] = struct{}{}
-		}
-		for _, id := range normalized.IndustryKnowledgeBaseIDs {
-			if _, ok := authorized[id]; !ok {
-				return AICCKnowledgeResult{}, fmt.Errorf("%w: 行业知识库未获企业授权", ErrInvalidArgument)
-			}
-		}
-	}
 	run := func(store AICCStore) error {
-		if err := store.DeleteAICCAgentKnowledgeByAgent(ctx, agentID); err != nil {
-			return fmt.Errorf("清空 AICC 知识范围失败: %w", err)
+		// 与资料更新共用主行锁，使两种整组写入不会相互覆盖。
+		lockedAgent, err := store.GetAICCAgentForUpdate(ctx, agentID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
 		}
-		if normalized.UseOrgKnowledge {
-			if err := store.AddAICCAgentKnowledge(ctx, sqlc.AddAICCAgentKnowledgeParams{
-				ID:         newUUID(),
-				AgentID:    agentID,
-				AgentOrgID: agent.OrgID,
-				ScopeType:  domain.AICCKnowledgeScopeTypeOrg,
-				OrgID:      nullStr(agent.OrgID),
-			}); err != nil {
-				return fmt.Errorf("保存 AICC 企业知识范围失败: %w", err)
-			}
+		if err != nil {
+			return fmt.Errorf("锁定 AICC 智能体失败: %w", err)
 		}
-		for _, id := range normalized.IndustryKnowledgeBaseIDs {
-			if err := store.AddAICCAgentKnowledge(ctx, sqlc.AddAICCAgentKnowledgeParams{
-				ID:                      newUUID(),
-				AgentID:                 agentID,
-				AgentOrgID:              agent.OrgID,
-				ScopeType:               domain.AICCKnowledgeScopeTypeIndustry,
-				IndustryKnowledgeBaseID: nullStr(id),
-			}); err != nil {
-				return fmt.Errorf("保存 AICC 行业知识范围失败: %w", err)
-			}
+		if err := s.validateIndustryKnowledge(ctx, store, lockedAgent.OrgID, normalized.IndustryKnowledgeBaseIDs); err != nil {
+			return err
 		}
-		if err := s.recordAICCAudit(ctx, store, principal, agent.OrgID, agentID, "update_knowledge", map[string]any{
+		if err := s.replaceAgentIndustryKnowledge(ctx, store, lockedAgent, normalized); err != nil {
+			return err
+		}
+		if err := s.recordAICCAudit(ctx, store, principal, lockedAgent.OrgID, agentID, "update_knowledge", map[string]any{
 			"use_org_knowledge":           normalized.UseOrgKnowledge,
 			"industry_knowledge_base_ids": normalized.IndustryKnowledgeBaseIDs,
 		}); err != nil {
@@ -594,11 +646,7 @@ func (s *AICCService) ReplaceAgentKnowledge(ctx context.Context, principal auth.
 		}
 		return nil
 	}
-	if s.tx != nil {
-		if err := s.tx.WithAICCTx(ctx, run); err != nil {
-			return AICCKnowledgeResult{}, err
-		}
-	} else if err := run(s.store); err != nil {
+	if err := s.withAICCTx(ctx, run); err != nil {
 		return AICCKnowledgeResult{}, err
 	}
 	return s.GetAgentKnowledge(ctx, principal, agentID)
@@ -1146,6 +1194,78 @@ func (s *AICCService) recordAICCAudit(ctx context.Context, store AICCStore, prin
 	return nil
 }
 
+// withAICCTx 统一 AICC 管理组合写事务入口；未注入 runner 时仅用于兼容轻量单元测试。
+func (s *AICCService) withAICCTx(ctx context.Context, fn func(AICCStore) error) error {
+	if s.tx != nil {
+		return s.tx.WithAICCTx(ctx, fn)
+	}
+	return fn(s.store)
+}
+
+// validateIndustryKnowledge 校验提交的行业库全部属于目标企业当前授权范围。
+// 校验必须发生在隐藏 app 或 profile 写入前，避免无效请求留下部分资源。
+func (s *AICCService) validateIndustryKnowledge(ctx context.Context, store AICCStore, orgID string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	bases, err := store.ListOrganizationIndustryKnowledgeBasesForUpdate(ctx, orgID)
+	if err != nil {
+		return fmt.Errorf("查询企业已授权行业知识库失败: %w", err)
+	}
+	return validateIndustryKnowledgeIDs(ids, bases)
+}
+
+// validateIndustryKnowledgeReadOnly 在外部资源创建前快速拒绝未授权行业库；事务内仍会锁定复验以防 TOCTOU。
+func (s *AICCService) validateIndustryKnowledgeReadOnly(ctx context.Context, store AICCStore, orgID string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	bases, err := store.ListOrganizationIndustryKnowledgeBases(ctx, orgID)
+	if err != nil {
+		return fmt.Errorf("查询企业已授权行业知识库失败: %w", err)
+	}
+	return validateIndustryKnowledgeIDs(ids, bases)
+}
+
+// validateIndustryKnowledgeIDs 确认请求中的每个行业库都存在于当前企业授权集合。
+func validateIndustryKnowledgeIDs(ids []string, bases []sqlc.IndustryKnowledgeBasis) error {
+	authorized := make(map[string]struct{}, len(bases))
+	for _, base := range bases {
+		authorized[base.ID] = struct{}{}
+	}
+	for _, id := range ids {
+		if _, ok := authorized[id]; !ok {
+			return fmt.Errorf("%w: 行业知识库未获企业授权", ErrInvalidArgument)
+		}
+	}
+	return nil
+}
+
+// replaceAgentIndustryKnowledge 在调用方事务中整组替换知识范围。
+// 企业知识库开关由调用方明确传入，创建默认开启，编辑和独立知识接口沿用既有勾选语义。
+func (s *AICCService) replaceAgentIndustryKnowledge(ctx context.Context, store AICCStore, agent sqlc.AiccAgent, input AICCKnowledgeInput) error {
+	if err := store.DeleteAICCAgentKnowledgeByAgent(ctx, agent.ID); err != nil {
+		return fmt.Errorf("清空 AICC 知识范围失败: %w", err)
+	}
+	if input.UseOrgKnowledge {
+		if err := store.AddAICCAgentKnowledge(ctx, sqlc.AddAICCAgentKnowledgeParams{
+			ID: newUUID(), AgentID: agent.ID, AgentOrgID: agent.OrgID,
+			ScopeType: domain.AICCKnowledgeScopeTypeOrg, OrgID: nullStr(agent.OrgID),
+		}); err != nil {
+			return fmt.Errorf("保存 AICC 企业知识范围失败: %w", err)
+		}
+	}
+	for _, id := range input.IndustryKnowledgeBaseIDs {
+		if err := store.AddAICCAgentKnowledge(ctx, sqlc.AddAICCAgentKnowledgeParams{
+			ID: newUUID(), AgentID: agent.ID, AgentOrgID: agent.OrgID,
+			ScopeType: domain.AICCKnowledgeScopeTypeIndustry, IndustryKnowledgeBaseID: nullStr(id),
+		}); err != nil {
+			return fmt.Errorf("保存 AICC 行业知识范围失败: %w", err)
+		}
+	}
+	return nil
+}
+
 func normalizeAICCKnowledgeInput(input AICCKnowledgeInput) (AICCKnowledgeInput, error) {
 	industryIDs, err := normalizeAICCKnowledgeIDs(input.IndustryKnowledgeBaseIDs, 20, "行业知识库")
 	if err != nil {
@@ -1220,6 +1340,10 @@ func normalizeAICCAgentInput(input AICCAgentInput) (AICCAgentInput, error) {
 	if input.Name == "" {
 		return AICCAgentInput{}, fmt.Errorf("%w: AICC 智能体名称不能为空", ErrInvalidArgument)
 	}
+	input.Persona = strings.TrimSpace(input.Persona)
+	if utf8.RuneCountInString(input.Persona) > 8000 {
+		return AICCAgentInput{}, fmt.Errorf("%w: AICC 智能体人设最多 8000 个字符", ErrInvalidArgument)
+	}
 	if input.RetentionDays == 0 {
 		input.RetentionDays = aiccDefaultRetentionDays
 	}
@@ -1279,33 +1403,40 @@ func newAICCToken() (string, error) {
 func toAICCAgentResult(row sqlc.AiccAgent) AICCAgentResult {
 	allowedDomains, _ := parseAICCAllowedDomains(row.AllowedDomainsJson)
 	return AICCAgentResult{
-		ID:             row.ID,
-		OrgID:          row.OrgID,
-		AppID:          row.AppID,
-		Name:           row.Name,
-		Status:         row.Status,
-		Scenario:       strOrEmpty(row.Scenario),
-		Greeting:       strOrEmpty(row.Greeting),
-		AnswerBoundary: strOrEmpty(row.AnswerBoundary),
-		PrivacyMode:    row.PrivacyMode,
-		PrivacyText:    strOrEmpty(row.PrivacyText),
-		RetentionDays:  row.RetentionDays,
-		PublicToken:    row.PublicToken,
-		WidgetToken:    row.WidgetToken,
-		AllowedDomains: allowedDomains,
-		CreatedAt:      row.CreatedAt,
-		UpdatedAt:      row.UpdatedAt,
+		ID:                       row.ID,
+		OrgID:                    row.OrgID,
+		AppID:                    row.AppID,
+		Name:                     row.Name,
+		Persona:                  strOrEmpty(row.Persona),
+		IndustryKnowledgeBaseIDs: []string{},
+		Status:                   row.Status,
+		Scenario:                 strOrEmpty(row.Scenario),
+		Greeting:                 strOrEmpty(row.Greeting),
+		AnswerBoundary:           strOrEmpty(row.AnswerBoundary),
+		PrivacyMode:              row.PrivacyMode,
+		PrivacyText:              strOrEmpty(row.PrivacyText),
+		RetentionDays:            row.RetentionDays,
+		PublicToken:              row.PublicToken,
+		WidgetToken:              row.WidgetToken,
+		AllowedDomains:           allowedDomains,
+		CreatedAt:                row.CreatedAt,
+		UpdatedAt:                row.UpdatedAt,
 	}
 }
 
 // toAICCAgentResult 补充隐藏 app 的只读运行时展示状态，避免前端拼接两个生命周期维度。
 func (s *AICCService) toAICCAgentResult(ctx context.Context, row sqlc.AiccAgent) (AICCAgentResult, error) {
 	result := toAICCAgentResult(row)
+	knowledge, err := s.store.ListAICCAgentKnowledge(ctx, row.ID)
+	if err != nil {
+		return AICCAgentResult{}, fmt.Errorf("查询 AICC 知识范围失败: %w", err)
+	}
+	result.IndustryKnowledgeBaseIDs = toAICCKnowledgeResult(row, knowledge).IndustryKnowledgeBaseIDs
 	if row.Status == domain.AICCAgentStatusDeleted {
 		result.RuntimeStatus = domain.AICCRuntimeStatusDeleted
 		return result, nil
 	}
-	appRow, err := s.store.GetAppWithVersion(ctx, row.AppID)
+	app, err := s.store.GetApp(ctx, row.AppID)
 	if errors.Is(err, sql.ErrNoRows) {
 		result.RuntimeStatus = domain.AICCRuntimeStatusStarting
 		return result, nil
@@ -1313,12 +1444,12 @@ func (s *AICCService) toAICCAgentResult(ctx context.Context, row sqlc.AiccAgent)
 	if err != nil {
 		return AICCAgentResult{}, fmt.Errorf("查询 AICC 隐藏运行时失败: %w", err)
 	}
-	if appRow.App.Status == domain.AppStatusError {
+	if app.Status == domain.AppStatusError {
 		result.RuntimeStatus = domain.AICCRuntimeStatusError
-		result.RuntimeMessage = strOrEmpty(appRow.App.LastErrorMessage)
+		result.RuntimeMessage = strOrEmpty(app.LastErrorMessage)
 		return result, nil
 	}
-	if appRow.App.RuntimePhase != domain.RuntimePhaseReady {
+	if app.RuntimePhase != domain.RuntimePhaseReady {
 		result.RuntimeStatus = domain.AICCRuntimeStatusStarting
 		return result, nil
 	}

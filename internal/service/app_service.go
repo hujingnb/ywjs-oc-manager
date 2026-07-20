@@ -26,6 +26,8 @@ type AppStore interface {
 	MarkAppAICCType(ctx context.Context, id string) error
 	// GetUser 读取创建者语言偏好，用于隐藏 app 初始化时快照 locale。
 	GetUser(ctx context.Context, id string) (sqlc.User, error)
+	// GetApp 读取不依赖助手版本的基础应用行，供 version_id 可为空的 AICC 隐藏应用使用。
+	GetApp(ctx context.Context, id string) (sqlc.App, error)
 	// GetAppWithVersion 联查实例与绑定版本的 revision / image_id，用于计算 version_synced。
 	GetAppWithVersion(ctx context.Context, id string) (sqlc.GetAppWithVersionRow, error)
 	// ListAppsByOrgWithVersion 批量联查组织实例及绑定版本信息，用于 version_synced 批量计算。
@@ -149,21 +151,39 @@ type AppResult struct {
 
 // Get 查询应用。
 func (s *AppService) Get(ctx context.Context, principal auth.Principal, appID string) (AppResult, error) {
-	// appID 直接作为字符串传入；格式非法（不存在）时 store 返回 sql.ErrNoRows。
-	row, err := s.store.GetAppWithVersion(ctx, appID)
+	// 先读取基础 app 判断类型；AICC 的 version_id 固定为空，不能通过版本 INNER JOIN 定位。
+	app, err := s.store.GetApp(ctx, appID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AppResult{}, ErrNotFound
 	}
 	if err != nil {
 		return AppResult{}, fmt.Errorf("查询应用失败: %w", err)
 	}
-	if domain.IsAICCAppType(domain.AppType(row.App.AppType)) {
-		if err := s.ensureAICCHiddenAppViewAccess(ctx, principal, row.App); err != nil {
+	if domain.IsAICCAppType(domain.AppType(app.AppType)) {
+		if err := s.ensureAICCHiddenAppViewAccess(ctx, principal, app); err != nil {
 			return AppResult{}, err
 		}
 	}
-	if !auth.CanViewApp(principal, row.App.OrgID, row.App.OwnerUserID) {
+	if !auth.CanViewApp(principal, app.OrgID, app.OwnerUserID) {
 		return AppResult{}, ErrForbidden
+	}
+	if domain.IsAICCAppType(domain.AppType(app.AppType)) {
+		result := toAppResult(app)
+		result.WebPublishPendingRestart = s.computeWebPublishPendingRestart(ctx, app)
+		result.PlatformPromptPendingRestart = computePlatformPromptPendingRestart(app)
+		if principal.Role == domain.UserRolePlatformAdmin {
+			result.RuntimeImageRef = app.RuntimeImageRef
+			result.RuntimeImageSha256 = app.RuntimeImageSha256
+		}
+		return result, nil
+	}
+	// standard app 保持版本联查语义，用于计算 version_synced。
+	row, err := s.store.GetAppWithVersion(ctx, appID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return AppResult{}, ErrNotFound
+	}
+	if err != nil {
+		return AppResult{}, fmt.Errorf("查询应用版本失败: %w", err)
 	}
 	result := toAppResult(row.App)
 	// version_synced：修订 + 镜像双维度对比，判断实例是否需要重启。
@@ -236,8 +256,8 @@ func (s *AppService) ListByOrg(ctx context.Context, principal auth.Principal, or
 //
 // 取舍说明：成员 onboarding 会同时创建成员、渠道绑定和审计，AICC 只需要一个 hermes runtime，
 // 因此这里保留最小共享边界：创建 apps 行、创建 app_initialize job、将 app_type 标记为 aicc。
-// 隐藏 app 绑定的助手版本仅提供模型、技能和行为初始化配置；客服镜像由 worker 从
-// aicc.runtime_image 单独选择。new-api token、runtime token、k8s Deployment、知识注入等细节继续由 app_initialize worker 统一处理。
+// 隐藏 app 不绑定助手版本；客服模型、人设和知识范围均由 AICC 独立配置提供。客服镜像由
+// worker 从 aicc.runtime_image 单独选择，运行时资源初始化继续复用 app_initialize worker。
 func (s *AppService) CreateHiddenAICCApp(ctx context.Context, principal auth.Principal, input AICCHiddenAppInput) (string, error) {
 	if input.AppID == "" || input.OrgID == "" || input.UserID == "" || strings.TrimSpace(input.Name) == "" {
 		return "", fmt.Errorf("%w: AICC 隐藏 app 缺少必要参数", ErrInvalidArgument)
@@ -252,10 +272,6 @@ func (s *AppService) CreateHiddenAICCApp(ctx context.Context, principal auth.Pri
 	if err != nil {
 		return "", fmt.Errorf("查询企业失败: %w", err)
 	}
-	versionID, err := firstAssistantVersionID(org)
-	if err != nil {
-		return "", err
-	}
 	appLocale := null.String{}
 	if user, err := s.store.GetUser(ctx, input.UserID); err == nil && user.Locale.Valid && user.Locale.String != "" {
 		appLocale = null.StringFrom(user.Locale.String)
@@ -268,7 +284,7 @@ func (s *AppService) CreateHiddenAICCApp(ctx context.Context, principal auth.Pri
 		Description:         null.String{},
 		Status:              domain.AppStatusDraft,
 		ApiKeyStatus:        domain.APIKeyStatusPending,
-		VersionID:           null.StringFrom(versionID),
+		VersionID:           null.String{},
 		Locale:              appLocale,
 		KnowledgeQuotaBytes: org.DefaultAppKnowledgeQuotaBytes,
 		AppType:             string(domain.AppTypeAICC),
@@ -309,17 +325,17 @@ func (s *AppService) SoftDeleteHiddenAICCApp(ctx context.Context, principal auth
 	if strings.TrimSpace(appID) == "" {
 		return fmt.Errorf("%w: AICC 隐藏 app ID 不能为空", ErrInvalidArgument)
 	}
-	app, err := s.store.GetAppWithVersion(ctx, appID)
+	app, err := s.store.GetApp(ctx, appID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("查询 AICC 隐藏 app 失败: %w", err)
 	}
-	if !domain.IsAICCAppType(domain.AppType(app.App.AppType)) {
+	if !domain.IsAICCAppType(domain.AppType(app.AppType)) {
 		return fmt.Errorf("%w: 只能清理 AICC 隐藏 app", ErrInvalidArgument)
 	}
-	if !auth.CanManageAICCAgent(principal, app.App.OrgID) {
+	if !auth.CanManageAICCAgent(principal, app.OrgID) {
 		return ErrForbidden
 	}
 	if err := s.store.SoftDeleteApp(ctx, appID); err != nil {
@@ -337,17 +353,17 @@ func (s *AppService) DeleteHiddenAICCApp(ctx context.Context, principal auth.Pri
 	if strings.TrimSpace(appID) == "" {
 		return fmt.Errorf("%w: AICC 隐藏 app ID 不能为空", ErrInvalidArgument)
 	}
-	app, err := s.store.GetAppWithVersion(ctx, appID)
+	app, err := s.store.GetApp(ctx, appID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("查询 AICC 隐藏 app 失败: %w", err)
 	}
-	if !domain.IsAICCAppType(domain.AppType(app.App.AppType)) {
+	if !domain.IsAICCAppType(domain.AppType(app.AppType)) {
 		return fmt.Errorf("%w: 只能清理 AICC 隐藏 app", ErrInvalidArgument)
 	}
-	if !auth.CanManageAICCAgent(principal, app.App.OrgID) {
+	if !auth.CanManageAICCAgent(principal, app.OrgID) {
 		return ErrForbidden
 	}
 	if err := s.store.SoftDeleteApp(ctx, appID); err != nil {

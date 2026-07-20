@@ -10,6 +10,13 @@ SELECT *
 FROM aicc_agents
 WHERE id = ? AND deleted_at IS NULL;
 
+-- name: GetAICCAgentForUpdate :one
+-- 资料、知识和状态更新统一锁定智能体主行，避免事务外快照覆盖并发写入。
+SELECT *
+FROM aicc_agents
+WHERE id = ? AND deleted_at IS NULL
+FOR UPDATE;
+
 -- name: GetAICCAgentByPublicToken :one
 SELECT *
 FROM aicc_agents

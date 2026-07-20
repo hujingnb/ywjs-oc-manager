@@ -25,10 +25,12 @@ type fakeAICCStore struct {
 	config                    sqlc.OrganizationAiccConfig
 	count                     int64
 	agents                    map[string]sqlc.AiccAgent
-	runtimeApps               map[string]sqlc.GetAppWithVersionRow
+	runtimeApps               map[string]sqlc.App
 	settings                  map[string]sqlc.AiccAgentSetting
 	knowledge                 map[string][]sqlc.AiccAgentKnowledge
 	organizationIndustryBases map[string][]sqlc.IndustryKnowledgeBasis
+	lockedIndustryListCalls   int
+	lockedAgentCalls          int
 	sessions                  map[string]sqlc.AiccSession
 	messages                  map[string][]sqlc.AiccMessage
 	leads                     map[string]sqlc.AiccLead
@@ -59,6 +61,7 @@ type fakeAICCStore struct {
 	completedLeadArg          sqlc.CountAICCCompletedLeadSessionsInRangeParams
 	topQuestionsArg           sqlc.ListAICCTopVisitorQuestionsInRangeParams
 	topSourcesArg             sqlc.ListAICCTopSourceURLsInRangeParams
+	jobs                      []sqlc.CreateJobParams
 	countBlockedArg           string
 	readLeadArg               sqlc.MarkAICCLeadReadParams
 	createField               sqlc.UpsertAICCLeadFieldParams
@@ -74,6 +77,7 @@ type fakeAICCStore struct {
 	deleteErr                 error
 	sessionsErr               error
 	leadsErr                  error
+	addKnowledgeErr           error
 	organization              error
 }
 
@@ -83,7 +87,7 @@ func (f *fakeAICCStore) GetOrganizationAICCConfig(_ context.Context, orgID strin
 		return sqlc.OrganizationAiccConfig{}, sql.ErrNoRows
 	}
 	if f.config.OrgID == "" {
-		return sqlc.OrganizationAiccConfig{OrgID: orgID, Enabled: true, Revision: 1}, nil
+		return sqlc.OrganizationAiccConfig{OrgID: orgID, Enabled: true, Model: null.StringFrom("gpt-5-mini"), Revision: 1}, nil
 	}
 	return f.config, nil
 }
@@ -122,6 +126,7 @@ func (f *fakeAICCStore) CreateAICCAgent(_ context.Context, arg sqlc.CreateAICCAg
 		OrgID:              arg.OrgID,
 		AppID:              arg.AppID,
 		Name:               arg.Name,
+		Persona:            arg.Persona,
 		Status:             arg.Status,
 		Scenario:           arg.Scenario,
 		Greeting:           arg.Greeting,
@@ -152,11 +157,17 @@ func (f *fakeAICCStore) GetAICCAgent(_ context.Context, id string) (sqlc.AiccAge
 	return row, nil
 }
 
-// GetAppWithVersion 返回 AICC 绑定隐藏 app 的运行时状态，供管理端计算展示状态。
-func (f *fakeAICCStore) GetAppWithVersion(_ context.Context, id string) (sqlc.GetAppWithVersionRow, error) {
+// GetAICCAgentForUpdate 返回事务时点的智能体快照，并记录行锁读取次数。
+func (f *fakeAICCStore) GetAICCAgentForUpdate(_ context.Context, id string) (sqlc.AiccAgent, error) {
+	f.lockedAgentCalls++
+	return f.GetAICCAgent(context.Background(), id)
+}
+
+// GetApp 返回 AICC 绑定隐藏 app 的运行时状态，不依赖助手版本关联。
+func (f *fakeAICCStore) GetApp(_ context.Context, id string) (sqlc.App, error) {
 	row, ok := f.runtimeApps[id]
 	if !ok {
-		return sqlc.GetAppWithVersionRow{}, sql.ErrNoRows
+		return sqlc.App{}, sql.ErrNoRows
 	}
 	return row, nil
 }
@@ -229,6 +240,12 @@ func (f *fakeAICCStore) ListOrganizationIndustryKnowledgeBases(_ context.Context
 	return append([]sqlc.IndustryKnowledgeBasis(nil), f.organizationIndustryBases[orgID]...), nil
 }
 
+// ListOrganizationIndustryKnowledgeBasesForUpdate 记录锁定读取，并返回事务时点的企业行业库授权。
+func (f *fakeAICCStore) ListOrganizationIndustryKnowledgeBasesForUpdate(_ context.Context, orgID string) ([]sqlc.IndustryKnowledgeBasis, error) {
+	f.lockedIndustryListCalls++
+	return append([]sqlc.IndustryKnowledgeBasis(nil), f.organizationIndustryBases[orgID]...), nil
+}
+
 // DeleteAICCAgentKnowledgeByAgent 清空智能体知识范围，模拟整组替换的第一步。
 func (f *fakeAICCStore) DeleteAICCAgentKnowledgeByAgent(_ context.Context, agentID string) error {
 	delete(f.knowledge, agentID)
@@ -237,6 +254,9 @@ func (f *fakeAICCStore) DeleteAICCAgentKnowledgeByAgent(_ context.Context, agent
 
 // AddAICCAgentKnowledge 记录并写入单条知识范围。
 func (f *fakeAICCStore) AddAICCAgentKnowledge(_ context.Context, arg sqlc.AddAICCAgentKnowledgeParams) error {
+	if f.addKnowledgeErr != nil {
+		return f.addKnowledgeErr
+	}
 	f.addKnowledge = append(f.addKnowledge, arg)
 	if f.knowledge == nil {
 		f.knowledge = map[string][]sqlc.AiccAgentKnowledge{}
@@ -266,6 +286,7 @@ func (f *fakeAICCStore) UpdateAICCAgentProfile(_ context.Context, arg sqlc.Updat
 		return sql.ErrNoRows
 	}
 	row.Name = arg.Name
+	row.Persona = arg.Persona
 	row.Scenario = arg.Scenario
 	row.Greeting = arg.Greeting
 	row.AnswerBoundary = arg.AnswerBoundary
@@ -275,6 +296,12 @@ func (f *fakeAICCStore) UpdateAICCAgentProfile(_ context.Context, arg sqlc.Updat
 	row.ThemeJson = arg.ThemeJson
 	row.AllowedDomainsJson = arg.AllowedDomainsJson
 	f.agents[arg.ID] = row
+	return nil
+}
+
+// CreateJob 记录事务内创建的运行时任务，供资料变更重启行为断言。
+func (f *fakeAICCStore) CreateJob(_ context.Context, arg sqlc.CreateJobParams) error {
+	f.jobs = append(f.jobs, arg)
 	return nil
 }
 
@@ -854,8 +881,8 @@ func TestAICCServiceRuntimeDisplayStatus(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			store := seededAICCStore()
 			store.agents["agent-1"] = sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-hidden-1", Name: "官网售前", Status: tc.agentStatus, PrivacyMode: domain.AICCPrivacyModeNotice, RetentionDays: 180}
-			store.runtimeApps = map[string]sqlc.GetAppWithVersionRow{
-				"app-hidden-1": {App: sqlc.App{ID: "app-hidden-1", Status: tc.appStatus, RuntimePhase: tc.phase}},
+			store.runtimeApps = map[string]sqlc.App{
+				"app-hidden-1": {ID: "app-hidden-1", Status: tc.appStatus, RuntimePhase: tc.phase},
 			}
 
 			result, err := NewAICCService(store, &fakeAICCHiddenAppCreator{}).GetAgent(context.Background(), aiccOrgAdmin(), "agent-1")
@@ -877,15 +904,15 @@ func TestAICCServiceCreateAgentValidation(t *testing.T) {
 		input     AICCAgentInput
 		wantErr   error
 	}{
-		{name: "空名称返回参数错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1"}, input: AICCAgentInput{Name: "   "}, wantErr: ErrInvalidArgument},                                                                                                                         // 场景：名称 trim 后为空。
-		{name: "保留期小于下限返回参数错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1"}, input: AICCAgentInput{Name: "售前", RetentionDays: -1}, wantErr: ErrInvalidArgument},                                                                                                   // 场景：保留期不能小于 1 天。
-		{name: "保留期超过上限返回参数错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1"}, input: AICCAgentInput{Name: "售前", RetentionDays: 3651}, wantErr: ErrInvalidArgument},                                                                                                 // 场景：保留期不能超过迁移约束上限。
-		{name: "挂件域名不合法返回参数错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1"}, input: AICCAgentInput{Name: "售前", AllowedDomains: []string{"https://"}}, wantErr: ErrInvalidArgument},                                                                                // 场景：域名白名单必须能解析出主机名。
-		{name: "未开通企业返回无权限", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1"}, config: sqlc.OrganizationAiccConfig{OrgID: "org-1", Enabled: false, Revision: 1}, input: AICCAgentInput{Name: "售前"}, wantErr: ErrForbidden},                                             // 场景：平台未给企业开通 AICC。
-		{name: "达到企业上限返回配额错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1"}, config: sqlc.OrganizationAiccConfig{OrgID: "org-1", Enabled: true, AgentLimit: null.IntFrom(1), Revision: 1}, count: 1, input: AICCAgentInput{Name: "售前"}, wantErr: ErrQuotaExceeded}, // 场景：当前数量已达到 aicc_agent_limit。
-		{name: "跨组织管理员返回无权限", principal: auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: "org-2", UserID: "admin-2"}, org: sqlc.Organization{ID: "org-1"}, input: AICCAgentInput{Name: "售前"}, wantErr: ErrForbidden},                                                            // 场景：企业管理员只能管理本企业。
-		{name: "普通成员返回无权限", principal: auth.Principal{Role: domain.UserRoleOrgMember, OrgID: "org-1", UserID: "member-1"}, org: sqlc.Organization{ID: "org-1"}, input: AICCAgentInput{Name: "售前"}, wantErr: ErrForbidden},                                                            // 场景：普通成员无 AICC 管理入口。
-		{name: "平台管理员未指定企业返回无权限", principal: auth.Principal{Role: domain.UserRolePlatformAdmin, UserID: "platform-1"}, org: sqlc.Organization{ID: "org-1"}, input: AICCAgentInput{Name: "售前"}, wantErr: ErrForbidden},                                                                // 场景：平台管理员必须明确目标企业。
+		{name: "空名称返回参数错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1"}, input: AICCAgentInput{Name: "   "}, wantErr: ErrInvalidArgument},                                                                                                                                                               // 场景：名称 trim 后为空。
+		{name: "保留期小于下限返回参数错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1"}, input: AICCAgentInput{Name: "售前", RetentionDays: -1}, wantErr: ErrInvalidArgument},                                                                                                                                         // 场景：保留期不能小于 1 天。
+		{name: "保留期超过上限返回参数错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1"}, input: AICCAgentInput{Name: "售前", RetentionDays: 3651}, wantErr: ErrInvalidArgument},                                                                                                                                       // 场景：保留期不能超过迁移约束上限。
+		{name: "挂件域名不合法返回参数错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1"}, input: AICCAgentInput{Name: "售前", AllowedDomains: []string{"https://"}}, wantErr: ErrInvalidArgument},                                                                                                                      // 场景：域名白名单必须能解析出主机名。
+		{name: "未开通企业返回无权限", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1"}, config: sqlc.OrganizationAiccConfig{OrgID: "org-1", Enabled: false, Revision: 1}, input: AICCAgentInput{Name: "售前"}, wantErr: ErrForbidden},                                                                                   // 场景：平台未给企业开通 AICC。
+		{name: "达到企业上限返回配额错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1"}, config: sqlc.OrganizationAiccConfig{OrgID: "org-1", Enabled: true, Model: null.StringFrom("gpt-5-mini"), AgentLimit: null.IntFrom(1), Revision: 1}, count: 1, input: AICCAgentInput{Name: "售前"}, wantErr: ErrQuotaExceeded}, // 场景：当前数量已达到 aicc_agent_limit。
+		{name: "跨组织管理员返回无权限", principal: auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: "org-2", UserID: "admin-2"}, org: sqlc.Organization{ID: "org-1"}, input: AICCAgentInput{Name: "售前"}, wantErr: ErrForbidden},                                                                                                  // 场景：企业管理员只能管理本企业。
+		{name: "普通成员返回无权限", principal: auth.Principal{Role: domain.UserRoleOrgMember, OrgID: "org-1", UserID: "member-1"}, org: sqlc.Organization{ID: "org-1"}, input: AICCAgentInput{Name: "售前"}, wantErr: ErrForbidden},                                                                                                  // 场景：普通成员无 AICC 管理入口。
+		{name: "平台管理员未指定企业返回无权限", principal: auth.Principal{Role: domain.UserRolePlatformAdmin, UserID: "platform-1"}, org: sqlc.Organization{ID: "org-1"}, input: AICCAgentInput{Name: "售前"}, wantErr: ErrForbidden},                                                                                                      // 场景：平台管理员必须明确目标企业。
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1191,6 +1218,7 @@ func TestAICCServiceReplaceAgentKnowledge(t *testing.T) {
 	})
 
 	require.NoError(t, err)
+	assert.Equal(t, 1, store.lockedIndustryListCalls)
 	assert.True(t, result.UseOrgKnowledge)
 	assert.Equal(t, []string{"industry-2"}, result.IndustryKnowledgeBaseIDs)
 	assert.Empty(t, result.AppDocumentIDs)

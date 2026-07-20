@@ -130,6 +130,10 @@ type CreateAICCAgentRequest struct {
 	OrgID string `json:"org_id"`
 	// Name 是智能体展示名。
 	Name string `json:"name" binding:"required"`
+	// Persona 是客服独立人设，最多 8000 个 Unicode 字符。
+	Persona string `json:"persona"`
+	// IndustryKnowledgeBaseIDs 是企业已授权且本客服启用的行业知识库 ID。
+	IndustryKnowledgeBaseIDs []string `json:"industry_knowledge_base_ids"`
 	// Scenario 是智能体适用业务场景说明。
 	Scenario string `json:"scenario"`
 	// Greeting 是访客进入会话时看到的欢迎语。
@@ -150,6 +154,10 @@ type CreateAICCAgentRequest struct {
 type UpdateAICCAgentRequest struct {
 	// Name 是智能体展示名。
 	Name string `json:"name" binding:"required"`
+	// Persona 是客服独立人设，最多 8000 个 Unicode 字符。
+	Persona string `json:"persona"`
+	// IndustryKnowledgeBaseIDs 是企业已授权且本客服启用的行业知识库 ID。
+	IndustryKnowledgeBaseIDs []string `json:"industry_knowledge_base_ids"`
 	// Scenario 是智能体适用业务场景说明。
 	Scenario string `json:"scenario"`
 	// Greeting 是访客进入会话时看到的欢迎语。

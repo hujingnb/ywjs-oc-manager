@@ -18,6 +18,10 @@ type AICCAgentInput struct {
 	OrgID string
 	// Name 是智能体展示名，创建和更新时 trim 后不能为空。
 	Name string
+	// Persona 是客服独立人设，不复用助手版本中的 persona 配置。
+	Persona string
+	// IndustryKnowledgeBaseIDs 是本次提交的企业已授权行业知识库 ID。
+	IndustryKnowledgeBaseIDs []string
 	// Scenario 描述智能体适用业务场景，用于后续生成提示词和前端展示。
 	Scenario string
 	// Greeting 是访客进入会话时看到的欢迎语。
@@ -48,6 +52,10 @@ type AICCAgentResult struct {
 	AppID string `json:"app_id"`
 	// Name 是智能体展示名。
 	Name string `json:"name"`
+	// Persona 是客服独立人设。
+	Persona string `json:"persona,omitempty"`
+	// IndustryKnowledgeBaseIDs 是客服当前启用的行业知识库 ID。
+	IndustryKnowledgeBaseIDs []string `json:"industry_knowledge_base_ids"`
 	// Status 是智能体生命周期状态：draft / active / paused / deleted。
 	Status string `json:"status"`
 	// RuntimeStatus 是隐藏运行时就绪事实与接待意图共同计算的管理端展示状态。

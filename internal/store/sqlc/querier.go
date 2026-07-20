@@ -141,6 +141,8 @@ type Querier interface {
 	GetAICCAgentByAppID(ctx context.Context, appID string) (AiccAgent, error)
 	GetAICCAgentByPublicToken(ctx context.Context, publicToken string) (AiccAgent, error)
 	GetAICCAgentByWidgetToken(ctx context.Context, widgetToken string) (AiccAgent, error)
+	// 资料、知识和状态更新统一锁定智能体主行，避免事务外快照覆盖并发写入。
+	GetAICCAgentForUpdate(ctx context.Context, id string) (AiccAgent, error)
 	GetAICCAgentSettings(ctx context.Context, agentID string) (AiccAgentSetting, error)
 	// dispatcher 写入 reply_to_message_id，使无 client_message_id 的公开消息也能准确定位助手回复。
 	GetAICCAssistantMessageByVisitorMessageID(ctx context.Context, replyToMessageID null.String) (AiccMessage, error)
@@ -291,6 +293,8 @@ type Querier interface {
 	ListOrganizationAICCConfigs(ctx context.Context) ([]OrganizationAiccConfig, error)
 	// 列出企业已获授权且未删除的行业知识库，供 AICC 配置候选项和平台配置回显使用。
 	ListOrganizationIndustryKnowledgeBases(ctx context.Context, orgID string) ([]IndustryKnowledgeBasis, error)
+	// AICC 写事务锁定企业当前授权行，使平台按 org_id 整组删除授权时必须串行，避免提交已撤销的 agent 关联。
+	ListOrganizationIndustryKnowledgeBasesForUpdate(ctx context.Context, orgID string) ([]IndustryKnowledgeBasis, error)
 	ListOrganizations(ctx context.Context, arg ListOrganizationsParams) ([]Organization, error)
 	// 仅选择仍有效且活跃的智能体；app 软删除后不得继续下发企业模型配置。
 	ListPendingAICCModelRolloutAgents(ctx context.Context, arg ListPendingAICCModelRolloutAgentsParams) ([]AiccAgent, error)

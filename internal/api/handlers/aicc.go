@@ -176,14 +176,16 @@ func (h *AICCHandler) UpdateAgent(c *gin.Context) {
 		return
 	}
 	result, err := h.service.UpdateAgent(c.Request.Context(), principalFromCtx(c), c.Param("agentId"), service.AICCAgentInput{
-		Name:           req.Name,
-		Scenario:       req.Scenario,
-		Greeting:       req.Greeting,
-		AnswerBoundary: req.AnswerBoundary,
-		PrivacyMode:    req.PrivacyMode,
-		PrivacyText:    req.PrivacyText,
-		RetentionDays:  req.RetentionDays,
-		AllowedDomains: req.AllowedDomains,
+		Name:                     req.Name,
+		Persona:                  req.Persona,
+		IndustryKnowledgeBaseIDs: req.IndustryKnowledgeBaseIDs,
+		Scenario:                 req.Scenario,
+		Greeting:                 req.Greeting,
+		AnswerBoundary:           req.AnswerBoundary,
+		PrivacyMode:              req.PrivacyMode,
+		PrivacyText:              req.PrivacyText,
+		RetentionDays:            req.RetentionDays,
+		AllowedDomains:           req.AllowedDomains,
 	})
 	if err != nil {
 		writeServiceError(c, err)
@@ -768,14 +770,16 @@ func queryTime(c *gin.Context, key string) (time.Time, bool) {
 
 func toAICCAgentInput(req CreateAICCAgentRequest) service.AICCAgentInput {
 	return service.AICCAgentInput{
-		OrgID:          req.OrgID,
-		Name:           req.Name,
-		Scenario:       req.Scenario,
-		Greeting:       req.Greeting,
-		AnswerBoundary: req.AnswerBoundary,
-		PrivacyMode:    req.PrivacyMode,
-		PrivacyText:    req.PrivacyText,
-		RetentionDays:  req.RetentionDays,
-		AllowedDomains: req.AllowedDomains,
+		OrgID:                    req.OrgID,
+		Name:                     req.Name,
+		Persona:                  req.Persona,
+		IndustryKnowledgeBaseIDs: req.IndustryKnowledgeBaseIDs,
+		Scenario:                 req.Scenario,
+		Greeting:                 req.Greeting,
+		AnswerBoundary:           req.AnswerBoundary,
+		PrivacyMode:              req.PrivacyMode,
+		PrivacyText:              req.PrivacyText,
+		RetentionDays:            req.RetentionDays,
+		AllowedDomains:           req.AllowedDomains,
 	}
 }

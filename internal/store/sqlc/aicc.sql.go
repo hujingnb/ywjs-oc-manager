@@ -935,6 +935,42 @@ func (q *Queries) GetAICCAgentByWidgetToken(ctx context.Context, widgetToken str
 	return i, err
 }
 
+const getAICCAgentForUpdate = `-- name: GetAICCAgentForUpdate :one
+SELECT id, org_id, app_id, name, status, scenario, greeting, answer_boundary, privacy_mode, privacy_text, retention_days, theme_json, allowed_domains_json, public_token, widget_token, created_at, updated_at, deleted_at, persona, applied_config_revision
+FROM aicc_agents
+WHERE id = ? AND deleted_at IS NULL
+FOR UPDATE
+`
+
+// 资料、知识和状态更新统一锁定智能体主行，避免事务外快照覆盖并发写入。
+func (q *Queries) GetAICCAgentForUpdate(ctx context.Context, id string) (AiccAgent, error) {
+	row := q.db.QueryRowContext(ctx, getAICCAgentForUpdate, id)
+	var i AiccAgent
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.AppID,
+		&i.Name,
+		&i.Status,
+		&i.Scenario,
+		&i.Greeting,
+		&i.AnswerBoundary,
+		&i.PrivacyMode,
+		&i.PrivacyText,
+		&i.RetentionDays,
+		&i.ThemeJson,
+		&i.AllowedDomainsJson,
+		&i.PublicToken,
+		&i.WidgetToken,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.Persona,
+		&i.AppliedConfigRevision,
+	)
+	return i, err
+}
+
 const getAICCAgentSettings = `-- name: GetAICCAgentSettings :one
 SELECT agent_id, message_limit_per_session, sensitive_words_json, blocked_visitor_enabled, blocked_visitor_threshold_json, session_resume_ttl_minutes, analytics_config_json, created_at, updated_at
 FROM aicc_agent_settings

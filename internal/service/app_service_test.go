@@ -192,7 +192,6 @@ func appOrgAdminPrincipal(org sqlc.Organization) auth.Principal {
 // TestCreateHiddenAICCAppCreatesHiddenAppAndInitializeJob 覆盖 AICC 隐藏 app 创建：写 app、标记隐藏并创建初始化 job。
 func TestCreateHiddenAICCAppCreatesHiddenAppAndInitializeJob(t *testing.T) {
 	svc, store := newAppServiceWithStore(t)
-	store.organization.AssistantVersionIds = []byte(`["` + testSwitchVersionID + `"]`)
 	store.user.Locale = null.StringFrom("zh")
 	notifier := &fakeNotifier{}
 	svc.SetJobNotifier(notifier)
@@ -208,7 +207,7 @@ func TestCreateHiddenAICCAppCreatesHiddenAppAndInitializeJob(t *testing.T) {
 	assert.Equal(t, "app-aicc-hidden-1", appID)
 	assert.Equal(t, string(domain.AppTypeAICC), store.app.AppType)
 	assert.Equal(t, "官网售前", store.app.Name)
-	assert.Equal(t, testSwitchVersionID, store.app.VersionID.String)
+	assert.False(t, store.app.VersionID.Valid)
 	assert.Equal(t, "zh", store.app.Locale.String)
 	require.Len(t, store.jobs, 1)
 	assert.Equal(t, domain.JobTypeAppInitialize, store.jobs[0].Type)
@@ -239,9 +238,9 @@ func TestAppServiceDeleteHiddenAICCAppEnqueuesRuntimeCleanup(t *testing.T) {
 	assert.Equal(t, store.jobs[0].ID, notifier.lastJobID)
 }
 
-// TestCreateHiddenAICCAppRejectsMissingVersionAllowlist 覆盖异常路径：企业未配置模型和技能初始化版本时拒绝创建隐藏 app；
-// 客服镜像来自独立配置，不影响该版本依赖。
-func TestCreateHiddenAICCAppRejectsMissingVersionAllowlist(t *testing.T) {
+// TestCreateHiddenAICCAppLeavesVersionUnbound 覆盖隐藏客服应用不再绑定助手版本：
+// 即使企业助手版本 allowlist 为空也应创建成功，并保留 NULL version_id。
+func TestCreateHiddenAICCAppLeavesVersionUnbound(t *testing.T) {
 	svc, store := newAppServiceWithStore(t)
 
 	_, err := svc.CreateHiddenAICCApp(context.Background(), appOrgAdminPrincipal(store.organization), AICCHiddenAppInput{
@@ -251,7 +250,8 @@ func TestCreateHiddenAICCAppRejectsMissingVersionAllowlist(t *testing.T) {
 		Name:   "官网售前",
 	})
 
-	require.ErrorIs(t, err, ErrVersionNotInAllowlist)
+	require.NoError(t, err)
+	assert.False(t, store.app.VersionID.Valid)
 }
 
 // TestCreateHiddenAICCAppRollsBackAppWhenInitializeJobFails 覆盖异常路径：隐藏 app 行已写入但初始化 job 创建失败时，
@@ -285,6 +285,8 @@ type appServiceStoreStub struct {
 	auditLogs      []sqlc.CreateAuditLogParams
 	jobErr         error
 	auditErr       error
+	// getAppWithVersionErr 模拟 NULL version_id 无法命中版本联查，基础 GetApp 仍可读取隐藏 app。
+	getAppWithVersionErr error
 	// setVersionCalls 记录 SetAppVersion 被调用的参数，用于断言写入行为。
 	setVersionCalls []sqlc.SetAppVersionParams
 	// webPublishCfg / webPublishErr 控制 GetWebPublishConfig 返回值；
@@ -363,8 +365,19 @@ func (s *appServiceStoreStub) GetUser(_ context.Context, id string) (sqlc.User, 
 	return s.user, nil
 }
 
+// GetApp 返回不依赖助手版本的基础应用行，模拟 NULL version_id 的隐藏应用查询。
+func (s *appServiceStoreStub) GetApp(_ context.Context, id string) (sqlc.App, error) {
+	if s.app.ID != id {
+		return sqlc.App{}, sql.ErrNoRows
+	}
+	return s.app, nil
+}
+
 // GetAppWithVersion 返回 app 及版本 revision / image_id，模拟联查结果。
 func (s *appServiceStoreStub) GetAppWithVersion(_ context.Context, id string) (sqlc.GetAppWithVersionRow, error) {
+	if s.getAppWithVersionErr != nil {
+		return sqlc.GetAppWithVersionRow{}, s.getAppWithVersionErr
+	}
 	if s.app.ID != id {
 		return sqlc.GetAppWithVersionRow{}, sql.ErrNoRows
 	}
@@ -373,6 +386,39 @@ func (s *appServiceStoreStub) GetAppWithVersion(_ context.Context, id string) (s
 		VersionRevision: s.versionRevision,
 		VersionImageID:  s.versionImageID,
 	}, nil
+}
+
+// TestHiddenAICCAppDeletionUsesVersionIndependentLookup 验证 NULL version_id 不影响创建补偿与正式删除入口定位隐藏 app。
+func TestHiddenAICCAppDeletionUsesVersionIndependentLookup(t *testing.T) {
+	t.Run("创建失败补偿可软删除", func(t *testing.T) {
+		svc, store := newAppServiceWithStore(t)
+		app := store.mustSeedApp(t)
+		app.AppType = string(domain.AppTypeAICC)
+		app.VersionID = null.String{}
+		store.app = app
+		store.getAppWithVersionErr = sql.ErrNoRows
+
+		err := svc.SoftDeleteHiddenAICCApp(context.Background(), appOrgAdminPrincipal(store.organization), app.ID)
+
+		require.NoError(t, err)
+		assert.True(t, store.app.DeletedAt.Valid)
+	})
+
+	t.Run("正式删除可入队资源回收", func(t *testing.T) {
+		svc, store := newAppServiceWithStore(t)
+		app := store.mustSeedApp(t)
+		app.AppType = string(domain.AppTypeAICC)
+		app.VersionID = null.String{}
+		store.app = app
+		store.getAppWithVersionErr = sql.ErrNoRows
+
+		err := svc.DeleteHiddenAICCApp(context.Background(), appOrgAdminPrincipal(store.organization), app.ID)
+
+		require.NoError(t, err)
+		assert.True(t, store.app.DeletedAt.Valid)
+		require.Len(t, store.jobs, 1)
+		assert.Equal(t, domain.JobTypeAppDelete, store.jobs[0].Type)
+	})
 }
 
 // ListAppsByOrgWithVersion 返回组织下 app 列表及版本信息，模拟联查结果。
@@ -572,6 +618,24 @@ func TestGetVersionSynced(t *testing.T) {
 	result2, err := svc.Get(context.Background(), platformAdmin(), testAppServiceAppID)
 	require.NoError(t, err)
 	assert.False(t, result2.VersionSynced, "实例 revision 落后于版本，version_synced 应为 false")
+}
+
+// TestGetVersionUnboundAICCApp 验证 AICC 隐藏应用不绑定助手版本时仍可读取详情，且不会伪造版本同步状态。
+func TestGetVersionUnboundAICCApp(t *testing.T) {
+	svc, store := newAppServiceWithStore(t)
+	app := store.mustSeedApp(t)
+	app.AppType = string(domain.AppTypeAICC)
+	app.VersionID = null.String{}
+	store.app = app
+	store.aiccAgent = sqlc.AiccAgent{ID: "agent-1", OrgID: app.OrgID, AppID: app.ID}
+	store.getAppWithVersionErr = sql.ErrNoRows
+
+	result, err := svc.Get(context.Background(), appOrgAdminPrincipal(store.organization), app.ID)
+
+	require.NoError(t, err)
+	assert.Equal(t, app.ID, result.ID)
+	assert.Empty(t, result.VersionID)
+	assert.False(t, result.VersionSynced)
 }
 
 // fakeConfigOps 是 configOps 的测试桩：返回预设的 OcConfig，或预设错误（模拟实例不可达）。

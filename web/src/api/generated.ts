@@ -15701,10 +15701,14 @@ export interface components {
             answer_boundary?: string;
             /** @description Greeting 是访客进入会话时看到的欢迎语。 */
             greeting?: string;
+            /** @description IndustryKnowledgeBaseIDs 是企业已授权且本客服启用的行业知识库 ID。 */
+            industry_knowledge_base_ids?: string[];
             /** @description Name 是智能体展示名。 */
             name: string;
             /** @description OrgID 是平台管理员代管时的目标企业；企业管理员不需要也不能指定其他企业。 */
             org_id?: string;
+            /** @description Persona 是客服独立人设，最多 8000 个 Unicode 字符。 */
+            persona?: string;
             /** @description PrivacyMode 是隐私提示模式：notice / consent_required。 */
             privacy_mode?: string;
             /** @description PrivacyText 是企业自定义隐私说明。 */
@@ -16052,8 +16056,12 @@ export interface components {
             answer_boundary?: string;
             /** @description Greeting 是访客进入会话时看到的欢迎语。 */
             greeting?: string;
+            /** @description IndustryKnowledgeBaseIDs 是企业已授权且本客服启用的行业知识库 ID。 */
+            industry_knowledge_base_ids?: string[];
             /** @description Name 是智能体展示名。 */
             name: string;
+            /** @description Persona 是客服独立人设，最多 8000 个 Unicode 字符。 */
+            persona?: string;
             /** @description PrivacyMode 是隐私提示模式：notice / consent_required。 */
             privacy_mode?: string;
             /** @description PrivacyText 是企业自定义隐私说明。 */
@@ -16512,10 +16520,14 @@ export interface components {
             greeting?: string;
             /** @description ID 是智能体主键。 */
             id?: string;
+            /** @description IndustryKnowledgeBaseIDs 是客服当前启用的行业知识库 ID。 */
+            industry_knowledge_base_ids?: string[];
             /** @description Name 是智能体展示名。 */
             name?: string;
             /** @description OrgID 是智能体所属企业，用于平台只读排障和企业侧过滤。 */
             org_id?: string;
+            /** @description Persona 是客服独立人设。 */
+            persona?: string;
             /** @description PrivacyMode 是隐私提示模式。 */
             privacy_mode?: string;
             /** @description PrivacyText 是隐私说明文本。 */

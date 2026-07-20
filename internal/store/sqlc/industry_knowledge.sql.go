@@ -340,6 +340,48 @@ func (q *Queries) ListOrganizationIndustryKnowledgeBases(ctx context.Context, or
 	return items, nil
 }
 
+const listOrganizationIndustryKnowledgeBasesForUpdate = `-- name: ListOrganizationIndustryKnowledgeBasesForUpdate :many
+SELECT ikb.id, ikb.name, ikb.created_by, ikb.created_at, ikb.updated_at, ikb.deleted_at, ikb.name_active_key
+FROM organization_industry_knowledge_bases oikb
+JOIN industry_knowledge_bases ikb ON ikb.id = oikb.industry_knowledge_base_id
+WHERE oikb.org_id = ?
+  AND ikb.deleted_at IS NULL
+ORDER BY ikb.name ASC, ikb.id ASC
+FOR UPDATE
+`
+
+// AICC 写事务锁定企业当前授权行，使平台按 org_id 整组删除授权时必须串行，避免提交已撤销的 agent 关联。
+func (q *Queries) ListOrganizationIndustryKnowledgeBasesForUpdate(ctx context.Context, orgID string) ([]IndustryKnowledgeBasis, error) {
+	rows, err := q.db.QueryContext(ctx, listOrganizationIndustryKnowledgeBasesForUpdate, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []IndustryKnowledgeBasis{}
+	for rows.Next() {
+		var i IndustryKnowledgeBasis
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.NameActiveKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const renameIndustryKnowledgeBase = `-- name: RenameIndustryKnowledgeBase :exec
 UPDATE industry_knowledge_bases
 SET name = ?, updated_at = now()

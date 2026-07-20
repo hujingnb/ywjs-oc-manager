@@ -180,6 +180,7 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	// AICC 智能体复用 AppService 创建隐藏 app，并由 app_initialize worker 继续完成 runtime 初始化。
 	aiccService := service.NewAICCService(dbStore.Queries, appService)
 	aiccService.SetTxRunner(store.NewAICCRunner(dbStore))
+	aiccService.SetJobNotifier(redisQueue)
 	runtimeOpService := service.NewRuntimeOperationService(dbStore.Queries, logger, redisQueue)
 	// usage / organization service 在装配 newapi client 之后再实例化（见下方）；
 	// 这里仅声明变量，真实赋值发生在 newapi wiring 段。

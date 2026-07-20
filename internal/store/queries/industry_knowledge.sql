@@ -90,6 +90,16 @@ WHERE oikb.org_id = ?
   AND ikb.deleted_at IS NULL
 ORDER BY ikb.name ASC, ikb.id ASC;
 
+-- name: ListOrganizationIndustryKnowledgeBasesForUpdate :many
+-- AICC 写事务锁定企业当前授权行，使平台按 org_id 整组删除授权时必须串行，避免提交已撤销的 agent 关联。
+SELECT ikb.*
+FROM organization_industry_knowledge_bases oikb
+JOIN industry_knowledge_bases ikb ON ikb.id = oikb.industry_knowledge_base_id
+WHERE oikb.org_id = ?
+  AND ikb.deleted_at IS NULL
+ORDER BY ikb.name ASC, ikb.id ASC
+FOR UPDATE;
+
 -- name: ReplaceOrganizationIndustryKnowledgeBases :exec
 -- 企业行业库授权使用整组替换，避免平台配置中的增删产生残留授权。
 DELETE FROM organization_industry_knowledge_bases
