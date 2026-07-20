@@ -69,8 +69,29 @@ class _ScenarioHandler(BaseHTTPRequestHandler):
         self.wfile.write(response_body)
 
     def do_GET(self):
-        """提供认证读取和瞬时失败后恢复两条只读服务端分支。"""
+        """提供健康检查、认证读取和瞬时失败恢复等只读服务端分支。"""
         self._record_request()
+
+        # 健康检查重试场景第一次模拟 Traefik 暂无 Endpoint 返回的瞬时 502。
+        if (
+            self.server.scenario == "health_retry"
+            and len(self.server.requests) == 1
+        ):
+            self._send_json(502, {"code": "bad_gateway", "message": "入口尚未就绪"})
+            return
+
+        # 健康检查重试场景第二次恢复，只有精确 ok 状态才允许后续登录写请求。
+        if (
+            self.server.scenario == "health_retry"
+            and len(self.server.requests) == 2
+        ):
+            self._send_json(200, {"status": "ok"})
+            return
+
+        # 健康检查返回非 ok 状态时仍属于无效响应，不应继续轮询或发起登录。
+        if self.server.scenario == "health_invalid":
+            self._send_json(200, {"status": "starting"})
+            return
 
         # 登录场景只允许读取助手版本，用于验证 Bearer token 会自动附加。
         if self.server.scenario == "login" and self.path == "/api/v1/assistant-versions":
@@ -224,6 +245,36 @@ class ManagerAPITest(unittest.TestCase):
         self.assertEqual([{"id": "v1"}], result["versions"])
         self.assertEqual([1], sleeps)
         self.assertEqual(2, len(server.requests))
+
+    # 覆盖同一 Ingress 健康检查先返回 502 再恢复，要求复用 GET 首档退避后接受 ok。
+    def test_wait_ready_retries_transient_502_then_accepts_ok(self):
+        server = self._start_server("health_retry")
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        sleeps = []
+        client = ManagerAPI(base_url, sleep=sleeps.append)
+
+        result = client.wait_ready()
+
+        self.assertEqual({"status": "ok"}, result)
+        self.assertEqual([1], sleeps)
+        self.assertEqual(
+            ["GET", "GET"],
+            [request["method"] for request in server.requests],
+        )
+
+    # 覆盖健康接口返回非 ok 业务状态，要求立即拒绝且不重复健康检查。
+    def test_wait_ready_rejects_non_ok_envelope(self):
+        server = self._start_server("health_invalid")
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        client = ManagerAPI(base_url)
+
+        with self.assertRaises(APIError) as raised:
+            client.wait_ready()
+
+        self.assertEqual(200, raised.exception.status)
+        self.assertEqual("invalid_health_response", raised.exception.code)
+        self.assertEqual(1, len(server.requests))
+        self.assertEqual("GET", server.requests[0]["method"])
 
     # 覆盖 GET 持续收到瞬时状态直至耗尽，锁定五档退避、六次请求和最终 APIError。
     def test_get_transient_status_exhausts_finite_backoff(self):

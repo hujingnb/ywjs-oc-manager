@@ -63,6 +63,21 @@ class ManagerAPI:
         self.monotonic = monotonic
         self.access_token = None
 
+    def wait_ready(self, timeout=60):
+        """经登录使用的同一 Ingress 等待 manager 健康入口在总预算内就绪。"""
+        # 绝对 deadline 覆盖请求与有限退避，避免入口异常时突破调用方总等待预算。
+        deadline = self.monotonic() + timeout
+        payload = self.get("/healthz", deadline=deadline)
+        # 只有明确的 ok 对象才可进入登录；模糊健康状态不得触发不可重放的 POST。
+        if not isinstance(payload, dict) or payload.get("status") != "ok":
+            raise APIError(
+                "GET /healthz",
+                200,
+                "invalid_health_response",
+                "manager 健康检查响应异常",
+            )
+        return payload
+
     def login(self, org_code, username, password):
         """以明文 JSON 完成受控本地登录，并只保留返回的访问令牌与用户数据。"""
         data = self.post(
