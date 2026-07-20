@@ -81,7 +81,7 @@ class ManagerAPI:
         result_queue = queue.Queue(maxsize=1)
 
         def request_health():
-            """在 daemon worker 中仅执行匿名幂等 GET，并回传结果或普通异常。"""
+            """在 daemon worker 中执行匿名幂等 GET，并搬运结果或控制流异常。"""
             try:
                 payload = self._request(
                     "GET",
@@ -90,8 +90,8 @@ class ManagerAPI:
                     authenticated=False,
                     deadline=deadline,
                 )
-            except Exception as error:
-                # 不捕获 KeyboardInterrupt/SystemExit；普通异常由主线程保持类型重新抛出。
+            except BaseException as error:
+                # BaseException 仅用于跨线程传输；主线程原对象 raise，CLI 顶层仍不捕获。
                 result_queue.put_nowait((False, error))
                 return
             result_queue.put_nowait((True, payload))

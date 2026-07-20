@@ -477,6 +477,39 @@ class ManagerAPITest(unittest.TestCase):
 
         self.assertIs(expected, raised.exception)
 
+    # 覆盖 worker 收到 KeyboardInterrupt，必须立即搬运至主线程且不触发线程 traceback。
+    def test_wait_ready_reraises_worker_keyboard_interrupt_immediately(self):
+        expected = KeyboardInterrupt()
+        client = ManagerAPI("http://manager.test")
+
+        with mock.patch.object(client, "_request", side_effect=expected):
+            with mock.patch("threading.excepthook") as excepthook:
+                started_at = time.monotonic()
+                with self.assertRaises(KeyboardInterrupt) as raised:
+                    client.wait_ready(timeout=0.2)
+                elapsed = time.monotonic() - started_at
+
+        self.assertIs(expected, raised.exception)
+        self.assertLess(elapsed, 0.5)
+        excepthook.assert_not_called()
+
+    # 覆盖 worker 收到 SystemExit，必须保留退出码立即传播且不打印线程 traceback。
+    def test_wait_ready_reraises_worker_system_exit_immediately(self):
+        expected = SystemExit(7)
+        client = ManagerAPI("http://manager.test")
+
+        with mock.patch.object(client, "_request", side_effect=expected):
+            with mock.patch("threading.excepthook") as excepthook:
+                started_at = time.monotonic()
+                with self.assertRaises(SystemExit) as raised:
+                    client.wait_ready(timeout=0.2)
+                elapsed = time.monotonic() - started_at
+
+        self.assertIs(expected, raised.exception)
+        self.assertEqual(7, raised.exception.code)
+        self.assertLess(elapsed, 0.5)
+        excepthook.assert_not_called()
+
     # 覆盖 daemon worker 正常完成，主线程应无竞态地返回健康对象且仅调用一次匿名 GET。
     def test_wait_ready_returns_worker_payload_once(self):
         client = ManagerAPI("http://manager.test")
