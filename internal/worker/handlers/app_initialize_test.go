@@ -1122,7 +1122,7 @@ func TestAppInitialize_AppliedVersionRecorded(t *testing.T) {
 }
 
 // TestAppInitialize_AICCHiddenAppUsesDedicatedRuntimeImage 验证 AICC 隐藏应用使用客服专用 resolver，
-// 且初始化成功后只确认企业配置 revision，不写普通助手版本同步字段。
+// 且初始化成功后确认企业配置 revision，并记录已应用镜像供自动升级协调器收敛。
 func TestAppInitialize_AICCHiddenAppUsesDedicatedRuntimeImage(t *testing.T) {
 	store := newAppInitStub(t)
 	store.app.AppType = string(domain.AppTypeAICC)
@@ -1141,7 +1141,8 @@ func TestAppInitialize_AICCHiddenAppUsesDedicatedRuntimeImage(t *testing.T) {
 
 	require.NoError(t, handler.Handle(context.Background(), buildJob(t, testAppID, "")))
 	assert.Zero(t, store.assistantVersionCalls)
-	assert.False(t, store.appliedVersionSet)
+	assert.True(t, store.appliedVersionSet)
+	assert.Equal(t, aiccImageRef, store.lastAppliedVersion.AppliedImageRef)
 	assert.Equal(t, int32(1), store.appliedAICCRevision)
 }
 
@@ -1169,8 +1170,37 @@ func TestAppInitializeAICCUsesOrganizationConfigWithoutVersion(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Zero(t, store.assistantVersionCalls, "AICC 初始化不得读取助手版本")
-	assert.False(t, store.appliedVersionSet, "AICC 初始化不得写助手版本应用状态")
+	assert.True(t, store.appliedVersionSet, "AICC 初始化必须记录已应用客服镜像")
+	assert.Equal(t, aiccImageRef, store.lastAppliedVersion.AppliedImageRef)
 	assert.Equal(t, int32(7), store.appliedAICCRevision, "AICC 就绪后应确认企业配置 revision")
+}
+
+// TestAppInitialize_AICCRunningImageDriftTriggersSilentRestart 验证运行中的旧客服发现镜像漂移时，
+// 后台初始化任务会静默 rollout 并记录新镜像，而不是被 running 幂等分支短路。
+func TestAppInitialize_AICCRunningImageDriftTriggersSilentRestart(t *testing.T) {
+	store := newAppInitStub(t)
+	store.app.AppType = string(domain.AppTypeAICC)
+	store.app.VersionID = null.String{}
+	store.app.Status = domain.AppStatusRunning
+	store.app.AppliedImageRef = "registry.example.com/aicc:v1-old"
+	store.aiccAgent = sqlc.AiccAgent{ID: "agent-1", AppID: store.app.ID, OrgID: store.app.OrgID}
+	store.aiccConfig = sqlc.OrganizationAiccConfig{OrgID: store.app.OrgID, Enabled: true, Model: null.StringFrom("qwen-max"), Revision: 8}
+	const nextImage = "registry.example.com/aicc:v2"
+	rolloutEvents := []string{}
+	orch := &fakeOrchestrator{rolloutEvents: &rolloutEvents}
+	handler := NewAppInitializeHandler(store, &fakeNewAPI{result: newapi.APIKey{ID: 1, Key: "sk-test"}}, AppInitializeConfig{
+		Cipher:             testCipher(t),
+		AICCModelValidator: testAllowAICCModelValidator(),
+		ResolveAICCRuntimeImage: func() (string, bool) {
+			return nextImage, true
+		},
+	})
+	handler.SetOrchestrator(orch, AppInitializeK8sConfig{})
+
+	require.NoError(t, handler.Handle(context.Background(), buildJob(t, store.app.ID, "")))
+	assert.Contains(t, rolloutEvents, "restart:"+testAppID)
+	assert.Contains(t, rolloutEvents, "wait-rollout:"+testAppID)
+	assert.Equal(t, nextImage, store.lastAppliedVersion.AppliedImageRef)
 }
 
 // TestAppInitializeAICCStampsRevisionBeforeBindingWaiting 验证 AICC 在 pod Ready 后

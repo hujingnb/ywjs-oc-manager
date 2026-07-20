@@ -29,6 +29,7 @@
 //   - binding_failed → binding_waiting：用户手动重启绑定流程；
 //   - binding_failed → error：多次失败后用户放弃或自动收敛；
 //   - running → error：运行时容器异常退出，收敛到 error 等待人工或重试；
+//   - running → pulling_runtime_image：仅 AICC 后台镜像升级任务使用，普通实例入口仍拒绝运行中重试；
 //   - stopped → error：停止状态下底层异常（例如镜像被清理 / 节点失联）；
 //   - error → pulling_runtime_image：RequestInitialize 重试入口，从 worker 第一阶段重新开始；
 //   - error → deleted：由 IsAppTransitionAllowed 内置特殊分支兜底，不进 appTransitions map；
@@ -68,8 +69,10 @@ var appTransitions = map[AppTransition]struct{}{
 	{From: AppStatusBindingFailed, To: AppStatusError}:          {},
 	{From: AppStatusRunning, To: AppStatusStopped}:              {},
 	{From: AppStatusRunning, To: AppStatusError}:                {},
-	{From: AppStatusStopped, To: AppStatusRunning}:              {},
-	{From: AppStatusStopped, To: AppStatusError}:                {},
+	// AICC 运行时镜像升级由后台任务自动重新进入初始化阶段；普通实例不会从 handler 走此路径。
+	{From: AppStatusRunning, To: AppStatusPullingRuntimeImage}: {},
+	{From: AppStatusStopped, To: AppStatusRunning}:             {},
+	{From: AppStatusStopped, To: AppStatusError}:               {},
 
 	// restarting 段：渠道解绑触发 RolloutRestart 重建 pod 的过渡态。
 	// running → restarting：解绑置位，标记 pod 正在重启、oc-ops 暂不可用；

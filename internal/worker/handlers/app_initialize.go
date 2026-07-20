@@ -254,7 +254,8 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 	if app.DeletedAt.Valid {
 		return nil
 	}
-	// 已离开初始化阶段直接成功（幂等）。
+	// 普通实例已离开初始化阶段直接成功（幂等）。AICC 运行时镜像由平台配置驱动，
+	// 运行中的旧 app 若发现 applied_image_ref 漂移，必须继续走静默重建流程。
 	// binding_waiting 分支再做一次「渠道已绑定」自愈：上一次切换助手版本+重启
 	// 触发的镜像重建在 transitionTo 阶段已经把行推到 binding_waiting，但若此时
 	// channel_bindings 已是 bound（凭证保留在 k8s Secret，hermes 容器重启后无需
@@ -265,12 +266,12 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		}
 		return nil
 	}
-	if app.Status == domain.AppStatusRunning {
+	if app.Status == domain.AppStatusRunning && !domain.IsAICCAppType(domain.AppType(app.AppType)) {
 		return nil
 	}
 	// starting/error(starting) 表示上轮已创建或等待过 Deployment 但未完成 stamp；重入需强制新 generation。
 	aiccStartingReentry := domain.IsAICCAppType(domain.AppType(app.AppType)) &&
-		(app.Status == domain.AppStatusStarting || (app.Status == domain.AppStatusError && app.LastErrorStatus.Valid && app.LastErrorStatus.String == domain.AppStatusStarting))
+		(app.Status == domain.AppStatusRunning || app.Status == domain.AppStatusStarting || (app.Status == domain.AppStatusError && app.LastErrorStatus.Valid && app.LastErrorStatus.String == domain.AppStatusStarting))
 
 	resolved, err := h.resolveInitializeConfig(ctx, app)
 	if err != nil {
@@ -352,7 +353,8 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 		ID:           app.ID,
 	})
 
-	// standard 保留版本同步语义；AICC revision 已在进入 binding_waiting 前确认。
+	// standard 保留版本同步语义；AICC 没有助手版本，但必须记录专用镜像，
+	// 供运行时升级协调器判断是否需要下一轮静默重启。
 	if resolved.version != nil {
 		if err := h.store.SetAppAppliedVersion(ctx, sqlc.SetAppAppliedVersionParams{
 			ID:                     app.ID,
@@ -360,6 +362,12 @@ func (h *AppInitializeHandler) Handle(ctx context.Context, job sqlc.Job) error {
 			AppliedImageRef:        resolved.imageRef,
 		}); err != nil {
 			return h.markFailed(ctx, &app, domain.AppStatusBindingWaiting, fmt.Errorf("记录已应用版本信息失败: %w", err))
+		}
+	} else {
+		if err := h.store.SetAppAppliedVersion(ctx, sqlc.SetAppAppliedVersionParams{
+			ID: app.ID, AppliedVersionRevision: 0, AppliedImageRef: resolved.imageRef,
+		}); err != nil {
+			return h.markFailed(ctx, &app, domain.AppStatusBindingWaiting, fmt.Errorf("记录已应用 AICC 运行时镜像失败: %w", err))
 		}
 	}
 

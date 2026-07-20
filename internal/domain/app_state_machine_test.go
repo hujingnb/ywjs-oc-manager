@@ -67,8 +67,6 @@ func TestIsAppTransitionAllowed_IllegalTransitions(t *testing.T) {
 	}{
 		// 跳阶段：worker 不能从 draft 直接跨阶段进 creating_container。
 		{"跳过中间阶段", AppStatusDraft, AppStatusCreatingContainer},
-		// 不能从 running 回退到 init 子状态，避免运行中被误置为初始化阶段。
-		{"running 不能回退到 init", AppStatusRunning, AppStatusPullingRuntimeImage},
 		// 同状态原地转移视为非法，避免 worker 重复触发副作用。
 		{"同状态原地转移", AppStatusPullingRuntimeImage, AppStatusPullingRuntimeImage},
 		// 进入 deleted 必须从 error 出发，确保走 SoftDeleteApp 流程。
@@ -91,11 +89,11 @@ func TestIsAppTransitionAllowed_IllegalTransitions(t *testing.T) {
 	}
 }
 
-// TestEnsureAppTransitionWraps 验证 EnsureAppTransition 对合法/非法转移的返回值与错误包装。
+// TestEnsureAppTransitionWraps 验证 AICC 镜像升级转移与合法转移的返回值。
 func TestEnsureAppTransitionWraps(t *testing.T) {
-	// 非法转移必须返回带上下文的错误，方便 service / handler 直接向上抛。
+	// AICC 运行时镜像升级允许后台任务从 running 重新进入初始化阶段。
 	err := EnsureAppTransition(AppStatusRunning, AppStatusPullingRuntimeImage)
-	require.Error(t, err)
+	require.NoError(t, err)
 	// 合法转移必须无错，保证业务侧能正常推进状态机。
 	err = EnsureAppTransition(AppStatusDraft, AppStatusPullingRuntimeImage)
 	require.NoError(t, err)
