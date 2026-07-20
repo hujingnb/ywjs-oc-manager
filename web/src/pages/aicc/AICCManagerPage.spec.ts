@@ -26,6 +26,18 @@ const queryState = vi.hoisted(() => {
       data: ref({ industry_knowledge_bases: [], app_documents: [] }),
       isFetching: ref(false),
     },
+    organizationConfig: {
+      data: ref<{
+        org_id: string
+        enabled: boolean
+        model: string
+        revision: number
+        industry_knowledge_bases: Array<{ id: string; name: string }>
+      }>({ org_id: 'org-1', enabled: true, model: 'gpt-aicc', revision: 1, industry_knowledge_bases: [] }),
+      isFetching: ref(false),
+      error: ref<Error | null>(null),
+      lastOrgIdRef: ref<{ value?: string } | undefined>(undefined),
+    },
   }
 })
 
@@ -40,6 +52,10 @@ vi.mock('@/api/hooks/useAICC', () => ({
   useAICCLeadFieldsQuery: () => queryState.leadFields,
   useAICCKnowledgeQuery: () => queryState.knowledge,
   useAICCKnowledgeOptionsQuery: () => queryState.knowledgeOptions,
+  useAICCOrganizationConfigQuery: (orgId?: { value?: string }) => {
+    queryState.organizationConfig.lastOrgIdRef.value = orgId
+    return queryState.organizationConfig
+  },
   useCreateAICCAgent: () => mutationState,
   useUpdateAICCAgent: () => mutationState,
   useUpdateAICCSettings: () => mutationState,
@@ -59,6 +75,7 @@ function makeAgent(overrides: Partial<AICCAgent> = {}): AICCAgent {
     status: 'active',
     privacy_mode: 'notice',
     retention_days: 180,
+    industry_knowledge_base_ids: [],
     public_token: 'public-token',
     widget_token: 'widget-token',
     ...overrides,
@@ -95,8 +112,8 @@ const SpaceStub = defineComponent({
 })
 
 const FormStub = defineComponent({
-  setup(_, { slots }) {
-    return () => h('form', slots.default?.())
+  setup(_, { attrs, slots }) {
+    return () => h('form', attrs, slots.default?.())
   },
 })
 
@@ -108,20 +125,43 @@ const FormItemStub = defineComponent({
 })
 
 const InputStub = defineComponent({
-  props: ['value', 'placeholder', 'inputProps'],
+  props: ['value', 'placeholder', 'inputProps', 'type', 'maxlength'],
   emits: ['update:value'],
   setup(props, { emit }) {
-    return () => h('input', {
+    return () => h(props.type === 'textarea' ? 'textarea' : 'input', {
       ...(props.inputProps as Record<string, unknown> | undefined),
       value: props.value ?? '',
       placeholder: props.placeholder as string,
+      maxlength: props.maxlength as number | undefined,
       onInput: (event: Event) => emit('update:value', (event.target as HTMLInputElement).value),
     })
   },
 })
 
 const InputNumberStub = InputStub
-const SelectStub = InputStub
+const SelectStub = defineComponent({
+  props: ['value', 'options', 'inputProps', 'multiple', 'disabled', 'loading'],
+  emits: ['update:value'],
+  setup(props, { attrs, emit }) {
+    return () => h('select', {
+      ...attrs,
+      ...(props.inputProps as Record<string, unknown> | undefined),
+      multiple: Boolean(props.multiple),
+      disabled: Boolean(props.disabled),
+      value: props.value,
+      onChange: (event: Event) => {
+        const select = event.target as HTMLSelectElement
+        emit('update:value', props.multiple
+          ? Array.from(select.selectedOptions).map(option => option.value)
+          : select.value)
+      },
+    }, (props.options as Array<{ label: string; value: string; disabled?: boolean }> | undefined)?.map(option => h('option', {
+      value: option.value,
+      selected: Array.isArray(props.value) ? props.value.includes(option.value) : props.value === option.value,
+      disabled: option.disabled,
+    }, option.label)))
+  },
+})
 const CheckboxStub = defineComponent({
   props: ['checked'],
   emits: ['update:checked'],
@@ -210,7 +250,7 @@ function makeConsoleContext(options: { platformAdmin?: boolean; selectedOrgId?: 
     },
   }
 
-  return { context, selectedAgentIdState }
+  return { context, agentsState: agents, selectedAgentIdState }
 }
 
 describe('AICCManagerPage', () => {
@@ -222,6 +262,12 @@ describe('AICCManagerPage', () => {
     queryState.leadFields.data.value = []
     queryState.knowledge.data.value = undefined
     queryState.knowledgeOptions.data.value = { industry_knowledge_bases: [], app_documents: [] }
+    queryState.organizationConfig.data.value = {
+      org_id: 'org-1', enabled: true, model: 'gpt-aicc', revision: 1, industry_knowledge_bases: [],
+    }
+    queryState.organizationConfig.isFetching.value = false
+    queryState.organizationConfig.error.value = null
+    queryState.organizationConfig.lastOrgIdRef.value = undefined
   })
 
   // 覆盖最终布局：智能体选择已经上移到工作台顶部，接待台内容区不能再重复展示智能体列表。
@@ -304,7 +350,7 @@ describe('AICCManagerPage', () => {
 
     const helpTriggers = wrapper.findAll('[data-test="field-help"]')
 
-    expect(helpTriggers).toHaveLength(15)
+    expect(helpTriggers).toHaveLength(17)
     expect(helpTriggers.every(trigger => trigger.text() === '?')).toBe(true)
     expect(helpTriggers.some(trigger =>
       trigger.attributes('aria-label') === '开启后，系统会根据敏感词命中、异常频率等规则标记高风险访客，并阻止其继续发送消息。',
@@ -347,5 +393,151 @@ describe('AICCManagerPage', () => {
 
     expect(saveButton).toBeDefined()
     expect(saveButton?.attributes('disabled')).toBeUndefined()
+  })
+
+  // 场景：新建客服只能查看企业已配置模型，并从企业授权范围选择行业知识库，不能编辑模型或助手版本路由。
+  it('shows the organization model as read-only and industry knowledge candidates in the agent form', () => {
+    queryState.organizationConfig.data.value = {
+      org_id: 'org-1',
+      enabled: true,
+      model: 'gpt-aicc',
+      revision: 1,
+      industry_knowledge_bases: [{ id: 'industry-retail', name: '零售知识库' }],
+    }
+    const { context } = makeConsoleContext()
+    context.startCreateAgent()
+    const wrapper = mountManager(context, { initialSection: 'settings' })
+
+    expect(wrapper.text()).toContain('企业客服模型')
+    expect(wrapper.text()).toContain('gpt-aicc')
+    expect(wrapper.find('#aicc-industry-knowledge').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('助手版本')
+    expect(wrapper.text()).not.toContain('路由')
+    expect(wrapper.findAll('select').filter(select => select.attributes('id')?.includes('model'))).toHaveLength(0)
+  })
+
+  // 覆盖独立配置查询：企业管理员必须向 AICC 配置 hook 传入自身 org_id，避免 query key 和模型候选丢失企业隔离。
+  it('queries the organization AICC config with the org-admin organization id', () => {
+    const { context } = makeConsoleContext({ selectedOrgId: 'org-7' })
+    mountManager(context, { initialSection: 'settings' })
+
+    expect(queryState.organizationConfig.lastOrgIdRef.value?.value).toBe('org-7')
+  })
+
+  // 覆盖配置加载保护：候选行业库尚未就绪时，不能保存表单把既有行业授权误写为空数组。
+  it('disables industry selection and primary save while the organization config is loading', () => {
+    queryState.organizationConfig.isFetching.value = true
+    const { context } = makeConsoleContext()
+    const wrapper = mountManager(context, { initialSection: 'settings' })
+
+    expect(wrapper.find('#aicc-industry-knowledge').attributes('disabled')).toBeDefined()
+    expect(wrapper.findAll('button').find(button => button.text().includes('保存配置'))?.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('正在加载企业客服配置')
+  })
+
+  // 覆盖配置失败保护：读取企业授权失败时，页面必须阻止保存并展示可操作的失败提示。
+  it('disables primary save and shows an error when the organization config cannot load', () => {
+    queryState.organizationConfig.error.value = new Error('network failed')
+    const { context } = makeConsoleContext()
+    const wrapper = mountManager(context, { initialSection: 'settings' })
+
+    expect(wrapper.findAll('button').find(button => button.text().includes('保存配置'))?.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('企业客服配置加载失败')
+  })
+
+  // 覆盖已撤销授权的回显：历史行业库 ID 不在候选列表时仍须有警告标签，避免管理员无法识别并移除。
+  it('keeps revoked industry knowledge ids visible as disabled warning options', async () => {
+    queryState.organizationConfig.data.value = {
+      org_id: 'org-1', enabled: true, model: 'gpt-aicc', revision: 1,
+      industry_knowledge_bases: [{ id: 'industry-current', name: '当前授权库' }],
+    }
+    const { context, agentsState } = makeConsoleContext()
+    agentsState.value = [makeAgent({ industry_knowledge_base_ids: ['industry-revoked'] })]
+    const wrapper = mountManager(context, { initialSection: 'settings' })
+
+    const options = (wrapper.vm as unknown as { industryKnowledgeOptions: Array<{ value: string; label: string; disabled?: boolean }> }).industryKnowledgeOptions
+    expect(options).toContainEqual({ value: 'industry-revoked', label: '已撤销授权（industry-revoked）', disabled: true })
+  })
+
+  // 场景：保存新建客服时，人设和行业库选择必须进入创建载荷，避免仅在界面暂存。
+  it('sends persona and industry knowledge ids when creating an agent', async () => {
+    mutationState.mutateAsync.mockResolvedValue(makeAgent({ persona: '已保存人设', industry_knowledge_base_ids: ['industry-retail'] }))
+    queryState.organizationConfig.data.value = {
+      org_id: 'org-1',
+      enabled: true,
+      model: 'gpt-aicc',
+      revision: 1,
+      industry_knowledge_bases: [{ id: 'industry-retail', name: '零售知识库' }],
+    }
+    const { context } = makeConsoleContext()
+    context.startCreateAgent()
+    const wrapper = mountManager(context, { initialSection: 'settings' })
+
+    await wrapper.find('#aicc-agent-name').setValue('零售顾问')
+    await wrapper.find('#aicc-persona').setValue('专业售前顾问')
+    ;(wrapper.vm as unknown as { form: { industry_knowledge_base_ids: string[] } }).form.industry_knowledge_base_ids = ['industry-retail']
+    await wrapper.vm.$nextTick()
+    await wrapper.find('form').trigger('submit')
+    await Promise.resolve()
+    await wrapper.vm.$nextTick()
+
+    expect(mutationState.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({
+      name: '零售顾问',
+      persona: '专业售前顾问',
+      industry_knowledge_base_ids: ['industry-retail'],
+    }))
+    expect((wrapper.find('#aicc-persona').element as HTMLTextAreaElement).value).toBe('已保存人设')
+  })
+
+  // 场景：切换编辑对象时必须从各自 agent 响应回填人设和行业库，不能残留上一个客服的表单值。
+  it('restores each selected agent persona and industry knowledge ids', async () => {
+    queryState.organizationConfig.data.value = {
+      org_id: 'org-1',
+      enabled: true,
+      model: 'gpt-aicc',
+      revision: 1,
+      industry_knowledge_bases: [
+        { id: 'industry-sales', name: '销售知识库' },
+        { id: 'industry-support', name: '售后知识库' },
+      ],
+    }
+    const { context, selectedAgentIdState } = makeConsoleContext()
+    const agents = context.agents.value
+    agents[0] = makeAgent({ persona: '售前人设', industry_knowledge_base_ids: ['industry-sales'] })
+    agents[1] = makeAgent({ id: 'agent-support', persona: '售后人设', industry_knowledge_base_ids: ['industry-support'] })
+    const wrapper = mountManager(context, { initialSection: 'settings' })
+
+    expect((wrapper.find('#aicc-persona').element as HTMLTextAreaElement).value).toBe('售前人设')
+    expect((wrapper.vm as unknown as { form: { industry_knowledge_base_ids: string[] } }).form.industry_knowledge_base_ids).toEqual(['industry-sales'])
+
+    selectedAgentIdState.value = 'agent-support'
+    await wrapper.vm.$nextTick()
+
+    expect((wrapper.find('#aicc-persona').element as HTMLTextAreaElement).value).toBe('售后人设')
+    expect((wrapper.vm as unknown as { form: { industry_knowledge_base_ids: string[] } }).form.industry_knowledge_base_ids).toEqual(['industry-support'])
+  })
+
+  // 覆盖主表单与知识面板联动：刚保存的新行业范围必须成为知识保存载荷，不能回写旧 agent 快照。
+  it('uses the latest saved industry knowledge ids when saving knowledge settings', async () => {
+    mutationState.mutateAsync
+      .mockResolvedValueOnce(makeAgent({ industry_knowledge_base_ids: ['industry-new'] }))
+      .mockResolvedValueOnce(undefined)
+    const { context } = makeConsoleContext()
+    const wrapper = mountManager(context, { initialSection: 'settings' })
+
+    ;(wrapper.vm as unknown as { form: { industry_knowledge_base_ids: string[] } }).form.industry_knowledge_base_ids = ['industry-new']
+    await wrapper.find('form').trigger('submit')
+    await Promise.resolve()
+    await wrapper.vm.$nextTick()
+    await wrapper.findAll('button').find(button => button.text().includes('保存知识范围'))!.trigger('click')
+    await Promise.resolve()
+
+    expect(mutationState.mutateAsync).toHaveBeenLastCalledWith({
+      agentId: 'agent-sales',
+      payload: {
+        use_org_knowledge: true,
+        industry_knowledge_base_ids: ['industry-new'],
+      },
+    })
   })
 })

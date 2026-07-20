@@ -28,6 +28,10 @@ export interface AICCAgent {
   runtime_message?: string
   // 业务场景说明。
   scenario?: string
+  // 客服独立人设；由当前智能体自身配置，不继承其他客服的表单值。
+  persona?: string
+  // 企业已授权且当前客服启用的行业知识库 ID 列表。
+  industry_knowledge_base_ids: string[]
   // 访客欢迎语。
   greeting?: string
   // 回答边界说明。
@@ -58,6 +62,10 @@ export interface AICCAgentPayload {
   name: string
   // 业务场景说明。
   scenario?: string
+  // 客服独立人设，最多 8000 个 Unicode 字符。
+  persona?: string
+  // 企业已授权且当前客服启用的行业知识库 ID 列表。
+  industry_knowledge_base_ids: string[]
   // 访客欢迎语。
   greeting?: string
   // 回答边界说明。

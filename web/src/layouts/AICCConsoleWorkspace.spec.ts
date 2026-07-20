@@ -52,6 +52,7 @@ vi.mock('vue-router', () => ({
 
       return () => h('main', { 'data-test': 'router-view' }, [
         h('span', { 'data-test': 'context-selected-id' }, context?.selectedAgentId.value ?? 'none'),
+        h('span', { 'data-test': 'context-selected-org' }, context?.selectedOrgId.value ?? 'none'),
         h('span', { 'data-test': 'context-selected-agent' }, context?.selectedAgent.value?.name ?? 'none'),
         h('span', { 'data-test': 'context-id-readonly' }, String(context ? isReadonly(context.selectedAgentId) : false)),
         h('button', {
@@ -139,6 +140,7 @@ function makeAgent(overrides: Partial<AICCAgent> = {}): AICCAgent {
     status: 'active',
     privacy_mode: 'notice',
     retention_days: 180,
+    industry_knowledge_base_ids: [],
     public_token: 'public-token',
     ...overrides,
   }
@@ -261,7 +263,17 @@ describe('AICCConsoleWorkspace', () => {
     expect(wrapper.text()).toContain('已生成')
     expect(wrapper.text()).toContain('180 天')
     expect(wrapper.find('[data-test="context-selected-id"]').text()).toBe('agent-sales')
+    expect(wrapper.find('[data-test="context-selected-org"]').text()).toBe('org-1')
     expect(wrapper.find('[data-test="context-id-readonly"]').text()).toBe('true')
+  })
+
+  // 覆盖企业管理员配置上下文：工作台必须把登录企业 ID 注入子页，供独立 AICC 配置查询使用。
+  it('provides the signed-in organization id for an org admin configuration query', () => {
+    const wrapper = mountWorkspace()
+
+    expect(wrapper.find('[data-test="context-selected-org"]').text()).toBe('org-1')
+    // 企业管理员的智能体列表仍由后端按登录企业鉴权，不能把列表参数变化误当作配置上下文。
+    expect(agentsState.lastOrgIdRef.value?.value).toBeUndefined()
   })
 
   // 覆盖上下文写入口：子页面只能通过 selectAgent/startCreateAgent 修改工作区内部选中值。

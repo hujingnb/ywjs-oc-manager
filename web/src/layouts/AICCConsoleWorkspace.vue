@@ -146,7 +146,8 @@ const aiccOrganizations = computed(() => organizations.value.filter(org => org.a
 const organizationsLoading = computed(() => organizationsQuery.isLoading.value)
 const agentsLoading = computed(() => agentsQuery.isLoading.value)
 const agentsError = computed<Error | null>(() => agentsQuery.error.value instanceof Error ? agentsQuery.error.value : null)
-const selectedOrgId = computed(() => selectedOrgIdState.value)
+// 企业管理员没有企业切换器，但其客服独立配置仍必须带登录企业 ID，保证配置 query 的缓存键和候选模型属于正确企业。
+const selectedOrgId = computed(() => isPlatformAdmin.value ? selectedOrgIdState.value : auth.user?.org_id)
 const selectedAgentId = computed(() => selectedAgentIdState.value)
 const selectedAgent = computed(() => agents.value.find(agent => agent.id === selectedAgentIdState.value))
 const requestedOrgId = computed(() => typeof route.query.org_id === 'string' ? route.query.org_id : undefined)

@@ -31,6 +31,9 @@ import type {
   AICCSessionListResult,
 } from '@/domain/aicc'
 
+// 企业 AICC 独立配置是平台配置页和客服工作台共享的同一接口，避免两处维护不同请求和缓存语义。
+export { useOrganizationAICCConfigQuery as useAICCOrganizationConfigQuery } from './useOrganizations'
+
 const AICC_AGENTS_KEY = ['aicc', 'agents'] as const
 const aiccAgentsKey = (orgId?: string) => [...AICC_AGENTS_KEY, orgId ?? 'current'] as const
 const aiccAgentKey = (agentId?: string) => ['aicc', 'agent', agentId] as const

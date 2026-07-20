@@ -130,6 +130,53 @@
               <div class="field-full">
                 <n-form-item>
                   <template #label>
+                    <FieldLabel :label="t('aicc.manager.form.persona')" :help="t('aicc.manager.form.help.persona')" />
+                  </template>
+                  <n-input
+                    v-model:value="form.persona"
+                    type="textarea"
+                    maxlength="8000"
+                    :autosize="{ minRows: 3, maxRows: 8 }"
+                    :input-props="{ id: 'aicc-persona', name: 'aicc_persona' }"
+                    :placeholder="t('aicc.manager.form.personaPlaceholder')"
+                  />
+                </n-form-item>
+              </div>
+              <div class="field-full">
+                <n-form-item>
+                  <template #label>
+                    <FieldLabel :label="t('aicc.manager.form.model')" :help="t('aicc.manager.form.help.model')" />
+                  </template>
+                  <n-tag type="info" :bordered="false">{{ organizationConfigQuery.data.value?.model || t('aicc.manager.form.modelUnavailable') }}</n-tag>
+                </n-form-item>
+                <n-alert v-if="organizationConfigQuery.isFetching.value" type="info" :bordered="false">
+                  {{ t('aicc.manager.form.configLoading') }}
+                </n-alert>
+                <n-alert v-else-if="organizationConfigError" type="error" :bordered="false">
+                  {{ t('aicc.manager.form.configLoadFailed') }}
+                </n-alert>
+              </div>
+              <div class="field-full">
+                <n-form-item>
+                  <template #label>
+                    <FieldLabel :label="t('aicc.manager.form.industryKnowledge')" :help="t('aicc.manager.form.help.industryKnowledge')" />
+                  </template>
+                  <n-select
+                    v-model:value="form.industry_knowledge_base_ids"
+                    multiple
+                    clearable
+                    filterable
+                    :loading="organizationConfigQuery.isFetching.value"
+                    :disabled="!isOrganizationConfigReady"
+                    :input-props="{ id: 'aicc-industry-knowledge', name: 'aicc_industry_knowledge' }"
+                    :options="industryKnowledgeOptions"
+                    :placeholder="t('aicc.manager.form.industryPlaceholder')"
+                  />
+                </n-form-item>
+              </div>
+              <div class="field-full">
+                <n-form-item>
+                  <template #label>
                     <FieldLabel :label="t('aicc.manager.form.answerBoundary')" :help="t('aicc.manager.form.help.answerBoundary')" />
                   </template>
                   <n-input
@@ -172,7 +219,7 @@
             </div>
             <n-space justify="end">
               <n-button attr-type="button" @click="resetForm">{{ t('aicc.manager.form.reset') }}</n-button>
-              <n-button type="primary" attr-type="submit" :loading="submitBusy" :disabled="!canManageAICC">
+              <n-button type="primary" attr-type="submit" :loading="submitBusy" :disabled="!canManageAICC || !isOrganizationConfigReady">
                 <template #icon><Save :size="16" /></template>
                 {{ t('aicc.manager.form.saveConfig') }}
               </n-button>
@@ -296,21 +343,6 @@
               <n-checkbox v-model:checked="knowledgeForm.use_org_knowledge">
                 <FieldLabel :label="t('aicc.manager.knowledge.useOrgKnowledge')" :help="t('aicc.manager.knowledge.help.useOrgKnowledge')" />
               </n-checkbox>
-              <n-form-item>
-                <template #label>
-                  <FieldLabel :label="t('aicc.manager.knowledge.industryKnowledge')" :help="t('aicc.manager.knowledge.help.industryKnowledge')" />
-                </template>
-                <n-select
-                  v-model:value="knowledgeForm.industry_knowledge_base_ids"
-                  multiple
-                  clearable
-                  filterable
-                  :loading="knowledgeOptionsQuery.isFetching.value"
-                  :input-props="{ id: 'aicc-industry-knowledge', name: 'aicc_industry_knowledge' }"
-                  :options="industryKnowledgeOptions"
-                  :placeholder="t('aicc.manager.knowledge.industryPlaceholder')"
-                />
-              </n-form-item>
               <div class="current-knowledge-row">
                 <div>
                   <FieldLabel :label="t('aicc.manager.knowledge.currentAgentKnowledge')" :help="t('aicc.manager.knowledge.help.currentAgentKnowledge')" />
@@ -436,7 +468,7 @@ import AICCLeadsPage from '@/pages/aicc/AICCLeadsPage.vue'
 import AICCSessionsPage from '@/pages/aicc/AICCSessionsPage.vue'
 import {
   useAICCKnowledgeQuery,
-  useAICCKnowledgeOptionsQuery,
+  useAICCOrganizationConfigQuery,
   useAICCLeadFieldsQuery,
   useAICCSettingsQuery,
   useCreateAICCAgent,
@@ -504,7 +536,7 @@ interface LeadFieldRow extends AICCLeadFieldPayload {
   local_id: string
 }
 
-interface KnowledgeForm extends AICCKnowledgePayload {}
+interface KnowledgeForm extends Pick<AICCKnowledgePayload, 'use_org_knowledge'> {}
 
 interface SettingsForm {
   message_limit_per_session: number
@@ -529,7 +561,7 @@ const { t } = useI18n()
 const settingsQuery = useAICCSettingsQuery(selectedAgentId)
 const leadFieldsQuery = useAICCLeadFieldsQuery(selectedAgentId)
 const knowledgeQuery = useAICCKnowledgeQuery(selectedAgentId)
-const knowledgeOptionsQuery = useAICCKnowledgeOptionsQuery(selectedAgentId)
+const organizationConfigQuery = useAICCOrganizationConfigQuery(consoleContext.selectedOrgId)
 const createMutation = useCreateAICCAgent(consoleContext.selectedOrgId)
 const updateMutation = useUpdateAICCAgent()
 const settingsMutation = useUpdateAICCSettings()
@@ -566,13 +598,31 @@ const settingsForm = reactive<SettingsForm>(emptySettingsForm())
 const leadFieldRows = ref<LeadFieldRow[]>([])
 const knowledgeForm = reactive<KnowledgeForm>(emptyKnowledgeForm())
 const qrDataUrl = ref('')
+// 主表单保存成功后立即更新该快照，知识面板仅保存企业知识开关时不会把刚更新的行业范围回写为旧值。
+const currentAgentIndustryKnowledgeIds = ref<string[]>([])
 
-const industryKnowledgeOptions = computed<SelectOption[]>(() =>
-  (knowledgeOptionsQuery.data.value?.industry_knowledge_bases ?? []).map(item => ({
-    label: item.document_count > 0 ? `${item.name} (${item.document_count})` : item.name,
+const organizationConfigError = computed(() => organizationConfigQuery.error.value instanceof Error
+  ? organizationConfigQuery.error.value
+  : null)
+const isOrganizationConfigReady = computed(() => Boolean(organizationConfigQuery.data.value)
+  && !organizationConfigQuery.isFetching.value
+  && !organizationConfigError.value)
+
+const industryKnowledgeOptions = computed<SelectOption[]>(() => {
+  const authorizedOptions = (organizationConfigQuery.data.value?.industry_knowledge_bases ?? []).map(item => ({
+    label: item.name,
     value: item.id,
-  })),
-)
+  }))
+  const authorizedIds = new Set(authorizedOptions.map(option => option.value))
+  const revokedOptions = form.industry_knowledge_base_ids
+    .filter(id => !authorizedIds.has(id))
+    .map(id => ({
+      label: t('aicc.manager.form.revokedIndustryKnowledge', { id }),
+      value: id,
+      disabled: true,
+    }))
+  return [...authorizedOptions, ...revokedOptions]
+})
 
 const privacyOptions = computed<SelectOption[]>(() => [
   { label: t('aicc.manager.options.privacyNotice'), value: 'notice' },
@@ -600,10 +650,12 @@ const widgetSnippet = computed(() => {
 watch(selectedAgent, (agent) => {
   if (agent) {
     fillForm(agent)
+    currentAgentIndustryKnowledgeIds.value = [...(agent.industry_knowledge_base_ids ?? [])]
     return
   }
   delete form.id
   Object.assign(form, emptyForm())
+  currentAgentIndustryKnowledgeIds.value = []
   feedback.value = ''
 }, { immediate: true })
 
@@ -641,7 +693,6 @@ watch(
     Object.assign(knowledgeForm, knowledge
       ? {
           use_org_knowledge: knowledge.use_org_knowledge,
-          industry_knowledge_base_ids: [...knowledge.industry_knowledge_base_ids],
         }
       : emptyKnowledgeForm())
   },
@@ -678,6 +729,8 @@ function emptyForm(): AgentForm {
     id: undefined,
     name: '',
     scenario: '',
+    persona: '',
+    industry_knowledge_base_ids: [],
     greeting: t('aicc.manager.defaults.greeting'),
     answer_boundary: '',
     privacy_mode: 'notice',
@@ -690,7 +743,6 @@ function emptyForm(): AgentForm {
 function emptyKnowledgeForm(): KnowledgeForm {
   return {
     use_org_knowledge: true,
-    industry_knowledge_base_ids: [],
   }
 }
 
@@ -718,6 +770,8 @@ function fillForm(agent: AICCAgent) {
   form.id = agent.id
   form.name = agent.name
   form.scenario = agent.scenario ?? ''
+  form.persona = agent.persona ?? ''
+  form.industry_knowledge_base_ids = [...(agent.industry_knowledge_base_ids ?? [])]
   form.greeting = agent.greeting ?? ''
   form.answer_boundary = agent.answer_boundary ?? ''
   form.privacy_mode = agent.privacy_mode
@@ -730,6 +784,8 @@ function payloadFromForm(): AICCAgentPayload {
   return {
     name: form.name.trim(),
     scenario: form.scenario?.trim() || undefined,
+    persona: form.persona?.trim() || undefined,
+    industry_knowledge_base_ids: [...form.industry_knowledge_base_ids],
     greeting: form.greeting?.trim() || undefined,
     answer_boundary: form.answer_boundary?.trim() || undefined,
     privacy_mode: form.privacy_mode,
@@ -832,7 +888,8 @@ async function saveKnowledge() {
       agentId: selectedAgent.value.id,
       payload: {
         use_org_knowledge: knowledgeForm.use_org_knowledge,
-        industry_knowledge_base_ids: [...knowledgeForm.industry_knowledge_base_ids],
+        // 行业库选择改由主表单保存；这里回传当前智能体快照，避免单独保存企业知识开关时意外清空行业范围。
+        industry_knowledge_base_ids: [...currentAgentIndustryKnowledgeIds.value],
       },
     })
     setFeedback(t('aicc.manager.feedback.knowledgeSaved'))
@@ -876,13 +933,20 @@ async function submitForm() {
     setFeedback(t('aicc.manager.feedback.missingName'), true)
     return
   }
+  if (!isOrganizationConfigReady.value) {
+    setFeedback(t('aicc.manager.form.configLoadFailed'), true)
+    return
+  }
   try {
     const payload = payloadFromForm()
     const agent = form.id
       ? await updateMutation.mutateAsync({ agentId: form.id, payload })
       : await createMutation.mutateAsync(payload)
     consoleContext.selectAgent(agent.id)
+    // 新建后切换选择会先触发工作台旧缓存的 watcher；等待该轮同步结束，再以保存响应回显当前表单。
+    await nextTick()
     fillForm(agent)
+    currentAgentIndustryKnowledgeIds.value = [...(agent.industry_knowledge_base_ids ?? [])]
     setFeedback(t('aicc.manager.feedback.configSaved'))
   } catch (err) {
     setFeedback(err instanceof Error ? err.message : t('aicc.manager.feedback.saveFailed'), true)

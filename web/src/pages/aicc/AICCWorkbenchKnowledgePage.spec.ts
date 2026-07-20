@@ -55,6 +55,7 @@ function makeAgent(overrides: Partial<AICCAgent> = {}): AICCAgent {
     status: 'active',
     privacy_mode: 'notice',
     retention_days: 180,
+    industry_knowledge_base_ids: [],
     public_token: 'public-token',
     ...overrides,
   }
