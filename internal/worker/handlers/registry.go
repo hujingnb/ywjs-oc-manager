@@ -18,13 +18,32 @@ type HandlerFunc func(ctx context.Context, job sqlc.Job) error
 
 // Registry 是 job_type 到 HandlerFunc 的映射。
 type Registry struct {
-	handlers map[string]HandlerFunc
+	handlers     map[string]HandlerFunc
+	afterSuccess map[string]HandlerFunc
 }
 
 // NewRegistry 创建空的注册表。
 func NewRegistry() *Registry {
-	return &Registry{handlers: map[string]HandlerFunc{}}
+	return &Registry{handlers: map[string]HandlerFunc{}, afterSuccess: map[string]HandlerFunc{}}
 }
+
+// RegisterAfterSuccess 登记任务成功落库后的回调，供依赖 succeeded 生命周期的后继调度使用。
+func (r *Registry) RegisterAfterSuccess(jobType string, fn HandlerFunc) error {
+	if fn == nil {
+		return fmt.Errorf("job 类型 %q 的成功回调不能为空", jobType)
+	}
+	if _, exists := r.handlers[jobType]; !exists {
+		return fmt.Errorf("job 类型 %q 尚未注册 handler", jobType)
+	}
+	if _, exists := r.afterSuccess[jobType]; exists {
+		return fmt.Errorf("job 类型 %q 已注册成功回调", jobType)
+	}
+	r.afterSuccess[jobType] = fn
+	return nil
+}
+
+// LookupAfterSuccess 返回成功落库后的回调；未登记时返回 nil，保持既有 job 行为不变。
+func (r *Registry) LookupAfterSuccess(jobType string) HandlerFunc { return r.afterSuccess[jobType] }
 
 // Register 注册一个 job_type 的处理函数。
 // 重复注册同一类型会返回错误，避免 worker 启动时静默覆盖。

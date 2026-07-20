@@ -52,6 +52,30 @@ func TestAICCPlatformPromptRolloutCoordinatorSkipsWhenActiveJobExists(t *testing
 	}
 }
 
+// TestAICCPlatformPromptRolloutCoordinatorCreatesSuccessorOnlyAfterOldJobSucceeded 验证后继调度的真实生命周期：
+// 旧 hash job 仍 running 时 coordinator 必须跳过；worker 标记 succeeded 后，同一 singleton guard 才创建并通知一个新任务。
+func TestAICCPlatformPromptRolloutCoordinatorCreatesSuccessorOnlyAfterOldJobSucceeded(t *testing.T) {
+	store := &fakePromptRolloutStore{hasActive: true, hasStale: true}
+	notifier := &fakePromptRolloutNotifier{}
+	coordinator := newPromptRolloutCoordinatorForTest(store, notifier)
+
+	// 场景：handler 完成但旧任务仍处于 running，不能过早或重复创建 successor。
+	require.NoError(t, coordinator.EnqueueIfNeeded(context.Background()))
+	assert.Empty(t, store.jobs)
+	assert.Empty(t, notifier.jobIDs)
+
+	// 场景：worker 已将旧任务成功落库，当前 hash 仍有落后客服时恰好创建并通知一个 successor。
+	store.hasActive = false
+	require.NoError(t, coordinator.EnqueueIfNeeded(context.Background()))
+	require.Len(t, store.jobs, 1)
+	assert.Equal(t, []string{store.jobs[0].ID}, notifier.jobIDs)
+
+	// 场景：同一成功后回调被重复触发时，新任务已 active，singleton 语义不再重复创建。
+	require.NoError(t, coordinator.EnqueueIfNeeded(context.Background()))
+	assert.Len(t, store.jobs, 1)
+	assert.Len(t, notifier.jobIDs, 1)
+}
+
 // TestAICCPlatformPromptRolloutCoordinatorPropagatesStoreErrors 验证检查或创建任务失败会阻止启动，不能静默遗漏提示词下发。
 func TestAICCPlatformPromptRolloutCoordinatorPropagatesStoreErrors(t *testing.T) {
 	for _, testCase := range []struct {

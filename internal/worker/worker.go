@@ -157,6 +157,13 @@ func (w *Worker) processJobID(ctx context.Context, id string) error {
 	if err := w.store.MarkJobSucceeded(ctx, job.ID); err != nil {
 		return fmt.Errorf("标记 job 成功失败: %w", err)
 	}
+	// 后继调度必须在 succeeded 事实落库后执行；running 旧任务仍会被 singleton 协调器视为活跃，
+	// 从而拒绝创建当前提示词 hash 的 successor。
+	if afterSuccess := w.registry.LookupAfterSuccess(job.Type); afterSuccess != nil {
+		if err := afterSuccess(ctx, job); err != nil {
+			return fmt.Errorf("job 成功后回调失败: %w", err)
+		}
+	}
 	return nil
 }
 

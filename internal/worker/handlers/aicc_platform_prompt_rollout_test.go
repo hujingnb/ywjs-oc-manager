@@ -79,20 +79,6 @@ func TestAICCPlatformPromptRolloutDefersWhenModelRolloutOwnsSameApp(t *testing.T
 	assert.Empty(t, store.appPhases)
 }
 
-// TestAICCPlatformPromptRolloutEnqueuesSuccessorForCurrentHash 验证旧目标 hash 已完成时，
-// handler 通过 singleton 协调器检查当前 hash 落后客服并只创建一个后继任务。
-func TestAICCPlatformPromptRolloutEnqueuesSuccessorForCurrentHash(t *testing.T) {
-	events := []string{}
-	store := newPromptRolloutStore("old-hash", "old-target")
-	store.events = &events
-	successor := &fakePromptRolloutSuccessor{}
-	handler := NewAICCPlatformPromptRolloutHandler(store, &aiccPromptRolloutOrchestrator{events: &events, generation: 7}, time.Second)
-	handler.SetSuccessorEnqueuer(successor)
-
-	require.NoError(t, handler.Handle(context.Background(), promptRolloutJob(t, "old-target")))
-	assert.Equal(t, 1, successor.calls)
-}
-
 // TestAICCPlatformPromptRolloutPersistsMarkerBeforeRestartFailure 验证 restart 失败时 ownership marker
 // 已落库；后续 job 重试从 generation=0 marker 恢复，而不会丢失本次待重启客服。
 func TestAICCPlatformPromptRolloutPersistsMarkerBeforeRestartFailure(t *testing.T) {
@@ -164,12 +150,6 @@ type aiccRolloutOwner struct {
 	jobType string
 	active  bool
 }
-
-// fakePromptRolloutSuccessor 记录 handler 完成旧 hash 后是否请求协调器检查后继任务。
-type fakePromptRolloutSuccessor struct{ calls int }
-
-// EnqueueIfNeeded 满足后继协调器接口；真实实现会在 singleton guard 事务中去重创建任务。
-func (f *fakePromptRolloutSuccessor) EnqueueIfNeeded(context.Context) error { f.calls++; return nil }
 
 // newPromptRolloutStore 创建一台默认 active 客服；oldHash 表示 bootstrap 更新前的 app 状态。
 func newPromptRolloutStore(oldHash, bootstrapHash string) *promptRolloutStore {

@@ -37,11 +37,6 @@ type AICCPlatformPromptRolloutStore interface {
 	ReleaseAICCRolloutAppOwnershipByOwner(ctx context.Context, arg sqlc.ReleaseAICCRolloutAppOwnershipByOwnerParams) (int64, error)
 }
 
-// AICCPlatformPromptRolloutSuccessorEnqueuer 在旧 hash 下发完成后，检查是否需为当前 hash 创建后继任务。
-type AICCPlatformPromptRolloutSuccessorEnqueuer interface {
-	EnqueueIfNeeded(ctx context.Context) error
-}
-
 // AICCPlatformPromptRolloutPayload 是全局提示词任务的最小载荷。
 type AICCPlatformPromptRolloutPayload struct {
 	// TargetPromptHash 是本轮必须由 bootstrap 写入 app 的平台提示词 hash。
@@ -56,15 +51,9 @@ type AICCPlatformPromptRolloutPayload struct {
 
 // AICCPlatformPromptRolloutHandler 逐台滚动重启提示词 hash 落后的 AICC Deployment。
 type AICCPlatformPromptRolloutHandler struct {
-	store     AICCPlatformPromptRolloutStore
-	orch      k8sorch.Orchestrator
-	timeout   time.Duration
-	successor AICCPlatformPromptRolloutSuccessorEnqueuer
-}
-
-// SetSuccessorEnqueuer 注入 singleton 协调器；服务启动时设置，避免 worker 直接复制创建去重逻辑。
-func (h *AICCPlatformPromptRolloutHandler) SetSuccessorEnqueuer(enqueuer AICCPlatformPromptRolloutSuccessorEnqueuer) {
-	h.successor = enqueuer
+	store   AICCPlatformPromptRolloutStore
+	orch    k8sorch.Orchestrator
+	timeout time.Duration
 }
 
 // NewAICCPlatformPromptRolloutHandler 构造独立 handler；依赖缺失会在执行时返回可重试诊断错误。
@@ -129,11 +118,6 @@ func (h *AICCPlatformPromptRolloutHandler) Handle(ctx context.Context, job sqlc.
 			return aiccPlatformPromptRolloutStageError("-", "list_pending", err)
 		}
 		if len(agents) == 0 {
-			if h.successor != nil {
-				if err := h.successor.EnqueueIfNeeded(ctx); err != nil {
-					return aiccPlatformPromptRolloutStageError("-", "enqueue_successor", err)
-				}
-			}
 			return nil
 		}
 		agent := agents[0]

@@ -50,6 +50,7 @@ import (
 	"oc-manager/internal/scheduler"
 	"oc-manager/internal/service"
 	"oc-manager/internal/store"
+	"oc-manager/internal/store/sqlc"
 	"oc-manager/internal/worker"
 	aiccworker "oc-manager/internal/worker/aicc"
 	"oc-manager/internal/worker/handlers"
@@ -599,9 +600,15 @@ func runManager(ctx context.Context, cfg config.Config, logOut io.Writer) error 
 	aiccPlatformPromptRolloutCoordinator := service.NewAICCPlatformPromptRolloutCoordinator(
 		store.NewAICCPlatformPromptRolloutRunner(dbStore), redisQueue,
 	)
-	aiccPlatformPromptRolloutHandler.SetSuccessorEnqueuer(aiccPlatformPromptRolloutCoordinator)
 	if err := aiccPlatformPromptRolloutCoordinator.EnqueueIfNeeded(ctx); err != nil {
 		return fmt.Errorf("启动 AICC 平台提示词下发任务失败: %w", err)
+	}
+	// 旧 hash rollout 只有被 worker 标记 succeeded 后，协调器才不会把它视为活跃任务；
+	// 此回调在成功落库后检查当前 hash 是否还需创建唯一后继任务。
+	if err := registry.RegisterAfterSuccess(domain.JobTypeAICCPlatformPromptRollout, func(callbackCtx context.Context, _ sqlc.Job) error {
+		return aiccPlatformPromptRolloutCoordinator.EnqueueIfNeeded(callbackCtx)
+	}); err != nil {
+		return fmt.Errorf("注册 aicc_platform_prompt_rollout 成功后回调失败: %w", err)
 	}
 	// 生命周期 handler 走 k8s 编排（appOrchestrator + ObjectStore）：传入上方构造的真实 orch
 	// （未启用 k8s 时为 nil，handler 内部已做守卫）。

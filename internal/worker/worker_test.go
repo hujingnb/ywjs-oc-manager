@@ -36,6 +36,24 @@ func TestWorkerTickMarksSuccess(t *testing.T) {
 	require.Equal(t, domain.JobStatusSucceeded, store.snapshot("job-1").Status)
 }
 
+// TestWorkerTickRunsSuccessCallbackAfterSucceeded 验证后继调度回调只能在 job 成功状态已落库后运行，
+// 避免平台提示词 coordinator 将仍 running 的旧任务误判为活跃而跳过 successor。
+func TestWorkerTickRunsSuccessCallbackAfterSucceeded(t *testing.T) {
+	store := newJobStoreStub(t)
+	registry := handlers.NewRegistry()
+	registry.MustRegister("prompt-rollout", func(context.Context, sqlc.Job) error { return nil })
+	callbackSawSucceeded := false
+	require.NoError(t, registry.RegisterAfterSuccess("prompt-rollout", func(_ context.Context, job sqlc.Job) error {
+		_, current := store.findByID(job.ID)
+		callbackSawSucceeded = current.Status == domain.JobStatusSucceeded
+		return nil
+	}))
+	store.put("job-1", sqlc.Job{ID: store.id("job-1"), Type: "prompt-rollout", Status: domain.JobStatusPending, MaxAttempts: 3})
+
+	require.NoError(t, New(store, &queueStub{ids: []string{store.id("job-1")}}, registry, Config{WorkerID: "w1"}).Tick(context.Background()))
+	assert.True(t, callbackSawSucceeded)
+}
+
 // TestWorkerTickRetriesUntilMaxAttempts 验证workerTickRetriesUntil最大Attempts的边界条件场景。
 func TestWorkerTickRetriesUntilMaxAttempts(t *testing.T) {
 	store := newJobStoreStub(t)
