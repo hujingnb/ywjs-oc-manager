@@ -41,25 +41,14 @@ func EnsureInitJob(ctx context.Context, store InitJobStore, appID string) (strin
 		return "", fmt.Errorf("查 job: %w", err)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
-		// 历史从未建过 app_initialize job，新建一份。payload 只含 app_id（k8s 路径按 appID 寻址）。
-		payload, perr := json.Marshal(map[string]any{"app_id": appID})
-		if perr != nil {
-			return "", fmt.Errorf("序列化 payload: %w", perr)
-		}
-		newID := uuid.NewString()
-		if cerr := store.CreateJob(ctx, sqlc.CreateJobParams{
-			ID:          newID,
-			Type:        domain.JobTypeAppInitialize,
-			Priority:    100,
-			RunAfter:    time.Now(),
-			MaxAttempts: 3,
-			PayloadJson: payload,
-		}); cerr != nil {
-			return "", fmt.Errorf("CreateJob: %w", cerr)
-		}
-		return newID, nil
+		return createInitJob(ctx, store, appID)
 	}
 	if job.Status == domain.JobStatusPending {
+		// 历史 worker 异常可能留下 attempts 已耗尽但仍 pending 的任务；
+		// scheduler 会拒绝再次领取它，必须创建新任务而不是复用死任务。
+		if job.MaxAttempts > 0 && job.Attempts >= job.MaxAttempts {
+			return createInitJob(ctx, store, appID)
+		}
 		// 已 pending 不动 status，但仍返回 ID 让上层 Enqueue 一次。
 		return job.ID, nil
 	}
@@ -67,4 +56,20 @@ func EnsureInitJob(ctx context.Context, store InitJobStore, appID string) (strin
 		return "", fmt.Errorf("RequeueJob: %w", err)
 	}
 	return job.ID, nil
+}
+
+// createInitJob 为历史耗尽任务创建新的初始化任务；旧任务保留审计记录，新任务承担后续重试。
+func createInitJob(ctx context.Context, store InitJobStore, appID string) (string, error) {
+	payload, err := json.Marshal(map[string]any{"app_id": appID})
+	if err != nil {
+		return "", fmt.Errorf("序列化 payload: %w", err)
+	}
+	jobID := uuid.NewString()
+	if err := store.CreateJob(ctx, sqlc.CreateJobParams{
+		ID: jobID, Type: domain.JobTypeAppInitialize, Priority: 100,
+		RunAfter: time.Now(), MaxAttempts: 20, PayloadJson: payload,
+	}); err != nil {
+		return "", fmt.Errorf("CreateJob: %w", err)
+	}
+	return jobID, nil
 }
