@@ -67,7 +67,13 @@ class ManagerAPI:
         """经登录使用的同一 Ingress 等待 manager 健康入口在总预算内就绪。"""
         # 绝对 deadline 覆盖请求与有限退避，避免入口异常时突破调用方总等待预算。
         deadline = self.monotonic() + timeout
-        payload = self.get("/healthz", deadline=deadline)
+        payload = self._request(
+            "GET",
+            "/healthz",
+            None,
+            authenticated=False,
+            deadline=deadline,
+        )
         # 只有明确的 ok 对象才可进入登录；模糊健康状态不得触发不可重放的 POST。
         if not isinstance(payload, dict) or payload.get("status") != "ok":
             raise APIError(
@@ -133,20 +139,38 @@ class ManagerAPI:
             try:
                 request_timeout = self._request_timeout(deadline, operation)
                 with urllib.request.urlopen(request, timeout=request_timeout) as response:
-                    payload = json.load(response)
-                    self._raise_if_deadline_exhausted(deadline, operation)
+                    payload = self._read_json_response(
+                        response,
+                        deadline,
+                        operation,
+                    )
                     # manager handler 直接返回顶层业务对象，不额外包装 data envelope。
                     return payload
             except urllib.error.HTTPError as error:
                 # 仅 GET 的指定瞬时状态可重试，避免 POST/PATCH 被服务端重复执行。
-                if method == "GET" and error.code in TRANSIENT_STATUSES and attempt < len(retry_delays):
-                    # 重试前主动释放错误响应及底层连接，不依赖解释器引用计数时机。
+                should_retry = (
+                    method == "GET"
+                    and error.code in TRANSIENT_STATUSES
+                    and attempt < len(retry_delays)
+                )
+                terminal_error = None
+                try:
+                    if not should_retry:
+                        terminal_error = self._api_error(
+                            operation,
+                            error,
+                            deadline,
+                        )
+                finally:
+                    # 所有 HTTPError 均统一关闭，终态错误也不得泄漏响应连接。
                     error.close()
+
+                if should_retry:
                     self._sleep_before_retry(
                         retry_delays[attempt], deadline, operation
                     )
                     continue
-                raise self._api_error(operation, error) from None
+                raise terminal_error from None
             except (urllib.error.URLError, OSError, http.client.HTTPException):
                 # 连接异常同样只允许 GET 退避；写入无法判断服务端是否已经提交。
                 if method == "GET" and attempt < len(retry_delays):
@@ -173,6 +197,62 @@ class ManagerAPI:
             raise RequestDeadlineExceeded(operation)
         return timeout
 
+    def _read_json_response(self, response, deadline, operation):
+        """在绝对预算内读取成功响应，并将非法 JSON 统一映射为安全 APIError。"""
+        status = self._response_status(response)
+        try:
+            response_body = self._read_response_body(
+                response,
+                deadline,
+                operation,
+            )
+            return json.loads(response_body)
+        except (
+            json.JSONDecodeError,
+            UnicodeDecodeError,
+            http.client.IncompleteRead,
+        ):
+            raise APIError(
+                operation,
+                status,
+                "invalid_response",
+                "manager 响应格式异常",
+            ) from None
+
+    def _read_response_body(self, response, deadline, operation):
+        """分段读取响应体，并在每次阻塞读取前后执行绝对 deadline 校验。"""
+        chunks = []
+        read1 = getattr(response, "read1", None)
+        while True:
+            self._raise_if_deadline_exhausted(deadline, operation)
+            self._limit_response_read_timeout(response, deadline, operation)
+            # HTTPResponse.read1 只取当前可用字节；普通 file-like 退化为单字节读取。
+            chunk = read1(64 * 1024) if callable(read1) else response.read(1)
+            self._raise_if_deadline_exhausted(deadline, operation)
+            if not chunk:
+                return b"".join(chunks)
+            chunks.append(chunk)
+
+    def _limit_response_read_timeout(self, response, deadline, operation):
+        """按剩余预算收紧真实 HTTPResponse socket，避免单次读取越过 deadline。"""
+        if deadline is None:
+            return
+        timeout = self._request_timeout(deadline, operation)
+        response_fp = getattr(response, "fp", None)
+        raw_stream = getattr(response_fp, "raw", None)
+        response_socket = getattr(raw_stream, "_sock", None)
+        if response_socket is not None:
+            response_socket.settimeout(timeout)
+
+    @staticmethod
+    def _response_status(response):
+        """兼容 HTTPResponse 与测试 file-like，提取可安全写入 APIError 的状态码。"""
+        status = getattr(response, "status", None)
+        getcode = getattr(response, "getcode", None)
+        if status is None and callable(getcode):
+            status = getcode()
+        return status
+
     def _sleep_before_retry(self, delay, deadline, operation):
         """将 GET 退避截断到剩余预算，并在睡后阻止 deadline 外的新请求。"""
         if deadline is None:
@@ -192,14 +272,19 @@ class ManagerAPI:
         if deadline is not None and self.monotonic() >= deadline:
             raise RequestDeadlineExceeded(operation)
 
-    @staticmethod
-    def _api_error(operation, error):
+    def _api_error(self, operation, error, deadline):
         """从 HTTP 错误响应中只提取 code/message，丢弃可能含敏感信息的其余字段。"""
         try:
-            payload = json.load(error)
+            response_body = self._read_response_body(
+                error,
+                deadline,
+                operation,
+            )
+            payload = json.loads(response_body)
         except (
             json.JSONDecodeError,
             UnicodeDecodeError,
+            http.client.IncompleteRead,
             http.client.HTTPException,
             OSError,
         ):

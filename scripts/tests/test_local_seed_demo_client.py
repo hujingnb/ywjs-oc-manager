@@ -5,6 +5,7 @@ import io
 import os
 import socket
 import threading
+import time
 import unittest
 import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -39,6 +40,26 @@ class _DeadlineClock:
         self.now += seconds
 
 
+class _ReadOnlyResponse:
+    """模拟仅实现 read 的最小 file-like 响应，验证非 HTTPResponse 回退路径。"""
+
+    def __init__(self, body):
+        """保存响应字节，并提供 urlopen 上下文管理器所需的关闭语义。"""
+        self.body = io.BytesIO(body)
+
+    def read(self, size=-1):
+        """按调用方指定大小读取，刻意不提供 HTTPResponse.read1。"""
+        return self.body.read(size)
+
+    def __enter__(self):
+        """返回当前响应供 with 块读取。"""
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        """退出 with 块时关闭底层字节流。"""
+        self.body.close()
+
+
 class _ScenarioHandler(BaseHTTPRequestHandler):
     """按测试场景提供最小 HTTP 行为，并只保留协议断言需要的请求信息。"""
 
@@ -68,9 +89,22 @@ class _ScenarioHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(response_body)
 
+    def _send_bytes(self, status, content_type, response_body):
+        """发送测试指定的原始响应体，用于覆盖成功状态下的非法 JSON 编码。"""
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(response_body)))
+        self.end_headers()
+        self.wfile.write(response_body)
+
     def do_GET(self):
         """提供健康检查、认证读取和瞬时失败恢复等只读服务端分支。"""
         self._record_request()
+
+        # 正常健康场景用于独立验证固定路径、匿名请求和默认 deadline。
+        if self.server.scenario == "health_ok":
+            self._send_json(200, {"status": "ok"})
+            return
 
         # 健康检查重试场景第一次模拟 Traefik 暂无 Endpoint 返回的瞬时 502。
         if (
@@ -91,6 +125,37 @@ class _ScenarioHandler(BaseHTTPRequestHandler):
         # 健康检查返回非 ok 状态时仍属于无效响应，不应继续轮询或发起登录。
         if self.server.scenario == "health_invalid":
             self._send_json(200, {"status": "starting"})
+            return
+
+        # HTML 成功响应不属于 manager JSON 契约，客户端必须转为安全 APIError。
+        if self.server.scenario == "health_html":
+            self._send_bytes(200, "text/html", b"<html>bad gateway</html>")
+            return
+
+        # 语法截断的 JSON 即使 HTTP 200，也不能让 JSONDecodeError 逃出客户端边界。
+        if self.server.scenario == "health_truncated_json":
+            self._send_bytes(200, "application/json", b'{"status":"ok"')
+            return
+
+        # 非法 UTF-8 JSON 必须与其他成功响应解析失败使用相同的安全错误。
+        if self.server.scenario == "health_invalid_utf8":
+            self._send_bytes(200, "application/json", b'{"status":"\xff"}')
+            return
+
+        # 每 50ms 仅发送一个字节，复现单次 socket timeout 被持续小包续命的问题。
+        if self.server.scenario == "health_slow_trickle":
+            response_body = b'{"status":"ok"}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(response_body)))
+            self.end_headers()
+            for byte in response_body:
+                time.sleep(0.05)
+                try:
+                    self.wfile.write(bytes([byte]))
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    return
             return
 
         # 登录场景只允许读取助手版本，用于验证 Bearer token 会自动附加。
@@ -261,6 +326,10 @@ class ManagerAPITest(unittest.TestCase):
             ["GET", "GET"],
             [request["method"] for request in server.requests],
         )
+        self.assertEqual(
+            ["/healthz", "/healthz"],
+            [request["path"] for request in server.requests],
+        )
 
     # 覆盖健康接口返回非 ok 业务状态，要求立即拒绝且不重复健康检查。
     def test_wait_ready_rejects_non_ok_envelope(self):
@@ -275,6 +344,87 @@ class ManagerAPITest(unittest.TestCase):
         self.assertEqual("invalid_health_response", raised.exception.code)
         self.assertEqual(1, len(server.requests))
         self.assertEqual("GET", server.requests[0]["method"])
+        self.assertEqual("/healthz", server.requests[0]["path"])
+
+    # 覆盖客户端已有访问令牌时的健康检查，固定路径仍必须匿名且不泄露 Bearer token。
+    def test_wait_ready_uses_anonymous_health_path(self):
+        server = self._start_server("health_ok")
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        client = ManagerAPI(base_url)
+        client.access_token = "existing-token"
+
+        self.assertEqual({"status": "ok"}, client.wait_ready())
+
+        self.assertEqual(1, len(server.requests))
+        self.assertEqual("GET", server.requests[0]["method"])
+        self.assertEqual("/healthz", server.requests[0]["path"])
+        self.assertIsNone(server.requests[0]["authorization"])
+
+    # 覆盖 wait_ready 默认总预算，要求首次请求得到约 60 秒剩余 timeout。
+    def test_wait_ready_uses_default_sixty_second_deadline(self):
+        clock = _DeadlineClock()
+        response = io.BytesIO(b'{"status":"ok"}')
+        client = ManagerAPI("http://manager.test", monotonic=clock.monotonic)
+
+        with mock.patch("urllib.request.urlopen", return_value=response) as urlopen:
+            self.assertEqual({"status": "ok"}, client.wait_ready())
+
+        self.assertEqual(1, urlopen.call_count)
+        self.assertAlmostEqual(60, urlopen.call_args.kwargs["timeout"])
+
+    # 覆盖持续小包响应不能续命：0.2 秒绝对预算应在宽松的 0.5 秒上限内中止读取。
+    def test_wait_ready_deadline_interrupts_slow_trickle_response(self):
+        server = self._start_server("health_slow_trickle")
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        client = ManagerAPI(base_url)
+        started_at = time.monotonic()
+
+        with self.assertRaises(client_module.RequestDeadlineExceeded):
+            client.wait_ready(timeout=0.2)
+
+        elapsed = time.monotonic() - started_at
+        self.assertLess(elapsed, 0.5)
+        self.assertEqual(1, len(server.requests))
+
+    # 覆盖 HTTP 200 HTML，要求映射为固定安全字段而非暴露 JSON 解析异常或响应体。
+    def test_success_html_response_raises_safe_api_error(self):
+        server = self._start_server("health_html")
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        client = ManagerAPI(base_url)
+
+        with self.assertRaises(APIError) as raised:
+            client.wait_ready()
+
+        self.assertEqual(200, raised.exception.status)
+        self.assertEqual("invalid_response", raised.exception.code)
+        self.assertEqual("manager 响应格式异常", raised.exception.safe_message)
+        self.assertNotIn("bad gateway", str(raised.exception))
+
+    # 覆盖 HTTP 200 截断 JSON，要求复用成功响应的安全解析错误边界。
+    def test_success_truncated_json_raises_safe_api_error(self):
+        server = self._start_server("health_truncated_json")
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        client = ManagerAPI(base_url)
+
+        with self.assertRaises(APIError) as raised:
+            client.wait_ready()
+
+        self.assertEqual(200, raised.exception.status)
+        self.assertEqual("invalid_response", raised.exception.code)
+        self.assertEqual("manager 响应格式异常", raised.exception.safe_message)
+
+    # 覆盖 HTTP 200 非法 UTF-8 JSON，要求复用成功响应的安全解析错误边界。
+    def test_success_invalid_utf8_raises_safe_api_error(self):
+        server = self._start_server("health_invalid_utf8")
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        client = ManagerAPI(base_url)
+
+        with self.assertRaises(APIError) as raised:
+            client.wait_ready()
+
+        self.assertEqual(200, raised.exception.status)
+        self.assertEqual("invalid_response", raised.exception.code)
+        self.assertEqual("manager 响应格式异常", raised.exception.safe_message)
 
     # 覆盖 GET 持续收到瞬时状态直至耗尽，锁定五档退避、六次请求和最终 APIError。
     def test_get_transient_status_exhausts_finite_backoff(self):
@@ -320,6 +470,45 @@ class ManagerAPITest(unittest.TestCase):
         self.assertEqual(1, len(server.requests))
         self.assertEqual(400, raised.exception.status)
         self.assertEqual("bad_request", raised.exception.code)
+
+    # 覆盖非瞬时 HTTPError 的终态分支，解析安全错误后必须关闭底层响应流。
+    def test_non_transient_http_error_closes_response(self):
+        error_body = io.BytesIO(b'{"code":"bad_request"}')
+        error = urllib.error.HTTPError(
+            "http://manager.test/resource",
+            400,
+            "bad request",
+            None,
+            error_body,
+        )
+        client = ManagerAPI("http://manager.test")
+
+        with mock.patch("urllib.request.urlopen", side_effect=error):
+            with self.assertRaises(APIError):
+                client.get("/resource")
+
+        self.assertTrue(error_body.closed)
+
+    # 覆盖瞬时 HTTPError 耗尽后的终态分支，包含最后一次在内的所有错误流均须关闭。
+    def test_exhausted_transient_http_errors_close_all_responses(self):
+        error_bodies = [io.BytesIO(b'{"code":"temporary"}') for _ in range(6)]
+        errors = [
+            urllib.error.HTTPError(
+                "http://manager.test/resource",
+                503,
+                "unavailable",
+                None,
+                error_body,
+            )
+            for error_body in error_bodies
+        ]
+        client = ManagerAPI("http://manager.test", sleep=lambda _: None)
+
+        with mock.patch("urllib.request.urlopen", side_effect=errors):
+            with self.assertRaises(APIError):
+                client.get("/resource")
+
+        self.assertTrue(all(error_body.closed for error_body in error_bodies))
 
     # 覆盖错误响应为 JSON null 的合法编码，要求降级为安全默认 APIError。
     def test_http_error_with_json_null_uses_safe_defaults(self):
@@ -400,6 +589,21 @@ class ManagerAPITest(unittest.TestCase):
         self.assertEqual(1, urlopen.call_count)
         self.assertGreater(urlopen.call_args.kwargs["timeout"], 0)
         self.assertAlmostEqual(0.25, urlopen.call_args.kwargs["timeout"])
+
+    # 覆盖测试替身等仅实现 read 的 file-like 响应，deadline 读取器必须安全回退。
+    def test_get_deadline_reader_falls_back_without_read1(self):
+        clock = _DeadlineClock()
+        response = _ReadOnlyResponse(b'{"ok":true}')
+        client = ManagerAPI(
+            "http://manager.test",
+            monotonic=clock.monotonic,
+        )
+
+        with mock.patch("urllib.request.urlopen", return_value=response):
+            result = client.get("/healthz", deadline=1)
+
+        self.assertEqual({"ok": True}, result)
+        self.assertTrue(response.body.closed)
 
     # 覆盖瞬时错误后的退避超过剩余预算：sleep 截断，耗尽后不得发送第二次 GET。
     def test_get_deadline_truncates_backoff_and_forbids_retry(self):
