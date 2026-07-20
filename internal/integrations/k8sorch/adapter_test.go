@@ -10,6 +10,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	autoscalingv2beta2 "k8s.io/api/autoscaling/v2beta2"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -281,6 +282,8 @@ func TestEnsureAppAICCIgnoresUnavailableHPAAPI(t *testing.T) {
 			switch object := create.GetObject().(type) {
 			case *autoscalingv2.HorizontalPodAutoscaler:
 				name = object.Name
+			case *autoscalingv2beta2.HorizontalPodAutoscaler:
+				return false, nil, nil
 			case *autoscalingv1.HorizontalPodAutoscaler:
 				return false, nil, nil
 			}
@@ -294,12 +297,11 @@ func TestEnsureAppAICCIgnoresUnavailableHPAAPI(t *testing.T) {
 	require.NoError(t, a.EnsureApp(context.Background(), app))
 	_, err := cs.AppsV1().Deployments("oc-aicc").Get(context.Background(), "app-a1", metav1.GetOptions{})
 	require.NoError(t, err)
-	hpa, err := cs.AutoscalingV1().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-a1", metav1.GetOptions{})
+	hpa, err := cs.AutoscalingV2beta2().HorizontalPodAutoscalers("oc-aicc").Get(context.Background(), "app-a1", metav1.GetOptions{})
 	require.NoError(t, err)
-	assert.Contains(t, hpa.Annotations["autoscaling.alpha.kubernetes.io/metrics"], `"name":"memory"`)
-	assert.NotContains(t, hpa.Annotations["autoscaling.alpha.kubernetes.io/metrics"], `"name":"cpu"`)
-	require.NotNil(t, hpa.Spec.TargetCPUUtilizationPercentage)
-	assert.Equal(t, int32(70), *hpa.Spec.TargetCPUUtilizationPercentage)
+	require.Len(t, hpa.Spec.Metrics, 2)
+	assert.Equal(t, corev1.ResourceCPU, hpa.Spec.Metrics[0].Resource.Name)
+	assert.Equal(t, corev1.ResourceMemory, hpa.Spec.Metrics[1].Resource.Name)
 }
 
 // TestEnsureAppAICCRequestsStableHPAGVR 通过 fake client 的 action 记录验证，

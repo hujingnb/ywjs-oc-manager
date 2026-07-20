@@ -12,6 +12,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	autoscalingv2beta2 "k8s.io/api/autoscaling/v2beta2"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -97,7 +98,7 @@ func (a *KubernetesAdapter) applyHPA(ctx context.Context, h *autoscalingv2.Horiz
 	if apierrors.IsNotFound(err) {
 		_, cerr := api.Create(ctx, h, metav1.CreateOptions{})
 		if apierrors.IsNotFound(cerr) {
-			return a.applyHPAAutoscalingV1(ctx, h)
+			return a.applyHPAAutoscalingV2Beta2(ctx, h)
 		}
 		return wrapK8s("创建 HPA", cerr)
 	}
@@ -107,12 +108,52 @@ func (a *KubernetesAdapter) applyHPA(ctx context.Context, h *autoscalingv2.Horiz
 	h.ResourceVersion = existing.ResourceVersion
 	_, uerr := api.Update(ctx, h, metav1.UpdateOptions{})
 	if apierrors.IsNotFound(uerr) {
-		return a.applyHPAAutoscalingV1(ctx, h)
+		return a.applyHPAAutoscalingV2Beta2(ctx, h)
 	}
 	return wrapK8s("更新 HPA", uerr)
 }
 
-// applyHPAAutoscalingV1 在老集群未提供 autoscaling/v2 时保留已有 v1 HPA。
+// applyHPAAutoscalingV2Beta2 兼容线上老集群：其 API Server 尚未提供 autoscaling/v2，
+// 但支持 v2beta2 原生多指标，因此 CPU、内存和缩容稳定窗口都可完整表达。
+func (a *KubernetesAdapter) applyHPAAutoscalingV2Beta2(ctx context.Context, h *autoscalingv2.HorizontalPodAutoscaler) error {
+	api := a.client.AutoscalingV2beta2().HorizontalPodAutoscalers(a.namespace)
+	minReplicas := int32(1)
+	stabilizationWindowSeconds := int32(600)
+	hpa := &autoscalingv2beta2.HorizontalPodAutoscaler{
+		ObjectMeta: metav1.ObjectMeta{Name: h.Name, Namespace: h.Namespace, Labels: h.Labels},
+		Spec: autoscalingv2beta2.HorizontalPodAutoscalerSpec{
+			ScaleTargetRef: autoscalingv2beta2.CrossVersionObjectReference{APIVersion: "apps/v1", Kind: "Deployment", Name: h.Spec.ScaleTargetRef.Name},
+			MinReplicas:    &minReplicas,
+			MaxReplicas:    h.Spec.MaxReplicas,
+			Metrics: []autoscalingv2beta2.MetricSpec{
+				{Type: autoscalingv2beta2.ResourceMetricSourceType, Resource: &autoscalingv2beta2.ResourceMetricSource{Name: corev1.ResourceCPU, Target: autoscalingv2beta2.MetricTarget{Type: autoscalingv2beta2.UtilizationMetricType, AverageUtilization: int32Ptr(70)}}},
+				{Type: autoscalingv2beta2.ResourceMetricSourceType, Resource: &autoscalingv2beta2.ResourceMetricSource{Name: corev1.ResourceMemory, Target: autoscalingv2beta2.MetricTarget{Type: autoscalingv2beta2.UtilizationMetricType, AverageUtilization: int32Ptr(75)}}},
+			},
+			Behavior: &autoscalingv2beta2.HorizontalPodAutoscalerBehavior{
+				ScaleDown: &autoscalingv2beta2.HPAScalingRules{StabilizationWindowSeconds: &stabilizationWindowSeconds},
+			},
+		},
+	}
+	existing, err := api.Get(ctx, hpa.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		_, err = api.Create(ctx, hpa, metav1.CreateOptions{})
+		if apierrors.IsNotFound(err) {
+			return a.applyHPAAutoscalingV1(ctx, h)
+		}
+		return wrapK8s("创建 autoscaling/v2beta2 HPA", err)
+	}
+	if err != nil {
+		return wrapK8s("查询 autoscaling/v2beta2 HPA", err)
+	}
+	hpa.ResourceVersion = existing.ResourceVersion
+	_, err = api.Update(ctx, hpa, metav1.UpdateOptions{})
+	if apierrors.IsNotFound(err) {
+		return a.applyHPAAutoscalingV1(ctx, h)
+	}
+	return wrapK8s("更新 autoscaling/v2beta2 HPA", err)
+}
+
+// applyHPAAutoscalingV1 是既不支持 v2、也不支持 v2beta2 时的最终兼容路径。
 // v1 结构无法表达 v2 的多指标配置；已有对象可能通过历史 annotation 提供内存扩缩容，不能覆盖。
 func (a *KubernetesAdapter) applyHPAAutoscalingV1(ctx context.Context, h *autoscalingv2.HorizontalPodAutoscaler) error {
 	api := a.client.AutoscalingV1().HorizontalPodAutoscalers(a.namespace)
