@@ -251,6 +251,65 @@ func TestAICCMigrationGuardrails(t *testing.T) {
 	assert.Greater(t, dropDocumentIndex, dropKnowledgeIndex)
 }
 
+// TestAICCAssistantVersionIsolationMigration 验证 AICC 配置迁出组织主表、隐藏应用解除版本绑定且可回滚。
+func TestAICCAssistantVersionIsolationMigration(t *testing.T) {
+	upBytes, err := FS.ReadFile("000040_aicc_assistant_version_isolation.up.sql")
+	require.NoError(t, err)
+	downBytes, err := FS.ReadFile("000040_aicc_assistant_version_isolation.down.sql")
+	require.NoError(t, err)
+	up, down := string(upBytes), string(downBytes)
+
+	// 缺少有效首版本的启用企业必须在任何永久 DDL 前由临时 CHECK guard 拒绝，避免留下半迁移 schema。
+	guardIndex := strings.Index(up, "CREATE TEMPORARY TABLE aicc_version_isolation_guard")
+	configTableIndex := strings.Index(up, "CREATE TABLE organization_aicc_configs")
+	require.NotEqual(t, -1, guardIndex)
+	require.NotEqual(t, -1, configTableIndex)
+	assert.Less(t, guardIndex, configTableIndex)
+
+	// 独立配置表必须约束启用企业拥有非空模型，并通过 revision 驱动智能体异步追平配置。
+	assert.Contains(t, up, "CREATE TABLE organization_aicc_configs")
+	assert.Contains(t, up, "revision INT NOT NULL DEFAULT 1")
+	assert.Contains(t, up, "CONSTRAINT organization_aicc_configs_revision_check")
+	assert.Contains(t, up, "CONSTRAINT organization_aicc_configs_enabled_model_check")
+	assert.Contains(t, up, "ADD COLUMN persona TEXT NULL")
+	assert.Contains(t, up, "ADD COLUMN applied_config_revision INT NOT NULL DEFAULT 0")
+
+	// 备份表只保存回滚所需的原始映射，不能继续用外键把 AICC app 绑定到助手版本生命周期。
+	assert.Contains(t, up, "CREATE TABLE aicc_version_isolation_backups")
+	assert.NotContains(t, up, "fk_aicc_version_isolation_backups_version")
+	assert.Contains(t, up, "UPDATE apps SET version_id = NULL WHERE app_type = 'aicc'")
+
+	// 配置回填完成后删除组织旧列，并为模型 rollout 放宽 jobs 类型约束。
+	assert.Contains(t, up, "DROP CHECK organizations_aicc_agent_limit_check")
+	assert.Contains(t, up, "DROP COLUMN aicc_enabled")
+	assert.Contains(t, up, "DROP COLUMN aicc_agent_limit")
+	assert.Contains(t, up, "'aicc_model_rollout'")
+
+	// 回滚必须恢复旧配置列和 app 版本映射，再移除隔离模型新增结构。
+	assert.Contains(t, down, "ADD COLUMN aicc_enabled BOOLEAN NOT NULL DEFAULT FALSE")
+	assert.Contains(t, down, "ADD COLUMN aicc_agent_limit INT NULL")
+	assert.Contains(t, down, "JOIN aicc_version_isolation_backups")
+	assert.Contains(t, down, "DELETE FROM jobs WHERE type = 'aicc_model_rollout'")
+	assert.Contains(t, down, "DROP COLUMN applied_config_revision")
+	assert.Contains(t, down, "DROP COLUMN persona")
+
+	// rollout 任务必须在任何 down DDL/DML 前清理，避免旧 CHECK 收紧失败后形成半回滚。
+	deleteRolloutIndex := strings.Index(down, "DELETE FROM jobs WHERE type = 'aicc_model_rollout'")
+	restoreOrganizationIndex := strings.Index(down, "ALTER TABLE organizations")
+	require.NotEqual(t, -1, deleteRolloutIndex)
+	require.NotEqual(t, -1, restoreOrganizationIndex)
+	assert.Less(t, deleteRolloutIndex, restoreOrganizationIndex)
+
+	// 助手版本在隔离期被物理删除时，down 必须先把失效备份降级为 NULL，再执行任何永久 DDL。
+	// 软删除版本仍满足 apps 外键且旧读取链路可用，必须忠实恢复原 ID，不能按 deleted_at 降级。
+	normalizeBackupIndex := strings.Index(down, "UPDATE aicc_version_isolation_backups b")
+	require.NotEqual(t, -1, normalizeBackupIndex)
+	assert.Contains(t, down, "LEFT JOIN assistant_versions av ON av.id = b.version_id")
+	assert.NotContains(t, down, "AND av.deleted_at IS NULL")
+	assert.Contains(t, down, "SET b.version_id = NULL")
+	assert.Less(t, normalizeBackupIndex, restoreOrganizationIndex)
+}
+
 // TestAppsAppTypeMigrationGuardrails 验证应用类型迁移会保留 AICC 标记语义，
 // 并将普通应用的 owner 唯一约束限定在未删除的 standard 应用。
 func TestAppsAppTypeMigrationGuardrails(t *testing.T) {

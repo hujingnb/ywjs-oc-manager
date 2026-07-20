@@ -428,10 +428,10 @@ func (q *Queries) CountReadyAICCMessageTasksByApp(ctx context.Context) ([]CountR
 
 const createAICCAgent = `-- name: CreateAICCAgent :exec
 INSERT INTO aicc_agents (
-    id, org_id, app_id, name, status, scenario, greeting, answer_boundary,
+    id, org_id, app_id, name, persona, status, scenario, greeting, answer_boundary,
     privacy_mode, privacy_text, retention_days, theme_json, allowed_domains_json,
     public_token, widget_token
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateAICCAgentParams struct {
@@ -439,6 +439,7 @@ type CreateAICCAgentParams struct {
 	OrgID              string      `db:"org_id" json:"org_id"`
 	AppID              string      `db:"app_id" json:"app_id"`
 	Name               string      `db:"name" json:"name"`
+	Persona            null.String `db:"persona" json:"persona"`
 	Status             string      `db:"status" json:"status"`
 	Scenario           null.String `db:"scenario" json:"scenario"`
 	Greeting           null.String `db:"greeting" json:"greeting"`
@@ -458,6 +459,7 @@ func (q *Queries) CreateAICCAgent(ctx context.Context, arg CreateAICCAgentParams
 		arg.OrgID,
 		arg.AppID,
 		arg.Name,
+		arg.Persona,
 		arg.Status,
 		arg.Scenario,
 		arg.Greeting,
@@ -798,7 +800,7 @@ func (q *Queries) FailAICCMessageTask(ctx context.Context, arg FailAICCMessageTa
 }
 
 const getAICCAgent = `-- name: GetAICCAgent :one
-SELECT id, org_id, app_id, name, status, scenario, greeting, answer_boundary, privacy_mode, privacy_text, retention_days, theme_json, allowed_domains_json, public_token, widget_token, created_at, updated_at, deleted_at
+SELECT id, org_id, app_id, name, status, scenario, greeting, answer_boundary, privacy_mode, privacy_text, retention_days, theme_json, allowed_domains_json, public_token, widget_token, created_at, updated_at, deleted_at, persona, applied_config_revision
 FROM aicc_agents
 WHERE id = ? AND deleted_at IS NULL
 `
@@ -825,12 +827,14 @@ func (q *Queries) GetAICCAgent(ctx context.Context, id string) (AiccAgent, error
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.Persona,
+		&i.AppliedConfigRevision,
 	)
 	return i, err
 }
 
 const getAICCAgentByAppID = `-- name: GetAICCAgentByAppID :one
-SELECT id, org_id, app_id, name, status, scenario, greeting, answer_boundary, privacy_mode, privacy_text, retention_days, theme_json, allowed_domains_json, public_token, widget_token, created_at, updated_at, deleted_at
+SELECT id, org_id, app_id, name, status, scenario, greeting, answer_boundary, privacy_mode, privacy_text, retention_days, theme_json, allowed_domains_json, public_token, widget_token, created_at, updated_at, deleted_at, persona, applied_config_revision
 FROM aicc_agents
 WHERE app_id = ? AND deleted_at IS NULL
 `
@@ -857,12 +861,14 @@ func (q *Queries) GetAICCAgentByAppID(ctx context.Context, appID string) (AiccAg
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.Persona,
+		&i.AppliedConfigRevision,
 	)
 	return i, err
 }
 
 const getAICCAgentByPublicToken = `-- name: GetAICCAgentByPublicToken :one
-SELECT id, org_id, app_id, name, status, scenario, greeting, answer_boundary, privacy_mode, privacy_text, retention_days, theme_json, allowed_domains_json, public_token, widget_token, created_at, updated_at, deleted_at
+SELECT id, org_id, app_id, name, status, scenario, greeting, answer_boundary, privacy_mode, privacy_text, retention_days, theme_json, allowed_domains_json, public_token, widget_token, created_at, updated_at, deleted_at, persona, applied_config_revision
 FROM aicc_agents
 WHERE public_token = ? AND status = 'active' AND deleted_at IS NULL
 `
@@ -889,12 +895,14 @@ func (q *Queries) GetAICCAgentByPublicToken(ctx context.Context, publicToken str
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.Persona,
+		&i.AppliedConfigRevision,
 	)
 	return i, err
 }
 
 const getAICCAgentByWidgetToken = `-- name: GetAICCAgentByWidgetToken :one
-SELECT id, org_id, app_id, name, status, scenario, greeting, answer_boundary, privacy_mode, privacy_text, retention_days, theme_json, allowed_domains_json, public_token, widget_token, created_at, updated_at, deleted_at
+SELECT id, org_id, app_id, name, status, scenario, greeting, answer_boundary, privacy_mode, privacy_text, retention_days, theme_json, allowed_domains_json, public_token, widget_token, created_at, updated_at, deleted_at, persona, applied_config_revision
 FROM aicc_agents
 WHERE widget_token = ? AND status = 'active' AND deleted_at IS NULL
 `
@@ -921,6 +929,8 @@ func (q *Queries) GetAICCAgentByWidgetToken(ctx context.Context, widgetToken str
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.Persona,
+		&i.AppliedConfigRevision,
 	)
 	return i, err
 }
@@ -1393,7 +1403,7 @@ func (q *Queries) ListAICCAgentKnowledge(ctx context.Context, agentID string) ([
 }
 
 const listAICCAgentsByOrg = `-- name: ListAICCAgentsByOrg :many
-SELECT id, org_id, app_id, name, status, scenario, greeting, answer_boundary, privacy_mode, privacy_text, retention_days, theme_json, allowed_domains_json, public_token, widget_token, created_at, updated_at, deleted_at
+SELECT id, org_id, app_id, name, status, scenario, greeting, answer_boundary, privacy_mode, privacy_text, retention_days, theme_json, allowed_domains_json, public_token, widget_token, created_at, updated_at, deleted_at, persona, applied_config_revision
 FROM aicc_agents
 WHERE org_id = ? AND deleted_at IS NULL
 ORDER BY created_at DESC, id DESC
@@ -1434,6 +1444,8 @@ func (q *Queries) ListAICCAgentsByOrg(ctx context.Context, arg ListAICCAgentsByO
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.Persona,
+			&i.AppliedConfigRevision,
 		); err != nil {
 			return nil, err
 		}
@@ -2955,7 +2967,7 @@ func (q *Queries) TouchAICCSessionLastActive(ctx context.Context, id string) (in
 
 const updateAICCAgentProfile = `-- name: UpdateAICCAgentProfile :exec
 UPDATE aicc_agents
-SET name = ?, scenario = ?, greeting = ?, answer_boundary = ?, privacy_mode = ?,
+SET name = ?, persona = ?, scenario = ?, greeting = ?, answer_boundary = ?, privacy_mode = ?,
     privacy_text = ?, retention_days = ?, theme_json = ?, allowed_domains_json = ?,
     updated_at = now()
 WHERE id = ? AND deleted_at IS NULL
@@ -2963,6 +2975,7 @@ WHERE id = ? AND deleted_at IS NULL
 
 type UpdateAICCAgentProfileParams struct {
 	Name               string      `db:"name" json:"name"`
+	Persona            null.String `db:"persona" json:"persona"`
 	Scenario           null.String `db:"scenario" json:"scenario"`
 	Greeting           null.String `db:"greeting" json:"greeting"`
 	AnswerBoundary     null.String `db:"answer_boundary" json:"answer_boundary"`
@@ -2977,6 +2990,7 @@ type UpdateAICCAgentProfileParams struct {
 func (q *Queries) UpdateAICCAgentProfile(ctx context.Context, arg UpdateAICCAgentProfileParams) error {
 	_, err := q.db.ExecContext(ctx, updateAICCAgentProfile,
 		arg.Name,
+		arg.Persona,
 		arg.Scenario,
 		arg.Greeting,
 		arg.AnswerBoundary,

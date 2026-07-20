@@ -22,6 +22,7 @@ import (
 // fakeAICCStore 是 AICC service 单测使用的最小 store，记录创建入参与返回组织配置。
 type fakeAICCStore struct {
 	org                       sqlc.Organization
+	config                    sqlc.OrganizationAiccConfig
 	count                     int64
 	agents                    map[string]sqlc.AiccAgent
 	runtimeApps               map[string]sqlc.GetAppWithVersionRow
@@ -74,6 +75,17 @@ type fakeAICCStore struct {
 	sessionsErr               error
 	leadsErr                  error
 	organization              error
+}
+
+// GetOrganizationAICCConfig 返回独立配置；未显式配置的历史用例默认代表已开通企业。
+func (f *fakeAICCStore) GetOrganizationAICCConfig(_ context.Context, orgID string) (sqlc.OrganizationAiccConfig, error) {
+	if f.org.ID != orgID {
+		return sqlc.OrganizationAiccConfig{}, sql.ErrNoRows
+	}
+	if f.config.OrgID == "" {
+		return sqlc.OrganizationAiccConfig{OrgID: orgID, Enabled: true, Revision: 1}, nil
+	}
+	return f.config, nil
 }
 
 // GetOrganization 返回测试预置的企业开通配置。
@@ -677,7 +689,7 @@ func aiccOrgAdmin() auth.Principal {
 
 func seededAICCStore() *fakeAICCStore {
 	return &fakeAICCStore{
-		org: sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org: sqlc.Organization{ID: "org-1"},
 		agents: map[string]sqlc.AiccAgent{
 			"agent-1": {
 				ID:            "agent-1",
@@ -787,7 +799,7 @@ func seededAICCStore() *fakeAICCStore {
 // TestAICCServiceCreateAgentCreatesHiddenApp 覆盖正常路径：企业管理员创建智能体时自动创建隐藏 app 并绑定。
 func TestAICCServiceCreateAgentCreatesHiddenApp(t *testing.T) {
 	store := &fakeAICCStore{
-		org:   sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:   sqlc.Organization{ID: "org-1"},
 		count: 0,
 	}
 	apps := &fakeAICCHiddenAppCreator{appID: "app-hidden-1"}
@@ -860,23 +872,24 @@ func TestAICCServiceCreateAgentValidation(t *testing.T) {
 		name      string         // 子场景说明
 		principal auth.Principal // 调用主体
 		org       sqlc.Organization
+		config    sqlc.OrganizationAiccConfig
 		count     int64
 		input     AICCAgentInput
 		wantErr   error
 	}{
-		{name: "空名称返回参数错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1", AiccEnabled: true}, input: AICCAgentInput{Name: "   "}, wantErr: ErrInvalidArgument},                                                              // 场景：名称 trim 后为空。
-		{name: "保留期小于下限返回参数错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1", AiccEnabled: true}, input: AICCAgentInput{Name: "售前", RetentionDays: -1}, wantErr: ErrInvalidArgument},                                        // 场景：保留期不能小于 1 天。
-		{name: "保留期超过上限返回参数错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1", AiccEnabled: true}, input: AICCAgentInput{Name: "售前", RetentionDays: 3651}, wantErr: ErrInvalidArgument},                                      // 场景：保留期不能超过迁移约束上限。
-		{name: "挂件域名不合法返回参数错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1", AiccEnabled: true}, input: AICCAgentInput{Name: "售前", AllowedDomains: []string{"https://"}}, wantErr: ErrInvalidArgument},                     // 场景：域名白名单必须能解析出主机名。
-		{name: "未开通企业返回无权限", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1", AiccEnabled: false}, input: AICCAgentInput{Name: "售前"}, wantErr: ErrForbidden},                                                                   // 场景：平台未给企业开通 AICC。
-		{name: "达到企业上限返回配额错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1", AiccEnabled: true, AiccAgentLimit: null.IntFrom(1)}, count: 1, input: AICCAgentInput{Name: "售前"}, wantErr: ErrQuotaExceeded},                   // 场景：当前数量已达到 aicc_agent_limit。
-		{name: "跨组织管理员返回无权限", principal: auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: "org-2", UserID: "admin-2"}, org: sqlc.Organization{ID: "org-1", AiccEnabled: true}, input: AICCAgentInput{Name: "售前"}, wantErr: ErrForbidden}, // 场景：企业管理员只能管理本企业。
-		{name: "普通成员返回无权限", principal: auth.Principal{Role: domain.UserRoleOrgMember, OrgID: "org-1", UserID: "member-1"}, org: sqlc.Organization{ID: "org-1", AiccEnabled: true}, input: AICCAgentInput{Name: "售前"}, wantErr: ErrForbidden}, // 场景：普通成员无 AICC 管理入口。
-		{name: "平台管理员未指定企业返回无权限", principal: auth.Principal{Role: domain.UserRolePlatformAdmin, UserID: "platform-1"}, org: sqlc.Organization{ID: "org-1", AiccEnabled: true}, input: AICCAgentInput{Name: "售前"}, wantErr: ErrForbidden},     // 场景：平台管理员必须明确目标企业。
+		{name: "空名称返回参数错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1"}, input: AICCAgentInput{Name: "   "}, wantErr: ErrInvalidArgument},                                                                                                                         // 场景：名称 trim 后为空。
+		{name: "保留期小于下限返回参数错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1"}, input: AICCAgentInput{Name: "售前", RetentionDays: -1}, wantErr: ErrInvalidArgument},                                                                                                   // 场景：保留期不能小于 1 天。
+		{name: "保留期超过上限返回参数错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1"}, input: AICCAgentInput{Name: "售前", RetentionDays: 3651}, wantErr: ErrInvalidArgument},                                                                                                 // 场景：保留期不能超过迁移约束上限。
+		{name: "挂件域名不合法返回参数错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1"}, input: AICCAgentInput{Name: "售前", AllowedDomains: []string{"https://"}}, wantErr: ErrInvalidArgument},                                                                                // 场景：域名白名单必须能解析出主机名。
+		{name: "未开通企业返回无权限", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1"}, config: sqlc.OrganizationAiccConfig{OrgID: "org-1", Enabled: false, Revision: 1}, input: AICCAgentInput{Name: "售前"}, wantErr: ErrForbidden},                                             // 场景：平台未给企业开通 AICC。
+		{name: "达到企业上限返回配额错误", principal: aiccOrgAdmin(), org: sqlc.Organization{ID: "org-1"}, config: sqlc.OrganizationAiccConfig{OrgID: "org-1", Enabled: true, AgentLimit: null.IntFrom(1), Revision: 1}, count: 1, input: AICCAgentInput{Name: "售前"}, wantErr: ErrQuotaExceeded}, // 场景：当前数量已达到 aicc_agent_limit。
+		{name: "跨组织管理员返回无权限", principal: auth.Principal{Role: domain.UserRoleOrgAdmin, OrgID: "org-2", UserID: "admin-2"}, org: sqlc.Organization{ID: "org-1"}, input: AICCAgentInput{Name: "售前"}, wantErr: ErrForbidden},                                                            // 场景：企业管理员只能管理本企业。
+		{name: "普通成员返回无权限", principal: auth.Principal{Role: domain.UserRoleOrgMember, OrgID: "org-1", UserID: "member-1"}, org: sqlc.Organization{ID: "org-1"}, input: AICCAgentInput{Name: "售前"}, wantErr: ErrForbidden},                                                            // 场景：普通成员无 AICC 管理入口。
+		{name: "平台管理员未指定企业返回无权限", principal: auth.Principal{Role: domain.UserRolePlatformAdmin, UserID: "platform-1"}, org: sqlc.Organization{ID: "org-1"}, input: AICCAgentInput{Name: "售前"}, wantErr: ErrForbidden},                                                                // 场景：平台管理员必须明确目标企业。
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			store := &fakeAICCStore{org: tc.org, count: tc.count}
+			store := &fakeAICCStore{org: tc.org, config: tc.config, count: tc.count}
 			svc := NewAICCService(store, &fakeAICCHiddenAppCreator{})
 
 			_, err := svc.CreateAgent(context.Background(), tc.principal, tc.input)
@@ -1066,7 +1079,7 @@ func TestAICCServiceUpdateAgentRequiresManagePermission(t *testing.T) {
 
 // TestAICCServiceCreateAgentAllowsPlatformAdminForTargetOrg 覆盖平台代管：平台管理员显式选择已开通企业后可创建该企业智能体。
 func TestAICCServiceCreateAgentAllowsPlatformAdminForTargetOrg(t *testing.T) {
-	store := &fakeAICCStore{org: sqlc.Organization{ID: "org-1", AiccEnabled: true}}
+	store := &fakeAICCStore{org: sqlc.Organization{ID: "org-1"}}
 	apps := &fakeAICCHiddenAppCreator{appID: "app-hidden-1"}
 	svc := NewAICCService(store, apps)
 
@@ -1235,7 +1248,7 @@ func TestAICCServiceMapsMissingAgent(t *testing.T) {
 
 // TestAICCServiceWrapsHiddenAppCreatorError 覆盖隐藏 app 创建失败时中止智能体创建。
 func TestAICCServiceWrapsHiddenAppCreatorError(t *testing.T) {
-	store := &fakeAICCStore{org: sqlc.Organization{ID: "org-1", AiccEnabled: true}}
+	store := &fakeAICCStore{org: sqlc.Organization{ID: "org-1"}}
 	svc := NewAICCService(store, &fakeAICCHiddenAppCreator{err: errors.New("boom")})
 
 	_, err := svc.CreateAgent(context.Background(), aiccOrgAdmin(), AICCAgentInput{Name: "售前"})
@@ -1248,7 +1261,7 @@ func TestAICCServiceWrapsHiddenAppCreatorError(t *testing.T) {
 // service 应软删除隐藏 app，避免留下没有 aicc_agents 绑定的后台实例。
 func TestAICCServiceRollsBackHiddenAppWhenAgentCreateFails(t *testing.T) {
 	store := &fakeAICCStore{
-		org:       sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:       sqlc.Organization{ID: "org-1"},
 		createErr: errors.New("insert failed"),
 	}
 	apps := &fakeAICCHiddenAppCreator{appID: "app-hidden-rollback"}

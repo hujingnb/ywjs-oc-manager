@@ -1,4 +1,5 @@
 -- name: CreateJob :exec
+-- 通用任务入口允许创建迁移约束声明的类型，包括企业模型变更触发的 aicc_model_rollout。
 INSERT INTO jobs (
     id,
     type,

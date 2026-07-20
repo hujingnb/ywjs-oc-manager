@@ -336,6 +336,13 @@ func buildFixture(ctx context.Context, db *sql.DB, runtimeImageID string, identi
 	); err != nil {
 		return fx, fmt.Errorf("create org: %w", err)
 	}
+	// E2E fixture 绕过 OrganizationService 直接建组织，因此必须同步补默认关闭的独立 AICC 配置。
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO organization_aicc_configs (org_id) VALUES (?)`,
+		fx.OrgID,
+	); err != nil {
+		return fx, fmt.Errorf("create org aicc config: %w", err)
+	}
 
 	// 2) 创建 org_admin / org_member 两个账号；后续 app.owner_user_id 用 admin id。
 	// 注：migration 000003 已删除 runtime_nodes 表，不再插入节点行；
@@ -391,6 +398,10 @@ func buildFixture(ctx context.Context, db *sql.DB, runtimeImageID string, identi
 	); err != nil {
 		return fx, fmt.Errorf("allow assistant_version for org: %w", err)
 	}
+	// 配置行早于助手版本创建；allowlist 就绪后必须同步真实模型，确保 AICC fixture 可直接启用。
+	if err := initializeOrganizationAICCModel(ctx, db, fx.OrgID, e2eMainModel()); err != nil {
+		return fx, err
+	}
 
 	// 4) 创建 fixture app（status=running，绑定上面的版本）。owner_user_id 用 org_admin。
 	// migration 000003 已删除 apps.runtime_node_id / container_id / container_name 列，
@@ -421,6 +432,26 @@ func buildFixture(ctx context.Context, db *sql.DB, runtimeImageID string, identi
 // 不能使用历史硬编码 gpt-4：本地 new-api 仅配置 DeepSeek 渠道，错误模型会让 Hermes 在真实问答时返回 503。
 func e2eMainModel() string {
 	return "deepseek-chat"
+}
+
+// initializeOrganizationAICCModel 在 fixture 助手版本就绪后回填独立配置模型。
+// 必须恰好更新一行；缺少配置意味着 seed 顺序或迁移状态异常，不能继续生成不可启用的 fixture。
+func initializeOrganizationAICCModel(ctx context.Context, db *sql.DB, orgID, model string) error {
+	result, err := db.ExecContext(ctx, `
+		UPDATE organization_aicc_configs
+		SET model = ?
+		WHERE org_id = ?`, model, orgID)
+	if err != nil {
+		return fmt.Errorf("initialize org aicc model: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read initialized org aicc rows: %w", err)
+	}
+	if affected != 1 {
+		return fmt.Errorf("initialize org aicc model: updated %d rows, want 1", affected)
+	}
+	return nil
 }
 
 // e2eNewAPICreditAmount 返回临时 E2E 用户的展示额度，覆盖多轮公开问答而不影响正式企业余额。

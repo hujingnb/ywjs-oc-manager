@@ -97,8 +97,11 @@ type Querier interface {
 	CreateCustomSkillTarget(ctx context.Context, arg CreateCustomSkillTargetParams) error
 	// 创建平台级行业知识库；名称唯一性由未删除记录的生成列唯一键兜底。
 	CreateIndustryKnowledgeBase(ctx context.Context, arg CreateIndustryKnowledgeBaseParams) error
+	// 通用任务入口允许创建迁移约束声明的类型，包括企业模型变更触发的 aicc_model_rollout。
 	CreateJob(ctx context.Context, arg CreateJobParams) error
 	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) error
+	// 新企业默认关闭，但需从有效首版本初始化模型，保证旧启用接口保留模型时不会触发 enabled/model CHECK。
+	CreateOrganizationAICCConfig(ctx context.Context, id string) error
 	CreatePlatformSkill(ctx context.Context, arg CreatePlatformSkillParams) error
 	CreatePublishedSite(ctx context.Context, arg CreatePublishedSiteParams) error
 	// 懒创建实例级 dataset 映射；并发首创命中唯一索引时忽略，由 service 读取已有映射且不重复创建远端 dataset。
@@ -182,6 +185,8 @@ type Querier interface {
 	// 密码明文不落库，因此这里只返回账号名，密码提示由调用方生成。
 	GetOrgAdminByOrg(ctx context.Context, orgID null.String) (User, error)
 	GetOrganization(ctx context.Context, id string) (Organization, error)
+	// 按企业读取独立 AICC 配置，调用方据此校验开通状态和当前模型 revision。
+	GetOrganizationAICCConfig(ctx context.Context, orgID string) (OrganizationAiccConfig, error)
 	GetOrganizationByCode(ctx context.Context, code string) (Organization, error)
 	GetOrganizationByName(ctx context.Context, name string) (Organization, error)
 	// OOS-2 access_token 自愈用：以行锁查询组织，避免并发更新密文时出现写丢失。
@@ -280,9 +285,13 @@ type Querier interface {
 	ListIndustryKnowledgeBases(ctx context.Context, arg ListIndustryKnowledgeBasesParams) ([]ListIndustryKnowledgeBasesRow, error)
 	// 列出助手版本关联的未删除行业知识库，供发布配置和运行时检索范围使用。
 	ListIndustryKnowledgeBasesByAssistantVersion(ctx context.Context, versionID string) ([]IndustryKnowledgeBasis, error)
+	// 平台管理场景按稳定企业主键顺序返回配置，避免分页或批处理顺序漂移。
+	ListOrganizationAICCConfigs(ctx context.Context) ([]OrganizationAiccConfig, error)
 	// 列出企业已获授权且未删除的行业知识库，供 AICC 配置候选项和平台配置回显使用。
 	ListOrganizationIndustryKnowledgeBases(ctx context.Context, orgID string) ([]IndustryKnowledgeBasis, error)
 	ListOrganizations(ctx context.Context, arg ListOrganizationsParams) ([]Organization, error)
+	// 仅选择仍有效且活跃的智能体；app 软删除后不得继续下发企业模型配置。
+	ListPendingAICCModelRolloutAgents(ctx context.Context, arg ListPendingAICCModelRolloutAgentsParams) ([]AiccAgent, error)
 	ListPlatformSkills(ctx context.Context) ([]PlatformSkill, error)
 	// 扁平列出某个组织或实例知识库文件，支持按状态和文件名过滤。
 	ListRAGFlowDocumentsByScope(ctx context.Context, arg ListRAGFlowDocumentsByScopeParams) ([]RagflowDocument, error)
@@ -392,6 +401,8 @@ type Querier interface {
 	RetryJob(ctx context.Context, arg RetryJobParams) error
 	RevokeRefreshToken(ctx context.Context, id string) error
 	RevokeRefreshTokensByUser(ctx context.Context, userID string) error
+	// 条件更新只允许 revision 前进，防止较旧的并发 rollout 覆盖新配置应用进度。
+	SetAICCAgentAppliedConfigRevision(ctx context.Context, arg SetAICCAgentAppliedConfigRevisionParams) error
 	SetAICCAgentStatus(ctx context.Context, arg SetAICCAgentStatusParams) error
 	// bootstrap 渲染时记录本次写入 input 的平台层 prompt sha256，用于「平台提示词已更新需重启」检测。
 	// 不更新 updated_at：bootstrap 每次 pod 启动都会调用（与 SetAppWebPublishApplied 同因），
@@ -478,6 +489,7 @@ type Querier interface {
 	UpdateAssistantVersion(ctx context.Context, arg UpdateAssistantVersionParams) error
 	// skill 上传/删除单独走此查询：只改 skills_json 与 revision，避免覆盖其它字段。
 	UpdateAssistantVersionSkills(ctx context.Context, arg UpdateAssistantVersionSkillsParams) error
+	// revision 由业务层在配置实际变化时递增，更新时间显式落库便于追踪 rollout 起点。
 	UpdateOrganizationAICCConfig(ctx context.Context, arg UpdateOrganizationAICCConfigParams) error
 	// OOS-2 access_token 自愈用：仅更新 newapi_user_credentials_ciphertext，不动 newapi_user_id。
 	UpdateOrganizationCredentialsCiphertext(ctx context.Context, arg UpdateOrganizationCredentialsCiphertextParams) error

@@ -28,6 +28,21 @@ type newAPIUsernameLookupStub struct {
 	deleteCalls int
 }
 
+// TestInitializeOrganizationAICCModel 验证 fixture 创建助手版本后会把真实模型同步到独立企业配置。
+func TestInitializeOrganizationAICCModel(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+
+	mock.ExpectExec(`UPDATE organization_aicc_configs\s+SET model = \?\s+WHERE org_id = \?`).
+		WithArgs("deepseek-chat", "org-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	err = initializeOrganizationAICCModel(context.Background(), db, "org-1", "deepseek-chat")
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 // FindUserByUsername 返回预置用户或错误，模拟真实 new-api 精确用户名查询。
 func (stub *newAPIUsernameLookupStub) FindUserByUsername(context.Context, string) (newapi.User, error) {
 	return stub.user, stub.err

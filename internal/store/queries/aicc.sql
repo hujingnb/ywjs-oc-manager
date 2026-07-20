@@ -1,9 +1,9 @@
 -- name: CreateAICCAgent :exec
 INSERT INTO aicc_agents (
-    id, org_id, app_id, name, status, scenario, greeting, answer_boundary,
+    id, org_id, app_id, name, persona, status, scenario, greeting, answer_boundary,
     privacy_mode, privacy_text, retention_days, theme_json, allowed_domains_json,
     public_token, widget_token
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetAICCAgent :one
 SELECT *
@@ -71,7 +71,7 @@ WHERE org_id = ? AND deleted_at IS NULL;
 
 -- name: UpdateAICCAgentProfile :exec
 UPDATE aicc_agents
-SET name = ?, scenario = ?, greeting = ?, answer_boundary = ?, privacy_mode = ?,
+SET name = ?, persona = ?, scenario = ?, greeting = ?, answer_boundary = ?, privacy_mode = ?,
     privacy_text = ?, retention_days = ?, theme_json = ?, allowed_domains_json = ?,
     updated_at = now()
 WHERE id = ? AND deleted_at IS NULL;

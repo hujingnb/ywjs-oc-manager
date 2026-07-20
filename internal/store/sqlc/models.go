@@ -12,24 +12,26 @@ import (
 )
 
 type AiccAgent struct {
-	ID                 string      `db:"id" json:"id"`
-	OrgID              string      `db:"org_id" json:"org_id"`
-	AppID              string      `db:"app_id" json:"app_id"`
-	Name               string      `db:"name" json:"name"`
-	Status             string      `db:"status" json:"status"`
-	Scenario           null.String `db:"scenario" json:"scenario"`
-	Greeting           null.String `db:"greeting" json:"greeting"`
-	AnswerBoundary     null.String `db:"answer_boundary" json:"answer_boundary"`
-	PrivacyMode        string      `db:"privacy_mode" json:"privacy_mode"`
-	PrivacyText        null.String `db:"privacy_text" json:"privacy_text"`
-	RetentionDays      int32       `db:"retention_days" json:"retention_days"`
-	ThemeJson          []byte      `db:"theme_json" json:"theme_json"`
-	AllowedDomainsJson []byte      `db:"allowed_domains_json" json:"allowed_domains_json"`
-	PublicToken        string      `db:"public_token" json:"public_token"`
-	WidgetToken        string      `db:"widget_token" json:"widget_token"`
-	CreatedAt          time.Time   `db:"created_at" json:"created_at"`
-	UpdatedAt          time.Time   `db:"updated_at" json:"updated_at"`
-	DeletedAt          null.Time   `db:"deleted_at" json:"deleted_at"`
+	ID                    string      `db:"id" json:"id"`
+	OrgID                 string      `db:"org_id" json:"org_id"`
+	AppID                 string      `db:"app_id" json:"app_id"`
+	Name                  string      `db:"name" json:"name"`
+	Status                string      `db:"status" json:"status"`
+	Scenario              null.String `db:"scenario" json:"scenario"`
+	Greeting              null.String `db:"greeting" json:"greeting"`
+	AnswerBoundary        null.String `db:"answer_boundary" json:"answer_boundary"`
+	PrivacyMode           string      `db:"privacy_mode" json:"privacy_mode"`
+	PrivacyText           null.String `db:"privacy_text" json:"privacy_text"`
+	RetentionDays         int32       `db:"retention_days" json:"retention_days"`
+	ThemeJson             []byte      `db:"theme_json" json:"theme_json"`
+	AllowedDomainsJson    []byte      `db:"allowed_domains_json" json:"allowed_domains_json"`
+	PublicToken           string      `db:"public_token" json:"public_token"`
+	WidgetToken           string      `db:"widget_token" json:"widget_token"`
+	CreatedAt             time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt             time.Time   `db:"updated_at" json:"updated_at"`
+	DeletedAt             null.Time   `db:"deleted_at" json:"deleted_at"`
+	Persona               null.String `db:"persona" json:"persona"`
+	AppliedConfigRevision int32       `db:"applied_config_revision" json:"applied_config_revision"`
 }
 
 type AiccAgentKnowledge struct {
@@ -241,6 +243,11 @@ type AiccSessionIntent struct {
 	InviteStatus      string      `db:"invite_status" json:"invite_status"`
 	CreatedAt         time.Time   `db:"created_at" json:"created_at"`
 	UpdatedAt         time.Time   `db:"updated_at" json:"updated_at"`
+}
+
+type AiccVersionIsolationBackup struct {
+	AppID     string      `db:"app_id" json:"app_id"`
+	VersionID null.String `db:"version_id" json:"version_id"`
 }
 
 type App struct {
@@ -521,10 +528,16 @@ type Organization struct {
 	KnowledgeQuotaBytes int64           `db:"knowledge_quota_bytes" json:"knowledge_quota_bytes"`
 	// 该企业新建实例的默认个人知识库空间上限（字节），默认 1GB
 	DefaultAppKnowledgeQuotaBytes int64 `db:"default_app_knowledge_quota_bytes" json:"default_app_knowledge_quota_bytes"`
-	// 是否开通 AICC（AI Contact Center）能力
-	AiccEnabled bool `db:"aicc_enabled" json:"aicc_enabled"`
-	// AICC 智能体数量上限，NULL 表示不限
-	AiccAgentLimit null.Int `db:"aicc_agent_limit" json:"aicc_agent_limit"`
+}
+
+type OrganizationAiccConfig struct {
+	OrgID      string      `db:"org_id" json:"org_id"`
+	Enabled    bool        `db:"enabled" json:"enabled"`
+	Model      null.String `db:"model" json:"model"`
+	AgentLimit null.Int    `db:"agent_limit" json:"agent_limit"`
+	Revision   int32       `db:"revision" json:"revision"`
+	CreatedAt  time.Time   `db:"created_at" json:"created_at"`
+	UpdatedAt  time.Time   `db:"updated_at" json:"updated_at"`
 }
 
 type OrganizationIndustryKnowledgeBasis struct {

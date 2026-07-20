@@ -36,6 +36,7 @@ type CreateJobParams struct {
 	PayloadJson json.RawMessage `db:"payload_json" json:"payload_json"`
 }
 
+// 通用任务入口允许创建迁移约束声明的类型，包括企业模型变更触发的 aicc_model_rollout。
 func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) error {
 	_, err := q.db.ExecContext(ctx, createJob,
 		arg.ID,

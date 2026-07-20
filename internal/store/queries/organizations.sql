@@ -65,14 +65,6 @@ SET
     updated_at = now()
 WHERE id = ?;
 
--- name: UpdateOrganizationAICCConfig :exec
-UPDATE organizations
-SET
-    aicc_enabled = ?,
-    aicc_agent_limit = ?,
-    updated_at = now()
-WHERE id = ?;
-
 -- name: SetOrganizationStatus :exec
 UPDATE organizations
 SET status = ?, updated_at = now()

@@ -58,7 +58,7 @@ func TestAICCPublicSendMessageRejectsFullGlobalQueue(t *testing.T) {
 // TestAICCPublicChatRequiresConsent 覆盖隐私强同意模式：未同意前拒绝访客继续聊天。
 func TestAICCPublicChatRequiresConsent(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:                sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:                sqlc.Organization{ID: "org-1"},
 		agent:              sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeConsentRequired},
 		session:            sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 		intentInviteStatus: "invited",
@@ -74,7 +74,7 @@ func TestAICCPublicChatRequiresConsent(t *testing.T) {
 // TestAICCPublicChatDoesNotRequireLeadFields 覆盖对话优先边界：访客未填写表单时仍可继续咨询。
 func TestAICCPublicChatDoesNotRequireLeadFields(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:                sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:                sqlc.Organization{ID: "org-1"},
 		agent:              sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		session:            sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 		leadFields:         []sqlc.AiccLeadField{{ID: "field-phone", AgentID: "agent-1", Required: true, FieldKey: "phone", Label: "手机号"}},
@@ -93,7 +93,7 @@ func TestAICCPublicChatDoesNotRequireLeadFields(t *testing.T) {
 // 持有有效 session token 的访客只能读取本会话消息，用于前端恢复对话内容。
 func TestAICCPublicGetSessionReturnsMessages(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:     sqlc.Organization{ID: "org-1"},
 		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 		messages: []sqlc.AiccMessage{
@@ -162,7 +162,7 @@ func TestAICCPublicGetSessionMapsStoreUnavailable(t *testing.T) {
 // 必填字段写入后 session 标记完成，同时生成企业线索主记录供管理端列表和导出使用。
 func TestAICCPublicSubmitLeadValuesCompletesRequiredFields(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:                sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:                sqlc.Organization{ID: "org-1"},
 		agent:              sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		session:            sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 		leadFields:         []sqlc.AiccLeadField{{ID: "field-phone", AgentID: "agent-1", Required: true, FieldKey: "phone", Label: "手机号", FieldType: "phone"}},
@@ -193,7 +193,7 @@ func TestAICCPublicSubmitLeadValuesCompletesRequiredFields(t *testing.T) {
 // TestAICCPublicSubmitLeadValuesRejectsUnknownField 覆盖留资字段配置边界：未配置的 field_key 不能写入。
 func TestAICCPublicSubmitLeadValuesRejectsUnknownField(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:        sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:        sqlc.Organization{ID: "org-1"},
 		agent:      sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		session:    sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 		leadFields: []sqlc.AiccLeadField{{ID: "field-phone", AgentID: "agent-1", Required: true, FieldKey: "phone", Label: "手机号"}},
@@ -210,7 +210,7 @@ func TestAICCPublicSubmitLeadValuesRejectsUnknownField(t *testing.T) {
 // TestAICCPublicSubmitLeadValuesConsumesInvitationWithoutContact 覆盖显式表单提交：未填写联系方式也应结束邀约，但不能创建正式线索。
 func TestAICCPublicSubmitLeadValuesConsumesInvitationWithoutContact(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:                sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:                sqlc.Organization{ID: "org-1"},
 		agent:              sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive},
 		session:            sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 		leadFields:         []sqlc.AiccLeadField{{ID: "field-company", AgentID: "agent-1", FieldKey: "company", Label: "企业名称"}},
@@ -229,7 +229,7 @@ func TestAICCPublicSubmitLeadValuesConsumesInvitationWithoutContact(t *testing.T
 // TestAICCPublicDeclineLeadInvitationOnlyUpdatesCurrentSession 验证访客拒绝仅写当前会话的邀约状态。
 func TestAICCPublicDeclineLeadInvitationOnlyUpdatesCurrentSession(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:                sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:                sqlc.Organization{ID: "org-1"},
 		agent:              sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive},
 		session:            sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 		intentInviteStatus: "invited",
@@ -244,7 +244,7 @@ func TestAICCPublicDeclineLeadInvitationOnlyUpdatesCurrentSession(t *testing.T) 
 // TestAICCPublicDeclineLeadInvitationDoesNotOverwriteSubmitted 覆盖提交优先：已提交联系方式后拒绝请求不能回写邀约状态。
 func TestAICCPublicDeclineLeadInvitationDoesNotOverwriteSubmitted(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:                sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:                sqlc.Organization{ID: "org-1"},
 		agent:              sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive},
 		session:            sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 		intentInviteStatus: "submitted",
@@ -259,7 +259,7 @@ func TestAICCPublicDeclineLeadInvitationDoesNotOverwriteSubmitted(t *testing.T) 
 // TestAICCPublicDeclineLeadInvitationRejectsDisabledAgent 覆盖下线边界：智能体下线后不能继续写入邀约状态。
 func TestAICCPublicDeclineLeadInvitationRejectsDisabledAgent(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:                sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:                sqlc.Organization{ID: "org-1"},
 		agent:              sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: "disabled"},
 		session:            sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 		intentInviteStatus: "invited",
@@ -278,7 +278,7 @@ func TestAICCPublicDeclineLeadInvitationRejectsDisabledAgent(t *testing.T) {
 func TestAICCPublicChatRespondsToPromptInjectionWithoutCallingRuntime(t *testing.T) {
 	chat := &fakeAICCHermesChat{reply: "不应调用"}
 	store := &fakeAICCPublicStore{
-		org:      sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:      sqlc.Organization{ID: "org-1"},
 		agent:    sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		settings: sqlc.AiccAgentSetting{AgentID: "agent-1", MessageLimitPerSession: 100, SessionResumeTtlMinutes: 30},
 		session:  sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
@@ -356,7 +356,7 @@ func TestAICCPublicPromptInjectionRollsBackAndRetriesAfterAssistantWriteFailure(
 // TestAICCPublicSendMessageQueuesVisitorMessage 覆盖正常路径：访客消息和待处理任务原子写入，公开入口不再同步调用 Hermes。
 func TestAICCPublicSendMessageQueuesVisitorMessage(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:     sqlc.Organization{ID: "org-1"},
 		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice, Scenario: null.StringFrom("官网售前咨询"), AnswerBoundary: null.StringFrom("不承诺最终成交价格")},
 		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 	}
@@ -619,7 +619,7 @@ func TestAICCPublicSendMessageQueuesSecondMessage(t *testing.T) {
 // 成功保存访客和助手消息后必须刷新 last_active_at，刷新后的会话可在续接 TTL 内恢复。
 func TestAICCPublicChatTouchesSessionLastActive(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:      sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:      sqlc.Organization{ID: "org-1"},
 		agent:    sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", PublicToken: "pub", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		settings: sqlc.AiccAgentSetting{AgentID: "agent-1", MessageLimitPerSession: 100, BlockedVisitorEnabled: true, SessionResumeTtlMinutes: 30},
 		session: sqlc.AiccSession{
@@ -655,7 +655,7 @@ func TestAICCPublicChatTouchesSessionLastActive(t *testing.T) {
 // 创建任务前必须先写入访客消息作为占位，后续并发请求才能看到已消耗的消息额度。
 func TestAICCPublicSendMessageReservesVisitorMessageBeforeQueue(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:      sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:      sqlc.Organization{ID: "org-1"},
 		agent:    sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		settings: sqlc.AiccAgentSetting{AgentID: "agent-1", MessageLimitPerSession: 2, BlockedVisitorEnabled: true, SessionResumeTtlMinutes: 30},
 		session:  sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
@@ -676,7 +676,7 @@ func TestAICCPublicSendMessageReservesVisitorMessageBeforeQueue(t *testing.T) {
 // 首次请求已受理后，同一 client_message_id 重试只能返回原任务，不能重复占用消息额度。
 func TestAICCPublicSendMessageRetriesClientMessageWithoutDuplicatingTask(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:      sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:      sqlc.Organization{ID: "org-1"},
 		agent:    sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		settings: sqlc.AiccAgentSetting{AgentID: "agent-1", MessageLimitPerSession: 100, SessionResumeTtlMinutes: 30},
 		session:  sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
@@ -703,7 +703,7 @@ func TestAICCPublicSendMessageRetriesClientMessageWithoutDuplicatingTask(t *test
 func TestAICCPublicChatRejectsMissingSessionOnTouch(t *testing.T) {
 	chat := &fakeAICCHermesChat{reply: "不应调用"}
 	store := &fakeAICCPublicStore{
-		org:         sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:         sqlc.Organization{ID: "org-1"},
 		agent:       sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		settings:    sqlc.AiccAgentSetting{AgentID: "agent-1", MessageLimitPerSession: 100, BlockedVisitorEnabled: true, SessionResumeTtlMinutes: 30},
 		session:     sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
@@ -721,7 +721,7 @@ func TestAICCPublicChatRejectsMissingSessionOnTouch(t *testing.T) {
 // TestAICCPublicSendMessageQueuesImageMessage 覆盖图片消息路径：已上传图片可作为访客消息镜像保存并排队。
 func TestAICCPublicSendMessageQueuesImageMessage(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:     sqlc.Organization{ID: "org-1"},
 		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 		image:   sqlc.AiccImage{ID: "image-1", SessionID: "session-1", ObjectKey: "apps/app-1/aicc/session-1/image-1/a.png", Mime: "image/png", SizeBytes: 12},
@@ -745,7 +745,7 @@ func TestAICCPublicSendMessageQueuesImageMessage(t *testing.T) {
 func TestAICCPublicSendMessageRejectsSensitiveWord(t *testing.T) {
 	chat := &fakeAICCHermesChat{}
 	store := &fakeAICCPublicStore{
-		org:      sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:      sqlc.Organization{ID: "org-1"},
 		agent:    sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		session:  sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour), PrivacyNoticeShown: true},
 		settings: sqlc.AiccAgentSetting{AgentID: "agent-1", MessageLimitPerSession: 100, SensitiveWordsJson: []byte(`["违禁词"]`), BlockedVisitorEnabled: true, SessionResumeTtlMinutes: 30},
@@ -764,7 +764,7 @@ func TestAICCPublicSendMessageRejectsSensitiveWord(t *testing.T) {
 func TestAICCPublicSendMessageRejectsMessageLimit(t *testing.T) {
 	chat := &fakeAICCHermesChat{}
 	store := &fakeAICCPublicStore{
-		org:                 sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:                 sqlc.Organization{ID: "org-1"},
 		agent:               sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		session:             sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour), PrivacyNoticeShown: true},
 		settings:            sqlc.AiccAgentSetting{AgentID: "agent-1", MessageLimitPerSession: 1, BlockedVisitorEnabled: true, SessionResumeTtlMinutes: 30},
@@ -785,7 +785,7 @@ func TestAICCPublicSendMessageRejectsBlockedVisitor(t *testing.T) {
 	chat := &fakeAICCHermesChat{}
 	visitorHash := hashAICCVisitorMarker("203.0.113.9")
 	store := &fakeAICCPublicStore{
-		org:            sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:            sqlc.Organization{ID: "org-1"},
 		agent:          sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		session:        sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour), PrivacyNoticeShown: true, IpHash: null.StringFrom(visitorHash)},
 		settings:       sqlc.AiccAgentSetting{AgentID: "agent-1", MessageLimitPerSession: 100, BlockedVisitorEnabled: true, SessionResumeTtlMinutes: 30},
@@ -803,7 +803,7 @@ func TestAICCPublicSendMessageRejectsBlockedVisitor(t *testing.T) {
 // TestAICCPublicUploadImageStoresObject 覆盖图片上传正常路径：校验后写对象存储并落图片记录。
 func TestAICCPublicUploadImageStoresObject(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:     sqlc.Organization{ID: "org-1"},
 		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 	}
@@ -832,7 +832,7 @@ func TestAICCPublicUploadImageStoresObject(t *testing.T) {
 // TestAICCPublicUploadImageRejectsUnsupportedType 覆盖图片上传类型边界：非图片扩展名不落对象存储。
 func TestAICCPublicUploadImageRejectsUnsupportedType(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:     sqlc.Organization{ID: "org-1"},
 		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 	}
@@ -861,7 +861,7 @@ func TestAICCPublicUploadImageChecksSessionBeforeBlob(t *testing.T) {
 // TestAICCPublicUploadImageRejectsTooLongFilenameBeforePut 覆盖 DB 长度边界：文件名过长时不能先上传孤儿对象。
 func TestAICCPublicUploadImageRejectsTooLongFilenameBeforePut(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:     sqlc.Organization{ID: "org-1"},
 		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 	}
@@ -880,7 +880,7 @@ func TestAICCPublicUploadImageRejectsTooLongFilenameBeforePut(t *testing.T) {
 // TestAICCPublicUploadImageRejectsMismatchedMime 覆盖内容嗅探边界：扩展名与实际图片 MIME 不一致时拒绝。
 func TestAICCPublicUploadImageRejectsMismatchedMime(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:     sqlc.Organization{ID: "org-1"},
 		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 	}
@@ -899,7 +899,8 @@ func TestAICCPublicUploadImageRejectsMismatchedMime(t *testing.T) {
 // TestAICCPublicChatStopsWhenOrgDisabled 覆盖平台关闭企业 AICC 后，已有访客会话也不能继续发送消息。
 func TestAICCPublicChatStopsWhenOrgDisabled(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:     sqlc.Organization{ID: "org-1", AiccEnabled: false},
+		org:     sqlc.Organization{ID: "org-1"},
+		config:  sqlc.OrganizationAiccConfig{OrgID: "org-1", Enabled: false, Revision: 1},
 		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 	}
@@ -914,7 +915,7 @@ func TestAICCPublicChatStopsWhenOrgDisabled(t *testing.T) {
 // TestAICCPublicChatRejectsExpiredSession 覆盖会话过期边界：过期 session token 不能继续发送消息。
 func TestAICCPublicChatRejectsExpiredSession(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:     sqlc.Organization{ID: "org-1"},
 		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(-time.Minute)},
 	}
@@ -929,7 +930,7 @@ func TestAICCPublicChatRejectsExpiredSession(t *testing.T) {
 // TestAICCPublicChatRejectsImageMessage 覆盖当前文字切片边界：图片消息未实现前不能写入空文本消息。
 func TestAICCPublicChatRejectsImageMessage(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:     sqlc.Organization{ID: "org-1"},
 		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 	}
@@ -946,7 +947,7 @@ func TestAICCPublicChatRejectsImageMessage(t *testing.T) {
 // 隐私 notice 模式会记录已展示隐私说明，过期时间跟随智能体 retention_days。
 func TestAICCPublicCreateSessionCreatesExpiringSession(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org: sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org: sqlc.Organization{ID: "org-1"},
 		agent: sqlc.AiccAgent{
 			ID:            "agent-1",
 			OrgID:         "org-1",
@@ -973,7 +974,7 @@ func TestAICCPublicCreateSessionCreatesExpiringSession(t *testing.T) {
 // 访客传入仍有效的 session token 时，服务端必须返回原会话，不创建新会话。
 func TestAICCPublicCreateSessionRestoresExistingSession(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:   sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:   sqlc.Organization{ID: "org-1"},
 		agent: sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", PublicToken: "pub", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		session: sqlc.AiccSession{
 			ID:                 "session-1",
@@ -1001,7 +1002,7 @@ func TestAICCPublicCreateSessionRestoresExistingSession(t *testing.T) {
 // 已恢复的会话必须返回自身留资状态，前端才能避免对已留资访客重复弹留资表单。
 func TestAICCPublicGetSessionReturnsLeadStatus(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:   sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:   sqlc.Organization{ID: "org-1"},
 		agent: sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", PublicToken: "pub", Status: domain.AICCAgentStatusActive},
 		session: sqlc.AiccSession{
 			ID:               "session-1",
@@ -1028,7 +1029,7 @@ func TestAICCPublicGetSessionReturnsLeadStatus(t *testing.T) {
 // last_active_at 缺失时使用 created_at 判断续接窗口，避免旧会话数据无法刷新恢复。
 func TestAICCPublicCreateSessionRestoresByCreatedAtWhenLastActiveMissing(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:   sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:   sqlc.Organization{ID: "org-1"},
 		agent: sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", PublicToken: "pub", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		session: sqlc.AiccSession{
 			ID:                 "session-1",
@@ -1055,7 +1056,7 @@ func TestAICCPublicCreateSessionRestoresByCreatedAtWhenLastActiveMissing(t *test
 // 有效 session token 超过续接 TTL 后必须创建新会话，避免长期复用旧会话。
 func TestAICCPublicCreateSessionSkipsRestoreAfterResumeTTL(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:      sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:      sqlc.Organization{ID: "org-1"},
 		agent:    sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", PublicToken: "pub", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		settings: sqlc.AiccAgentSetting{AgentID: "agent-1", MessageLimitPerSession: 100, BlockedVisitorEnabled: true, SessionResumeTtlMinutes: 30},
 		session: sqlc.AiccSession{
@@ -1084,7 +1085,7 @@ func TestAICCPublicCreateSessionSkipsRestoreAfterResumeTTL(t *testing.T) {
 // 智能体配置 allowed_domains 后，非白名单 Origin 不能创建 web_widget 会话。
 func TestAICCPublicCreateWidgetSessionRejectsDisallowedOrigin(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org: sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org: sqlc.Organization{ID: "org-1"},
 		agent: sqlc.AiccAgent{
 			ID:                 "agent-1",
 			OrgID:              "org-1",
@@ -1110,7 +1111,7 @@ func TestAICCPublicCreateWidgetSessionRejectsDisallowedOrigin(t *testing.T) {
 // 白名单命中后创建挂件会话，并落 IP/User-Agent hash，避免保存原始访客标识。
 func TestAICCPublicCreateWidgetSessionStoresRequestHashes(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org: sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org: sqlc.Organization{ID: "org-1"},
 		agent: sqlc.AiccAgent{
 			ID:                 "agent-1",
 			OrgID:              "org-1",
@@ -1143,7 +1144,7 @@ func TestAICCPublicCreateWidgetSessionStoresRequestHashes(t *testing.T) {
 // 公开会话创建时只保存解析后的粗粒度地域，不保存明文 IP。
 func TestAICCPublicCreateSessionStoresResolvedRegion(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org: sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org: sqlc.Organization{ID: "org-1"},
 		agent: sqlc.AiccAgent{
 			ID:            "agent-1",
 			OrgID:         "org-1",
@@ -1167,7 +1168,7 @@ func TestAICCPublicCreateSessionStoresResolvedRegion(t *testing.T) {
 // 限流器拒绝时不能继续创建会话，防止匿名访客刷会话消耗企业额度。
 func TestAICCPublicCreateSessionHonorsRateLimiter(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org: sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org: sqlc.Organization{ID: "org-1"},
 		agent: sqlc.AiccAgent{
 			ID:          "agent-1",
 			OrgID:       "org-1",
@@ -1190,7 +1191,7 @@ func TestAICCPublicCreateSessionHonorsRateLimiter(t *testing.T) {
 // TestAICCPublicCreateSessionMapsRateLimiterUnavailable 覆盖 Redis 限流存储不可用：
 // 公开入口不能把基础设施连接错误直接泄露为未分类的内部错误。
 func TestAICCPublicCreateSessionMapsRateLimiterUnavailable(t *testing.T) {
-	store := &fakeAICCPublicStore{org: sqlc.Organization{ID: "org-1", AiccEnabled: true}, agent: sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", PublicToken: "pub", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice}}
+	store := &fakeAICCPublicStore{org: sqlc.Organization{ID: "org-1"}, agent: sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", PublicToken: "pub", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice}}
 	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
 	svc.SetRateLimiter(&fakeAICCRateLimiter{err: errors.New("redis unavailable")})
 
@@ -1226,7 +1227,8 @@ func TestAICCPublicConsentRejectsInvalidSession(t *testing.T) {
 // TestAICCPublicConfigStopsWhenOrgDisabled 覆盖公开配置读取：企业被平台关闭 AICC 后公开入口返回下线。
 func TestAICCPublicConfigStopsWhenOrgDisabled(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org: sqlc.Organization{ID: "org-1", AiccEnabled: false},
+		org:    sqlc.Organization{ID: "org-1"},
+		config: sqlc.OrganizationAiccConfig{OrgID: "org-1", Enabled: false, Revision: 1},
 		agent: sqlc.AiccAgent{
 			ID:          "agent-1",
 			OrgID:       "org-1",
@@ -1246,7 +1248,7 @@ func TestAICCPublicConfigStopsWhenOrgDisabled(t *testing.T) {
 // 仅当渠道明确为 web_widget 时才允许加载配置，否则挂件 token 不能伪装成公开链接。
 func TestAICCPublicConfigAcceptsWidgetToken(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org: sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org: sqlc.Organization{ID: "org-1"},
 		agent: sqlc.AiccAgent{
 			ID:          "agent-1",
 			OrgID:       "org-1",
@@ -1272,7 +1274,7 @@ func TestAICCPublicConfigAcceptsWidgetToken(t *testing.T) {
 // 挂件 token 不能走 web_link 渠道创建会话，避免绕开挂件域名白名单。
 func TestAICCPublicCreateSessionRejectsWidgetTokenAsWebLink(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org: sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org: sqlc.Organization{ID: "org-1"},
 		agent: sqlc.AiccAgent{
 			ID:          "agent-1",
 			OrgID:       "org-1",
@@ -1390,7 +1392,7 @@ func TestAICCPublicConfirmedResolutionStartsNewPhase(t *testing.T) {
 // 访客只持有当前 session token 时，可将整个会话标记为已解决，且不写入单条回复反馈。
 func TestAICCPublicResolveSessionMarksSessionResolved(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:     sqlc.Organization{ID: "org-1"},
 		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive},
 		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 	}
@@ -1409,7 +1411,7 @@ func TestAICCPublicResolveSessionMarksSessionResolved(t *testing.T) {
 // 访客只持有当前 session token 时，可将整个会话标记为未解决，且不写入单条回复反馈。
 func TestAICCPublicUpdateSessionResolutionMarksSessionUnresolved(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:     sqlc.Organization{ID: "org-1"},
 		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive},
 		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 	}
@@ -1431,7 +1433,7 @@ func TestAICCPublicUpdateSessionResolutionMarksSessionUnresolved(t *testing.T) {
 // 访客只能选择已解决或未解决，跟进中是未选择时的默认后台展示状态。
 func TestAICCPublicUpdateSessionResolutionRejectsUnknown(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:     sqlc.Organization{ID: "org-1"},
 		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive},
 		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
 	}
@@ -1451,7 +1453,7 @@ func TestAICCPublicUpdateSessionResolutionRejectsUnknown(t *testing.T) {
 // 过期或无效 token 不能改变任何会话状态。
 func TestAICCPublicResolveSessionRejectsExpiredToken(t *testing.T) {
 	store := &fakeAICCPublicStore{
-		org:     sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:     sqlc.Organization{ID: "org-1"},
 		agent:   sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive},
 		session: sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", ExpiresAt: aiccPublicTestNow.Add(-time.Minute)},
 	}
@@ -1475,6 +1477,7 @@ func (f fakeAICCGeoIPResolver) Resolve(_ context.Context, _ string) string {
 
 type fakeAICCPublicStore struct {
 	org                       sqlc.Organization
+	config                    sqlc.OrganizationAiccConfig
 	agent                     sqlc.AiccAgent
 	session                   sqlc.AiccSession
 	intent                    sqlc.AiccSessionIntent
@@ -1512,7 +1515,7 @@ type fakeAICCPublicStore struct {
 // newAICCPublicMessageStore 构造可接收公开消息的最小有效会话，避免队列测试重复维护无关前置条件。
 func newAICCPublicMessageStore() *fakeAICCPublicStore {
 	return &fakeAICCPublicStore{
-		org:      sqlc.Organization{ID: "org-1", AiccEnabled: true},
+		org:      sqlc.Organization{ID: "org-1"},
 		agent:    sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", AppID: "app-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
 		settings: sqlc.AiccAgentSetting{AgentID: "agent-1", MessageLimitPerSession: 100, BlockedVisitorEnabled: true, SessionResumeTtlMinutes: 30},
 		session:  sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
@@ -1581,6 +1584,17 @@ func (f *fakeAICCPublicStore) GetOrganization(_ context.Context, id string) (sql
 		return sqlc.Organization{}, sql.ErrNoRows
 	}
 	return f.org, nil
+}
+
+// GetOrganizationAICCConfig 返回独立开关；未显式配置的历史用例默认代表已开通企业。
+func (f *fakeAICCPublicStore) GetOrganizationAICCConfig(_ context.Context, orgID string) (sqlc.OrganizationAiccConfig, error) {
+	if f.org.ID != orgID {
+		return sqlc.OrganizationAiccConfig{}, sql.ErrNoRows
+	}
+	if f.config.OrgID == "" {
+		return sqlc.OrganizationAiccConfig{OrgID: orgID, Enabled: true, Revision: 1}, nil
+	}
+	return f.config, nil
 }
 
 func (f *fakeAICCPublicStore) GetAICCAgent(_ context.Context, id string) (sqlc.AiccAgent, error) {

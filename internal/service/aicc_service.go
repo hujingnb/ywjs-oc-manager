@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/guregu/null/v5"
+
 	"oc-manager/internal/auth"
 	"oc-manager/internal/domain"
 	"oc-manager/internal/store/sqlc"
@@ -35,6 +37,8 @@ const (
 type AICCStore interface {
 	// GetOrganization 读取企业开通状态、数量上限和版本 allowlist。
 	GetOrganization(ctx context.Context, id string) (sqlc.Organization, error)
+	// GetOrganizationAICCConfig 读取独立开关与数量上限，组织主表不再保存 AICC 配置。
+	GetOrganizationAICCConfig(ctx context.Context, orgID string) (sqlc.OrganizationAiccConfig, error)
 	// CountAICCAgentsByOrg 统计企业当前未删除智能体数量，用于 aicc_agent_limit 校验。
 	CountAICCAgentsByOrg(ctx context.Context, orgID string) (int64, error)
 	// CreateAuditLog 写入 AICC 管理动作审计。
@@ -197,10 +201,17 @@ func (s *AICCService) CreateAgent(ctx context.Context, principal auth.Principal,
 	if err != nil {
 		return AICCAgentResult{}, fmt.Errorf("查询企业 AICC 配置失败: %w", err)
 	}
-	if !org.AiccEnabled {
+	config, err := s.store.GetOrganizationAICCConfig(ctx, orgID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return AICCAgentResult{}, ErrForbidden
 	}
-	if err := s.ensureAgentLimit(ctx, org); err != nil {
+	if err != nil {
+		return AICCAgentResult{}, fmt.Errorf("查询企业 AICC 配置失败: %w", err)
+	}
+	if !config.Enabled {
+		return AICCAgentResult{}, ErrForbidden
+	}
+	if err := s.ensureAgentLimit(ctx, org.ID, config.AgentLimit); err != nil {
 		return AICCAgentResult{}, err
 	}
 	agentID := newUUID()
@@ -1166,15 +1177,15 @@ func normalizeAICCKnowledgeIDs(ids []string, limit int, label string) ([]string,
 	return results, nil
 }
 
-func (s *AICCService) ensureAgentLimit(ctx context.Context, org sqlc.Organization) error {
-	if !org.AiccAgentLimit.Valid {
+func (s *AICCService) ensureAgentLimit(ctx context.Context, orgID string, agentLimit null.Int) error {
+	if !agentLimit.Valid {
 		return nil
 	}
-	count, err := s.store.CountAICCAgentsByOrg(ctx, org.ID)
+	count, err := s.store.CountAICCAgentsByOrg(ctx, orgID)
 	if err != nil {
 		return fmt.Errorf("统计 AICC 智能体数量失败: %w", err)
 	}
-	if count >= org.AiccAgentLimit.Int64 {
+	if count >= agentLimit.Int64 {
 		return fmt.Errorf("%w: AICC 智能体数量已达上限", ErrQuotaExceeded)
 	}
 	return nil

@@ -54,6 +54,9 @@ func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 	assert.Equal(t, int32(20), *result.CreditWarningThreshold)
 	assert.Equal(t, "test-org", result.Code)
 	assert.Equal(t, "test-org", store.created.Code)
+	// 新企业必须同步创建默认关闭的独立 AICC 配置行。
+	assert.Equal(t, result.ID, store.aiccConfig.OrgID)
+	assert.False(t, store.aiccConfig.Enabled)
 	assert.Equal(t, 1, prov.createCalls)
 	assert.Equal(t, 1, prov.bootstrapCalls)
 	// new-api username 由 org.Code 加随机后缀派生：带 code 前缀，但不等于裸 code。
@@ -73,6 +76,30 @@ func TestOrganizationServiceCreateProvisionsNewAPIUser(t *testing.T) {
 	require.Equal(t, "access-tok-xyz", creds.AccessToken)
 	assert.Equal(t, prov.lastCreate.Username, creds.Username)
 	assert.Equal(t, prov.lastCreate.Password, creds.Password)
+}
+
+// TestOrganizationServiceNewOrganizationCanEnableAICC 验证新企业从首版本初始化模型后，旧启用接口会保留该模型。
+func TestOrganizationServiceNewOrganizationCanEnableAICC(t *testing.T) {
+	store := &organizationStoreStub{initialAICCModel: null.StringFrom("model-a")}
+	prov := &fakeProvisioner{user: newapi.User{ID: 42}, accessToken: "access-tok-xyz"}
+	svc := NewOrganizationService(store, prov, mustCipher(t), nil)
+	svc.SetVersionValidator(fakeVersionValidator{known: map[string]bool{"version-a": true}})
+	svc.hashPassword = fakeHash
+
+	created, err := svc.CreateOrganization(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, OrganizationInput{
+		Name:                "新企业",
+		Code:                "new-org",
+		AssistantVersionIDs: []string{"version-a"},
+		AdminUsername:       "admin",
+		AdminDisplayName:    "管理员",
+		AdminPassword:       "secret-password",
+	})
+	require.NoError(t, err)
+
+	_, err = svc.UpdateAICCConfig(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, created.ID, AICCConfigInput{Enabled: true})
+	require.NoError(t, err)
+	assert.True(t, store.updatedAICCConfig.Enabled)
+	assert.Equal(t, "model-a", store.updatedAICCConfig.Model.String)
 }
 
 // TestCreateOrganizationTruncatesNewAPIDisplayName 验证组织名称超过 new-api 展示名上限时，
@@ -376,7 +403,10 @@ func TestOrganizationServiceListIncludesAdminUsername(t *testing.T) {
 
 // TestOrganizationServiceUpdateAICCConfig 验证平台管理员可开通 AICC 并设置智能体上限。
 func TestOrganizationServiceUpdateAICCConfig(t *testing.T) {
-	store := &organizationStoreStub{org: sqlc.Organization{ID: "org-1", Name: "Org", Code: "org", Status: domain.StatusActive}}
+	store := &organizationStoreStub{
+		org:        sqlc.Organization{ID: "org-1", Name: "Org", Code: "org", Status: domain.StatusActive},
+		aiccConfig: sqlc.OrganizationAiccConfig{OrgID: "org-1", Model: null.StringFrom("model-a"), Revision: 7},
+	}
 	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
 	limit := int32(5)
 
@@ -387,10 +417,13 @@ func TestOrganizationServiceUpdateAICCConfig(t *testing.T) {
 
 	require.NoError(t, err)
 	require.True(t, store.updateAICCConfigCalled)
-	assert.Equal(t, "org-1", store.updatedAICCConfig.ID)
-	assert.True(t, store.updatedAICCConfig.AiccEnabled)
-	require.True(t, store.updatedAICCConfig.AiccAgentLimit.Valid)
-	assert.Equal(t, int64(5), store.updatedAICCConfig.AiccAgentLimit.Int64)
+	assert.Equal(t, "org-1", store.updatedAICCConfig.OrgID)
+	assert.True(t, store.updatedAICCConfig.Enabled)
+	require.True(t, store.updatedAICCConfig.AgentLimit.Valid)
+	assert.Equal(t, int64(5), store.updatedAICCConfig.AgentLimit.Int64)
+	// 旧接口尚未提交模型字段时必须保留迁移回填的模型和 revision。
+	assert.Equal(t, "model-a", store.updatedAICCConfig.Model.String)
+	assert.Equal(t, int32(7), store.updatedAICCConfig.Revision)
 	assert.True(t, result.AICCEnabled)
 	require.NotNil(t, result.AICCAgentLimit)
 	assert.Equal(t, int32(5), *result.AICCAgentLimit)
@@ -454,7 +487,7 @@ func TestOrganizationServiceUpdateAICCConfigRejectsNegativeLimit(t *testing.T) {
 
 // TestOrganizationServiceUpdateAICCConfigClearsLimit 验证 nil 智能体上限会写入 NULL，表示企业 AICC 智能体数量不限。
 func TestOrganizationServiceUpdateAICCConfigClearsLimit(t *testing.T) {
-	store := &organizationStoreStub{org: sqlc.Organization{ID: "org-1", Name: "Org", Code: "org", Status: domain.StatusActive, AiccEnabled: true}}
+	store := &organizationStoreStub{org: sqlc.Organization{ID: "org-1", Name: "Org", Code: "org", Status: domain.StatusActive}}
 	svc := NewOrganizationService(store, &fakeProvisioner{}, mustCipher(t), nil)
 
 	result, err := svc.UpdateAICCConfig(context.Background(), auth.Principal{Role: domain.UserRolePlatformAdmin}, "org-1", AICCConfigInput{
@@ -464,8 +497,8 @@ func TestOrganizationServiceUpdateAICCConfigClearsLimit(t *testing.T) {
 
 	require.NoError(t, err)
 	require.True(t, store.updateAICCConfigCalled)
-	assert.False(t, store.updatedAICCConfig.AiccEnabled)
-	assert.False(t, store.updatedAICCConfig.AiccAgentLimit.Valid)
+	assert.False(t, store.updatedAICCConfig.Enabled)
+	assert.False(t, store.updatedAICCConfig.AgentLimit.Valid)
 	assert.False(t, result.AICCEnabled)
 	assert.Nil(t, result.AICCAgentLimit)
 }
@@ -548,6 +581,8 @@ func (p *fakeProvisioner) DeleteUser(_ context.Context, userID int64) error {
 
 type organizationStoreStub struct {
 	org                              sqlc.Organization
+	aiccConfig                       sqlc.OrganizationAiccConfig
+	initialAICCModel                 null.String
 	orgAdmin                         sqlc.User
 	created                          sqlc.CreateOrganizationParams
 	updated                          sqlc.SetOrganizationNewAPIUserParams
@@ -564,6 +599,23 @@ type organizationStoreStub struct {
 	updatedAICCConfig                sqlc.UpdateOrganizationAICCConfigParams
 	organizationIndustryBases        []sqlc.IndustryKnowledgeBasis
 	cleanedUnauthorizedAICCKnowledge bool
+}
+
+// CreateOrganizationAICCConfig 为测试中新建企业建立默认关闭配置。
+func (s *organizationStoreStub) CreateOrganizationAICCConfig(_ context.Context, orgID string) error {
+	s.aiccConfig = sqlc.OrganizationAiccConfig{OrgID: orgID, Model: s.initialAICCModel, Revision: 1}
+	return nil
+}
+
+// GetOrganizationAICCConfig 返回测试桩保存的独立企业配置。
+func (s *organizationStoreStub) GetOrganizationAICCConfig(_ context.Context, orgID string) (sqlc.OrganizationAiccConfig, error) {
+	if s.aiccConfig.OrgID == "" {
+		s.aiccConfig = sqlc.OrganizationAiccConfig{OrgID: orgID, Revision: 1}
+	}
+	if s.aiccConfig.OrgID != orgID {
+		return sqlc.OrganizationAiccConfig{}, sql.ErrNoRows
+	}
+	return s.aiccConfig, nil
 }
 
 func (s *organizationStoreStub) CreateOrganization(_ context.Context, arg sqlc.CreateOrganizationParams) error {
@@ -649,8 +701,7 @@ func (s *organizationStoreStub) UpdateOrganizationAICCConfig(_ context.Context, 
 	}
 	s.updatedAICCConfig = arg
 	s.updateAICCConfigCalled = true
-	s.org.AiccEnabled = arg.AiccEnabled
-	s.org.AiccAgentLimit = arg.AiccAgentLimit
+	s.aiccConfig = sqlc.OrganizationAiccConfig{OrgID: arg.OrgID, Enabled: arg.Enabled, Model: arg.Model, AgentLimit: arg.AgentLimit, Revision: arg.Revision}
 	return nil
 }
 

@@ -46,8 +46,8 @@ var aiccAllowedImageExts = map[string]bool{
 
 // AICCPublicStore 是访客公开 API 依赖的数据访问接口。
 type AICCPublicStore interface {
-	// GetOrganization 读取企业 AICC 开通状态，公开入口需随平台开关实时下线。
-	GetOrganization(ctx context.Context, id string) (sqlc.Organization, error)
+	// GetOrganizationAICCConfig 读取独立开关，公开入口需随平台配置实时下线。
+	GetOrganizationAICCConfig(ctx context.Context, orgID string) (sqlc.OrganizationAiccConfig, error)
 	// GetAICCAgent 通过会话内 agent_id 读取未删除智能体，用于消息发送前校验状态。
 	GetAICCAgent(ctx context.Context, id string) (sqlc.AiccAgent, error)
 	// GetAICCAgentByPublicToken 只通过公开链接 token 定位 active 智能体，避免挂件 token 旁路域名校验。
@@ -1335,14 +1335,14 @@ func (s *AICCPublicService) activeAgentByMessage(ctx context.Context, message sq
 }
 
 func (s *AICCPublicService) ensureAICCOrgEnabled(ctx context.Context, orgID string) error {
-	org, err := s.store.GetOrganization(ctx, orgID)
+	config, err := s.store.GetOrganizationAICCConfig(ctx, orgID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrAICCOffline
 	}
 	if err != nil {
 		return fmt.Errorf("查询 AICC 企业开通状态失败: %w", err)
 	}
-	if !org.AiccEnabled {
+	if !config.Enabled {
 		return ErrAICCOffline
 	}
 	return nil

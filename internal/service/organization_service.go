@@ -56,12 +56,15 @@ type OrganizationVersionValidator interface {
 type OrganizationStore interface {
 	// CreateOrganization 创建组织（:exec），写入后通过 GetOrganization 读回。
 	CreateOrganization(ctx context.Context, arg sqlc.CreateOrganizationParams) error
+	// CreateOrganizationAICCConfig 为新企业创建默认关闭的独立 AICC 配置行。
+	CreateOrganizationAICCConfig(ctx context.Context, orgID string) error
 	// SetOrganizationNewAPIUser 更新 new-api 用户信息（:exec），写入后通过 GetOrganization 读回。
 	SetOrganizationNewAPIUser(ctx context.Context, arg sqlc.SetOrganizationNewAPIUserParams) error
 	// CreateUser 创建用户（:exec）。
 	CreateUser(ctx context.Context, arg sqlc.CreateUserParams) error
 	HardDeleteOrganization(ctx context.Context, id string) error
 	GetOrganization(ctx context.Context, id string) (sqlc.Organization, error)
+	GetOrganizationAICCConfig(ctx context.Context, orgID string) (sqlc.OrganizationAiccConfig, error)
 	ListOrganizations(ctx context.Context, arg sqlc.ListOrganizationsParams) ([]sqlc.Organization, error)
 	GetOrgAdminByOrg(ctx context.Context, id null.String) (sqlc.User, error)
 	// UpdateOrganizationProfile 更新组织资料（:exec），写入后通过 GetOrganization 读回。
@@ -295,6 +298,13 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 		}
 		return OrganizationResult{}, fmt.Errorf("创建企业失败: %w", err)
 	}
+	// 组织旧 AICC 列已删除，新企业必须在任何后续回读前建立一对一配置行。
+	if err := s.store.CreateOrganizationAICCConfig(ctx, orgID); err != nil {
+		if rollbackErr := s.store.HardDeleteOrganization(ctx, orgID); rollbackErr != nil {
+			return OrganizationResult{}, fmt.Errorf("创建企业 AICC 默认配置失败: %w；回滚企业行失败: %v", err, rollbackErr)
+		}
+		return OrganizationResult{}, fmt.Errorf("创建企业 AICC 默认配置失败: %w", err)
+	}
 	org, err := s.store.GetOrganization(ctx, orgID)
 	if err != nil {
 		return OrganizationResult{}, fmt.Errorf("读取新建企业失败: %w", err)
@@ -392,6 +402,7 @@ func (s *OrganizationService) CreateOrganization(ctx context.Context, principal 
 		return OrganizationResult{}, wrappedErr
 	}
 	result := toOrganizationResult(org)
+	applyOrganizationAICCConfig(&result, sqlc.OrganizationAiccConfig{OrgID: org.ID})
 	result.AdminUsername = input.AdminUsername
 	if s.knowledgeDatasets != nil {
 		if _, err := s.knowledgeDatasets.EnsureOrgDataset(ctx, org); err != nil {
@@ -678,11 +689,21 @@ func (s *OrganizationService) UpdateAICCConfig(ctx context.Context, principal au
 			return OrganizationResult{}, fmt.Errorf("校验行业知识库失败: %w", err)
 		}
 	}
-	// UpdateOrganizationAICCConfig 为 :exec；写入后回读组织，确保响应包含数据库最终状态。
+	// 旧接口暂未提交模型字段，最小适配必须保留迁移回填的模型与 revision，避免写入空值破坏约束。
+	currentConfig, err := s.store.GetOrganizationAICCConfig(ctx, orgID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return OrganizationResult{}, ErrNotFound
+	}
+	if err != nil {
+		return OrganizationResult{}, fmt.Errorf("读取企业 AICC 配置失败: %w", err)
+	}
+	// UpdateOrganizationAICCConfig 为 :exec；写入后回读组织与独立配置，确保响应包含数据库最终状态。
 	if err := s.store.UpdateOrganizationAICCConfig(ctx, sqlc.UpdateOrganizationAICCConfigParams{
-		AiccEnabled:    input.Enabled,
-		AiccAgentLimit: nullIntFromInt32Ptr(input.AgentLimit),
-		ID:             orgID,
+		Enabled:    input.Enabled,
+		Model:      currentConfig.Model,
+		AgentLimit: nullIntFromInt32Ptr(input.AgentLimit),
+		Revision:   currentConfig.Revision,
+		OrgID:      orgID,
 	}); err != nil {
 		return OrganizationResult{}, fmt.Errorf("更新企业 AICC 配置失败: %w", err)
 	}
@@ -761,14 +782,6 @@ func DecryptOrganizationCredentials(org sqlc.Organization, cipher *auth.Cipher) 
 	return creds, nil
 }
 
-func toOrganizationResults(orgs []sqlc.Organization) []OrganizationResult {
-	results := make([]OrganizationResult, 0, len(orgs))
-	for _, org := range orgs {
-		results = append(results, toOrganizationResult(org))
-	}
-	return results
-}
-
 // toOrganizationResultsWithAdminUsernames 在组织基础视图上补充管理员用户名。
 // 密码明文只在创建请求里短暂出现，数据库只保存 hash，因此响应不会也不能包含管理员密码。
 func (s *OrganizationService) toOrganizationResultsWithAdminUsernames(ctx context.Context, orgs []sqlc.Organization) ([]OrganizationResult, error) {
@@ -787,6 +800,11 @@ func (s *OrganizationService) toOrganizationResultsWithAdminUsernames(ctx contex
 // 避免一个历史异常组织阻断组织资料、状态切换等主流程。
 func (s *OrganizationService) toOrganizationResultWithAdminUsername(ctx context.Context, org sqlc.Organization) (OrganizationResult, error) {
 	result := toOrganizationResult(org)
+	config, err := s.store.GetOrganizationAICCConfig(ctx, org.ID)
+	if err != nil {
+		return OrganizationResult{}, fmt.Errorf("查询企业 AICC 配置失败: %w", err)
+	}
+	applyOrganizationAICCConfig(&result, config)
 	result.AdminUsername = s.getOrgAdminUsername(ctx, org.ID)
 	bases, err := s.store.ListOrganizationIndustryKnowledgeBases(ctx, org.ID)
 	if err != nil {
@@ -838,10 +856,14 @@ func toOrganizationResult(org sqlc.Organization) OrganizationResult {
 		KnowledgeQuotaBytes:           org.KnowledgeQuotaBytes,
 		DefaultAppKnowledgeQuotaBytes: org.DefaultAppKnowledgeQuotaBytes,
 		AssistantVersionIDs:           versionIDs,
-		AICCEnabled:                   org.AiccEnabled,
-		AICCAgentLimit:                int32PtrFromNullInt(org.AiccAgentLimit),
 		IndustryKnowledgeBaseIDs:      []string{},
 	}
+}
+
+// applyOrganizationAICCConfig 把独立配置投影到兼容响应字段，避免 API 在调用方迁移期间改变键名。
+func applyOrganizationAICCConfig(result *OrganizationResult, config sqlc.OrganizationAiccConfig) {
+	result.AICCEnabled = config.Enabled
+	result.AICCAgentLimit = int32PtrFromNullInt(config.AgentLimit)
 }
 
 // nullIntFromInt32Ptr 把可选 int32 指针转换为 null.Int（用于 CreditWarningThreshold）。
