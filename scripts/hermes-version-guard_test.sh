@@ -91,7 +91,10 @@ test ! -e "$sentinel"
 # 场景七：仓库当前真实 v0.18.2 元数据必须持续通过，避免临时 fixture 与实际默认版本行为脱节。
 expect_guard_pass 'hermes-v0.18.2'
 
-# 场景八：Dockerfile 使用上游 --branch 安装路径，40 位 commit SHA 也必须拒绝，不能宣称支持未实现的 --commit。
+# 场景八：仓库新增的 v0.19.0 variant 必须持续通过，避免新版本目录或上游 ref 元数据缺失。
+expect_guard_pass 'hermes-v0.19.0'
+
+# 场景九：Dockerfile 使用上游 --branch 安装路径，40 位 commit SHA 也必须拒绝，不能宣称支持未实现的 --commit。
 create_variant commit_sha commit-sha
 printf '%s\n' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' >"${repo_root}/runtime/hermes/${commit_sha}/hermes-ref.txt"
 expect_guard_fail "$commit_sha" 'Hermes 上游 ref 必须是不可变版本 tag'

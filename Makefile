@@ -78,7 +78,7 @@ WEB_IMAGE_REPO   ?= $(PROD_REGISTRY)/$(PROD_APP_NS)/oc-manager-web
 # hermes runtime 生产镜像仓库，与上方三个服务保持一致命名风格。
 # HERMES_VARIANT 选择 runtime/hermes/ 下的 versioned variant 子目录（自包含 Dockerfile + 资产）。
 # 镜像 tag 从该 variant 的 version.txt 派生，禁止 main / master / latest / dev 等浮动 ref。
-HERMES_VARIANT       ?= hermes-v0.18.2
+HERMES_VARIANT       ?= hermes-v0.19.0
 # HERMES_VARIANT_DIR 只能由 HERMES_VARIANT 派生，避免命令行直接指向任意目录绕过版本校验。
 override HERMES_VARIANT_DIR := runtime/hermes/$(HERMES_VARIANT)
 override HERMES_VERSION := $(strip $(shell if [ -f "$(HERMES_VARIANT_DIR)/version.txt" ]; then cat "$(HERMES_VARIANT_DIR)/version.txt"; fi))
@@ -88,7 +88,7 @@ override HERMES_VERSION := $(strip $(shell if [ -f "$(HERMES_VARIANT_DIR)/versio
 # 必须保留空值并交由版本守卫拒绝，避免元数据配置错误被兼容回退静默掩盖。
 override HERMES_UPSTREAM_REF := $(strip $(shell if [ -f "$(HERMES_VARIANT_DIR)/hermes-ref.txt" ]; then cat "$(HERMES_VARIANT_DIR)/hermes-ref.txt"; else printf '%s' "$(HERMES_VERSION)"; fi))
 HERMES_IMAGE_REPO    ?= $(PROD_REGISTRY)/$(PROD_APP_NS)/oc-manager-aigowork
-# hermes 镜像 tag 以产品/variant 版本开头（如 v0.18.2-时间戳-源码提交），便于识别对外运行时版本。
+# hermes 镜像 tag 以产品/variant 版本开头（如 v0.19.0-时间戳-源码提交），便于识别对外运行时版本。
 # 上游固定 ref 独立记录在 hermes-ref.txt 并透传到镜像元数据，不能再从产品版本号推断。
 override HERMES_IMAGE := $(HERMES_IMAGE_REPO):$(HERMES_VERSION)-$(IMAGE_TAG)
 # 本地普通实例必须使用 secret.yaml 中同版本的固定 tag；直接导入节点后，app Pod 可绕过
