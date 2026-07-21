@@ -4,6 +4,7 @@ import {
   assertAICCRuntimeFileContains,
   clearLoginState,
   changeAICCModelToAnotherAvailableOption,
+  countAICCLeadsByPhone,
   createAICCAgentAsOrgAdmin,
   forceZh,
   getAICCRuntimePhase,
@@ -459,10 +460,19 @@ test('公开访客提交留资后企业管理员可查看线索和导出 CSV', s
   await expect(publicPage.getByRole('heading', { name: agent.name })).toBeVisible()
 
   const phone = `139${Date.now().toString().slice(-8)}`
+  const initialLeadCount = countAICCLeadsByPhone(phone)
   // 留资卡只在模型识别到高购买意向后出现；先走真实公开咨询，不能把配置手机号字段误当作自动邀约。
   await sendPublicAICCMessage(publicPage, '我们计划采购 50 个席位，预算已批准，请联系我安排演示。')
   await expect(publicPage.getByText('请先留下联系信息')).toBeVisible()
+  const leadSessionToken = await publicPage.evaluate(token => window.localStorage.getItem(`aicc:session:${token}:web_link`), agent.public_token)
+  expect(leadSessionToken).toBeTruthy()
+  // 同一公开会话在第二个页面恢复同一张留资卡；重复提交只能更新当前客户，不能产生第二条正式线索。
+  const duplicatePage = await page.context().newPage()
+  await forceZh(duplicatePage)
+  await duplicatePage.goto(`/aicc/${agent.public_token}`)
+  await expect(duplicatePage.getByText('请先留下联系信息')).toBeVisible()
   await publicPage.getByPlaceholder('联系电话').fill(phone)
+  await duplicatePage.getByPlaceholder('联系电话').fill(phone)
   const submitted = publicPage.waitForResponse(response =>
     response.url().includes('/lead-values')
     && response.request().method() === 'POST',
@@ -470,6 +480,17 @@ test('公开访客提交留资后企业管理员可查看线索和导出 CSV', s
   await publicPage.getByRole('button', { name: '提交联系信息' }).click()
   expect((await submitted).ok()).toBeTruthy()
   await expect(publicPage.getByText('请先留下联系信息')).toBeHidden()
+  await expect.poll(() => countAICCLeadsByPhone(phone), { timeout: 10_000 }).toBe(initialLeadCount + 1)
+
+  const duplicateSubmitted = duplicatePage.waitForResponse(response =>
+    response.url().includes('/lead-values')
+    && response.request().method() === 'POST',
+  )
+  await duplicatePage.getByRole('button', { name: '提交联系信息' }).click()
+  expect((await duplicateSubmitted).ok()).toBeTruthy()
+  await expect(duplicatePage.getByText('请先留下联系信息')).toBeHidden()
+  await expect.poll(() => countAICCLeadsByPhone(phone), { timeout: 10_000 }).toBe(initialLeadCount + 1)
+  await duplicatePage.close()
 
   const messageSent = publicPage.waitForResponse(response =>
     response.url().includes('/messages')

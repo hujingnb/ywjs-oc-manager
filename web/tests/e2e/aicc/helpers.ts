@@ -263,10 +263,14 @@ export async function createStartedAICCConversationFixture(page: Page, prefix: s
   await expect(orgRow).toBeVisible()
   await orgRow.getByRole('button', { name: '编辑' }).click()
   const enabledSwitch = page.locator('.n-form-item').filter({ hasText: '开通 AICC' }).getByRole('switch')
-  if (await enabledSwitch.getAttribute('aria-checked') !== 'true') await enabledSwitch.click()
-  const enabledSaved = page.waitForResponse(response => response.url().includes('/aicc-config') && response.request().method() === 'PATCH')
-  await page.getByRole('button', { name: '保存 AICC 配置' }).click()
-  expect((await enabledSaved).ok()).toBeTruthy()
+  // 共享本地环境可能已由其它 AICC spec 开通过企业配置；只有状态确实变化时才等待保存请求，
+  // 避免无改动保存按钮不发请求时把后续公开聊天场景卡到总超时。
+  if (await enabledSwitch.getAttribute('aria-checked') !== 'true') {
+    await enabledSwitch.click()
+    const enabledSaved = page.waitForResponse(response => response.url().includes('/aicc-config') && response.request().method() === 'PATCH')
+    await page.getByRole('button', { name: '保存 AICC 配置' }).click()
+    expect((await enabledSaved).ok()).toBeTruthy()
+  }
 
   await clearLoginState(page)
   await loginAs(page, 'org_admin', fixture, 'zh')
@@ -461,7 +465,7 @@ export function queryLocalManagerDB(sql: string): string {
 export function countAICCLeadsByPhone(phone: string): number {
   const escapedPhone = phone.replaceAll("'", "''")
   const result = queryLocalManagerDB(
-    `SELECT COUNT(*) FROM aicc_lead_values WHERE value='${escapedPhone}'`,
+    `SELECT COUNT(*) FROM aicc_leads WHERE primary_contact_hash=SHA2(LOWER(TRIM('${escapedPhone}')), 256)`,
   )
   return Number(result || '0')
 }
