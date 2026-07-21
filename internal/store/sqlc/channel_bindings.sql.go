@@ -156,7 +156,17 @@ func (q *Queries) SetChannelBindingChallenge(ctx context.Context, arg SetChannel
 
 const setChannelBindingStatus = `-- name: SetChannelBindingStatus :exec
 UPDATE channel_bindings
-SET status = ?, last_error = ?, updated_at = now()
+SET
+    status = ?,
+    last_error = ?,
+    -- SetChannelBindingStatus 只承载 pending / failed / expired / unbound 等非 bound 状态；
+    -- bound 统一走 MarkChannelBindingBound。因此这里清理旧身份，避免解绑或失败后前端展示 stale account。
+    -- metadata_json 不能在 pending_auth 轮询中清理：channel_start_login 写入二维码后，
+    -- channel_check_binding 会继续把状态刷新为 pending_auth，若清 metadata 会导致二维码立即消失。
+    bound_identity = NULL,
+    channel_name = NULL,
+    bound_at = NULL,
+    updated_at = now()
 WHERE app_id = ? AND channel_type = ? AND status <> 'deleted'
 `
 

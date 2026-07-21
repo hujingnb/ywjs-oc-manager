@@ -32,6 +32,13 @@ type ChannelRestarter interface {
 	RestartApp(ctx context.Context, appID string) error
 }
 
+// WeChatRuntimeUnbinder 抽象微信 runtime 侧解绑能力。
+// manager DB 只是控制台状态；微信账号真实凭证由 runtime/oc-ops 管理，解绑时必须同步清理，
+// 否则下一轮微信 check fallback 会从 runtime 读到旧账号并把 DB 重新标记为 bound。
+type WeChatRuntimeUnbinder interface {
+	UnbindWeChat(ctx context.Context, appID string) error
+}
+
 // ChannelStore 抽象渠道服务的数据访问能力。
 type ChannelStore interface {
 	GetApp(ctx context.Context, id string) (sqlc.App, error)
@@ -65,6 +72,8 @@ type ChannelService struct {
 	feishuRestarter ChannelRestarter
 	// cipher 用于企业微信手填发起时加密 secret 落 metadata（飞书加密在 worker check，企业微信在 service）。
 	cipher *auth.Cipher
+	// wechatUnbinder 清理 runtime/oc-ops 侧 weixin 账号；未注入时微信解绑仅清理 manager DB（测试/旧装配兼容）。
+	wechatUnbinder WeChatRuntimeUnbinder
 }
 
 // NewChannelService 创建 service。
@@ -85,6 +94,11 @@ func (s *ChannelService) SetFeishuUnbindDeps(p FeishuSecretPatcher, r ChannelRes
 
 // SetCipher 注入加密器，供企业微信手填发起时加密 secret 落库。未注入时 BeginWorkWechatAuth 报错。
 func (s *ChannelService) SetCipher(c *auth.Cipher) { s.cipher = c }
+
+// SetWeChatRuntimeUnbinder 注入微信 runtime 解绑能力。
+func (s *ChannelService) SetWeChatRuntimeUnbinder(u WeChatRuntimeUnbinder) {
+	s.wechatUnbinder = u
+}
 
 // ChallengeResult 是 BeginAuth 对外返回的视图。
 type ChallengeResult struct {
@@ -614,6 +628,14 @@ func (s *ChannelService) Unbind(ctx context.Context, principal auth.Principal, a
 		LastError:   null.String{},
 	}); err != nil {
 		return fmt.Errorf("解绑渠道失败: %w", err)
+	}
+	// 微信凭证由 runtime/oc-ops 自管。manager DB 置 unbound 后仍需通知 runtime 清理旧账号，
+	// 否则旧 accounts 状态会被 channel_check_binding 的 cached-login fallback 识别为已绑定。
+	// runtime 清理失败只记日志：DB 状态仍是用户操作的 source of truth，避免临时 oc-ops 抖动阻断解绑。
+	if channelType == domain.ChannelTypeWeChat && s.wechatUnbinder != nil {
+		if err := s.wechatUnbinder.UnbindWeChat(ctx, app.ID); err != nil {
+			slog.ErrorContext(ctx, "微信解绑清理 runtime 账号失败", "app_id", app.ID, redactlog.Err(err))
+		}
 	}
 	// 飞书 / 企业微信解绑是用户即时动作（不走 worker）：删 app Secret 对应 key 并重启，
 	// 使引擎下次重启不再启用该平台。删 key / 重启失败只记日志不阻断——

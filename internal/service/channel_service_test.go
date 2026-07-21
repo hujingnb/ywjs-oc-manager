@@ -169,11 +169,19 @@ func TestChannelServicePollAuthDoesNotPushOnNonBindingWaiting(t *testing.T) {
 // TestChannelServiceUnbindUpdatesStatus 验证渠道服务解绑Updates状态的预期行为场景。
 func TestChannelServiceUnbindUpdatesStatus(t *testing.T) {
 	store := newChannelStub(t)
+	store.binding.Status = domain.ChannelStatusBound
+	store.binding.BoundIdentity = null.StringFrom("cd1e0e730997@im.bot")
+	store.binding.ChannelName = null.StringFrom("旧微信账号")
+	store.binding.BoundAt = null.TimeFrom(time.Now())
+	store.binding.MetadataJson = []byte(`{"type":"qrcode","qrcode":"old"}`)
 	svc := NewChannelService(store, channel.NewRegistry())
 
 	err := svc.Unbind(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, domain.ChannelTypeWeChat)
 	require.NoError(t, err)
 	require.Equal(t, domain.ChannelStatusUnboundByUser, store.lastStatus)
+	require.False(t, store.binding.BoundIdentity.Valid, "解绑后不得继续展示旧微信身份")
+	require.False(t, store.binding.ChannelName.Valid, "解绑后不得继续展示旧渠道名称")
+	require.False(t, store.binding.BoundAt.Valid, "解绑后不得保留旧绑定时间")
 }
 
 // TestChannelServiceUnbindFeishuDeletesSecretKeys 验证飞书解绑删 Secret key + 重启 + 置 unbound_by_user。
@@ -345,6 +353,20 @@ func TestChannelServiceUnbindWechatUnchanged(t *testing.T) {
 	require.NoError(t, svc.Unbind(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, domain.ChannelTypeWeChat))
 	require.Empty(t, patcher.deleted)
 	require.False(t, restarter.restarted)
+}
+
+// TestChannelServiceUnbindWechatCallsRuntimeUnbind 验证微信解绑除了更新 manager DB，
+// 还会通知 runtime/oc-ops 清理 weixin 侧账号，避免旧账号在下一轮 check fallback 中把 DB 自动标回 bound。
+func TestChannelServiceUnbindWechatCallsRuntimeUnbind(t *testing.T) {
+	store := newChannelStub(t)
+	unbinder := &fakeWeChatRuntimeUnbinder{}
+	svc := NewChannelService(store, channel.NewRegistry())
+	svc.SetWeChatRuntimeUnbinder(unbinder)
+
+	err := svc.Unbind(context.Background(), channelOrgAdminPrincipal(), testChannelAppID, domain.ChannelTypeWeChat)
+	require.NoError(t, err)
+	require.Equal(t, testChannelAppID, unbinder.appID)
+	require.Equal(t, domain.ChannelStatusUnboundByUser, store.lastStatus)
 }
 
 // TestChannelServiceUnbindPlatformAdminAllowed 验证平台管理员可运维介入解绑渠道：
@@ -610,6 +632,14 @@ type fakeRestarter struct{ restarted bool }
 
 func (r *fakeRestarter) RestartApp(_ context.Context, _ string) error { r.restarted = true; return nil }
 
+// fakeWeChatRuntimeUnbinder 记录微信解绑是否通知 runtime 清理 weixin 账号。
+type fakeWeChatRuntimeUnbinder struct{ appID string }
+
+func (u *fakeWeChatRuntimeUnbinder) UnbindWeChat(ctx context.Context, appID string) error {
+	u.appID = appID
+	return nil
+}
+
 type fakeAdapter struct {
 	challenge channel.AuthChallenge
 	progress  channel.AuthProgress
@@ -709,6 +739,11 @@ func (s *channelStub) SetChannelBindingStatus(_ context.Context, arg sqlc.SetCha
 	s.lastStatus = arg.Status
 	s.binding.Status = arg.Status
 	s.binding.LastError = arg.LastError
+	// SetChannelBindingStatus 只用于非 bound 状态；切出 bound 后必须清理旧身份与挑战信息，
+	// 避免解绑/失败页面继续展示 stale account。metadata_json 由 pending_auth 二维码轮询复用，不在此清理。
+	s.binding.BoundIdentity = null.String{}
+	s.binding.ChannelName = null.String{}
+	s.binding.BoundAt = null.Time{}
 	return nil
 }
 

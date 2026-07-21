@@ -19,7 +19,6 @@ import (
 	workerhandlers "oc-manager/internal/worker/handlers"
 )
 
-
 // ocopsEndpointResolver 把 service.OcOpsResolver 适配为 workerhandlers.ChannelEndpointResolver：
 // 仅取出 OcOpsAppLocation.Endpoint，让 channel_start_login worker 不直接依赖 service 类型。
 type ocopsEndpointResolver struct {
@@ -49,6 +48,32 @@ func (a ocopsBindingLocationResolver) Resolve(ctx context.Context, appID string)
 		return ocops.Endpoint{}, false, err
 	}
 	return loc.Endpoint, loc.Supported, nil
+}
+
+// ocopsWeChatRuntimeUnbinder 把微信解绑转发到 app runtime 的 oc-ops weixin 通道。
+// manager 侧渠道名是 wechat，runtime/hermes 侧渠道名是 weixin，不能混用。
+type ocopsWeChatRuntimeUnbinder struct {
+	resolver service.OcOpsResolver
+	ops      interface {
+		ChannelUnbind(ctx context.Context, ep ocops.Endpoint, channel string) (ocops.ChannelResult, error)
+	}
+}
+
+// UnbindWeChat 清理 runtime 中持久化的 weixin 账号，避免 manager 解绑后被旧 runtime 状态重新判定 bound。
+func (u ocopsWeChatRuntimeUnbinder) UnbindWeChat(ctx context.Context, appID string) error {
+	if u.resolver == nil || u.ops == nil {
+		return nil
+	}
+	loc, err := u.resolver.Resolve(ctx, appID)
+	if err != nil {
+		return err
+	}
+	// dev stub 或运行时暂不可达时没有可清理的真实 weixin 状态；manager DB 解绑仍应生效。
+	if !loc.Supported || loc.Endpoint.BaseURL == "" {
+		return nil
+	}
+	_, err = u.ops.ChannelUnbind(ctx, loc.Endpoint, "weixin")
+	return err
 }
 
 // appInputRefresherQueries 是 appInputRefresher 需要的最小 DB 查询子集。
