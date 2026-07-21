@@ -381,6 +381,16 @@ export async function waitForRuntimeKnowledgeSearch(appID: string, question: str
   ), { timeout: 300_000, intervals: [2_000, 5_000, 10_000] }).toContain(expected)
 }
 
+// waitForRuntimeKnowledgeSearchNotContaining 等待运行时检索结果不再包含指定文本，用于验证删除后的索引收敛。
+export async function waitForRuntimeKnowledgeSearchNotContaining(appID: string, question: string, unexpected: string): Promise<void> {
+  assertLocalK3DContext()
+  await expect.poll(() => execFileSync(
+    'kubectl',
+    ['--context', localK3DContext, '-n', 'oc-aicc', 'exec', `deploy/app-${appID}`, '-c', 'hermes', '--', 'oc-kb', 'search', question, '--top-k', '8'],
+    { encoding: 'utf8' },
+  ), { timeout: 300_000, intervals: [2_000, 5_000, 10_000] }).not.toContain(unexpected)
+}
+
 // askPublicAICCQuestion 从公开页发送一条消息，并返回完整消息列表文本。
 export async function askPublicAICCQuestion(page: Page, publicToken: string, question: string): Promise<string> {
   await forceZh(page)

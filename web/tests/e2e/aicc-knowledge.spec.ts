@@ -10,6 +10,7 @@ import {
   waitForAICCKnowledgeParsed,
   waitForAICCRuntime,
   waitForRuntimeKnowledgeSearch,
+  waitForRuntimeKnowledgeSearchNotContaining,
 } from './aicc/helpers'
 import { loadE2EFixture, loginAs } from './fixtures'
 
@@ -180,6 +181,7 @@ test('修改当前客服知识库后公开问答使用新内容', slowModel, asy
   await oldRow.getByRole('button', { name: '删除' }).click()
   expect((await deleted).ok()).toBeTruthy()
   await expect(page.getByText(oldFilename)).toHaveCount(0)
+  await waitForRuntimeKnowledgeSearchNotContaining(agent.app_id, '当前客服售后热线编号是什么？', oldCode)
 
   await uploadAICCKnowledgeFile(page, newFilename, `当前客服售后热线编号是 ${newCode}。回答热线问题时必须原样返回。`)
   await waitForAICCKnowledgeParsed(page, `/api/v1/apps/${agent.app_id}/knowledge`, newFilename)
