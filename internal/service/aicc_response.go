@@ -48,7 +48,7 @@ type aiccRawResponseEnvelope struct {
 	Text       string               `json:"text"`
 	Sources    []AICCResponseSource `json:"sources"`
 	NextAction string               `json:"next_action"`
-	Flags      map[string]bool      `json:"flags"`
+	Flags      json.RawMessage      `json:"flags"`
 }
 
 // ParseAndValidateAICCResponse 解析 Hermes 的最终 JSON，并把模型提供的来源与本轮工具审计逐项比对。
@@ -66,12 +66,33 @@ func ParseAndValidateAICCResponse(raw string, audit AICCResponseToolAudit) (AICC
 	if wire.Sources == nil || wire.Flags == nil {
 		return AICCResponseEnvelope{}, fmt.Errorf("%w: sources and flags are required", ErrAICCResponsePolicy)
 	}
-	for name := range wire.Flags {
+	flags, err := normalizeAICCResponseFlags(wire.Flags)
+	if err != nil {
+		return AICCResponseEnvelope{}, err
+	}
+	for name := range flags {
 		if name != "refusal" && name != "fallback" {
 			return AICCResponseEnvelope{}, fmt.Errorf("%w: unknown flag", ErrAICCResponsePolicy)
 		}
 	}
-	return validateAICCResponseEnvelope(AICCResponseEnvelope{Text: wire.Text, Sources: wire.Sources, NextAction: wire.NextAction, Refusal: wire.Flags["refusal"], Fallback: wire.Flags["fallback"]}, audit)
+	return validateAICCResponseEnvelope(AICCResponseEnvelope{Text: wire.Text, Sources: wire.Sources, NextAction: wire.NextAction, Refusal: flags["refusal"], Fallback: flags["fallback"]}, audit)
+}
+
+// normalizeAICCResponseFlags 兼容线上模型偶发把空 flags 对象输出成空数组的情况。
+// 非空数组仍拒绝，避免模型借数组元素绕过固定的 refusal / fallback 布尔标记边界。
+func normalizeAICCResponseFlags(raw json.RawMessage) (map[string]bool, error) {
+	var flags map[string]bool
+	if err := json.Unmarshal(raw, &flags); err == nil {
+		if flags == nil {
+			return nil, fmt.Errorf("%w: sources and flags are required", ErrAICCResponsePolicy)
+		}
+		return flags, nil
+	}
+	var emptyArray []json.RawMessage
+	if err := json.Unmarshal(raw, &emptyArray); err == nil && len(emptyArray) == 0 {
+		return map[string]bool{}, nil
+	}
+	return nil, fmt.Errorf("%w: invalid flags", ErrAICCResponsePolicy)
 }
 
 // validateAICCResponseEnvelope 校验已经由受信任适配层解码的响应。它也供 dispatcher 对重试结果

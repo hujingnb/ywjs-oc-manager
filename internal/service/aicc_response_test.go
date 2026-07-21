@@ -81,6 +81,18 @@ func TestParseAndValidateAICCResponseEnvelopeRejectsUnknownFlag(t *testing.T) {
 	require.ErrorIs(t, err, ErrAICCResponsePolicy)
 }
 
+// TestParseAndValidateAICCResponseEnvelopeAcceptsEmptyFlagsArray 覆盖线上模型把空 flags 对象
+// 误输出为空数组的兼容路径：空数组没有业务语义，可归一化为空对象，避免安全回复被误兜底。
+func TestParseAndValidateAICCResponseEnvelopeAcceptsEmptyFlagsArray(t *testing.T) {
+	reply, err := ParseAndValidateAICCResponse(`{"text":"您好！很高兴为您服务，请问有什么可以帮您的吗？","sources":[],"next_action":"none","flags":[]}`, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "您好！很高兴为您服务，请问有什么可以帮您的吗？", reply.Text)
+	assert.Equal(t, "none", reply.NextAction)
+	assert.False(t, reply.Fallback)
+	assert.False(t, reply.Refusal)
+}
+
 // TestParseAndValidateAICCResponseEnvelopeRequiresSourcesAndFlags 覆盖严格 wire schema：
 // 即使来源为空，模型也必须显式输出 sources 和 flags，不能以 null 或省略绕过结构约束。
 func TestParseAndValidateAICCResponseEnvelopeRequiresSourcesAndFlags(t *testing.T) {

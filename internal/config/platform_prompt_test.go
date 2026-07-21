@@ -80,6 +80,9 @@ func TestPlatformPrompts_Invariants(t *testing.T) {
 				assert.Contains(t, testCase.prompt, "不得调用或建议调用命令、终端、代码、文件、进程")
 				assert.Contains(t, testCase.prompt, "text、sources、next_action、flags")
 				assert.Contains(t, testCase.prompt, "aicc_response_sources")
+				// flags 必须明确为对象，避免模型把空标记输出成数组后触发 manager 固定兜底。
+				assert.Contains(t, testCase.prompt, "flags 必须是 JSON 对象")
+				assert.Contains(t, testCase.prompt, "不得使用数组")
 				// AICC 不得被平台提示词强制枚举全部 Skill，也不得在无匹配时自行回退通用能力。
 				assert.NotContains(t, testCase.prompt, "处理任何用户任务前，必须先调用 skills_list")
 				assert.NotContains(t, testCase.prompt, "只有在没有适用的技能时，才使用通用能力")
