@@ -408,7 +408,7 @@ func buildFixture(ctx context.Context, db *sql.DB, runtimeImageID string, identi
 	); err != nil {
 		return fx, fmt.Errorf("allow assistant_version for org: %w", err)
 	}
-	// 配置行早于助手版本创建；allowlist 就绪后必须同步真实模型，确保 AICC fixture 可直接启用。
+	// 配置行早于助手版本创建；allowlist 就绪后必须同步真实模型并打开开关，确保 AICC fixture 可直接使用。
 	if err := initializeOrganizationAICCModel(ctx, db, fx.OrgID, e2eMainModel()); err != nil {
 		return fx, err
 	}
@@ -444,12 +444,12 @@ func e2eMainModel() string {
 	return "deepseek-chat"
 }
 
-// initializeOrganizationAICCModel 在 fixture 助手版本就绪后回填独立配置模型。
-// 必须恰好更新一行；缺少配置意味着 seed 顺序或迁移状态异常，不能继续生成不可启用的 fixture。
+// initializeOrganizationAICCModel 在 fixture 助手版本就绪后回填独立配置模型并直接开通 AICC。
+// 必须恰好更新一行；缺少配置意味着 seed 顺序或迁移状态异常，不能继续生成不可用的 fixture。
 func initializeOrganizationAICCModel(ctx context.Context, db *sql.DB, orgID, model string) error {
 	result, err := db.ExecContext(ctx, `
 		UPDATE organization_aicc_configs
-		SET model = ?
+		SET enabled = 1, model = ?
 		WHERE org_id = ?`, model, orgID)
 	if err != nil {
 		return fmt.Errorf("initialize org aicc model: %w", err)

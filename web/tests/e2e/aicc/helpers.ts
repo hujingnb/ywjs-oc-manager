@@ -153,8 +153,7 @@ export interface AICCModelChangeResult {
 
 // openFixtureOrganizationAICCConfig 以平台管理员身份打开 fixture 企业的独立 AICC 配置表单。
 // 模型目录与独立配置会异步加载，调用方只能在该页面的可见控件上继续操作。
-async function openFixtureOrganizationAICCConfig(page: Page): Promise<void> {
-  const fixture = loadE2EFixture()
+async function openFixtureOrganizationAICCConfig(page: Page, fixture = loadE2EFixture()): Promise<void> {
   await forceZh(page)
   await loginAs(page, 'platform_admin', fixture, 'zh')
   await page.goto('/organizations')
@@ -170,11 +169,13 @@ export async function setAICCConfigForFixtureOrg(
   enabled: boolean,
   agentLimit: number,
   requestedModel?: string,
+  fixture = loadE2EFixture(),
 ): Promise<string> {
-  await openFixtureOrganizationAICCConfig(page)
+  await openFixtureOrganizationAICCConfig(page, fixture)
   const aiccSwitch = page.locator('.n-form-item').filter({ hasText: '开通 AICC' }).getByRole('switch')
-  if ((await aiccSwitch.getAttribute('aria-checked') === 'true') !== enabled) await aiccSwitch.click()
-  await page.locator('.n-form-item').filter({ hasText: 'AICC 智能体数量上限' }).locator('input').fill(String(agentLimit))
+  const currentEnabled = await aiccSwitch.getAttribute('aria-checked') === 'true'
+  const agentLimitInput = page.locator('.n-form-item').filter({ hasText: 'AICC 智能体数量上限' }).locator('input')
+  const currentAgentLimit = Number((await agentLimitInput.inputValue()).trim())
 
   const modelField = page.locator('.n-form-item').filter({ hasText: '客服模型' })
   const modelSelect = modelField.locator('.n-base-selection')
@@ -186,10 +187,21 @@ export async function setAICCConfigForFixtureOrg(
   const selectedModel = (await modelSelect.innerText()).trim()
   if (!selectedModel) throw new Error('fixture 企业未加载可用客服模型，无法保存 AICC 配置')
 
+  // 若当前配置已经满足目标状态，就直接返回，避免把“无需保存”的页面误当成提交失败。
+  if (currentEnabled === enabled && currentAgentLimit === agentLimit && (!requestedModel || selectedModel === requestedModel)) {
+    return selectedModel
+  }
+
+  if (currentEnabled !== enabled) await aiccSwitch.click()
+  await agentLimitInput.fill(String(agentLimit))
+
   const configSaved = page.waitForResponse(response => response.url().includes('/aicc-config') && response.request().method() === 'PUT')
+  await expect(page.getByRole('button', { name: '保存 AICC 配置' })).toBeEnabled()
   await page.getByRole('button', { name: '保存 AICC 配置' }).click()
   const response = await configSaved
-  expect(response.ok()).toBeTruthy()
+  if (!response.ok()) {
+    throw new Error(`保存 AICC 配置失败: ${response.status()} ${await response.text()}`)
+  }
   const payload = await response.json() as { config?: { model?: string } }
   const model = payload.config?.model
   if (!model) throw new Error('AICC 配置保存成功但响应未返回客服模型')

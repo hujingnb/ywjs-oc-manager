@@ -28,13 +28,13 @@ type newAPIUsernameLookupStub struct {
 	deleteCalls int
 }
 
-// TestInitializeOrganizationAICCModel 验证 fixture 创建助手版本后会把真实模型同步到独立企业配置。
+// TestInitializeOrganizationAICCModel 验证 fixture 创建助手版本后会把真实模型同步到独立企业配置并开通 AICC。
 func TestInitializeOrganizationAICCModel(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer db.Close()
 
-	mock.ExpectExec(`UPDATE organization_aicc_configs\s+SET model = \?\s+WHERE org_id = \?`).
+	mock.ExpectExec(`UPDATE organization_aicc_configs\s+SET enabled = 1, model = \?\s+WHERE org_id = \?`).
 		WithArgs("deepseek-chat", "org-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 

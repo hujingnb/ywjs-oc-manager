@@ -292,6 +292,10 @@ test('平台限制智能体数量并在关闭 AICC 后下线公开入口', slowM
   const offline = await page.request.get(`/api/v1/public/aicc/agents/${agent.public_token}/config`)
   expect(offline.status()).toBe(404)
   expect((await offline.json()) as { code: string }).toMatchObject({ code: 'AICC_OFFLINE' })
+
+  // 该用例会把共享 fixture 企业显式关停；后续 slow 场景仍依赖同一企业继续验证接待/意向链路，
+  // 所以必须在测试尾部直接回写数据库把开关恢复，避免再走不稳定的运行时启用流程。
+  queryLocalManagerDB(`UPDATE organization_aicc_configs SET enabled = 1, agent_limit = 100 WHERE org_id = '${fx.org_id}'`)
 })
 
 // 挂件安全覆盖：产品预览加载真实脚本；白名单宿主可创建会话并沉淀来源页，未授权宿主不能消耗会话配额。

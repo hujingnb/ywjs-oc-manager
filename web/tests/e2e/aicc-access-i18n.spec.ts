@@ -1,30 +1,72 @@
-import { expect, test, type Page } from '@playwright/test'
+import type { Page } from '@playwright/test'
+
+import { expect, test, type E2EFixture } from './fixtures'
 
 import { clearLoginState, forceZh } from './aicc/helpers'
-import { loadE2EFixture, loginAs } from './fixtures'
+import { loginAs } from './fixtures'
 
 // AICC 权限和国际化矩阵只依赖企业开通状态，不创建 runtime，避免把角色守卫测试绑定到容器启动耗时。
 test.setTimeout(120_000)
 
 // enableFixtureAICC 通过平台企业编辑页开通 fixture 企业，并保留企业列表入口所需的真实响应数据。
-async function enableFixtureAICC(page: Page): Promise<void> {
-  const fx = loadE2EFixture()
+async function enableFixtureAICC(page: Page, fixture: E2EFixture): Promise<void> {
   await forceZh(page)
-  await loginAs(page, 'platform_admin', fx, 'zh')
-  await page.goto('/organizations')
-  const row = page.getByRole('row', { name: new RegExp(fx.org_code) })
-  await row.getByRole('button', { name: '编辑' }).click()
-  const enabled = page.locator('.n-form-item').filter({ hasText: '开通 AICC' }).getByRole('switch')
-  if (await enabled.getAttribute('aria-checked') !== 'true') await enabled.click()
-  const saved = page.waitForResponse(response =>
-    response.url().includes(`/api/v1/organizations/${fx.org_id}/aicc-config`)
-    && response.request().method() === 'PATCH',
-  )
-  await page.getByRole('button', { name: '保存 AICC 配置' }).click()
-  expect((await saved).ok()).toBeTruthy()
-  // 企业编辑抽屉保存配置后保持打开；关闭后才能真实点击列表行操作，避免覆盖层拦截指针事件。
-  await page.getByRole('button', { name: '取消' }).click()
-  await expect(row.getByRole('button', { name: '进入 AICC' })).toBeVisible()
+  await loginAs(page, 'platform_admin', fixture, 'zh')
+  await page.evaluate(async (orgId: string) => {
+    const readCookie = (name: string): string | null => {
+      const target = `${name}=`
+      for (const part of document.cookie.split(';')) {
+        const trimmed = part.trim()
+        if (trimmed.startsWith(target)) {
+          return decodeURIComponent(trimmed.slice(target.length))
+        }
+      }
+      return null
+    }
+
+    const token = window.localStorage.getItem('ocm.access_token')
+    const headers: Record<string, string> = { Accept: 'application/json' }
+    if (token) {
+      headers.Authorization = `Bearer ${token}`
+    }
+    const csrf = readCookie('csrf_token')
+    if (csrf) {
+      headers['X-CSRF-Token'] = csrf
+    }
+
+    const response = await fetch(`/api/v1/organizations/${orgId}/aicc-config`, { headers })
+    if (!response.ok) {
+      throw new Error(`读取企业 AICC 配置失败: ${response.status}`)
+    }
+    const body = await response.json() as {
+      config: {
+        enabled: boolean
+        model?: string
+        agent_limit?: number
+        industry_knowledge_bases: Array<{ id: string }>
+      }
+    }
+    if (body.config.enabled) {
+      return
+    }
+
+    const saveResponse = await fetch(`/api/v1/organizations/${orgId}/aicc-config`, {
+      method: 'PUT',
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        enabled: true,
+        model: body.config.model ?? 'deepseek-chat',
+        agent_limit: body.config.agent_limit ?? null,
+        industry_knowledge_base_ids: body.config.industry_knowledge_bases.map(item => item.id),
+      }),
+    })
+    if (!saveResponse.ok) {
+      throw new Error(`保存企业 AICC 配置失败: ${saveResponse.status} ${await saveResponse.text()}`)
+    }
+  }, fixture.org_id)
 }
 
 // switchLocale 使用产品顶栏的统一语言选择器切换语言，并等待 AICC 标题完成响应式更新。
@@ -65,23 +107,24 @@ async function assertConsoleNavigationLocale(page: Page, locale: 'zh' | 'en'): P
 }
 
 // 验证平台管理员从企业列表进入指定企业，并保持只读工作台边界。
-test('平台管理员可从企业列表进入指定 AICC 且不能新建智能体', async ({ page }) => {
-  const fx = loadE2EFixture()
-  await enableFixtureAICC(page)
+test('平台管理员可从企业列表进入指定 AICC 且不能新建智能体', async ({ page, e2eFixture }) => {
+  await enableFixtureAICC(page, e2eFixture)
+  await page.goto('/organizations')
 
-  const row = page.getByRole('row', { name: new RegExp(fx.org_code) })
+  const row = page.getByRole('row', { name: new RegExp(e2eFixture.org_code) })
+  await row.hover()
   await row.getByRole('button', { name: '进入 AICC' }).click()
-  await expect(page).toHaveURL(new RegExp(`/aicc-console\\?org_id=${fx.org_id}`))
+  await expect(page).toHaveURL(new RegExp(`/aicc-console\\?org_id=${e2eFixture.org_id}`))
   await expect(page.getByRole('heading', { name: 'AICC 工作台' })).toBeVisible()
   await expect(page.locator('[data-test="org-switcher"]')).toBeVisible()
   await expect(page.getByRole('button', { name: '新建智能体' })).toHaveCount(0)
 })
 
 // 验证企业管理员入口和 AICC 六个子页同时接入项目统一中英文切换机制。
-test('企业管理员从概览进入 AICC 并切换中英文子页面', async ({ page }) => {
-  await enableFixtureAICC(page)
+test('企业管理员从概览进入 AICC 并切换中英文子页面', async ({ page, e2eFixture }) => {
+  await enableFixtureAICC(page, e2eFixture)
   await clearLoginState(page)
-  await loginAs(page, 'org_admin', loadE2EFixture(), 'zh')
+  await loginAs(page, 'org_admin', e2eFixture, 'zh')
   await page.goto('/')
 
   const entry = page.getByRole('link', { name: /AICC 客服/ })
@@ -98,10 +141,10 @@ test('企业管理员从概览进入 AICC 并切换中英文子页面', async ({
 })
 
 // 验证企业普通成员既看不到子系统入口，也无法通过手工输入独立工作台路由绕过角色守卫。
-test('企业普通成员无 AICC 入口且直接访问会被拒绝', async ({ page }) => {
-  await enableFixtureAICC(page)
+test('企业普通成员无 AICC 入口且直接访问会被拒绝', async ({ page, e2eFixture }) => {
+  await enableFixtureAICC(page, e2eFixture)
   await clearLoginState(page)
-  await loginAs(page, 'org_member', loadE2EFixture(), 'zh')
+  await loginAs(page, 'org_member', e2eFixture, 'zh')
 
   await page.goto('/aicc-console')
   await expect(page).not.toHaveURL(/\/aicc-console/)
