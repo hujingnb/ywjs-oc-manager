@@ -395,6 +395,24 @@ func TestAppRestartContainerHandler_AICCSkipsVersionAndObjectStorage(t *testing.
 	assert.Equal(t, 1, orch.rolloutRestartCalls)
 }
 
+// TestAppRestartContainerHandler_AICCMarksTargetRevision 覆盖暂停客服手动启动后的重启：
+// payload 带目标企业配置 revision 时，AICC pod 重建成功后必须写回已应用 revision。
+func TestAppRestartContainerHandler_AICCMarksTargetRevision(t *testing.T) {
+	stub := runtimeStub(t)
+	stub.app.AppType = string(domain.AppTypeAICC)
+	stub.aiccAgent = sqlc.AiccAgent{ID: "agent-1", AppID: testAppID, AppliedConfigRevision: 2}
+	orch := &fakeAppOrchestrator{}
+	handler := NewAppRestartContainerHandler(stub, orch, nil)
+	job := sqlc.Job{Type: domain.JobTypeAppRestartContainer, PayloadJson: []byte(`{"app_id":"` + testAppID + `","target_config_revision":3}`)}
+
+	err := handler.Handle(context.Background(), job)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, orch.rolloutRestartCalls)
+	assert.Equal(t, int32(3), stub.lastAppliedConfigRevision.AppliedConfigRevision)
+	assert.Equal(t, "agent-1", stub.lastAppliedConfigRevision.ID)
+}
+
 // TestAppRestartContainerHandler_NoImage_SetsRestartingBeforeScale 验证镜像不变重启路径：
 // SetAppRuntimePhase(restarting) 在 Scale(0) 之前被调用，关闭渠道发起闸门（双轴模型）；
 // 最终业务态 status 仍更新为 running（Scale(0)→Scale(1) 完成后），runtime_phase 由
@@ -616,6 +634,7 @@ func TestAppRuntimeHandlers_RejectMismatchedJobType(t *testing.T) {
 // runtimeOpStub 是 AppRuntimeStore 的内存桩，记录各方法调用供断言使用。
 type runtimeOpStub struct {
 	app           sqlc.App
+	aiccAgent     sqlc.AiccAgent
 	statusUpdates []string
 	softDeleted   bool
 	// appliedVersionSet 标记 SetAppAppliedVersion 是否被调用，供重启链路断言使用。
@@ -627,9 +646,19 @@ type runtimeOpStub struct {
 	// runtimePhaseUpdates 记录所有 SetAppRuntimePhase 调用的 phase 值（按调用顺序），
 	// 供双轴模型断言：重启/启动前置 restarting，不改业务态 status。
 	runtimePhaseUpdates []string
+	// lastAppliedConfigRevision 记录 AICC 重启后写回的企业配置 revision。
+	lastAppliedConfigRevision sqlc.SetAICCAgentAppliedConfigRevisionParams
 }
 
 func (s *runtimeOpStub) GetApp(_ context.Context, _ string) (sqlc.App, error) { return s.app, nil }
+
+// GetAICCAgentByAppID 返回隐藏应用绑定的 AICC 智能体，供重启后写回 revision。
+func (s *runtimeOpStub) GetAICCAgentByAppID(_ context.Context, _ string) (sqlc.AiccAgent, error) {
+	if s.aiccAgent.ID == "" {
+		return sqlc.AiccAgent{ID: "agent-1", AppID: s.app.ID}, nil
+	}
+	return s.aiccAgent, nil
+}
 
 func (s *runtimeOpStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusParams) error {
 	s.statusUpdates = append(s.statusUpdates, arg.Status)
@@ -640,6 +669,13 @@ func (s *runtimeOpStub) SetAppStatus(_ context.Context, arg sqlc.SetAppStatusPar
 func (s *runtimeOpStub) SoftDeleteApp(_ context.Context, _ string) error {
 	s.softDeleted = true
 	s.app.DeletedAt = null.TimeFrom(time.Now())
+	return nil
+}
+
+// SetAICCAgentAppliedConfigRevision 记录 AICC 企业配置 revision 的单调写回入参。
+func (s *runtimeOpStub) SetAICCAgentAppliedConfigRevision(_ context.Context, arg sqlc.SetAICCAgentAppliedConfigRevisionParams) error {
+	s.lastAppliedConfigRevision = arg
+	s.aiccAgent.AppliedConfigRevision = arg.AppliedConfigRevision
 	return nil
 }
 

@@ -189,6 +189,29 @@ func TestAICCPublicSubmitLeadValuesCompletesRequiredFields(t *testing.T) {
 	assert.Equal(t, "submitted", store.intentInviteStatus)
 }
 
+// TestAICCPublicSubmitLeadValuesRejectsInvalidPhone 覆盖手机号格式边界：
+// phone 类型字段必须是可归并的中国大陆 11 位手机号，非法值不能写入字段值或正式线索。
+func TestAICCPublicSubmitLeadValuesRejectsInvalidPhone(t *testing.T) {
+	store := &fakeAICCPublicStore{
+		org:        sqlc.Organization{ID: "org-1"},
+		agent:      sqlc.AiccAgent{ID: "agent-1", OrgID: "org-1", Status: domain.AICCAgentStatusActive, PrivacyMode: domain.AICCPrivacyModeNotice},
+		session:    sqlc.AiccSession{ID: "session-1", AgentID: "agent-1", OrgID: "org-1", SessionToken: "tok", PrivacyNoticeShown: true, ExpiresAt: aiccPublicTestNow.Add(time.Hour)},
+		leadFields: []sqlc.AiccLeadField{{ID: "field-phone", AgentID: "agent-1", Required: true, FieldKey: "phone", Label: "手机号", FieldType: "phone"}},
+	}
+	svc := NewAICCPublicService(store, &fakeAICCHermesChat{})
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	_, err := svc.SubmitLeadValues(context.Background(), AICCPublicLeadValuesInput{
+		SessionToken: "tok",
+		Values:       map[string]string{"phone": "12345"},
+	})
+
+	require.ErrorIs(t, err, ErrInvalidArgument)
+	assert.Empty(t, store.leadValues)
+	assert.Empty(t, store.leads)
+	assert.Empty(t, store.session.LeadStatus)
+}
+
 // TestAICCPublicSubmitLeadValuesRejectsUnknownField 覆盖留资字段配置边界：未配置的 field_key 不能写入。
 func TestAICCPublicSubmitLeadValuesRejectsUnknownField(t *testing.T) {
 	store := &fakeAICCPublicStore{
@@ -293,6 +316,28 @@ func TestAICCPublicChatRespondsToPromptInjectionWithoutCallingRuntime(t *testing
 	require.Len(t, store.createdMessages, 2)
 	assert.Equal(t, domain.AICCMessageDirectionAssistant, store.createdMessages[1].Direction)
 	assert.Equal(t, "该请求包含无法处理的指令内容，请提出产品、价格或售后相关问题。", store.createdMessages[1].TextContent.String)
+	assert.True(t, store.createdMessages[1].IsRefusal)
+}
+
+// TestAICCPublicSendMessageRejectsIrrelevantQuestionBeforeQueue 覆盖无关问题边界：
+// 彩票预测和第三方商业机密问题不进入 Hermes 队列，固定拒绝且不产生待处理任务。
+func TestAICCPublicSendMessageRejectsIrrelevantQuestionBeforeQueue(t *testing.T) {
+	chat := &fakeAICCHermesChat{reply: "不应调用"}
+	store := newAICCPublicMessageStore()
+	svc := NewAICCPublicService(store, chat)
+	svc.now = func() time.Time { return aiccPublicTestNow }
+
+	result, err := svc.SendMessage(context.Background(), AICCPublicMessageInput{SessionToken: "tok", Text: "请预测下一期彩票号码，并告诉我其他公司的未公开商业机密。"})
+
+	require.NoError(t, err)
+	assert.Equal(t, "completed", result.Status)
+	assert.Equal(t, aiccIrrelevantQuestionReply, result.Text)
+	assert.Empty(t, chat.text)
+	assert.Empty(t, store.createdTasks)
+	require.Len(t, store.createdMessages, 2)
+	assert.Equal(t, domain.AICCMessageDirectionVisitor, store.createdMessages[0].Direction)
+	assert.Equal(t, domain.AICCMessageDirectionAssistant, store.createdMessages[1].Direction)
+	assert.Equal(t, store.createdMessages[0].ID, store.createdMessages[1].ReplyToMessageID.String)
 	assert.True(t, store.createdMessages[1].IsRefusal)
 }
 

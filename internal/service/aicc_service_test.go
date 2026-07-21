@@ -1173,6 +1173,26 @@ func TestAICCServiceStatusAndDelete(t *testing.T) {
 	})
 }
 
+// TestAICCServiceStartStalePausedAgentCreatesRevisionRestart 覆盖暂停客服手动启动：
+// 企业模型配置已推进时，start 不能只改状态，必须调度一次重启让运行时应用最新 revision。
+func TestAICCServiceStartStalePausedAgentCreatesRevisionRestart(t *testing.T) {
+	store := seededAICCStore()
+	agent := store.agents["agent-1"]
+	agent.Status = domain.AICCAgentStatusPaused
+	agent.AppliedConfigRevision = 2
+	store.agents["agent-1"] = agent
+	store.config = sqlc.OrganizationAiccConfig{OrgID: "org-1", Enabled: true, Model: null.StringFrom("gpt-5.6"), Revision: 3}
+	svc := NewAICCService(store, &fakeAICCHiddenAppCreator{})
+
+	result, err := svc.SetAgentStatus(context.Background(), aiccOrgAdmin(), "agent-1", "start")
+
+	require.NoError(t, err)
+	assert.Equal(t, domain.AICCAgentStatusActive, result.Status)
+	require.Len(t, store.jobs, 1)
+	assert.Equal(t, domain.JobTypeAppRestartContainer, store.jobs[0].Type)
+	assert.JSONEq(t, `{"app_id":"app-hidden-1","target_config_revision":3}`, string(store.jobs[0].PayloadJson))
+}
+
 // TestAICCServiceGetAgentKnowledge 覆盖知识范围回显：返回企业知识库开关、行业库和当前客服知识库入口。
 func TestAICCServiceGetAgentKnowledge(t *testing.T) {
 	svc := NewAICCService(seededAICCStore(), &fakeAICCHiddenAppCreator{})

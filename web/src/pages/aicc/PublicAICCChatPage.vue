@@ -282,6 +282,11 @@ async function submitLeadForm() {
       errorMessage.value = t('aicc.publicChat.missingField', { label: field.label })
       return
     }
+    const fieldError = validateLeadFieldValue(field, value)
+    if (fieldError) {
+      errorMessage.value = fieldError
+      return
+    }
     if (value) values[field.field_key] = value
   }
   if (Object.keys(values).length === 0) {
@@ -614,6 +619,17 @@ function leadFieldInputProps(field: AICCLeadField) {
     name: `aicc_public_lead_${field.field_key}`,
     inputmode,
   }
+}
+
+function validateLeadFieldValue(field: AICCLeadField, value: string): string {
+  if (!value) return ''
+  if (field.field_type === 'phone' && !/^1[3-9][0-9]{9}$/.test(value)) {
+    return t('aicc.publicChat.invalidField', { label: field.label })
+  }
+  if (field.field_type === 'email' && (!value.includes('@') || value.startsWith('@') || value.endsWith('@'))) {
+    return t('aicc.publicChat.invalidField', { label: field.label })
+  }
+  return ''
 }
 
 function publicMessageErrorText(err: unknown): string {

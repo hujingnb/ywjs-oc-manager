@@ -401,6 +401,7 @@ export default {
     defaultPrivacyText: 'We use this conversation to answer your questions.',
     defaultGreeting: 'Hello, I am the online assistant. How can I help?',
     missingField: 'Please fill in {label}',
+    invalidField: 'Invalid {label} format',
     missingRequired: 'Complete the required contact information',
     leadRequired: 'Submit contact information before continuing.',
     sensitiveWord: 'This message contains unsupported content. Please revise and try again.',

@@ -618,6 +618,29 @@ describe('PublicAICCChatPage', () => {
 
   })
 
+  // 场景：手机号字段在公开页本地先做格式校验，明显非法值不能发起留资 API。
+  it('rejects invalid phone lead values before submitting', async () => {
+    apiState.fetchConfig.mockResolvedValue({
+      name: '售前接待', greeting: '您好', privacy_mode: 'notice', lead_fields: [
+        { field_key: 'phone', label: '联系电话', field_type: 'phone', required: true },
+      ],
+    })
+    apiState.sendMessage.mockResolvedValue({ message_id: 'message-1', status: 'completed', text: '可以为您安排演示', next_action: 'offer_lead' })
+    const wrapper = mountPublicChat()
+    await flushPromises()
+    await wrapper.find('textarea').setValue('想预约演示')
+    await wrapper.find('form.composer').trigger('submit')
+    await flushPromises()
+
+    await wrapper.find('.lead-gate input').setValue('12345')
+    await wrapper.find('.lead-gate').trigger('submit')
+    await flushPromises()
+
+    expect(apiState.submitLeadValues).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('联系电话格式不正确')
+    expect(wrapper.find('.lead-gate').exists()).toBe(true)
+  })
+
   // 场景：留资接口失败时不能假装留资完成，卡片必须继续可见以便访客重试。
   it('keeps an offered lead form visible when persistence fails', async () => {
     apiState.fetchConfig.mockResolvedValue({

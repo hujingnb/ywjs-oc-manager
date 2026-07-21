@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -27,9 +28,15 @@ import (
 
 const aiccImageMaxBytes int64 = 10 * 1024 * 1024
 
+var aiccLeadPhonePattern = regexp.MustCompile(`^1[3-9][0-9]{9}$`)
+
 // aiccPromptInjectionReply 是公开端拦截明确越权指令后的固定答复。
 // 固定文本避免模型复述攻击载荷、泄露内部提示词，且不给攻击者提供可迭代的运行时反馈。
 const aiccPromptInjectionReply = "该请求包含无法处理的指令内容，请提出产品、价格或售后相关问题。"
+
+// aiccIrrelevantQuestionReply 是公开端拦截明显脱离企业客服职责问题后的固定答复。
+// 这类问题不需要模型判断，先在入口层拒绝可避免把高风险无关请求写入运行时上下文。
+const aiccIrrelevantQuestionReply = "这个问题不在企业客服服务范围内，我可以继续回答本企业产品、价格、售前、售后或服务相关问题。"
 
 const (
 	// aiccCreateSessionRateLimit 限制单个来源对单个智能体创建会话频率，防止刷会话。
@@ -536,23 +543,28 @@ func (s *AICCPublicService) SendMessage(ctx context.Context, input AICCPublicMes
 		ImageSizeBytes:  null.IntFromPtr(int64PtrIfValid(image.SizeBytes, imageID != "")),
 		ClientMessageID: nullStr(clientMessageID),
 	}
-	isPromptInjection := isAICCPromptInjection(text)
+	refusalReply := ""
+	if isAICCPromptInjection(text) {
+		refusalReply = aiccPromptInjectionReply
+	} else if isAICCIrrelevantQuestion(text) {
+		refusalReply = aiccIrrelevantQuestionReply
+	}
 	var assistantMessage *sqlc.CreateAICCMessageParams
-	if isPromptInjection {
-		message := sqlc.CreateAICCMessageParams{ID: newUUID(), SessionID: session.ID, AgentID: session.AgentID, Direction: domain.AICCMessageDirectionAssistant, ContentType: domain.AICCMessageContentTypeText, TextContent: nullStr(aiccPromptInjectionReply), ClientMessageID: nullStr(clientMessageID), ReplyToMessageID: null.StringFrom(visitorMessage.ID), IsRefusal: true}
+	if refusalReply != "" {
+		message := sqlc.CreateAICCMessageParams{ID: newUUID(), SessionID: session.ID, AgentID: session.AgentID, Direction: domain.AICCMessageDirectionAssistant, ContentType: domain.AICCMessageContentTypeText, TextContent: nullStr(refusalReply), ClientMessageID: nullStr(clientMessageID), ReplyToMessageID: null.StringFrom(visitorMessage.ID), IsRefusal: true}
 		assistantMessage = &message
 	}
-	existingMessageID, err := s.reserveAICCVisitorMessage(ctx, session, settings.MessageLimitPerSession, visitorMessage, agent.AppID, !isPromptInjection, assistantMessage)
+	existingMessageID, err := s.reserveAICCVisitorMessage(ctx, session, settings.MessageLimitPerSession, visitorMessage, agent.AppID, refusalReply == "", assistantMessage)
 	if err != nil {
 		return AICCPublicMessageResult{}, err
 	}
 	if existingMessageID != "" {
 		return s.aiccMessageTaskResult(ctx, existingMessageID)
 	}
-	if !isPromptInjection {
+	if refusalReply == "" {
 		return AICCPublicMessageResult{MessageID: visitorMessage.ID, Status: "queued"}, nil
 	}
-	return AICCPublicMessageResult{MessageID: visitorMessage.ID, Status: "completed", Text: aiccPromptInjectionReply}, nil
+	return AICCPublicMessageResult{MessageID: visitorMessage.ID, Status: "completed", Text: refusalReply}, nil
 }
 
 // requeueFailedTaskWithAdmission 在同一事务内取得全局锁、检查容量并恢复失败任务，不能让重试绕过队列上限。
@@ -850,6 +862,26 @@ func isAICCPromptInjection(text string) bool {
 	return (hasDirective && hasInternalTarget) || (hasInternalTarget && hasDisclosureAction)
 }
 
+// isAICCIrrelevantQuestion 识别明显不属于企业客服可处理范围的高风险无关问题。
+// 只覆盖确定性强的类别，避免把一般业务外延咨询误伤为拒答。
+func isAICCIrrelevantQuestion(text string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	if normalized == "" {
+		return false
+	}
+	hasLotteryPrediction := containsAnyAICCText(normalized,
+		"彩票", "双色球", "大乐透", "lottery", "winning numbers",
+	) && containsAnyAICCText(normalized,
+		"预测", "号码", "下一期", "下期", "predict", "forecast",
+	)
+	hasThirdPartySecret := containsAnyAICCText(normalized,
+		"其他公司", "竞争对手", "竞品公司", "third party", "competitor",
+	) && containsAnyAICCText(normalized,
+		"商业机密", "未公开", "内部机密", "trade secret", "confidential",
+	)
+	return hasLotteryPrediction || hasThirdPartySecret
+}
+
 // containsAnyAICCText 判断已归一化的访客文本是否包含任一安全规则关键词。
 func containsAnyAICCText(text string, candidates ...string) bool {
 	for _, candidate := range candidates {
@@ -1126,6 +1158,9 @@ func (s *AICCPublicService) submitLeadValues(ctx context.Context, input AICCPubl
 		value := strings.TrimSpace(input.Values[rawKey])
 		if value == "" {
 			return AICCPublicLeadValuesResult{}, fmt.Errorf("%w: 留资字段值不能为空", ErrInvalidArgument)
+		}
+		if err := validateAICCLeadFieldValue(field, value); err != nil {
+			return AICCPublicLeadValuesResult{}, err
 		}
 		if err := s.store.UpsertAICCLeadValue(ctx, sqlc.UpsertAICCLeadValueParams{
 			ID:        newUUID(),
@@ -1460,6 +1495,20 @@ func aiccLeadFieldKeys(fields []sqlc.AiccLeadField) []string {
 		keys = append(keys, field.FieldKey)
 	}
 	return keys
+}
+
+func validateAICCLeadFieldValue(field sqlc.AiccLeadField, value string) error {
+	switch field.FieldType {
+	case domain.AICCLeadFieldTypePhone:
+		if !aiccLeadPhonePattern.MatchString(value) {
+			return fmt.Errorf("%w: 手机号格式不正确", ErrInvalidArgument)
+		}
+	case domain.AICCLeadFieldTypeEmail:
+		if !strings.Contains(value, "@") || strings.HasPrefix(value, "@") || strings.HasSuffix(value, "@") {
+			return fmt.Errorf("%w: 邮箱格式不正确", ErrInvalidArgument)
+		}
+	}
+	return nil
 }
 
 func primaryAICCContactValue(fieldsByKey map[string]sqlc.AiccLeadField, values map[string]string) string {

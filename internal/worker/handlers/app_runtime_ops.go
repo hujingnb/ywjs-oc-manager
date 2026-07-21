@@ -23,8 +23,12 @@ import (
 // AppRuntimeStore 是 start/stop/restart/delete handler 共用的最小数据访问能力。
 type AppRuntimeStore interface {
 	GetApp(ctx context.Context, id string) (sqlc.App, error)
+	// GetAICCAgentByAppID 读取隐藏应用绑定的客服，用于 AICC 重启完成后写回已应用配置 revision。
+	GetAICCAgentByAppID(ctx context.Context, appID string) (sqlc.AiccAgent, error)
 	SetAppStatus(ctx context.Context, arg sqlc.SetAppStatusParams) error
 	SoftDeleteApp(ctx context.Context, id string) error
+	// SetAICCAgentAppliedConfigRevision 单调推进 AICC 已应用企业配置 revision。
+	SetAICCAgentAppliedConfigRevision(ctx context.Context, arg sqlc.SetAICCAgentAppliedConfigRevisionParams) error
 	// SetAppAppliedVersion 在重启成功后记录已应用的版本修订与镜像 ref，
 	// 供前端 version_synced 检测使用。
 	SetAppAppliedVersion(ctx context.Context, arg sqlc.SetAppAppliedVersionParams) error
@@ -65,7 +69,8 @@ type AppKnowledgeCleaner interface {
 
 // payload 描述四个 handler 共享的输入。
 type appOpPayload struct {
-	AppID string `json:"app_id"`
+	AppID                string `json:"app_id"`
+	TargetConfigRevision int32  `json:"target_config_revision"`
 }
 
 func decodeAppOpPayload(raw []byte) (appOpPayload, error) {
@@ -419,6 +424,21 @@ func (h *AppRestartContainerHandler) Handle(ctx context.Context, job sqlc.Job) e
 	}
 	if err := h.store.SetAppStatus(ctx, sqlc.SetAppStatusParams{ID: app.ID, Status: domain.AppStatusRunning}); err != nil {
 		return fmt.Errorf("更新应用状态失败: %w", err)
+	}
+	if isAICC && payload.TargetConfigRevision > 0 {
+		agent, err := h.store.GetAICCAgentByAppID(ctx, app.ID)
+		if err != nil {
+			return fmt.Errorf("加载 AICC 智能体失败: %w", err)
+		}
+		// AICC 隐藏应用的 bootstrap 在 pod 重建时重新读取企业配置；RolloutRestart 成功后
+		// 单调写回目标 revision，供暂停后手动启动链路判断最新模型是否已应用。
+		if err := h.store.SetAICCAgentAppliedConfigRevision(ctx, sqlc.SetAICCAgentAppliedConfigRevisionParams{
+			ID:                      agent.ID,
+			AppliedConfigRevision:   payload.TargetConfigRevision,
+			AppliedConfigRevision_2: payload.TargetConfigRevision,
+		}); err != nil {
+			return fmt.Errorf("记录 AICC 已应用配置 revision 失败: %w", err)
+		}
 	}
 
 	// 镜像不变重启：Scale(1) 成功后补齐版本新增 skill。

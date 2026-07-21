@@ -531,18 +531,57 @@ func (s *AICCService) SetAgentStatus(ctx context.Context, principal auth.Princip
 	if err != nil {
 		return AICCAgentResult{}, err
 	}
-	if err := s.store.SetAICCAgentStatus(ctx, sqlc.SetAICCAgentStatusParams{ID: agentID, Status: status}); errors.Is(err, sql.ErrNoRows) {
-		return AICCAgentResult{}, ErrNotFound
-	} else if err != nil {
-		return AICCAgentResult{}, fmt.Errorf("更新 AICC 智能体状态失败: %w", err)
+	var restartJobID string
+	update := func(store AICCStore) error {
+		lockedRow, err := store.GetAICCAgentForUpdate(ctx, agentID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("锁定 AICC 智能体失败: %w", err)
+		}
+		if err := store.SetAICCAgentStatus(ctx, sqlc.SetAICCAgentStatusParams{ID: agentID, Status: status}); errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return fmt.Errorf("更新 AICC 智能体状态失败: %w", err)
+		}
+		if status == domain.AICCAgentStatusActive {
+			config, err := store.GetOrganizationAICCConfig(ctx, lockedRow.OrgID)
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrForbidden
+			}
+			if err != nil {
+				return fmt.Errorf("查询 AICC 企业配置失败: %w", err)
+			}
+			if !config.Enabled {
+				return ErrForbidden
+			}
+			if config.Revision > lockedRow.AppliedConfigRevision {
+				payload, err := json.Marshal(map[string]any{"app_id": lockedRow.AppID, "target_config_revision": config.Revision})
+				if err != nil {
+					return fmt.Errorf("序列化 AICC 启动重启任务失败: %w", err)
+				}
+				restartJobID = newUUID()
+				if err := store.CreateJob(ctx, sqlc.CreateJobParams{
+					ID: restartJobID, Type: domain.JobTypeAppRestartContainer, Priority: 100,
+					RunAfter: time.Now().UTC(), MaxAttempts: 3, PayloadJson: payload,
+				}); err != nil {
+					return fmt.Errorf("创建 AICC 启动重启任务失败: %w", err)
+				}
+			}
+		}
+		return s.recordAICCAudit(ctx, store, principal, lockedRow.OrgID, lockedRow.ID, action, map[string]any{
+			"status": status,
+		})
+	}
+	if err := s.withAICCTx(ctx, update); err != nil {
+		return AICCAgentResult{}, err
+	}
+	if restartJobID != "" && s.jobNotifier != nil {
+		_ = s.jobNotifier.Enqueue(ctx, restartJobID)
 	}
 	row, err = s.getAgentRow(ctx, agentID)
 	if err != nil {
-		return AICCAgentResult{}, err
-	}
-	if err := s.recordAICCAudit(ctx, s.store, principal, row.OrgID, row.ID, action, map[string]any{
-		"status": row.Status,
-	}); err != nil {
 		return AICCAgentResult{}, err
 	}
 	return s.toAICCAgentResult(ctx, row)

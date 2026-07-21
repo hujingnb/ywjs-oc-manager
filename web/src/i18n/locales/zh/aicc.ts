@@ -401,6 +401,7 @@ export default {
     defaultPrivacyText: '我们会使用本次对话内容来回答您的问题。',
     defaultGreeting: '您好，我是在线客服，请问有什么可以帮您？',
     missingField: '请填写{label}',
+    invalidField: '{label}格式不正确',
     missingRequired: '请补全必填联系信息',
     leadRequired: '请先提交联系信息后继续咨询。',
     sensitiveWord: '这条消息包含暂不支持发送的内容，请调整后再试。',

@@ -471,6 +471,10 @@ test('公开访客提交留资后企业管理员可查看线索和导出 CSV', s
   await forceZh(duplicatePage)
   await duplicatePage.goto(`/aicc/${agent.public_token}`)
   await expect(duplicatePage.getByText('请先留下联系信息')).toBeVisible()
+  await publicPage.getByPlaceholder('联系电话').fill('12345')
+  await publicPage.getByRole('button', { name: '提交联系信息' }).click()
+  await expect(publicPage.getByText('联系电话格式不正确')).toBeVisible()
+  expect(countAICCLeadsByPhone(phone)).toBe(initialLeadCount)
   await publicPage.getByPlaceholder('联系电话').fill(phone)
   await duplicatePage.getByPlaceholder('联系电话').fill(phone)
   const submitted = publicPage.waitForResponse(response =>
@@ -738,6 +742,7 @@ test('暂停中的智能客服更换企业模型后不会被自动启动', slowM
   await page.getByRole('button', { name: '启动接待' }).click()
   expect((await started).ok()).toBeTruthy()
   await waitForAICCRuntime(agent.app_id)
+  await waitForAICCAgentAppliedRevision(agent.id, change.revision)
 
   const publicPage = await page.context().newPage()
   await forceZh(publicPage)
