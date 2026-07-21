@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"oc-manager/internal/domain"
+	"oc-manager/internal/integrations/hermes"
 )
 
 // TestPlatformPrompts_Invariants 校验两类平台提示词各自满足身份、技能和渲染约束。
@@ -83,6 +84,9 @@ func TestPlatformPrompts_Invariants(t *testing.T) {
 				// flags 必须明确为对象，避免模型把空标记输出成数组后触发 manager 固定兜底。
 				assert.Contains(t, testCase.prompt, "flags 必须是 JSON 对象")
 				assert.Contains(t, testCase.prompt, "不得使用数组")
+				// 结构化输出示例必须给出完整 JSON，减少模型把 flags 误写为数组或纯文本的概率。
+				assert.Contains(t, testCase.prompt, `{"text":"`)
+				assert.Contains(t, testCase.prompt, `"flags":{}`)
 				// AICC 不得被平台提示词强制枚举全部 Skill，也不得在无匹配时自行回退通用能力。
 				assert.NotContains(t, testCase.prompt, "处理任何用户任务前，必须先调用 skills_list")
 				assert.NotContains(t, testCase.prompt, "只有在没有适用的技能时，才使用通用能力")
@@ -96,15 +100,25 @@ func TestPlatformPrompts_Invariants(t *testing.T) {
 				assert.Contains(t, testCase.prompt, "与当前任务无关的技能不用启用")
 				assert.Contains(t, testCase.prompt, "没有适用的技能")
 				assert.Contains(t, testCase.prompt, "通用能力")
+				// 普通实例平台提示词仍不携带裸花括号，避免未定义占位符进入实例规则。
+				assert.NotContains(t, testCase.prompt, "{")
+				assert.NotContains(t, testCase.prompt, "}")
 			}
-			// 花括号会被 RenderRuleText 当作变量占位符，平台提示词中禁止出现。
-			assert.NotContains(t, testCase.prompt, "{")
-			assert.NotContains(t, testCase.prompt, "}")
 		})
 	}
 
 	// 两个场景的文本必须不同，才能避免 AICC 继承普通实例的内部交付规则。
 	assert.NotEqual(t, DefaultInstanceSystemPromptTemplate, DefaultAICCSystemPromptTemplate)
+}
+
+// TestAICCPlatformPromptJSONExampleRenders 验证 AICC 平台提示词中的 JSON 示例不会被
+// RenderRuleText 误识别为未定义占位符，避免 bootstrap 阶段拒绝写入 SOUL.md。
+func TestAICCPlatformPromptJSONExampleRenders(t *testing.T) {
+	rendered, err := hermes.RenderRuleText(DefaultAICCSystemPromptTemplate, hermes.VariablesFromContext("企业", "官网客服", "管理员"))
+
+	require.NoError(t, err)
+	assert.Contains(t, rendered, `{"text":"`)
+	assert.Contains(t, rendered, `"flags":{}`)
 }
 
 // TestPlatformPromptHash 校验两类平台提示词的 hash 均与所选提示词的 sha256 严格一致。
