@@ -98,3 +98,22 @@ make openapi-check && git diff --check                                   # PASS
 报告 5 个既有测试文件类型错误：`SkillDetailDrawer.spec.ts`、`LocaleSwitcher.spec.ts`（2 项）、
 `TicketTargetsEditor.spec.ts`、`AppKnowledgeTab.spec.ts`。这些文件不在本轮 AICC 改动范围，因此不能将
 裸 `tsc` 结果写为 PASS；同时也不影响已记录的 `vue-tsc` 项目类型检查结果。
+
+## 2026-07-21 客服体系验证补强
+
+本轮新增的是 AICC 本地 `chromium` slow/model 定向验收，不改变 2026-07-16 对全场景 Chrome Stable
+验收的 BLOCKED 结论。新增场景覆盖知识库修改、多文件组合问答、设置重启生效、企业模型 revision 绑定
+rollout、暂停客服不被 rollout 唤醒，以及手机号正式线索计数与同会话重复提交去重。
+
+| 范围 | 结果 | 证据 |
+|---|---|---|
+| 知识库 helper 与问答扩展 | PARTIAL | `cd web && npm run typecheck` 多次 PASS。定向 slow E2E 曾在既有首个知识库用例等待 `/aicc-config` 保存时超时；后续知识库新增场景仍需在稳定本地环境单独复跑。 |
+| 设置重启与模型切换 | PASS | `cd web && npm run typecheck` PASS；`npm run test:e2e:slow -- tests/e2e/aicc.spec.ts -g '重启生效|更换模型|暂停中的智能客服'` PASS，3/3；revision 修正后 `-g '更换模型|暂停中的智能客服'` PASS，2/2。 |
+| 线索手机号与去重 | PASS | `cd web && npm run typecheck` PASS；`OCM_AICC_CONVERSATION_E2E=1 npm run test:e2e:slow -- tests/e2e/aicc.spec.ts -g '公开访客提交留资后企业管理员可查看线索和导出 CSV'` PASS，1/1。 |
+| 全量 E2E | NOT RUN | 本轮是定向补强，未执行全量 AICC E2E。项目脚本没有 `npm run test:e2e`，当前可用脚本为 `test:e2e:quick`、`test:e2e:regression`、`test:e2e:slow`。 |
+
+已确认缺口：
+
+- 手机号格式校验当前未实现。公开页和后端 `SubmitLeadValues` 只校验必填非空和字段 key，不能把非法手机号拒绝写成 E2E 通过项。
+- 暂停客服在企业模型 rollout 后保持 `paused` 且未被自动 stamp 到新 revision；手动启动后可公开接待，但当前产品未证明会在手动启动时应用最新企业模型 revision。
+- “无关问题拒绝”依赖真实模型稳定输出；本轮尝试的新增 case 长时间未收敛，未提交未验证断言。已有安全 spec 仍覆盖命令执行、文件写入、网页登录和提示词注入拒绝及来源审计。
