@@ -268,7 +268,7 @@ export async function createStartedAICCConversationFixture(page: Page, prefix: s
   // 避免无改动保存按钮不发请求时把后续公开聊天场景卡到总超时。
   if (await enabledSwitch.getAttribute('aria-checked') !== 'true') {
     await enabledSwitch.click()
-    const enabledSaved = page.waitForResponse(response => response.url().includes('/aicc-config') && response.request().method() === 'PATCH')
+    const enabledSaved = page.waitForResponse(response => response.url().includes('/aicc-config') && response.request().method() === 'PUT')
     await page.getByRole('button', { name: '保存 AICC 配置' }).click()
     expect((await enabledSaved).ok()).toBeTruthy()
   }
@@ -409,9 +409,9 @@ export async function waitForAICCKnowledgeParsed(page: Page, endpoint: string, f
       return payload.items?.find(item => item.name === filename)?.parse_status ?? ''
     }, { endpoint, filename })
   }, { timeout: 180_000, intervals: [2_000, 3_000, 5_000] }).toBe('completed')
-  const knowledgeCard = page.locator('.knowledge-drop-zone')
-  await expect(knowledgeCard.getByText(filename, { exact: true })).toBeVisible({ timeout: 30_000 })
-  await expect(knowledgeCard.getByText('已完成', { exact: true })).toBeVisible({ timeout: 30_000 })
+  const documentRow = page.getByRole('row').filter({ hasText: filename })
+  await expect(documentRow.getByText(filename, { exact: true })).toBeVisible({ timeout: 30_000 })
+  await expect(documentRow.getByText('已完成', { exact: true })).toBeVisible({ timeout: 30_000 })
 }
 
 // waitForRuntimeKnowledgeSearch 等待 RAGFlow 索引进入运行时可检索状态。

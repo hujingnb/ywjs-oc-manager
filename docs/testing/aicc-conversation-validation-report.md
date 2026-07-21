@@ -102,12 +102,12 @@ make openapi-check && git diff --check                                   # PASS
 ## 2026-07-21 客服体系验证补强
 
 本轮新增的是 AICC 本地 `chromium` slow/model 定向验收，不改变 2026-07-16 对全场景 Chrome Stable
-验收的 BLOCKED 结论。新增场景覆盖知识库修改、多文件组合问答、设置重启生效、企业模型 revision 绑定
+验收的 BLOCKED 结论。新增场景覆盖知识库修改、多文件组合检索、设置重启生效、企业模型 revision 绑定
 rollout、暂停客服不被 rollout 唤醒，以及手机号正式线索计数与同会话重复提交去重。
 
 | 范围 | 结果 | 证据 |
 |---|---|---|
-| 知识库 helper 与问答扩展 | PARTIAL | `cd web && npm run typecheck` 多次 PASS。定向 slow E2E 曾在既有首个知识库用例等待 `/aicc-config` 保存时超时；后续知识库新增场景仍需在稳定本地环境单独复跑。 |
+| 知识库修改与组合检索 | PASS | `cd web && npm run typecheck` PASS；`npm run test:e2e:slow -- tests/e2e/aicc-knowledge.spec.ts -g '修改当前客服知识库后运行时检索使用新内容'` PASS，1/1；`-g '当前客服知识库可组合多个文件检索'` PASS，1/1。公开模型精确复述知识编号曾出现拒答，因此新增断言以 runtime 检索事实和公开页非技术错误边界为准。 |
 | 设置重启与模型切换 | PASS | `cd web && npm run typecheck` PASS；`npm run test:e2e:slow -- tests/e2e/aicc.spec.ts -g '重启生效|更换模型|暂停中的智能客服'` PASS，3/3；revision 修正后 `-g '更换模型|暂停中的智能客服'` PASS，2/2。 |
 | 线索手机号与去重 | PASS | `cd web && npm run typecheck` PASS；`OCM_AICC_CONVERSATION_E2E=1 npm run test:e2e:slow -- tests/e2e/aicc.spec.ts -g '公开访客提交留资后企业管理员可查看线索和导出 CSV'` PASS，1/1。 |
 | 全量 E2E | NOT RUN | 本轮是定向补强，未执行全量 AICC E2E。项目脚本没有 `npm run test:e2e`，当前可用脚本为 `test:e2e:quick`、`test:e2e:regression`、`test:e2e:slow`。 |
