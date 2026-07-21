@@ -401,10 +401,11 @@ export async function askPublicAICCQuestion(page: Page, publicToken: string, que
 // queryLocalManagerDB 在本地 manager MySQL 中执行只读查询，供 E2E 断言服务端事实。
 export function queryLocalManagerDB(sql: string): string {
   assertLocalK3DContext()
-  const escaped = sql.replaceAll('"', '\\"')
   return execFileSync('kubectl', [
     '--context', localK3DContext, '-n', 'ocm', 'exec', 'mysql-0', '--', 'sh', '-c',
-    `mysql -uroot -p"$MYSQL_ROOT_PASSWORD" ocm -N -e "${escaped}" 2>/dev/null`,
+    'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" ocm -N -e "$1" 2>/dev/null',
+    'mysql-query',
+    sql,
   ], { encoding: 'utf8' }).trim()
 }
 
