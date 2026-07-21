@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { randomUUID } from 'node:crypto'
 
 import { expect, type Page } from '@playwright/test'
@@ -463,9 +464,9 @@ export function queryLocalManagerDB(sql: string): string {
 
 // countAICCLeadsByPhone 通过手机号查正式线索数量，用于重复提交和并发去重验证。
 export function countAICCLeadsByPhone(phone: string): number {
-  const escapedPhone = phone.replaceAll("'", "''")
+  const phoneHash = createHash('sha256').update(phone.trim().toLowerCase()).digest('hex')
   const result = queryLocalManagerDB(
-    `SELECT COUNT(*) FROM aicc_leads WHERE primary_contact_hash=SHA2(LOWER(TRIM('${escapedPhone}')), 256)`,
+    `SELECT COUNT(*) FROM aicc_leads WHERE primary_contact_hash='${phoneHash}'`,
   )
   return Number(result || '0')
 }
