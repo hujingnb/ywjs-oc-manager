@@ -150,6 +150,73 @@ test('当前客服和企业知识库可解析并控制真实问答范围', slowM
   await expect(page.getByText(agentFilename)).toHaveCount(0)
 })
 
+// 场景：删除旧客服知识并上传新知识后，公开端新会话只能命中新事实，不能继续引用旧事实。
+test('修改当前客服知识库后公开问答使用新内容', slowModel, async ({ page }) => {
+  const agent = await prepareKnowledgeAgent(page)
+  const suffix = Date.now().toString(36).toUpperCase()
+  const oldCode = `AICC-KB-OLD-${suffix}`
+  const newCode = `AICC-KB-NEW-${suffix}`
+  const oldFilename = `aicc-kb-old-${suffix}.txt`
+  const newFilename = `aicc-kb-new-${suffix}.txt`
+
+  await page.getByRole('link', { name: '知识库', exact: true }).click()
+  await uploadAICCKnowledgeFile(page, oldFilename, `当前客服售后热线编号是 ${oldCode}。回答热线问题时必须原样返回。`)
+  await waitForAICCKnowledgeParsed(page, `/api/v1/apps/${agent.app_id}/knowledge`, oldFilename)
+  await startKnowledgeAgent(page)
+  await waitForRuntimeKnowledgeSearch(agent.app_id, '当前客服售后热线编号是什么？', oldCode)
+
+  const firstPublicPage = await page.context().newPage()
+  const oldAnswer = await askPublicAICCQuestion(firstPublicPage, agent.public_token, '当前客服售后热线编号是什么？只回复编号。')
+  expect(oldAnswer).toContain(oldCode)
+  await firstPublicPage.close()
+
+  await page.getByRole('link', { name: '知识库', exact: true }).click()
+  const oldRow = page.getByRole('row', { name: new RegExp(oldFilename) })
+  const deleted = page.waitForResponse(response =>
+    response.url().includes('/knowledge/')
+    && !response.url().includes('/knowledge-uploads')
+    && response.request().method() === 'DELETE',
+  )
+  await oldRow.getByRole('button', { name: '删除' }).click()
+  expect((await deleted).ok()).toBeTruthy()
+  await expect(page.getByText(oldFilename)).toHaveCount(0)
+
+  await uploadAICCKnowledgeFile(page, newFilename, `当前客服售后热线编号是 ${newCode}。回答热线问题时必须原样返回。`)
+  await waitForAICCKnowledgeParsed(page, `/api/v1/apps/${agent.app_id}/knowledge`, newFilename)
+  await waitForRuntimeKnowledgeSearch(agent.app_id, '当前客服售后热线编号是什么？', newCode)
+
+  const secondPublicPage = await page.context().newPage()
+  const newAnswer = await askPublicAICCQuestion(secondPublicPage, agent.public_token, '当前客服售后热线编号是什么？只回复编号。')
+  expect(newAnswer).toContain(newCode)
+  expect(newAnswer).not.toContain(oldCode)
+  await secondPublicPage.close()
+})
+
+// 场景：同一客服下多个知识文件可被同一公开问题组合检索，避免只验证单文件命中。
+test('当前客服知识库可组合多个文件回答', slowModel, async ({ page }) => {
+  const agent = await prepareKnowledgeAgent(page)
+  const suffix = Date.now().toString(36).toUpperCase()
+  const planCode = `AICC-KB-PLAN-${suffix}`
+  const slaCode = `AICC-KB-SLA-${suffix}`
+  const planFilename = `aicc-plan-${suffix}.txt`
+  const slaFilename = `aicc-sla-${suffix}.txt`
+
+  await page.getByRole('link', { name: '知识库', exact: true }).click()
+  await uploadAICCKnowledgeFile(page, planFilename, `当前客服套餐代号是 ${planCode}。`)
+  await waitForAICCKnowledgeParsed(page, `/api/v1/apps/${agent.app_id}/knowledge`, planFilename)
+  await uploadAICCKnowledgeFile(page, slaFilename, `当前客服服务等级代号是 ${slaCode}。`)
+  await waitForAICCKnowledgeParsed(page, `/api/v1/apps/${agent.app_id}/knowledge`, slaFilename)
+  await startKnowledgeAgent(page)
+  await waitForRuntimeKnowledgeSearch(agent.app_id, '套餐代号和服务等级代号分别是什么？', planCode)
+  await waitForRuntimeKnowledgeSearch(agent.app_id, '套餐代号和服务等级代号分别是什么？', slaCode)
+
+  const publicPage = await page.context().newPage()
+  const answer = await askPublicAICCQuestion(publicPage, agent.public_token, '请同时回答当前客服套餐代号和服务等级代号，只回复两个代号。')
+  expect(answer).toContain(planCode)
+  expect(answer).toContain(slaCode)
+  await publicPage.close()
+})
+
 // 公开端安全边界：访客输入中的伪造系统指令不能改变客服身份、泄露系统提示词或声称执行后台操作。
 test('公开客服拒绝提示词注入且不泄露系统指令', slowModel, async ({ page }) => {
   const agent = await prepareKnowledgeAgent(page)
