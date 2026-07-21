@@ -145,6 +145,11 @@ export interface AICCAgentFixture {
   widget_token: string
 }
 
+export interface AICCModelChangeResult {
+  model: string
+  revision: number
+}
+
 // openFixtureOrganizationAICCConfig 以平台管理员身份打开 fixture 企业的独立 AICC 配置表单。
 // 模型目录与独立配置会异步加载，调用方只能在该页面的可见控件上继续操作。
 async function openFixtureOrganizationAICCConfig(page: Page): Promise<void> {
@@ -190,9 +195,9 @@ export async function setAICCConfigForFixtureOrg(
   return model
 }
 
-// changeAICCModelToAnotherAvailableOption 真实确认换模影响，并返回与原配置不同的已保存模型。
+// changeAICCModelToAnotherAvailableOption 真实确认换模影响，并返回本次保存后的模型与配置 revision。
 // 当本地模型目录不足两个时立即给出可诊断错误，避免把环境缺口伪装成静默重启失败。
-export async function changeAICCModelToAnotherAvailableOption(page: Page): Promise<string> {
+export async function changeAICCModelToAnotherAvailableOption(page: Page): Promise<AICCModelChangeResult> {
   await openFixtureOrganizationAICCConfig(page)
   const modelField = page.locator('.n-form-item').filter({ hasText: '客服模型' })
   const modelSelect = modelField.locator('.n-base-selection')
@@ -214,10 +219,12 @@ export async function changeAICCModelToAnotherAvailableOption(page: Page): Promi
   await confirmDialog.getByRole('button', { name: '确认更换' }).click()
   const response = await configSaved
   expect(response.ok()).toBeTruthy()
-  const payload = await response.json() as { config?: { model?: string } }
+  const payload = await response.json() as { config?: { model?: string, revision?: number } }
   const model = payload.config?.model
+  const revision = payload.config?.revision
   if (!model || model === currentModel) throw new Error('客服模型切换未返回不同的新模型')
-  return model
+  if (typeof revision !== 'number' || !Number.isFinite(revision)) throw new Error('客服模型切换未返回有效配置 revision')
+  return { model, revision }
 }
 
 // createAICCAgentAsOrgAdmin 以企业管理员身份创建客服并保存可选人设，确认界面不暴露普通助手版本或智能路由。
@@ -350,6 +357,23 @@ export async function waitForAICCModelRollout(appId: string): Promise<void> {
     ],
     { encoding: 'utf8' },
   ).trim(), { timeout: 240_000 }).toBe('succeeded')
+}
+
+// waitForAICCModelRolloutRevision 等待本次配置 revision 对应的 rollout Job 成功，避免旧 succeeded 任务造成误判。
+export async function waitForAICCModelRolloutRevision(appId: string, revision: number): Promise<void> {
+  assertLocalK3DContext()
+  const escapedAppID = appId.replaceAll("'", "''")
+  await expect.poll(() => queryLocalManagerDB(
+    `SELECT status FROM jobs WHERE type='aicc_model_rollout' AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.org_id'))=(SELECT org_id FROM apps WHERE id='${escapedAppID}') AND CAST(JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.target_revision')) AS UNSIGNED)=${revision} ORDER BY created_at DESC LIMIT 1`,
+  ), { timeout: 240_000 }).toBe('succeeded')
+}
+
+// waitForAICCAgentAppliedRevision 等待智能体确认已应用目标企业 AICC 配置 revision。
+export async function waitForAICCAgentAppliedRevision(agentID: string, revision: number): Promise<void> {
+  const escapedAgentID = agentID.replaceAll("'", "''")
+  await expect.poll(() => Number(queryLocalManagerDB(
+    `SELECT applied_config_revision FROM aicc_agents WHERE id='${escapedAgentID}'`,
+  )), { timeout: 240_000 }).toBeGreaterThanOrEqual(revision)
 }
 
 // uploadAICCKnowledgeFile 通过当前页面的文件输入上传内存文本知识。
