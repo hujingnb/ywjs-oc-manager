@@ -709,9 +709,9 @@ async function scrollToBottom() {
   padding: 24px;
   overflow-x: hidden;
   background:
-    linear-gradient(120deg, rgba(17, 24, 39, 0.92), rgba(31, 41, 55, 0.72)),
-    radial-gradient(circle at top right, rgba(255, 106, 0, 0.22), transparent 30%),
-    #111827;
+    linear-gradient(120deg, rgba(255, 244, 237, 0.96), rgba(245, 247, 250, 0.94)),
+    radial-gradient(circle at top right, rgba(255, 106, 0, 0.18), transparent 34%),
+    var(--color-page);
 }
 
 .chat-window {
@@ -721,10 +721,10 @@ async function scrollToBottom() {
   height: calc(100vh - 48px);
   margin: 0 auto;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
-  background: #f8fafc;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+  background: var(--color-page);
+  box-shadow: 0 24px 80px rgba(255, 106, 0, 0.16);
 }
 
 .chat-header {
@@ -777,8 +777,8 @@ async function scrollToBottom() {
   height: 42px;
   place-items: center;
   border-radius: 8px;
-  color: #ffffff;
-  background: #111827;
+  color: var(--color-on-brand);
+  background: var(--color-brand);
 }
 
 .inline-alert {
@@ -813,7 +813,7 @@ async function scrollToBottom() {
   padding: 11px 13px;
   border-radius: 8px;
   color: var(--color-text-primary);
-  background: #ffffff;
+  background: var(--color-surface);
   border: 1px solid var(--color-divider);
   line-height: 1.6;
   white-space: pre-wrap;
@@ -822,9 +822,9 @@ async function scrollToBottom() {
 }
 
 .visitor .bubble {
-  color: #ffffff;
-  background: #1f2937;
-  border-color: #1f2937;
+  color: var(--color-on-brand);
+  background: var(--color-brand);
+  border-color: var(--color-brand);
 }
 
 .message-time {
@@ -854,8 +854,8 @@ async function scrollToBottom() {
   overflow: hidden;
   padding: 2px 6px;
   border-radius: 999px;
-  color: var(--color-text-secondary);
-  background: var(--color-surface-muted);
+  color: var(--color-brand-text);
+  background: var(--color-brand-soft);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -972,6 +972,12 @@ async function scrollToBottom() {
   width: 36px;
   height: 36px;
   flex: 0 0 auto;
+}
+
+.icon-control:hover {
+  border-color: var(--color-brand);
+  color: var(--color-brand-text);
+  background: var(--color-brand-soft);
 }
 
 .hidden-input {
