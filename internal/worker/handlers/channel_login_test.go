@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	null "github.com/guregu/null/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"oc-manager/internal/auth"
@@ -102,6 +103,32 @@ func TestChannelStartLoginHandlerEndpointResolveFailsSoft(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ocops.Endpoint{}, adapter.gotBeginInput.Endpoint)
 	require.Equal(t, domain.ChannelStatusPendingAuth, store.binding.Status)
+}
+
+// TestChannelStartLoginHandlerRequeuesWhenRuntimeNotReady 验证：启动登录 job 真正执行时
+// 实例可能已进入重启窗口；worker 必须重新检查 runtime_phase，避免继续打到不可用 oc-ops
+// 后把绑定误写成 failed，并应延迟重新入队等待实例恢复 ready。
+func TestChannelStartLoginHandlerRequeuesWhenRuntimeNotReady(t *testing.T) {
+	store := newChannelWorkerStore(t)
+	store.app.RuntimePhase = domain.RuntimePhaseRestarting // 重启窗口：oc-ops 暂不可用。
+	store.binding.Status = domain.ChannelStatusPendingAuth // service 已发起授权并入队 start job。
+	store.binding.LastError = null.StringFrom("启动微信登录失败: 触发 oc-ops 微信登录失败: ocops: hermes cli failed")
+	registry := channel.NewRegistry()
+	adapter := &workerFakeChannelAdapter{beginErr: errors.New("不应调用 adapter")}
+	registry.MustRegister(adapter)
+	handler := NewChannelStartLoginHandler(store, registry, nil)
+
+	err := handler.Handle(context.Background(), sqlc.Job{
+		Type:        domain.JobTypeChannelStartLogin,
+		PayloadJson: []byte(`{"app_id":"` + testChannelWorkerAppID + `","channel_type":"wechat"}`),
+	})
+	require.NoError(t, err)
+	require.Equal(t, domain.ChannelStatusPendingAuth, store.binding.Status)
+	require.False(t, store.binding.LastError.Valid, "重启窗口应清掉历史 oc-ops 启动失败文案")
+	require.Empty(t, adapter.gotBeginInput.AppID, "实例未 ready 时不得调用 BeginAuth")
+	require.Len(t, store.jobs, 1)
+	require.Equal(t, domain.JobTypeChannelStartLogin, store.jobs[0].Type)
+	require.True(t, store.jobs[0].RunAfter.After(time.Now()), "应延迟重试而不是立即打 oc-ops")
 }
 
 // TestChannelCheckBindingHandlerMarksBoundAndRunsApp 验证渠道Check绑定处理器Marks已绑定并Runs应用的预期行为场景。
@@ -275,11 +302,11 @@ func TestChannelCheckBindingHandlerTimesOutAfterDeadline(t *testing.T) {
 	payload := fmt.Sprintf(`{"app_id":"%s","channel_type":"dingtalk","check_deadline_unix":%d}`, testChannelWorkerAppID, deadline)
 	err := handler.Handle(context.Background(), sqlc.Job{Type: domain.JobTypeChannelCheckBinding, PayloadJson: []byte(payload)})
 	require.NoError(t, err)
-	require.Equal(t, domain.ChannelStatusFailed, store.binding.Status)            // 超时置 failed
-	require.True(t, store.binding.LastError.Valid)                                // 写了超时文案
-	require.Contains(t, store.binding.LastError.String, "连接超时")                  // 统一超时引导
-	require.Contains(t, store.binding.LastError.String, "Client ID")             // 钉钉专属自查引导
-	require.Empty(t, store.jobs)                                                  // 不再 re-enqueue
+	require.Equal(t, domain.ChannelStatusFailed, store.binding.Status) // 超时置 failed
+	require.True(t, store.binding.LastError.Valid)                     // 写了超时文案
+	require.Contains(t, store.binding.LastError.String, "连接超时")        // 统一超时引导
+	require.Contains(t, store.binding.LastError.String, "Client ID")   // 钉钉专属自查引导
+	require.Empty(t, store.jobs)                                       // 不再 re-enqueue
 }
 
 // TestChannelCheckBindingHandlerWorkWechatTimesOut 验证企业微信同样受 deadline 兜底保护：
@@ -298,9 +325,9 @@ func TestChannelCheckBindingHandlerWorkWechatTimesOut(t *testing.T) {
 	payload := fmt.Sprintf(`{"app_id":"%s","channel_type":"work_wechat","check_deadline_unix":%d}`, testChannelWorkerAppID, deadline)
 	err := handler.Handle(context.Background(), sqlc.Job{Type: domain.JobTypeChannelCheckBinding, PayloadJson: []byte(payload)})
 	require.NoError(t, err)
-	require.Equal(t, domain.ChannelStatusFailed, store.binding.Status)   // 超时置 failed
-	require.Contains(t, store.binding.LastError.String, "Bot ID")        // 企业微信专属自查引导
-	require.Empty(t, store.jobs)                                         // 不再 re-enqueue
+	require.Equal(t, domain.ChannelStatusFailed, store.binding.Status) // 超时置 failed
+	require.Contains(t, store.binding.LastError.String, "Bot ID")      // 企业微信专属自查引导
+	require.Empty(t, store.jobs)                                       // 不再 re-enqueue
 }
 
 // TestChannelCheckBindingHandlerFallsBackToResolverWhenAdapterPending 校验：
@@ -629,7 +656,6 @@ func TestFeishuCheckPhase2HealthFatalFails(t *testing.T) {
 	require.Contains(t, store.binding.LastError.String, "invalid app_secret")
 }
 
-
 type workerFakeChannelAdapter struct {
 	challenge channel.AuthChallenge
 	progress  channel.AuthProgress
@@ -671,9 +697,9 @@ func (r *workerFakeBindingResolver) ResolveWeChatBoundIdentity(_ context.Context
 // workerFakeRestarter 是 ChannelRestarter 的测试桩，记录调用次数与最后一次传入的 appID，
 // 用于断言 bound 后是否正确触发 hermes 重启（k8s rollout restart 路径）。
 type workerFakeRestarter struct {
-	calls      int
-	lastAppID  string
-	err        error
+	calls     int
+	lastAppID string
+	err       error
 }
 
 func (r *workerFakeRestarter) RestartApp(_ context.Context, appID string) error {
@@ -698,10 +724,11 @@ type channelWorkerStore struct {
 // spec-A2b：runtime_node_id / container_id 已从 schema 删除，不再填充。
 func newChannelWorkerStore(t *testing.T) *channelWorkerStore {
 	app := sqlc.App{
-		ID:          testChannelWorkerAppID,
-		OrgID:       testChannelWorkerOrgID,
-		OwnerUserID: testChannelWorkerOwnerID,
-		Status:      domain.AppStatusBindingWaiting,
+		ID:           testChannelWorkerAppID,
+		OrgID:        testChannelWorkerOrgID,
+		OwnerUserID:  testChannelWorkerOwnerID,
+		Status:       domain.AppStatusBindingWaiting,
+		RuntimePhase: domain.RuntimePhaseReady,
 	}
 	return &channelWorkerStore{
 		t:   t,

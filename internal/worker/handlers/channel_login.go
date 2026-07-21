@@ -73,6 +73,23 @@ func (h *ChannelStartLoginHandler) Handle(ctx context.Context, job sqlc.Job) err
 	if binding.Status == domain.ChannelStatusBound {
 		return nil
 	}
+	// worker 执行窗口守卫：HTTP service 入队时实例可能还是 ready，但 job 真正执行前
+	// 可能已因解绑、升级或 k8s 重建进入 restarting。这里必须再次检查，否则会打到
+	// 暂不可用的 oc-ops，把临时 502 误写成渠道绑定失败。
+	if !domain.AppCanInitiateChannelAuth(app.Status, app.RuntimePhase) {
+		if appStatusCanRetryChannelStart(app.Status) {
+			if err := h.store.SetChannelBindingStatus(ctx, sqlc.SetChannelBindingStatusParams{
+				AppID:       binding.AppID,
+				ChannelType: binding.ChannelType,
+				Status:      domain.ChannelStatusPendingAuth,
+				LastError:   null.String{},
+			}); err != nil {
+				return fmt.Errorf("暂缓渠道登录时更新渠道状态失败: %w", err)
+			}
+			return enqueueChannelStart(ctx, h.store, payload, 5*time.Second)
+		}
+		return nil
+	}
 	// 解析目标 app 的 oc-ops 坐标，注入 AuthInput.Endpoint：微信扫码登录走 oc-ops SSE，
 	// runner 据此路由到正确实例。解析失败仅告警不阻断（Endpoint 留零值，由下游 BeginAuth
 	// 在不可达时报错），避免 resolver 抖动直接吞掉登录请求。
@@ -706,6 +723,35 @@ func enqueueChannelCheck(ctx context.Context, store ChannelLoginStore, payload c
 		return fmt.Errorf("创建 channel_check_binding 任务失败: %w", err)
 	}
 	return nil
+}
+
+// enqueueChannelStart 延迟重排启动登录任务，用于实例重启窗口的可恢复等待。
+func enqueueChannelStart(ctx context.Context, store ChannelLoginStore, payload channelLoginPayload, delay time.Duration) error {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("序列化 channel_start_login payload 失败: %w", err)
+	}
+	if err := store.CreateJob(ctx, sqlc.CreateJobParams{
+		ID:          uuid.NewString(),
+		Type:        domain.JobTypeChannelStartLogin,
+		Priority:    90,
+		RunAfter:    time.Now().Add(delay),
+		MaxAttempts: 3,
+		PayloadJson: raw,
+	}); err != nil {
+		return fmt.Errorf("创建 channel_start_login 任务失败: %w", err)
+	}
+	return nil
+}
+
+// appStatusCanRetryChannelStart 判断业务态是否仍允许等待 runtime 恢复后继续发起授权。
+func appStatusCanRetryChannelStart(status string) bool {
+	switch status {
+	case domain.AppStatusRunning, domain.AppStatusBindingWaiting, domain.AppStatusBindingFailed:
+		return true
+	default:
+		return false
+	}
 }
 
 // channelStartErrorMessage 把渠道启动登录（BeginAuth）失败错误归约为前端可读文案。
