@@ -24,6 +24,18 @@ export function deleteLocalAICCPod(appID: string): void {
   ], { stdio: 'pipe' })
 }
 
+// assertAICCRuntimeFileContains 从本地 AICC Pod 读取运行时文件，验证重启后的 bootstrap 输入已进入容器。
+export function assertAICCRuntimeFileContains(appID: string, path: string, expected: string): void {
+  assertLocalK3DContext()
+  const content = execFileSync('kubectl', [
+    '--context', localK3DContext, '-n', 'oc-aicc', 'exec', `deploy/app-${appID}`, '-c', 'hermes', '--', 'sh', '-c',
+    'cat "$1"',
+    'read-runtime-file',
+    path,
+  ], { encoding: 'utf8' })
+  expect(content).toContain(expected)
+}
+
 // assertNoUnauthorizedAICCSourceAudit 读取 manager 持久化的受信任工具来源审计。
 // AICC 只会把受控 knowledge/web 工具的当前轮审计来源写入 aicc_message_sources；
 // 因此操作性拒绝后该会话不应产生任何来源记录，避免模型文本伪造“已执行”的痕迹。

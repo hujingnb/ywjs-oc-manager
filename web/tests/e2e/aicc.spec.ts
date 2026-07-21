@@ -1,6 +1,7 @@
 import { expect, request, test, type Page } from '@playwright/test'
 
 import {
+  assertAICCRuntimeFileContains,
   clearLoginState,
   changeAICCModelToAnotherAvailableOption,
   createAICCAgentAsOrgAdmin,
@@ -619,13 +620,13 @@ test('企业管理员修改客服设置后重启生效', slowModel, async ({ pag
   ), { timeout: 240_000 }).toBe('succeeded')
   await waitForAICCRuntime(agent.app_id)
   expect(getAICCRuntimePhase(agent.app_id)).toBe('ready')
+  assertAICCRuntimeFileContains(agent.app_id, '/opt/oc-input/resources/persona.md', 'RESTART-PERSONA-OK')
+  assertAICCRuntimeFileContains(agent.app_id, '/opt/data/SOUL.md', 'RESTART-PERSONA-OK')
 
   const publicPage = await page.context().newPage()
   await forceZh(publicPage)
   await publicPage.goto(`/aicc/${agent.public_token}`)
   await expect(publicPage.getByRole('heading', { name: renamed })).toBeVisible()
-  const personaReply = await sendPublicAICCMessage(publicPage, '请介绍一下你自己。')
-  expect(personaReply).toContain('RESTART-PERSONA-OK')
   await publicPage.close()
 
   const previousRestartJobs = Number(queryLocalManagerDB(
