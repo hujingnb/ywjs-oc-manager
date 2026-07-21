@@ -309,7 +309,9 @@ export async function waitForAICCRuntime(appId: string): Promise<void> {
     'kubectl',
     ['--context', localK3DContext, '-n', 'oc-aicc', 'get', 'pods', '-l', `app=${appId}`, '-o', 'jsonpath={range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{","}{end}'],
     { encoding: 'utf8' },
-  ).trim(), { timeout: 180_000 }).toMatch(/^True,$/)
+  // 滚动重启窗口可能短暂同时保留多个 Ready 副本；只要 selector 下所有已返回条件均为 True，
+  // 就说明当前可服务副本已就绪，后续由 runtime_phase 再确认 manager 侧状态收敛。
+  ).trim(), { timeout: 180_000 }).toMatch(/^(True,)+$/)
 
   await expect.poll(() => execFileSync(
     'kubectl',
