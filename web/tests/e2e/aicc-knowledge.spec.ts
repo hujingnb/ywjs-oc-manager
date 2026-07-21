@@ -1,8 +1,16 @@
-import { execFileSync } from 'node:child_process'
-
 import { expect, test, type Page } from '@playwright/test'
 
-import { clearLoginState, forceZh, openAICCConsole, openAICCSettings, waitForAICCRuntime } from './aicc/helpers'
+import {
+  askPublicAICCQuestion,
+  clearLoginState,
+  forceZh,
+  openAICCConsole,
+  openAICCSettings,
+  uploadAICCKnowledgeFile,
+  waitForAICCKnowledgeParsed,
+  waitForAICCRuntime,
+  waitForRuntimeKnowledgeSearch,
+} from './aicc/helpers'
 import { loadE2EFixture, loginAs } from './fixtures'
 
 // RAGFlow 解析和 Hermes 知识检索均为异步链路，单条完整验证允许最多八分钟。
@@ -50,42 +58,6 @@ async function prepareKnowledgeAgent(page: Page): Promise<AICCAgent> {
   return payload.agent
 }
 
-// uploadKnowledgeFile 通过当前页面唯一文件选择器上传内存文档，并等待上传 HTTP 成功。
-async function uploadKnowledgeFile(page: Page, filename: string, content: string): Promise<void> {
-  const uploaded = page.waitForResponse(response =>
-    response.url().includes('/knowledge')
-    && !response.url().includes('/knowledge-uploads')
-    && response.request().method() === 'POST',
-  )
-  await page.locator('input[type="file"]').setInputFiles({
-    name: filename,
-    mimeType: 'text/plain',
-    buffer: Buffer.from(content, 'utf8'),
-  })
-  expect((await uploaded).ok()).toBeTruthy()
-}
-
-// waitForKnowledgeParsed 在当前浏览器会话轮询后端列表，完成后回到真实页面确认可见解析状态。
-  // 避免反复整页刷新工作台，导致顶层 AICC 上下文在异步初始化期间被意外重置。
-async function waitForKnowledgeParsed(page: Page, endpoint: string, filename: string): Promise<void> {
-  await expect.poll(async () => {
-    return await page.evaluate(async ({ endpoint, filename }) => {
-      const token = window.localStorage.getItem('ocm.access_token')
-      const response = await fetch(`${endpoint}?page=1&page_size=50`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-      if (!response.ok) return ''
-      const payload = await response.json() as { items?: Array<{ name?: string, parse_status?: string }> }
-      return payload.items?.find(item => item.name === filename)?.parse_status ?? ''
-    }, { endpoint, filename })
-  }, { timeout: 180_000, intervals: [2_000, 3_000, 5_000] }).toBe('completed')
-  // 页面自身在解析中每 5 秒刷新列表；不整页 reload，保留当前 AICC 工作台上下文与已选智能体。
-  // 只在当前知识库卡片内断言文件名和完成状态，避免 Naive DataTable 的虚拟行角色影响可访问树定位。
-  const knowledgeCard = page.locator('.knowledge-drop-zone')
-  await expect(knowledgeCard.getByText(filename, { exact: true })).toBeVisible({ timeout: 30_000 })
-  await expect(knowledgeCard.getByText('已完成', { exact: true })).toBeVisible({ timeout: 30_000 })
-}
-
 // startKnowledgeAgent 从接待台启动智能体，确保公开页可执行真实 Hermes 问答。
 async function startKnowledgeAgent(page: Page): Promise<void> {
   await page.getByRole('link', { name: '接待台', exact: true }).click()
@@ -94,34 +66,6 @@ async function startKnowledgeAgent(page: Page): Promise<void> {
   )
   await page.getByRole('button', { name: '启动接待' }).click()
   expect((await started).ok()).toBeTruthy()
-}
-
-// waitForRuntimeKnowledgeSearch 等待 RAGFlow 完成异步索引；文档“已完成”不等于立即可被 runtime 检索。
-async function waitForRuntimeKnowledgeSearch(appID: string, question: string, expected: string): Promise<void> {
-  await expect.poll(() => execFileSync(
-    'kubectl',
-    ['-n', 'oc-aicc', 'exec', `deploy/app-${appID}`, '-c', 'hermes', '--', 'oc-kb', 'search', question, '--top-k', '8'],
-    { encoding: 'utf8' },
-  ), { timeout: 300_000, intervals: [2_000, 5_000, 10_000] }).toContain(expected)
-}
-
-// askPublicKnowledgeQuestion 在公开页发送真实访客问题，并返回助手回复区域的全部可见文本。
-async function askPublicKnowledgeQuestion(page: Page, publicToken: string, question: string): Promise<string> {
-  await forceZh(page)
-  await page.goto(`/aicc/${publicToken}`)
-  // 公开消息接口只表示异步受理；以助手正文数量增长作为真实 Hermes 回答完成的可见信号，
-  // 避免把“消息已发送，客服正在响应”状态提示误当作知识问答结果。
-  const assistantMessages = page.locator('.message-row.assistant .bubble p:not(.message-status)')
-  const previousAssistantCount = await assistantMessages.count()
-  const replied = page.waitForResponse(response =>
-    response.url().includes('/messages') && response.request().method() === 'POST',
-    { timeout: 180_000 },
-  )
-  await page.getByPlaceholder('输入您的问题').fill(question)
-  await page.getByRole('button', { name: '发送' }).click()
-  expect((await replied).ok()).toBeTruthy()
-  await expect(assistantMessages).toHaveCount(previousAssistantCount + 1, { timeout: 240_000 })
-  return await page.locator('.message-list').innerText()
 }
 
 // 验证当前客服库和企业库的上传、解析、范围切换及真实 oc-kb 问答闭环。
@@ -135,13 +79,13 @@ test('当前客服和企业知识库可解析并控制真实问答范围', slowM
 
   await page.getByRole('link', { name: '知识库', exact: true }).click()
   await expect(page.getByRole('heading', { name: '实例知识库', exact: true })).toBeVisible()
-  await uploadKnowledgeFile(page, agentFilename, `当前客服产品套餐名称是 ${agentCode}。回答套餐名称问题时必须原样返回。`)
-  await waitForKnowledgeParsed(page, `/api/v1/apps/${agent.app_id}/knowledge`, agentFilename)
+  await uploadAICCKnowledgeFile(page, agentFilename, `当前客服产品套餐名称是 ${agentCode}。回答套餐名称问题时必须原样返回。`)
+  await waitForAICCKnowledgeParsed(page, `/api/v1/apps/${agent.app_id}/knowledge`, agentFilename)
 
   await page.goto('/knowledge')
   await expect(page.getByRole('heading', { name: '企业知识库', exact: true })).toBeVisible()
-  await uploadKnowledgeFile(page, orgFilename, `企业共享产品套餐名称是 ${orgCode}。回答套餐名称问题时必须原样返回。`)
-  await waitForKnowledgeParsed(page, `/api/v1/organizations/${loadE2EFixture().org_id}/knowledge`, orgFilename)
+  await uploadAICCKnowledgeFile(page, orgFilename, `企业共享产品套餐名称是 ${orgCode}。回答套餐名称问题时必须原样返回。`)
+  await waitForAICCKnowledgeParsed(page, `/api/v1/organizations/${loadE2EFixture().org_id}/knowledge`, orgFilename)
 
   await openAICCConsole(page)
   await openAICCSettings(page)
@@ -157,17 +101,17 @@ test('当前客服和企业知识库可解析并控制真实问答范围', slowM
   await waitForRuntimeKnowledgeSearch(agent.app_id, '请查询当前客服知识库：产品套餐名称是什么？只回复套餐名称。', agentCode)
 
   const publicPage = await page.context().newPage()
-  const agentAnswer = await askPublicKnowledgeQuestion(publicPage, agent.public_token, '请查询当前客服知识库：产品套餐名称是什么？只回复套餐名称。')
+  const agentAnswer = await askPublicAICCQuestion(publicPage, agent.public_token, '请查询当前客服知识库：产品套餐名称是什么？只回复套餐名称。')
   expect(agentAnswer).toContain(agentCode)
   // 公开页的正式动作是“结束本次咨询”；下一条发送时才懒创建新 session。
   await publicPage.getByRole('button', { name: '结束本次咨询' }).click()
   // 无匹配知识时仍应由智能体给出稳定回复，不能把 RAGFlow 或运行时错误暴露给访客。
-  const noMatchAnswer = await askPublicKnowledgeQuestion(publicPage, agent.public_token, `不存在的知识编号 ${suffix} 是什么？`)
+  const noMatchAnswer = await askPublicAICCQuestion(publicPage, agent.public_token, `不存在的知识编号 ${suffix} 是什么？`)
   const noMatchReply = await publicPage.locator('.message-row.assistant .bubble').last().innerText()
   expect(noMatchReply.trim()).not.toBe('')
   expect(noMatchAnswer).not.toMatch(/api call failed|connection error|dial tcp|traceback|stack trace|upstream/i)
   await publicPage.getByRole('button', { name: '结束本次咨询' }).click()
-  const orgAnswer = await askPublicKnowledgeQuestion(publicPage, agent.public_token, '请查询企业知识库：企业共享产品套餐名称是什么？只回复套餐名称。')
+  const orgAnswer = await askPublicAICCQuestion(publicPage, agent.public_token, '请查询企业知识库：企业共享产品套餐名称是什么？只回复套餐名称。')
   expect(orgAnswer).toContain(orgCode)
   await publicPage.close()
 
@@ -184,10 +128,10 @@ test('当前客服和企业知识库可解析并控制真实问答范围', slowM
 
   const isolatedPage = await page.context().newPage()
   await forceZh(isolatedPage)
-  const isolatedAgentAnswer = await askPublicKnowledgeQuestion(isolatedPage, agent.public_token, '请查询当前客服知识库：产品套餐名称是什么？只回复套餐名称。')
+  const isolatedAgentAnswer = await askPublicAICCQuestion(isolatedPage, agent.public_token, '请查询当前客服知识库：产品套餐名称是什么？只回复套餐名称。')
   expect(isolatedAgentAnswer).toContain(agentCode)
   await isolatedPage.getByRole('button', { name: '结束本次咨询' }).click()
-  const isolatedOrgAnswer = await askPublicKnowledgeQuestion(isolatedPage, agent.public_token, '请查询企业知识库：企业共享产品套餐名称是什么？只回复套餐名称。')
+  const isolatedOrgAnswer = await askPublicAICCQuestion(isolatedPage, agent.public_token, '请查询企业知识库：企业共享产品套餐名称是什么？只回复套餐名称。')
   expect(isolatedOrgAnswer).not.toContain(orgCode)
   await isolatedPage.close()
 

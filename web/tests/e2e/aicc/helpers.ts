@@ -338,6 +338,91 @@ export async function waitForAICCModelRollout(appId: string): Promise<void> {
   ).trim(), { timeout: 240_000 }).toBe('succeeded')
 }
 
+// uploadAICCKnowledgeFile 通过当前页面的文件输入上传内存文本知识。
+export async function uploadAICCKnowledgeFile(page: Page, filename: string, content: string): Promise<void> {
+  const uploaded = page.waitForResponse(response =>
+    response.url().includes('/knowledge')
+    && !response.url().includes('/knowledge-uploads')
+    && response.request().method() === 'POST',
+  )
+  await page.locator('input[type="file"]').setInputFiles({
+    name: filename,
+    mimeType: 'text/plain',
+    buffer: Buffer.from(content, 'utf8'),
+  })
+  expect((await uploaded).ok()).toBeTruthy()
+}
+
+// waitForAICCKnowledgeParsed 轮询后端列表，确认指定文档已完成解析并在当前页面可见。
+export async function waitForAICCKnowledgeParsed(page: Page, endpoint: string, filename: string): Promise<void> {
+  await expect.poll(async () => {
+    return await page.evaluate(async ({ endpoint, filename }) => {
+      const token = window.localStorage.getItem('ocm.access_token')
+      const response = await fetch(`${endpoint}?page=1&page_size=50`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!response.ok) return ''
+      const payload = await response.json() as { items?: Array<{ name?: string, parse_status?: string }> }
+      return payload.items?.find(item => item.name === filename)?.parse_status ?? ''
+    }, { endpoint, filename })
+  }, { timeout: 180_000, intervals: [2_000, 3_000, 5_000] }).toBe('completed')
+  const knowledgeCard = page.locator('.knowledge-drop-zone')
+  await expect(knowledgeCard.getByText(filename, { exact: true })).toBeVisible({ timeout: 30_000 })
+  await expect(knowledgeCard.getByText('已完成', { exact: true })).toBeVisible({ timeout: 30_000 })
+}
+
+// waitForRuntimeKnowledgeSearch 等待 RAGFlow 索引进入运行时可检索状态。
+export async function waitForRuntimeKnowledgeSearch(appID: string, question: string, expected: string): Promise<void> {
+  assertLocalK3DContext()
+  await expect.poll(() => execFileSync(
+    'kubectl',
+    ['--context', localK3DContext, '-n', 'oc-aicc', 'exec', `deploy/app-${appID}`, '-c', 'hermes', '--', 'oc-kb', 'search', question, '--top-k', '8'],
+    { encoding: 'utf8' },
+  ), { timeout: 300_000, intervals: [2_000, 5_000, 10_000] }).toContain(expected)
+}
+
+// askPublicAICCQuestion 从公开页发送一条消息，并返回完整消息列表文本。
+export async function askPublicAICCQuestion(page: Page, publicToken: string, question: string): Promise<string> {
+  await forceZh(page)
+  await page.goto(`/aicc/${publicToken}`)
+  const assistantMessages = page.locator('.message-row.assistant .bubble p:not(.message-status)')
+  const previousAssistantCount = await assistantMessages.count()
+  const replied = page.waitForResponse(response =>
+    response.url().includes('/messages') && response.request().method() === 'POST',
+    { timeout: 180_000 },
+  )
+  await page.getByPlaceholder('输入您的问题').fill(question)
+  await page.getByRole('button', { name: '发送' }).click()
+  expect((await replied).ok()).toBeTruthy()
+  await expect(assistantMessages).toHaveCount(previousAssistantCount + 1, { timeout: 240_000 })
+  return await page.locator('.message-list').innerText()
+}
+
+// queryLocalManagerDB 在本地 manager MySQL 中执行只读查询，供 E2E 断言服务端事实。
+export function queryLocalManagerDB(sql: string): string {
+  assertLocalK3DContext()
+  const escaped = sql.replaceAll('"', '\\"')
+  return execFileSync('kubectl', [
+    '--context', localK3DContext, '-n', 'ocm', 'exec', 'mysql-0', '--', 'sh', '-c',
+    `mysql -uroot -p"$MYSQL_ROOT_PASSWORD" ocm -N -e "${escaped}" 2>/dev/null`,
+  ], { encoding: 'utf8' }).trim()
+}
+
+// countAICCLeadsByPhone 通过手机号查正式线索数量，用于重复提交和并发去重验证。
+export function countAICCLeadsByPhone(phone: string): number {
+  const escapedPhone = phone.replaceAll("'", "''")
+  const result = queryLocalManagerDB(
+    `SELECT COUNT(*) FROM aicc_lead_values WHERE value='${escapedPhone}'`,
+  )
+  return Number(result || '0')
+}
+
+// getAICCRuntimePhase 读取隐藏 app 的运行时阶段，配合 Kubernetes Ready 等待确认重启收敛。
+export function getAICCRuntimePhase(appID: string): string {
+  const escapedAppID = appID.replaceAll("'", "''")
+  return queryLocalManagerDB(`SELECT runtime_phase FROM apps WHERE id='${escapedAppID}'`)
+}
+
 // seedAICCSessionsForPagination 为浏览器分页场景补充带消息的历史会话。
 // 数据只写入 seed-e2e 创建的当前 agent/org，避免为翻页展示重复调用 Hermes 并拖慢整套回归。
 export function seedAICCSessionsForPagination(agentId: string, orgId: string, count: number): void {
